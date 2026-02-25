@@ -19,12 +19,15 @@ _system = platform.system()
 
 def _notify_windows(title: str, body: str, sound: bool = True) -> bool:
     """Windows Toast 通知（PowerShell，无需额外依赖）"""
-    # 使用 PowerShell 调用 Windows.UI.Notifications (Windows 10+)
     sound_xml = ""
     if sound:
         sound_xml = '<audio src="ms-winsoundevent:Notification.Default"/>'
     else:
         sound_xml = '<audio silent="true"/>'
+
+    # 转义 PowerShell 字符串中的特殊字符
+    safe_title = title.replace('"', '`"').replace("'", "''")
+    safe_body = body.replace('"', '`"').replace("'", "''")
 
     ps_script = f"""
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
@@ -34,8 +37,8 @@ $template = @"
 <toast>
   <visual>
     <binding template="ToastGeneric">
-      <text>{title}</text>
-      <text>{body}</text>
+      <text>{safe_title}</text>
+      <text>{safe_body}</text>
     </binding>
   </visual>
   {sound_xml}
@@ -48,15 +51,26 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("OpenAkita").Show($toast)
 """
     try:
-        subprocess.Popen(
+        result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            logger.warning(f"Windows toast PowerShell failed (rc={result.returncode}): {stderr[:200]}")
+            return False
         return True
+    except subprocess.TimeoutExpired:
+        logger.warning("Windows toast PowerShell timed out (10s)")
+        return False
+    except FileNotFoundError:
+        logger.warning("PowerShell not found, cannot send Windows toast notification")
+        return False
     except Exception as e:
-        logger.debug(f"Windows toast failed: {e}")
+        logger.warning(f"Windows toast failed: {e}")
         return False
 
 
@@ -68,14 +82,25 @@ def _notify_macos(title: str, body: str, sound: bool = True) -> bool:
         f'with title "{_escape_applescript(title)}"{sound_clause}'
     )
     try:
-        subprocess.Popen(
+        result = subprocess.run(
             ["osascript", "-e", script],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            logger.warning(f"macOS osascript failed (rc={result.returncode}): {stderr[:200]}")
+            return False
         return True
+    except subprocess.TimeoutExpired:
+        logger.warning("macOS osascript timed out (10s)")
+        return False
+    except FileNotFoundError:
+        logger.warning("osascript not found, cannot send macOS notification")
+        return False
     except Exception as e:
-        logger.debug(f"macOS notification failed: {e}")
+        logger.warning(f"macOS notification failed: {e}")
         return False
 
 
@@ -94,17 +119,25 @@ def _notify_linux(title: str, body: str, sound: bool = True) -> bool:
             title,
             body,
         ]
-        subprocess.Popen(
+        result = subprocess.run(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            logger.warning(f"notify-send failed (rc={result.returncode}): {stderr[:200]}")
+            return False
         return True
+    except subprocess.TimeoutExpired:
+        logger.warning("notify-send timed out (10s)")
+        return False
     except FileNotFoundError:
-        logger.debug("notify-send not found, skipping Linux notification")
+        logger.warning("notify-send not found, cannot send Linux notification")
         return False
     except Exception as e:
-        logger.debug(f"Linux notification failed: {e}")
+        logger.warning(f"Linux notification failed: {e}")
         return False
 
 
@@ -140,6 +173,7 @@ def send_desktop_notification(
     Returns:
         是否成功发送通知
     """
+    logger.info(f"Sending desktop notification: [{title}] {body[:60]}")
     ok = False
     try:
         if _system == "Windows":
@@ -149,12 +183,16 @@ def send_desktop_notification(
         elif _system == "Linux":
             ok = _notify_linux(title, body, sound)
         else:
-            logger.debug(f"Unsupported platform for desktop notification: {_system}")
+            logger.warning(f"Unsupported platform for desktop notification: {_system}")
     except Exception as e:
-        logger.debug(f"Desktop notification error: {e}")
+        logger.warning(f"Desktop notification error: {e}")
 
-    if not ok and fallback_beep:
-        _fallback_beep()
+    if ok:
+        logger.info(f"Desktop notification sent successfully ({_system})")
+    else:
+        logger.warning(f"Desktop notification failed ({_system}), fallback_beep={fallback_beep}")
+        if fallback_beep:
+            _fallback_beep()
 
     return ok
 
