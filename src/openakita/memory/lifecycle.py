@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +19,6 @@ from pathlib import Path
 from .extractor import MemoryExtractor
 from .types import (
     ConversationTurn,
-    Episode,
     MemoryPriority,
     MemoryType,
     SemanticMemory,
@@ -246,7 +244,7 @@ class LifecycleManager:
             by_type[mem.type.value].append(mem)
 
         deleted = 0
-        for mem_type, group in by_type.items():
+        for _mem_type, group in by_type.items():
             if len(group) < 2:
                 continue
             clusters = self._cluster_by_content(group, threshold=0.7)
@@ -477,6 +475,24 @@ class LifecycleManager:
 
                 decisions = json.loads(json_match.group())
                 if not isinstance(decisions, list):
+                    report["kept"] += len(batch)
+                    continue
+
+                # Guardrail: avoid catastrophic over-pruning from noisy LLM output.
+                destructive = 0
+                for d in decisions:
+                    if not isinstance(d, dict):
+                        continue
+                    action = str(d.get("action", "keep")).lower()
+                    if action in ("delete", "merge"):
+                        destructive += 1
+                if destructive > max(3, int(len(batch) * 0.4)):
+                    logger.warning(
+                        "[Lifecycle] Skip risky review batch %s: destructive=%s/%s",
+                        i // batch_size,
+                        destructive,
+                        len(batch),
+                    )
                     report["kept"] += len(batch)
                     continue
 

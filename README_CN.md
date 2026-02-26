@@ -9,21 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/openakita/openakita/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" />
-  </a>
-  <a href="https://www.python.org/downloads/">
-    <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python Version" />
-  </a>
-  <a href="https://github.com/openakita/openakita/releases">
-    <img src="https://img.shields.io/github/v/release/openakita/openakita" alt="Release" />
-  </a>
-  <a href="https://pypi.org/project/openakita/">
-    <img src="https://img.shields.io/pypi/v/openakita?color=green" alt="PyPI" />
-  </a>
-  <a href="https://github.com/openakita/openakita/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/openakita/openakita/ci.yml?branch=main" alt="Build Status" />
-  </a>
+  <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square" alt="License" height="20" />
+  <img src="https://img.shields.io/badge/python-3.11+-blue.svg?style=flat-square" alt="Python Version" height="20" />
+  <img src="https://img.shields.io/github/v/release/openakita/openakita?style=flat-square" alt="Release" height="20" />
+  <img src="https://img.shields.io/pypi/v/openakita?color=green&style=flat-square" alt="PyPI" height="20" />
+  <img src="https://img.shields.io/github/actions/workflow/status/openakita/openakita/ci.yml?branch=main&style=flat-square" alt="Build Status" height="20" />
 </p>
 
 <p align="center">
@@ -77,7 +67,7 @@ OpenAkita 提供跨平台的 **桌面终端** 应用（基于 Tauri + React）�
 不需要命令行，不需要改配置文件。**3 分钟从安装到对话**：
 
 <p align="center">
-  <img src="docs/assets/desktop_quick_config.png" alt="OpenAkita 快速配置 vs 完整配置" width="800" />
+  <img src="docs/assets/desktop_quick_config.gif" alt="OpenAkita 快速配置 vs 完整配置" width="800" />
 </p>
 
 <table>

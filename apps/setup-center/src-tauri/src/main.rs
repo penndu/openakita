@@ -2492,6 +2492,29 @@ async fn spawn_blocking_result<R: Send + 'static>(
         .map_err(|e| format!("后台任务失败（join error）: {e}"))?
 }
 
+/// Strip surrounding quotes and inline comments from a raw .env value.
+///
+/// - Quoted values (`"..."` or `'...'`): return content between quotes literally.
+/// - Unquoted values: strip inline comment (`#` preceded by whitespace).
+fn clean_env_value(raw: &str) -> String {
+    let v = raw.trim();
+    if v.len() >= 2 {
+        let bytes = v.as_bytes();
+        if (bytes[0] == b'"' && bytes[v.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[v.len() - 1] == b'\'')
+        {
+            return v[1..v.len() - 1].to_string();
+        }
+    }
+    // Unquoted: strip inline comment (# preceded by space or tab)
+    for pat in [" #", "\t#"] {
+        if let Some(pos) = v.find(pat) {
+            return v[..pos].trim_end().to_string();
+        }
+    }
+    v.to_string()
+}
+
 fn read_env_kv(path: &Path) -> Vec<(String, String)> {
     let Ok(content) = fs::read_to_string(path) else {
         return vec![];
@@ -2507,7 +2530,7 @@ fn read_env_kv(path: &Path) -> Vec<(String, String)> {
         if key.is_empty() {
             continue;
         }
-        out.push((key.to_string(), v.to_string()));
+        out.push((key.to_string(), clean_env_value(v)));
     }
     out
 }

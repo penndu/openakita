@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -367,6 +367,32 @@ class Settings(BaseSettings):
     # === 评估配置 ===
     evaluation_enabled: bool = Field(default=False, description="是否启用每日自动评估")
     evaluation_output_dir: str = Field(default="data/evaluation", description="评估报告输出目录")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_inline_comments(cls, values: dict) -> dict:  # type: ignore[override]
+        """Strip inline comments from env values before type coercion.
+
+        .env files may contain lines like ``MAX_TOKENS=4096  # 常规推荐值``.
+        If an external caller (e.g. Tauri bridge) passes the raw value including
+        the comment as an OS env-var, Pydantic would fail to parse ``"4096 # ..."``
+        as ``int``.  This validator runs *before* field-level coercion and removes
+        everything after an unquoted `` #`` / ``\\t#`` pattern.
+        """
+        if not isinstance(values, dict):
+            return values
+        cleaned: dict = {}
+        for k, v in values.items():
+            if isinstance(v, str) and not (
+                len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'")
+            ):
+                for sep in (" #", "\t#"):
+                    idx = v.find(sep)
+                    if idx != -1:
+                        v = v[:idx].rstrip()
+                        break
+            cleaned[k] = v
+        return cleaned
 
     model_config = {
         "env_file": ".env",

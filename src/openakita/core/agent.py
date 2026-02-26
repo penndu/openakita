@@ -69,14 +69,8 @@ from ..tools.shell import ShellTool
 from ..tools.web import WebTool
 from .agent_state import AgentState
 from .brain import Brain, Context
-from .errors import UserCancelledError
 from .context_manager import ContextManager
-from .token_tracking import (
-    TokenTrackingContext,
-    init_token_tracking,
-    set_tracking_context,
-    reset_tracking_context,
-)
+from .errors import UserCancelledError
 from .identity import Identity
 from .prompt_assembler import PromptAssembler
 from .ralph import RalphLoop, Task, TaskResult
@@ -89,6 +83,12 @@ from .response_handler import (
 )
 from .skill_manager import SkillManager
 from .task_monitor import RETROSPECT_PROMPT, TaskMonitor
+from .token_tracking import (
+    TokenTrackingContext,
+    init_token_tracking,
+    reset_tracking_context,
+    set_tracking_context,
+)
 from .tool_executor import OVERFLOW_MARKER, ToolExecutor
 from .user_profile import get_profile_manager
 
@@ -1439,7 +1439,7 @@ class Agent:
             if pw_hint:
                 logger.warning(f"浏览器自动化不可用: {pw_hint}")
             else:
-                from ..tools.browser import BrowserManager, PlaywrightTools, BrowserUseRunner
+                from ..tools.browser import BrowserManager, BrowserUseRunner, PlaywrightTools
 
                 self.browser_manager = BrowserManager()
                 self.pw_tools = PlaywrightTools(self.browser_manager)
@@ -3619,9 +3619,7 @@ create_agent(name="Agent名称", description="功能描述", skills=["技能ID�
 
             # 及时结束 memory session，触发记忆提取
             try:
-                task_desc = self._get_last_user_request(messages).strip()[:200]
-                if not task_desc:
-                    task_desc = (getattr(self, "_current_task_query", "") or "").strip()[:200]
+                task_desc = (getattr(self, "_current_task_query", "") or "").strip()[:200]
                 self.memory_manager.end_session(task_desc, success=True)
                 logger.debug(f"[Session:{session_id}] memory_manager.end_session() called")
             except Exception as e:
@@ -4536,7 +4534,7 @@ NEXT: 建议的下一步（如有）"""
                     farewell_text = block.text.strip()
                     break
             logger.info(f"[StopTask][CancelFarewell] LLM farewell 成功: {farewell_text[:120]}")
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             logger.warning("[StopTask][CancelFarewell] LLM farewell 超时 (5s)，使用默认文本")
         except Exception as e:
             logger.error(
@@ -4991,9 +4989,9 @@ NEXT: 建议的下一步（如有）"""
                     )
 
                 # ── 结构性错误快速熔断 ──
+                from ..llm.types import AllEndpointsFailedError as _Aefe
                 from .reasoning_engine import ReasoningEngine
-                from ..llm.types import AllEndpointsFailedError as _AEFE
-                if isinstance(e, _AEFE) and e.is_structural:
+                if isinstance(e, _Aefe) and e.is_structural:
                     _already = getattr(self, '_cli_structural_stripped', False)
                     if not _already:
                         stripped, did_strip = ReasoningEngine._strip_heavy_content(working_messages)
@@ -6067,7 +6065,7 @@ NEXT: 建议的下一步（如有）"""
                             f"({MAX_TASK_MODEL_SWITCHES}), aborting task"
                         )
                         return (
-                            f"❌ 任务执行失败，已尝试多个模型仍无法恢复。\n"
+                            "❌ 任务执行失败，已尝试多个模型仍无法恢复。\n"
                             "💡 你可以直接重新发送来重试。"
                         )
 
@@ -6165,9 +6163,9 @@ NEXT: 建议的下一步（如有）"""
                         )
 
                     # ── 结构性错误快速熔断 ──
+                    from ..llm.types import AllEndpointsFailedError as _Aefe
                     from .reasoning_engine import ReasoningEngine
-                    from ..llm.types import AllEndpointsFailedError as _AEFE
-                    if isinstance(e, _AEFE) and e.is_structural:
+                    if isinstance(e, _Aefe) and e.is_structural:
                         _already = getattr(self, '_task_structural_stripped', False)
                         if not _already:
                             stripped, did_strip = ReasoningEngine._strip_heavy_content(messages)

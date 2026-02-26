@@ -7,6 +7,7 @@ Skills route: GET /api/skills, POST /api/skills/config, GET /api/skills/marketpl
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Request
@@ -18,14 +19,13 @@ router = APIRouter()
 SKILLS_SH_API = "https://skills.sh/api/search"
 
 
-def _read_external_allowlist() -> tuple["Path", set[str] | None]:
+def _read_external_allowlist() -> tuple[Path, set[str] | None]:
     """Read external_allowlist from data/skills.json.
 
     Returns (base_path, allowlist). allowlist is None when the file doesn't
     exist or has no external_allowlist key (meaning "all external skills enabled").
     """
     import json
-    from pathlib import Path
 
     try:
         from openakita.config import settings
@@ -188,8 +188,17 @@ async def install_skill(request: Request):
         from openakita.setup_center.bridge import install_skill as _install_skill
 
         await asyncio.to_thread(_install_skill, workspace_dir, url)
+    except FileNotFoundError as e:
+        missing = getattr(e, "filename", None) or "外部命令"
+        logger.error("Skill install missing dependency: %s", e, exc_info=True)
+        return {
+            "error": (
+                f"安装失败：未找到可执行命令 `{missing}`。"
+                "请先安装 Git 并确保在 PATH 中，或改用 GitHub 简写/单个 SKILL.md 链接。"
+            )
+        }
     except Exception as e:
-        logger.error(f"Skill install failed: {e}")
+        logger.error("Skill install failed: %s", e, exc_info=True)
         return {"error": str(e)}
 
     # 安装成功后：重新加载技能到 agent 运行时，并应用 allowlist

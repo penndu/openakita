@@ -46,9 +46,16 @@ def _parse_env(content: str) -> dict[str, str]:
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip()
-        # Strip surrounding quotes
+        # Strip surrounding quotes (content inside quotes is taken literally)
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
             value = value[1:-1]
+        else:
+            # Unquoted: strip inline comment (# preceded by whitespace)
+            for sep in (" #", "\t#"):
+                idx = value.find(sep)
+                if idx != -1:
+                    value = value[:idx].rstrip()
+                    break
         env[key] = value
     return env
 

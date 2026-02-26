@@ -30,10 +30,16 @@ from typing import Any
 from ..config import settings
 from ..tracing.tracer import get_tracer
 from .agent_state import AgentState, TaskState, TaskStatus
-from .context_manager import ContextManager, _CancelledError as _CtxCancelledError
+from .context_manager import ContextManager
+from .context_manager import _CancelledError as _CtxCancelledError
 from .errors import UserCancelledError
-from .response_handler import ResponseHandler, clean_llm_response, parse_intent_tag, strip_thinking_tags
-from .token_tracking import TokenTrackingContext, set_tracking_context, reset_tracking_context
+from .response_handler import (
+    ResponseHandler,
+    clean_llm_response,
+    parse_intent_tag,
+    strip_thinking_tags,
+)
+from .token_tracking import TokenTrackingContext, reset_tracking_context, set_tracking_context
 from .tool_executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -563,7 +569,20 @@ class ReasoningEngine:
                         tools=tools,
                     )
                 except _CtxCancelledError:
-                    raise UserCancelledError(reason=state.cancel_reason or "用户请求停止", source="context_compress")
+                    # 仅当任务状态明确为“用户取消”时，才把压缩取消升级为任务取消。
+                    # 否则按压缩失败降级处理，避免误报 "Context compression cancelled by user"。
+                    if state.cancelled or bool((state.cancel_reason or "").strip()):
+                        raise UserCancelledError(
+                            reason=state.cancel_reason or "用户请求停止",
+                            source="context_compress",
+                        )
+                    logger.warning(
+                        "[ReAct] Context compression cancelled without task cancellation "
+                        "(session=%s). Fallback to uncompressed context.",
+                        conversation_id or state.session_id,
+                    )
+                    state.cancel_event = asyncio.Event()
+                    self._context_manager.set_cancel_event(state.cancel_event)
                 _after_tokens = self._context_manager.estimate_messages_tokens(working_messages)
                 if _after_tokens < _before_tokens:
                     _ctx_compressed_info = {
@@ -1310,12 +1329,21 @@ class ReasoningEngine:
                             tools=tools,
                         )
                     except _CtxCancelledError:
-                        async for ev in self._stream_cancel_farewell(
-                            working_messages, effective_prompt, current_model, state
-                        ):
-                            yield ev
-                        yield {"type": "done"}
-                        return
+                        # 与 run() 保持一致：只在明确用户取消时终止。
+                        if state.cancelled or bool((state.cancel_reason or "").strip()):
+                            async for ev in self._stream_cancel_farewell(
+                                working_messages, effective_prompt, current_model, state
+                            ):
+                                yield ev
+                            yield {"type": "done"}
+                            return
+                        logger.warning(
+                            "[ReAct-Stream] Context compression cancelled without task cancellation "
+                            "(session=%s). Fallback to uncompressed context.",
+                            conversation_id or state.session_id,
+                        )
+                        state.cancel_event = asyncio.Event()
+                        self._context_manager.set_cancel_event(state.cancel_event)
                     _after_tokens = self._context_manager.estimate_messages_tokens(working_messages)
                     if _after_tokens < _before_tokens:
                         _ctx_compressed_info = {
@@ -1849,7 +1877,7 @@ class ReasoningEngine:
                         for _new_msg in working_messages[_msg_count_before:]:
                             _content = _new_msg.get("content", "")
                             if "[系统提示-用户跳过步骤]" in _content:
-                                yield {"type": "chain_text", "content": f"用户跳过了当前步骤"}
+                                yield {"type": "chain_text", "content": "用户跳过了当前步骤"}
                             elif "[用户插入消息]" in _content:
                                 _preview = _content.split("]")[1].split("\n")[0].strip() if "]" in _content else _content[:60]
                                 yield {"type": "chain_text", "content": f"用户插入消息: {_preview[:60]}"}
@@ -2031,7 +2059,7 @@ class ReasoningEngine:
             case "browser_screenshot":
                 return "截图已获取"
             case "switch_persona":
-                return f"切换完成"
+                return "切换完成"
             case _:
                 if r_len < 100:
                     return r[:100]
@@ -2244,7 +2272,7 @@ class ReasoningEngine:
                     farewell_text = block.text.strip()
                     break
             logger.info(f"[ReAct][CancelFarewell] LLM farewell 成功: {farewell_text[:120]}")
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             logger.warning("[ReAct][CancelFarewell] LLM farewell 超时 (5s)，使用默认文本")
         except Exception as e:
             logger.error(
@@ -2330,7 +2358,7 @@ class ReasoningEngine:
                     farewell_text = block.text.strip()
                     break
             logger.info(f"[ReAct-Stream][CancelFarewell] LLM farewell 成功: {farewell_text[:120]}")
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             logger.warning("[ReAct-Stream][CancelFarewell] LLM farewell 超时 (5s)，使用默认文本")
         except Exception as e:
             logger.error(

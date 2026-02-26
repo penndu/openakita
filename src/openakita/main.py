@@ -105,6 +105,34 @@ _CHANNEL_DEPS: dict[str, list[tuple[str, str]]] = {
 }
 
 
+def _patch_backports_zstd() -> None:
+    """Patch incomplete ``backports.zstd`` so that ``urllib3 >= 2.3`` can load.
+
+    Some environments (notably PyInstaller bundles) ship an older
+    ``backports-zstd`` that exposes the decompressor but is missing the
+    ``ZstdError`` exception class.  ``urllib3.response`` references this
+    attribute at *class-definition time* in ``BaseHTTPResponse``, so the
+    ``AttributeError`` is raised during ``import urllib3`` — before any
+    user code can catch it.
+
+    We add a thin stub so the import succeeds.  The stub inherits from
+    ``Exception``, which is the correct base class for ``ZstdError``.
+    """
+    try:
+        import backports.zstd as _bzstd
+    except ImportError:
+        return
+
+    if hasattr(_bzstd, "ZstdError"):
+        return
+
+    class _ZstdError(Exception):
+        """Stub ``ZstdError`` for backports.zstd compatibility."""
+
+    _bzstd.ZstdError = _ZstdError
+    logger.debug("Patched backports.zstd: added missing ZstdError stub")
+
+
 def _ensure_channel_deps() -> None:
     """
     检查已启用的 IM 通道所需依赖，缺失的自动 pip install。
@@ -112,6 +140,8 @@ def _ensure_channel_deps() -> None:
     在适配器实例化之前调用，确保依赖就绪。
     Telegram 为核心依赖，始终包含在安装包中，不需检查。
     """
+    _patch_backports_zstd()
+
     enabled_channels: list[str] = []
     if settings.feishu_enabled:
         enabled_channels.append("feishu")
@@ -127,6 +157,15 @@ def _ensure_channel_deps() -> None:
     if not enabled_channels:
         return
 
+    # 在打包环境下，先注入“外部 Python”的 site-packages，
+    # 避免已安装依赖因为路径未注入而被误判为缺失。
+    try:
+        from openakita.runtime_env import inject_python_site_packages
+
+        inject_python_site_packages()
+    except Exception as e:
+        logger.debug(f"Pre-inject python site-packages skipped: {e}")
+
     # 收集缺失的包
     missing: list[str] = []
     for channel in enabled_channels:
@@ -136,6 +175,11 @@ def _ensure_channel_deps() -> None:
             except ImportError:
                 if pip_name not in missing:
                     missing.append(pip_name)
+            except Exception as e:
+                logger.warning(
+                    f"Import check for {import_name} ({channel}) hit unexpected error: "
+                    f"{type(e).__name__}: {e} — skipping auto-install for this dep"
+                )
 
     if not missing:
         return
@@ -175,6 +219,14 @@ def _ensure_channel_deps() -> None:
             console.print(f"[green]✓[/green] 依赖安装成功: {pkg_list}")
             # 安装后清除 importlib 缓存，让后续 import 能找到新包
             importlib.invalidate_caches()
+            # 关键：把用于 pip install 的解释器 site-packages 注入当前进程，
+            # 确保本次启动内即可 import 新装依赖（无需等待重启）
+            try:
+                from openakita.runtime_env import inject_python_site_packages
+
+                inject_python_site_packages()
+            except Exception as e:
+                logger.debug(f"Post-install site-packages injection skipped: {e}")
         else:
             err_tail = (result.stderr or result.stdout or "").strip()[-500:]
             logger.error(f"依赖安装失败 (exit {result.returncode}): {err_tail}")
@@ -306,7 +358,14 @@ async def start_im_channels(agent_or_master):
         return
 
     # 自动安装缺失的 IM 通道依赖
-    _ensure_channel_deps()
+    try:
+        _ensure_channel_deps()
+    except Exception as e:
+        logger.error(
+            f"IM channel dependency check failed ({type(e).__name__}: {e}), "
+            "continuing with adapter registration — individual adapters will "
+            "report their own import errors if deps are truly missing"
+        )
 
     # 初始化在线 STT 客户端（可选）
     from .llm.config import load_endpoints_config as _load_ep_config
