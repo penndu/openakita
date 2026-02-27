@@ -39,6 +39,7 @@ import {
   IconImage, IconRefresh, IconClipboard, IconTrash, IconZap,
   IconMask, IconBot, IconUsers, IconHelp, IconEdit, IconDownload,
   IconPin, IconSearch, IconCircleDot, IconXCircle,
+  getFileTypeIcon,
 } from "../icons";
 
 let _artifactClickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1180,55 +1181,61 @@ function MessageBubble({
                   </div>
                 );
               }
-              // Generic file artifact — clickable card to download/open
-              const sizeStr = art.size != null
-                ? art.size > 1048576 ? `${(art.size / 1048576).toFixed(1)} MB` : `${(art.size / 1024).toFixed(1)} KB`
-                : "";
-              return (
-                <div key={i} style={{
-                  display: "inline-flex", alignItems: "center", gap: 8,
-                  padding: "8px 14px", borderRadius: 8, border: "1px solid var(--line)",
-                  fontSize: 13, marginBottom: 4, cursor: "pointer",
-                  background: "var(--panel)",
-                  transition: "background 0.15s",
-                }}
-                  onClick={() => {
-                    if (_artifactClickTimer) clearTimeout(_artifactClickTimer);
-                    _artifactClickTimer = setTimeout(async () => {
-                      try {
-                        const savedPath = await invoke<string>("download_file", {
-                          url: fullUrl,
-                          filename: art.name || "file",
-                        });
-                        await invoke("show_item_in_folder", { path: savedPath });
-                      } catch (err) {
-                        console.error("文件下载失败:", err);
-                      }
-                    }, 250);
+              {(() => {
+                const FileIcon = getFileTypeIcon(art.name || "");
+                const sizeStr = art.size != null
+                  ? art.size > 1048576 ? `${(art.size / 1048576).toFixed(1)} MB` : `${(art.size / 1024).toFixed(1)} KB`
+                  : "";
+                return (
+                  <div key={i} style={{
+                    display: "inline-flex", alignItems: "center", gap: 10,
+                    padding: "10px 14px", borderRadius: 10, border: "1px solid var(--line)",
+                    fontSize: 13, marginBottom: 4, cursor: "pointer",
+                    background: "var(--panel)",
+                    transition: "background 0.15s",
                   }}
-                  onDoubleClick={() => {
-                    if (_artifactClickTimer) { clearTimeout(_artifactClickTimer); _artifactClickTimer = null; }
-                    (async () => {
-                      try {
-                        const savedPath = await invoke<string>("download_file", {
-                          url: fullUrl,
-                          filename: art.name || "file",
-                        });
-                        await invoke("open_file_with_default", { path: savedPath });
-                      } catch (err) {
-                        console.error("文件打开失败:", err);
-                      }
-                    })();
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(14,165,233,0.08)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--panel)"; }}
-                >
-                  <IconPaperclip size={14} />
-                  <span style={{ fontWeight: 600 }}>{art.name}</span>
-                  {sizeStr && <span style={{ opacity: 0.5 }}>{sizeStr}</span>}
-                  {art.caption && <span style={{ opacity: 0.6, fontSize: 12 }}>{art.caption}</span>}
-                </div>
-              );
+                    onClick={() => {
+                      if (_artifactClickTimer) clearTimeout(_artifactClickTimer);
+                      _artifactClickTimer = setTimeout(async () => {
+                        try {
+                          const savedPath = await invoke<string>("download_file", {
+                            url: fullUrl,
+                            filename: art.name || "file",
+                          });
+                          await invoke("show_item_in_folder", { path: savedPath });
+                        } catch (err) {
+                          console.error("文件下载失败:", err);
+                        }
+                      }, 250);
+                    }}
+                    onDoubleClick={() => {
+                      if (_artifactClickTimer) { clearTimeout(_artifactClickTimer); _artifactClickTimer = null; }
+                      (async () => {
+                        try {
+                          const savedPath = await invoke<string>("download_file", {
+                            url: fullUrl,
+                            filename: art.name || "file",
+                          });
+                          await invoke("open_file_with_default", { path: savedPath });
+                        } catch (err) {
+                          console.error("文件打开失败:", err);
+                        }
+                      })();
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(14,165,233,0.08)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--panel)"; }}
+                  >
+                    <FileIcon size={28} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{art.name}</span>
+                      <span style={{ fontSize: 11, opacity: 0.5 }}>
+                        {sizeStr}{sizeStr && art.caption ? " · " : ""}{art.caption || ""}
+                      </span>
+                    </div>
+                    <IconDownload size={14} style={{ opacity: 0.4, flexShrink: 0 }} />
+                  </div>
+                );
+              })()}
             })}
           </div>
         )}
@@ -1412,54 +1419,61 @@ function FlatMessageItem({
                     </div>
                   );
                 }
-                const sizeStr = art.size != null
-                  ? art.size > 1048576 ? `${(art.size / 1048576).toFixed(1)} MB` : `${(art.size / 1024).toFixed(1)} KB`
-                  : "";
-                return (
-                  <div key={i} style={{
-                    display: "inline-flex", alignItems: "center", gap: 8,
-                    padding: "8px 14px", borderRadius: 8, border: "1px solid var(--line)",
-                    fontSize: 13, marginBottom: 4, cursor: "pointer",
-                    background: "var(--panel)",
-                    transition: "background 0.15s",
-                  }}
-                    onClick={() => {
-                      if (_artifactClickTimer) clearTimeout(_artifactClickTimer);
-                      _artifactClickTimer = setTimeout(async () => {
-                        try {
-                          const savedPath = await invoke<string>("download_file", {
-                            url: fullUrl,
-                            filename: art.name || "file",
-                          });
-                          await invoke("show_item_in_folder", { path: savedPath });
-                        } catch (err) {
-                          console.error("文件下载失败:", err);
-                        }
-                      }, 250);
+                {(() => {
+                  const FileIcon = getFileTypeIcon(art.name || "");
+                  const sizeStr = art.size != null
+                    ? art.size > 1048576 ? `${(art.size / 1048576).toFixed(1)} MB` : `${(art.size / 1024).toFixed(1)} KB`
+                    : "";
+                  return (
+                    <div key={i} style={{
+                      display: "inline-flex", alignItems: "center", gap: 10,
+                      padding: "10px 14px", borderRadius: 10, border: "1px solid var(--line)",
+                      fontSize: 13, marginBottom: 4, cursor: "pointer",
+                      background: "var(--panel)",
+                      transition: "background 0.15s",
                     }}
-                    onDoubleClick={() => {
-                      if (_artifactClickTimer) { clearTimeout(_artifactClickTimer); _artifactClickTimer = null; }
-                      (async () => {
-                        try {
-                          const savedPath = await invoke<string>("download_file", {
-                            url: fullUrl,
-                            filename: art.name || "file",
-                          });
-                          await invoke("open_file_with_default", { path: savedPath });
-                        } catch (err) {
-                          console.error("文件打开失败:", err);
-                        }
-                      })();
-                    }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(14,165,233,0.08)"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--panel)"; }}
-                  >
-                    <IconPaperclip size={14} />
-                    <span style={{ fontWeight: 600 }}>{art.name}</span>
-                    {sizeStr && <span style={{ opacity: 0.5 }}>{sizeStr}</span>}
-                    {art.caption && <span style={{ opacity: 0.6, fontSize: 12 }}>{art.caption}</span>}
-                  </div>
-                );
+                      onClick={() => {
+                        if (_artifactClickTimer) clearTimeout(_artifactClickTimer);
+                        _artifactClickTimer = setTimeout(async () => {
+                          try {
+                            const savedPath = await invoke<string>("download_file", {
+                              url: fullUrl,
+                              filename: art.name || "file",
+                            });
+                            await invoke("show_item_in_folder", { path: savedPath });
+                          } catch (err) {
+                            console.error("文件下载失败:", err);
+                          }
+                        }, 250);
+                      }}
+                      onDoubleClick={() => {
+                        if (_artifactClickTimer) { clearTimeout(_artifactClickTimer); _artifactClickTimer = null; }
+                        (async () => {
+                          try {
+                            const savedPath = await invoke<string>("download_file", {
+                              url: fullUrl,
+                              filename: art.name || "file",
+                            });
+                            await invoke("open_file_with_default", { path: savedPath });
+                          } catch (err) {
+                            console.error("文件打开失败:", err);
+                          }
+                        })();
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(14,165,233,0.08)"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--panel)"; }}
+                    >
+                      <FileIcon size={28} />
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                        <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{art.name}</span>
+                        <span style={{ fontSize: 11, opacity: 0.5 }}>
+                          {sizeStr}{sizeStr && art.caption ? " · " : ""}{art.caption || ""}
+                        </span>
+                      </div>
+                      <IconDownload size={14} style={{ opacity: 0.4, flexShrink: 0 }} />
+                    </div>
+                  );
+                })()}
               })}
             </div>
           )}

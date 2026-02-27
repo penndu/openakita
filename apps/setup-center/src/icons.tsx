@@ -658,3 +658,59 @@ export function IconBrain(p: IconProps = {}) {
     <path d="M12 2v20" />
   </>);
 }
+
+// ─── File Type Icons (filled style, for artifact cards) ───
+
+function fileSvg(
+  p: IconProps,
+  badgeColor: string,
+  label: string,
+) {
+  const { size = 20, className, style } = p;
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 32 32" fill="none" className={className} style={style}>
+      <path d="M7 2h12l8 8v18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="#e8ecef" stroke="#bcc3cb" strokeWidth="1" />
+      <path d="M19 2l8 8h-6a2 2 0 0 1-2-2V2z" fill="#d1d5db" />
+      <rect x="3" y="17" width="22" height="10" rx="2" fill={badgeColor} />
+      <text x="14" y="24.5" textAnchor="middle" fill="#fff" fontSize="7" fontWeight="700" fontFamily="system-ui,sans-serif">{label}</text>
+    </svg>
+  );
+}
+
+export function IconFileWord(p: IconProps = {}) { return fileSvg(p, "#2b579a", "DOC"); }
+export function IconFileExcel(p: IconProps = {}) { return fileSvg(p, "#217346", "XLS"); }
+export function IconFilePPT(p: IconProps = {}) { return fileSvg(p, "#d24726", "PPT"); }
+export function IconFilePDF(p: IconProps = {}) { return fileSvg(p, "#e5252a", "PDF"); }
+export function IconFileZip(p: IconProps = {}) { return fileSvg(p, "#f59e0b", "ZIP"); }
+export function IconFileCode(p: IconProps = {}) { return fileSvg(p, "#6366f1", "CODE"); }
+export function IconFileText(p: IconProps = {}) { return fileSvg(p, "#64748b", "TXT"); }
+export function IconFileCSV(p: IconProps = {}) { return fileSvg(p, "#059669", "CSV"); }
+export function IconFileImage(p: IconProps = {}) { return fileSvg(p, "#8b5cf6", "IMG"); }
+export function IconFileAudio(p: IconProps = {}) { return fileSvg(p, "#ec4899", "MP3"); }
+export function IconFileVideo(p: IconProps = {}) { return fileSvg(p, "#f43f5e", "MP4"); }
+export function IconFileGeneric(p: IconProps = {}) { return fileSvg(p, "#94a3b8", "FILE"); }
+
+const _EXT_ICON_MAP: Record<string, (p: IconProps) => React.JSX.Element> = {
+  doc: IconFileWord, docx: IconFileWord, odt: IconFileWord, rtf: IconFileWord,
+  xls: IconFileExcel, xlsx: IconFileExcel, ods: IconFileExcel,
+  ppt: IconFilePPT, pptx: IconFilePPT, odp: IconFilePPT,
+  pdf: IconFilePDF,
+  zip: IconFileZip, rar: IconFileZip, "7z": IconFileZip, tar: IconFileZip, gz: IconFileZip,
+  js: IconFileCode, ts: IconFileCode, tsx: IconFileCode, jsx: IconFileCode,
+  py: IconFileCode, java: IconFileCode, cpp: IconFileCode, c: IconFileCode,
+  rs: IconFileCode, go: IconFileCode, rb: IconFileCode, php: IconFileCode,
+  html: IconFileCode, css: IconFileCode, json: IconFileCode, xml: IconFileCode,
+  yaml: IconFileCode, yml: IconFileCode, toml: IconFileCode, sql: IconFileCode,
+  sh: IconFileCode, bat: IconFileCode, md: IconFileText,
+  txt: IconFileText, log: IconFileText, ini: IconFileText, cfg: IconFileText,
+  csv: IconFileCSV, tsv: IconFileCSV,
+  png: IconFileImage, jpg: IconFileImage, jpeg: IconFileImage, gif: IconFileImage,
+  svg: IconFileImage, webp: IconFileImage, bmp: IconFileImage, ico: IconFileImage,
+  mp3: IconFileAudio, wav: IconFileAudio, ogg: IconFileAudio, flac: IconFileAudio, aac: IconFileAudio,
+  mp4: IconFileVideo, avi: IconFileVideo, mkv: IconFileVideo, mov: IconFileVideo, webm: IconFileVideo,
+};
+
+export function getFileTypeIcon(filename: string): (p: IconProps) => React.JSX.Element {
+  const ext = (filename.split(".").pop() || "").toLowerCase();
+  return _EXT_ICON_MAP[ext] || IconFileGeneric;
+}
