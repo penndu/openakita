@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .consolidator import MemoryConsolidator
 from .extractor import MemoryExtractor
-from .types import Memory, MemoryPriority, MemoryType
+from .types import MEMORY_MD_MAX_CHARS, Memory, MemoryPriority, MemoryType, truncate_memory_md
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,8 @@ class DailyConsolidator:
     - 刷新 MEMORY.md
     """
 
-    # MEMORY.md 最大字符数
-    MEMORY_MD_MAX_CHARS = 800
+    # MEMORY.md 最大字符数（引用全局统一常量）
+    MEMORY_MD_MAX_CHARS = MEMORY_MD_MAX_CHARS
 
     def __init__(
         self,
@@ -234,8 +234,7 @@ class DailyConsolidator:
         当内容超过限制时调用
         """
         if not self.brain:
-            # 没有 brain，简单截断
-            return content[: self.MEMORY_MD_MAX_CHARS]
+            return truncate_memory_md(content, self.MEMORY_MD_MAX_CHARS)
 
         try:
             prompt = f"""将以下记忆精简为更短的版本，保留最重要的信息。
@@ -257,7 +256,7 @@ class DailyConsolidator:
 
         except Exception as e:
             logger.error(f"Failed to compress MEMORY.md: {e}")
-            return content[: self.MEMORY_MD_MAX_CHARS]
+            return truncate_memory_md(content, self.MEMORY_MD_MAX_CHARS)
 
     def _save_daily_summary(self, result: dict, summaries: list) -> None:
         """保存每日摘要"""

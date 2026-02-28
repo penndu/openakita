@@ -704,9 +704,15 @@ def _build_memory_section(
     if scratchpad_text:
         parts.append(scratchpad_text)
 
+    # Layer 1.5: Pinned Rules — 从 SQLite 查询 RULE 类型记忆，独立注入，不受裁剪
+    pinned_rules = _build_pinned_rules_section(memory_manager)
+    if pinned_rules:
+        parts.append(pinned_rules)
+
     # Layer 2: Core Memory (MEMORY.md — 用户基本信息 + 永久规则)
-    core_budget = min(budget_tokens // 2, 300)
-    core_memory = _get_core_memory(memory_manager, max_chars=core_budget * 3)
+    from openakita.memory.types import MEMORY_MD_MAX_CHARS as _MD_MAX
+    core_budget = min(budget_tokens // 2, 500)
+    core_memory = _get_core_memory(memory_manager, max_chars=min(core_budget * 3, _MD_MAX))
     if core_memory:
         parts.append(f"## 核心记忆\n\n{core_memory}")
 
@@ -734,8 +740,66 @@ def _build_scratchpad_section(memory_manager: Optional["MemoryManager"]) -> str:
     return ""
 
 
+_PINNED_RULES_MAX_TOKENS = 500
+_PINNED_RULES_CHARS_PER_TOKEN = 3
+
+
+def _build_pinned_rules_section(
+    memory_manager: Optional["MemoryManager"],
+) -> str:
+    """从 SQLite 查询所有活跃的 RULE 类型记忆，作为独立段落注入 system prompt。
+
+    这些规则不受 memory_budget 裁剪，确保用户设定的行为规则始终可见。
+    设置独立的 token 上限防止异常膨胀。
+    """
+    store = getattr(memory_manager, "store", None)
+    if store is None:
+        return ""
+    try:
+        rules = store.query_semantic(memory_type="rule", limit=20)
+        if not rules:
+            return ""
+
+        from datetime import datetime
+        now = datetime.now()
+        active_rules = [
+            r for r in rules
+            if not r.superseded_by
+            and (not r.expires_at or r.expires_at > now)
+        ]
+        if not active_rules:
+            return ""
+
+        active_rules.sort(key=lambda r: r.importance_score, reverse=True)
+
+        lines = ["## 用户设定的规则（必须遵守）\n"]
+        total_chars = 0
+        max_chars = _PINNED_RULES_MAX_TOKENS * _PINNED_RULES_CHARS_PER_TOKEN
+        for r in active_rules:
+            content = (r.content or "").strip()
+            if not content:
+                continue
+            line = f"- {content}"
+            if total_chars + len(line) > max_chars:
+                break
+            lines.append(line)
+            total_chars += len(line)
+
+        if len(lines) <= 1:
+            return ""
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug(f"Failed to build pinned rules section: {e}")
+        return ""
+
+
 def _get_core_memory(memory_manager: Optional["MemoryManager"], max_chars: int = 600) -> str:
-    """获取 MEMORY.md 核心记忆（损坏时自动 fallback 到 .bak）"""
+    """获取 MEMORY.md 核心记忆（损坏时自动 fallback 到 .bak）
+
+    截断策略委托给 ``truncate_memory_md``：按段落拆分，规则段落优先保留。
+    """
+    from openakita.memory.types import truncate_memory_md
+
     memory_path = getattr(memory_manager, "memory_md_path", None)
     if not memory_path:
         return ""
@@ -754,17 +818,7 @@ def _get_core_memory(memory_manager: Optional["MemoryManager"], max_chars: int =
     if not content:
         return ""
 
-    if len(content) > max_chars:
-        lines = content.split("\n")
-        result_lines: list[str] = []
-        current_len = 0
-        for line in reversed(lines):
-            if current_len + len(line) + 1 > max_chars:
-                break
-            result_lines.insert(0, line)
-            current_len += len(line) + 1
-        return "\n".join(result_lines)
-    return content
+    return truncate_memory_md(content, max_chars)
 
 
 def _build_experience_section(

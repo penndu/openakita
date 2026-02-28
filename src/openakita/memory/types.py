@@ -15,6 +15,7 @@ v2 新增:
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -52,6 +53,73 @@ class MemoryScope(str, Enum):
 
 def _short_uuid() -> str:
     return str(uuid.uuid4())[:8]
+
+
+# ---------------------------------------------------------------------------
+# MEMORY.md 大小管理
+# ---------------------------------------------------------------------------
+
+MEMORY_MD_MAX_CHARS = 1500
+"""MEMORY.md 统一大小上限（字符），写入端和读取端共用。"""
+
+_RULE_SECTION_KEYWORDS = frozenset({"重要规则", "规则", "rules", "行为规则", "用户规则"})
+
+
+def truncate_memory_md(content: str, max_chars: int = MEMORY_MD_MAX_CHARS) -> str:
+    """按段落优先级截断 MEMORY.md 内容。
+
+    策略：
+    1. 按 ``## `` 拆分段落
+    2. 将段落分为高优先级（规则类）和普通优先级
+    3. 先填充高优先级段落（规则），再填充普通段落
+    4. 超出预算时截断普通段落，规则段落尽量保留
+    """
+    content = content.strip()
+    if not content or len(content) <= max_chars:
+        return content
+
+    sections = re.split(r"(?=^## )", content, flags=re.MULTILINE)
+
+    high_priority: list[str] = []
+    normal_priority: list[str] = []
+    header = ""
+
+    for section in sections:
+        stripped = section.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            header = stripped
+            continue
+        title_match = re.match(r"^## (.+)", stripped)
+        if title_match:
+            title = title_match.group(1).strip().lower()
+            if any(kw in title for kw in _RULE_SECTION_KEYWORDS):
+                high_priority.append(stripped)
+                continue
+        normal_priority.append(stripped)
+
+    result_parts: list[str] = []
+    current_len = len(header) + 2 if header else 0
+    if header:
+        result_parts.append(header)
+
+    for section in high_priority:
+        if current_len + len(section) + 2 <= max_chars:
+            result_parts.append(section)
+            current_len += len(section) + 2
+        else:
+            remaining = max_chars - current_len - 20
+            if remaining > 50:
+                result_parts.append(section[:remaining] + "\n...(规则被截断)")
+            break
+
+    for section in normal_priority:
+        if current_len + len(section) + 2 <= max_chars:
+            result_parts.append(section)
+            current_len += len(section) + 2
+
+    return "\n\n".join(result_parts)
 
 
 # ---------------------------------------------------------------------------

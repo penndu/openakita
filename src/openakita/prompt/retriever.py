@@ -73,6 +73,9 @@ def retrieve_memory(
 
 
 def _get_core_memory(memory_manager: "MemoryManager", max_chars: int = 800) -> str:
+    from openakita.memory.types import MEMORY_MD_MAX_CHARS, truncate_memory_md
+
+    max_chars = min(max_chars, MEMORY_MD_MAX_CHARS)
     memory_path = getattr(memory_manager, "memory_md_path", None)
     if not memory_path or not memory_path.exists():
         return ""
@@ -80,17 +83,7 @@ def _get_core_memory(memory_manager: "MemoryManager", max_chars: int = 800) -> s
         content = memory_path.read_text(encoding="utf-8").strip()
         if not content:
             return ""
-        if len(content) > max_chars:
-            lines = content.split("\n")
-            result_lines: list[str] = []
-            current_len = 0
-            for line in reversed(lines):
-                if current_len + len(line) + 1 > max_chars:
-                    break
-                result_lines.insert(0, line)
-                current_len += len(line) + 1
-            return "\n".join(result_lines)
-        return content
+        return truncate_memory_md(content, max_chars)
     except Exception as e:
         logger.warning(f"Failed to read MEMORY.md: {e}")
         return ""
@@ -165,21 +158,16 @@ def retrieve_memory_simple(
     max_chars: int = 800,
 ) -> str:
     """直接读取 MEMORY.md (不使用向量搜索)"""
+    from openakita.memory.types import MEMORY_MD_MAX_CHARS, truncate_memory_md
+
+    max_chars = min(max_chars, MEMORY_MD_MAX_CHARS)
     if not memory_md_path.exists():
         return ""
     try:
         content = memory_md_path.read_text(encoding="utf-8").strip()
-        if len(content) > max_chars:
-            lines = content.split("\n")
-            result_lines: list[str] = []
-            current_len = 0
-            for line in reversed(lines):
-                if current_len + len(line) + 1 > max_chars:
-                    break
-                result_lines.insert(0, line)
-                current_len += len(line) + 1
-            return "\n".join(result_lines)
-        return content
+        if not content:
+            return ""
+        return truncate_memory_md(content, max_chars)
     except Exception as e:
         logger.warning(f"Failed to read {memory_md_path}: {e}")
         return ""

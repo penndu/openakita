@@ -427,6 +427,13 @@ class Identity:
             new_memory = re.sub(pattern, replacement, memory, flags=re.DOTALL)
 
             if new_memory != memory:
+                from openakita.memory.types import MEMORY_MD_MAX_CHARS, truncate_memory_md
+                if len(new_memory) > MEMORY_MD_MAX_CHARS:
+                    logger.warning(
+                        f"MEMORY.md exceeds limit after section update "
+                        f"({len(new_memory)} > {MEMORY_MD_MAX_CHARS}), truncating"
+                    )
+                    new_memory = truncate_memory_md(new_memory, MEMORY_MD_MAX_CHARS)
                 self.memory_path.write_text(new_memory, encoding="utf-8")
                 self._memory = new_memory
                 logger.info(f"Updated MEMORY.md section: {section}")

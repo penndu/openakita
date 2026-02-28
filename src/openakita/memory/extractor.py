@@ -243,7 +243,7 @@ duration 参考:
                 duration = (item.get("duration") or "").strip()
                 if duration not in ("permanent", "7d", "24h", "session"):
                     duration = {
-                        "RULE": "24h",
+                        "RULE": "permanent",
                         "PREFERENCE": "permanent",
                         "SKILL": "permanent",
                         "ERROR": "7d",
@@ -520,7 +520,7 @@ duration 参考:
             duration = (item.get("duration") or "").strip()
             if duration not in ("permanent", "7d", "24h", "session"):
                 duration = {
-                    "RULE": "24h", "PREFERENCE": "permanent",
+                    "RULE": "permanent", "PREFERENCE": "permanent",
                     "SKILL": "permanent", "ERROR": "7d", "FACT": "permanent",
                     "EXPERIENCE": "permanent",
                 }.get(mem_type, "permanent")
@@ -749,14 +749,53 @@ duration 参考:
     # v2: Quick Facts (rule-based, for context compression)
     # ==================================================================
 
-    def extract_quick_facts(self, messages: list[dict]) -> list[SemanticMemory]:
-        """
-        [DEPRECATED] 已弃用 — 粗糙的关键词匹配误报率高，由 extract_from_turn_v2 替代。
+    _RULE_SIGNAL_PATTERNS = [
+        re.compile(r"(?:每次|总是|always)\s*.{4,80}"),
+        re.compile(r"(?:不要|不可以|禁止|never)\s*.{4,80}"),
+        re.compile(r"(?:必须|务必|一定要|must)\s*.{4,80}"),
+        re.compile(r"(?:永远|永远不要)\s*.{4,80}"),
+        re.compile(r"(?:规则|rule)[：:]\s*.{4,120}"),
+    ]
 
-        快速规则提取 — 用于上下文压缩前, 不调用 LLM
-        只提取强信号: 偏好、规则、路径
+    def extract_quick_facts(self, messages: list[dict]) -> list[SemanticMemory]:
+        """轻量级规则扫描 — 上下文压缩前调用，不使用 LLM。
+
+        仅提取用户消息中含有强规则信号的语句，
+        生成 RULE 类型 PERMANENT 优先级的 SemanticMemory。
         """
-        return []
+        from datetime import datetime as _dt
+
+        seen: set[str] = set()
+        results: list[SemanticMemory] = []
+
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content", "")
+            if not isinstance(content, str) or len(content) < 5:
+                continue
+
+            for pattern in self._RULE_SIGNAL_PATTERNS:
+                for match in pattern.finditer(content):
+                    snippet = match.group(0).strip()
+                    if len(snippet) < 6 or snippet in seen:
+                        continue
+                    seen.add(snippet)
+                    results.append(SemanticMemory(
+                        type=MemoryType.RULE,
+                        priority=MemoryPriority.PERMANENT,
+                        content=snippet,
+                        source="quick_rule_scan",
+                        subject="user",
+                        predicate="rule",
+                        importance_score=0.9,
+                        confidence=0.7,
+                        created_at=_dt.now(),
+                        updated_at=_dt.now(),
+                    ))
+                    if len(results) >= 10:
+                        return results
+        return results
 
     # ==================================================================
     # v1 Backward Compatible Methods

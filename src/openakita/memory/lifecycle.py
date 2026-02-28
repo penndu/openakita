@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .extractor import MemoryExtractor
 from .types import (
+    MEMORY_MD_MAX_CHARS,
     ConversationTurn,
     MemoryPriority,
     MemoryType,
@@ -675,7 +676,7 @@ class LifecycleManager:
         }
 
         total_chars = 0
-        max_chars = 1200
+        max_chars = MEMORY_MD_MAX_CHARS
 
         for type_key, label in type_labels.items():
             group = by_type.get(type_key, [])

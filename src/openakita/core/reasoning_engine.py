@@ -105,12 +105,14 @@ class ReasoningEngine:
         context_manager: ContextManager,
         response_handler: ResponseHandler,
         agent_state: AgentState,
+        memory_manager: Any = None,
     ) -> None:
         self._brain = brain
         self._tool_executor = tool_executor
         self._context_manager = context_manager
         self._response_handler = response_handler
         self._state = agent_state
+        self._memory_manager = memory_manager
 
         # Checkpoint 管理
         self._checkpoints: list[Checkpoint] = []
@@ -588,6 +590,7 @@ class ReasoningEngine:
                         working_messages,
                         system_prompt=_build_effective_system_prompt(),
                         tools=tools,
+                        memory_manager=self._memory_manager,
                     )
                 except _CtxCancelledError:
                     # 仅当任务状态明确为“用户取消”时，才把压缩取消升级为任务取消。
@@ -1350,6 +1353,7 @@ class ReasoningEngine:
                             working_messages,
                             system_prompt=effective_prompt,
                             tools=tools,
+                            memory_manager=self._memory_manager,
                         )
                     except _CtxCancelledError:
                         # 与 run() 保持一致：只在明确用户取消时终止。

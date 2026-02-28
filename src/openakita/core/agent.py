@@ -439,6 +439,7 @@ class Agent:
             context_manager=self.context_manager,
             response_handler=self.response_handler,
             agent_state=self.agent_state,
+            memory_manager=self.memory_manager,
         )
 
         logger.info(f"Agent '{self.name}' created (with refactored sub-modules)")
@@ -2995,14 +2996,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         target = max(int(early_tokens * COMPRESSION_RATIO), 100)
         summary = await self._summarize_messages_chunked(early_messages, target)
 
-        compressed = []
-        if summary:
-            compressed.append({"role": "user", "content": f"[之前的对话摘要]\n{summary}"})
-            compressed.append(
-                {"role": "assistant", "content": "好的，我已了解之前的对话内容，请继续。"}
-            )
-
-        compressed.extend(recent_messages)
+        compressed = ContextManager._inject_summary_into_recent(summary, recent_messages)
 
         compressed_tokens = self._estimate_messages_tokens(compressed)
         logger.info(

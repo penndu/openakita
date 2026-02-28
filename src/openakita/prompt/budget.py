@@ -33,10 +33,10 @@ class BudgetConfig:
     identity_budget: int = 1600   # soul + agent.core + agent.tooling + policies(627)
     catalogs_budget: int = 12000  # tools(33%) + skills(55%) + mcp(10%) 全量注入
     user_budget: int = 300        # user.summary + runtime_facts
-    memory_budget: int = 1500     # retriever 输出（含 MEMORY.md + vector memory）
+    memory_budget: int = 2500     # retriever 输出（含 MEMORY.md + pinned rules + vector memory）
 
     # 总预算（作为硬限制）
-    total_budget: int = 16000
+    total_budget: int = 17000
 
     # 裁剪优先级（数字越小越先被裁剪）
     # 高优先级的内容会在预算不足时保留

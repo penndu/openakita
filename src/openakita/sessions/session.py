@@ -323,8 +323,16 @@ class Session:
         if len(self.context.messages) > self.config.max_history:
             self._truncate_history()
 
+    _RULE_SIGNAL_WORDS = (
+        "不要", "必须", "禁止", "每次", "规则", "永远不要", "务必",
+        "永远", "always", "never", "must", "rule",
+    )
+
     def _truncate_history(self) -> None:
-        """截断历史消息，保留 75%，对丢弃部分生成简要摘要插入头部"""
+        """截断历史消息，保留 75%，对丢弃部分生成简要摘要插入头部。
+
+        优先保留用户设定的行为规则类消息。
+        """
         with self.context._msg_lock:
             keep_count = int(self.config.max_history * 3 / 4)
             messages = self.context.messages
@@ -334,17 +342,34 @@ class Session:
             self._mark_dropped_for_extraction(dropped)
 
             max_summary_len = 300
+            max_rules_len = 500
             keywords: list[str] = []
+            rule_snippets: list[str] = []
+            rules_len = 0
+
             for msg in dropped:
                 if msg.get("role") != "user":
                     continue
                 content = msg.get("content", "")
-                if isinstance(content, str) and content:
+                if not isinstance(content, str) or not content:
+                    continue
+
+                is_rule = any(w in content for w in self._RULE_SIGNAL_WORDS)
+                if is_rule and rules_len < max_rules_len:
+                    snippet = content[:200].replace("\n", " ").strip()
+                    if len(content) > 200:
+                        snippet += "…"
+                    rule_snippets.append(snippet)
+                    rules_len += len(snippet)
+                else:
                     preview = content[:40].replace("\n", " ").strip()
                     if len(content) > 40:
                         preview += "…"
                     keywords.append(preview)
 
+            header_parts: list[str] = []
+            if rule_snippets:
+                header_parts.append("[用户规则（必须遵守）]\n" + "\n".join(rule_snippets))
             if keywords:
                 header = "[历史背景，非当前任务]\n"
                 body = ""
@@ -353,12 +378,17 @@ class Session:
                     if len(header) + len(candidate) > max_summary_len:
                         break
                     body = candidate
-                kept.insert(0, {"role": "system", "content": header + body})
+                if body:
+                    header_parts.append(header + body)
+
+            if header_parts:
+                kept.insert(0, {"role": "system", "content": "\n\n".join(header_parts)})
 
             self.context.messages = kept
             logger.debug(
                 f"Session {self.id}: truncated history — "
-                f"dropped {len(dropped)}, kept {len(kept)} messages"
+                f"dropped {len(dropped)}, kept {len(kept)} messages, "
+                f"preserved {len(rule_snippets)} rule snippets"
             )
 
     def _mark_dropped_for_extraction(self, dropped: list[dict]) -> None:
