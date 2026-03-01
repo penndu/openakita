@@ -23,6 +23,26 @@ logger = logging.getLogger(__name__)
 _IDLE_TIMEOUT_SECONDS = 30 * 60  # 30 分钟空闲回收
 _REAP_INTERVAL_SECONDS = 60  # 每分钟检查一次
 
+# INCLUSIVE 模式下始终保留的基础系统工具。
+# 所有子 Agent（含用户手动创建的）都需要这些工具才能正常工作。
+# 只有浏览器、桌面控制、MCP、定时任务等专用工具需在 profile.skills 显式列出。
+ESSENTIAL_SYSTEM_SKILLS: frozenset[str] = frozenset({
+    # 规划（多步任务的核心）
+    "create-plan", "update-plan-step", "get-plan-status", "complete-plan",
+    # 技能发现（渐进式披露入口 — 外部技能必须先 get_skill_info 读指令）
+    "get-skill-info", "list-skills",
+    # 文件系统（外部技能执行的基础 — 读指令→写代码→run-shell 执行）
+    "run-shell", "read-file", "write-file", "list-directory",
+    # IM 通道（接收用户输入、交付文件）
+    "deliver-artifacts", "get-chat-history", "get-image-file", "get-voice-file",
+    # 记忆
+    "search-memory", "add-memory",
+    # 信息检索
+    "web-search",
+    # 系统
+    "get-tool-info", "set-task-timeout",
+})
+
 
 class AgentFactory:
     """
@@ -84,6 +104,11 @@ class AgentFactory:
         return (norm.split("@", 1)[-1] if "@" in norm else norm) in short_set
 
     @staticmethod
+    def _is_essential(skill_name: str) -> bool:
+        """判断是否为基础设施系统工具（INCLUSIVE 模式始终保留）。"""
+        return AgentFactory._normalize_skill_name(skill_name) in ESSENTIAL_SYSTEM_SKILLS
+
+    @staticmethod
     def _apply_skill_filter(agent: Agent, profile: AgentProfile) -> None:
         if profile.skills_mode == SkillsMode.ALL or not profile.skills:
             return
@@ -95,12 +120,16 @@ class AgentFactory:
         if profile.skills_mode == SkillsMode.INCLUSIVE:
             exact, short = AgentFactory._build_skill_match_set(profile.skills)
             for skill_name in all_skills:
+                if AgentFactory._is_essential(skill_name):
+                    continue
                 if not AgentFactory._skill_in_set(skill_name, exact, short):
                     registry.unregister(skill_name)
                     removed += 1
         elif profile.skills_mode == SkillsMode.EXCLUSIVE:
             exact, short = AgentFactory._build_skill_match_set(profile.skills)
             for skill_name in all_skills:
+                if AgentFactory._is_essential(skill_name):
+                    continue
                 if AgentFactory._skill_in_set(skill_name, exact, short):
                     registry.unregister(skill_name)
                     removed += 1

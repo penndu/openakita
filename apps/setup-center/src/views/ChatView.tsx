@@ -1969,6 +1969,7 @@ export function ChatView({
       setAgentProfiles([]);
       return;
     }
+    if (!visible) return;
     const fetchProfiles = async () => {
       try {
         const res = await fetch(`${apiBaseUrl}/api/agents/profiles`);
@@ -1981,7 +1982,7 @@ export function ChatView({
       }
     };
     fetchProfiles();
-  }, [multiAgentEnabled, apiBaseUrl, serviceRunning]);
+  }, [multiAgentEnabled, apiBaseUrl, serviceRunning, visible]);
 
   // Sync selectedAgent → current conversation's agentProfileId
   // Only react to selectedAgent changes (not activeConvId) to avoid overwriting

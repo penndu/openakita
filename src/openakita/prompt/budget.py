@@ -91,6 +91,10 @@ def estimate_tokens(text: str) -> int:
     return int(chinese_tokens + english_tokens)
 
 
+_TRUNCATE_THRESHOLD_PCT = 20  # 超预算 20% 以上才截断
+_TOKEN_TO_CHAR_RATIO = 3.5  # token → 字符估算系数
+
+
 def apply_budget(
     content: str,
     budget_tokens: int,
@@ -98,20 +102,16 @@ def apply_budget(
     truncate_strategy: str = "end",
 ) -> BudgetResult:
     """
-    对内容应用 token 预算（观测模式）
+    对内容应用 token 预算。
 
-    当前截断已关闭，仅记录实际 token 占用：
-    - 在预算内：INFO 级别
-    - 超出预算：WARNING 级别（含超出比例）
+    - 在预算内或轻微超标（<20%）：记录日志，原样返回
+    - 超标 ≥20%：按 truncate_strategy 截断
 
     Args:
         content: 原始内容
-        budget_tokens: 预算 token 数（仅用于日志对比）
+        budget_tokens: 预算 token 数
         section_name: 区域名称（用于日志）
-        truncate_strategy: 截断策略（当前未启用）
-
-    Returns:
-        BudgetResult 对象（内容原样返回，不截断）
+        truncate_strategy: "end"（默认）/ "start" / "middle"
     """
     if not content:
         return BudgetResult(
@@ -123,25 +123,53 @@ def apply_budget(
 
     original_tokens = estimate_tokens(content)
 
-    # 仅观测，不截断 —— 记录实际 token 占用
     if original_tokens <= budget_tokens:
         logger.info(
             f"[Budget] {section_name}: {original_tokens} tokens "
             f"(budget: {budget_tokens}, headroom: {budget_tokens - original_tokens})"
         )
-    else:
-        overflow = original_tokens - budget_tokens
-        pct = overflow / budget_tokens * 100 if budget_tokens > 0 else float("inf")
-        logger.warning(
-            f"[Budget] {section_name}: {original_tokens} tokens "
-            f"EXCEEDS budget {budget_tokens} by {overflow} (+{pct:.0f}%)"
+        return BudgetResult(
+            content=content,
+            original_tokens=original_tokens,
+            final_tokens=original_tokens,
+            truncated=False,
         )
 
+    overflow = original_tokens - budget_tokens
+    pct = overflow / budget_tokens * 100 if budget_tokens > 0 else float("inf")
+
+    if pct < _TRUNCATE_THRESHOLD_PCT:
+        logger.info(
+            f"[Budget] {section_name}: {original_tokens} tokens "
+            f"slightly over budget {budget_tokens} (+{pct:.0f}%), allowing"
+        )
+        return BudgetResult(
+            content=content,
+            original_tokens=original_tokens,
+            final_tokens=original_tokens,
+            truncated=False,
+        )
+
+    target_chars = int(budget_tokens * _TOKEN_TO_CHAR_RATIO)
+
+    if truncate_strategy == "start":
+        truncated = _truncate_start(content, target_chars)
+    elif truncate_strategy == "middle":
+        truncated = _truncate_middle(content, target_chars)
+    else:
+        truncated = _truncate_end(content, target_chars)
+
+    final_tokens = estimate_tokens(truncated)
+    logger.warning(
+        f"[Budget] {section_name}: {original_tokens} -> {final_tokens} tokens "
+        f"(budget: {budget_tokens}, truncated via {truncate_strategy})"
+    )
+
     return BudgetResult(
-        content=content,
+        content=truncated,
         original_tokens=original_tokens,
-        final_tokens=original_tokens,
-        truncated=False,
+        final_tokens=final_tokens,
+        truncated=True,
     )
 
 

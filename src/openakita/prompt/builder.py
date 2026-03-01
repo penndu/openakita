@@ -620,14 +620,14 @@ def _build_catalogs_section(
         tools_result = apply_budget(tools_text, budget_tokens // 3, "tools")
         parts.append(tools_result.content)
 
-    # 技能清单（预算的 55%）
+    # 技能清单（预算的 55%）— 统一三级渐进式披露
     if skill_catalog:
-        # === Skills 披露策略：全量索引 + 预算内详情 ===
-        # 目标：即使预算不足，也要保证“技能名称全量可见”，避免清单被截断成半截。
+        # Level 1: 全量索引（仅名称，保证所有技能名可见）+ 预算内详情（名称+描述）
+        # Level 2: get_skill_info → 完整 SKILL.md 指令（按需加载）
+        # Level 3: 资源文件（按需加载）
         skills_budget = budget_tokens * 55 // 100
         skills_index = skill_catalog.get_index_catalog()
 
-        # 给索引预留空间；剩余预算给详细列表（name + 1-line description）
         index_tokens = estimate_tokens(skills_index)
         remaining = max(0, skills_budget - index_tokens)
 
