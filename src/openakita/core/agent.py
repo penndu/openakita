@@ -3808,22 +3808,33 @@ search_github → install_skill → 使用
         """
         if not react_trace:
             return None
-        return [
-            {
+        summaries = []
+        for t in react_trace:
+            results_by_id: dict[str, str] = {}
+            for tr in t.get("tool_results", []):
+                tid = tr.get("tool_use_id", "")
+                if tid:
+                    results_by_id[tid] = str(tr.get("result_content", ""))[:120]
+            tools = []
+            for tc in t.get("tool_calls", []):
+                tool_entry: dict = {
+                    "name": tc.get("name", ""),
+                    "input_preview": str(tc.get("input", tc.get("input_preview", "")))[:80],
+                }
+                tc_id = tc.get("id", "")
+                if tc_id and tc_id in results_by_id:
+                    tool_entry["result_preview"] = results_by_id[tc_id]
+                tools.append(tool_entry)
+            item: dict = {
                 "iteration": t.get("iteration", 0),
                 "thinking_preview": (t.get("thinking") or "")[:150],
                 "thinking_duration_ms": t.get("thinking_duration_ms", 0),
-                "tools": [
-                    {
-                        "name": tc.get("name", ""),
-                        "input_preview": str(tc.get("input", tc.get("input_preview", "")))[:80],
-                    }
-                    for tc in t.get("tool_calls", [])
-                ],
-                **({"context_compressed": t["context_compressed"]} if t.get("context_compressed") else {}),
+                "tools": tools,
             }
-            for t in react_trace
-        ]
+            if t.get("context_compressed"):
+                item["context_compressed"] = t["context_compressed"]
+            summaries.append(item)
+        return summaries
 
     async def _compile_prompt(self, user_message: str) -> tuple[str, str]:
         """

@@ -60,7 +60,7 @@ function buildChainFromSummary(summary: ChainSummaryItem[]): ChainGroup[] {
         kind: "tool_end",
         toolId: `restored-${s.iteration}-${t.name}`,
         tool: t.name,
-        result: t.input_preview,
+        result: t.result_preview || t.input_preview,
         status: "done",
       });
     }
@@ -81,7 +81,7 @@ function buildChainFromSummary(summary: ChainSummaryItem[]): ChainGroup[] {
         toolId: `restored-${s.iteration}-${t.name}`,
         tool: t.name,
         args: {},
-        result: t.input_preview,
+        result: t.result_preview || t.input_preview,
         status: "done" as const,
         description: t.input_preview,
       })),

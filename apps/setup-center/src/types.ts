@@ -236,7 +236,7 @@ export type ChainSummaryItem = {
   iteration: number;
   thinking_preview: string;
   thinking_duration_ms: number;
-  tools: { name: string; input_preview: string }[];
+  tools: { name: string; input_preview: string; result_preview?: string }[];
   context_compressed?: { before_tokens: number; after_tokens: number };
 };
 
