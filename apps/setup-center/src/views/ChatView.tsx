@@ -104,7 +104,7 @@ function patchMessagesWithBackend(
 
     const patches: Partial<ChatMessage> = {};
 
-    if (!m.content && backend.content) {
+    if (!m.content && backend.content && !m.askUser) {
       patches.content = backend.content;
     }
 
@@ -1762,7 +1762,7 @@ export function ChatView({
     if (patchedConvsRef.current.has(activeConvId)) return;
 
     const hasIncomplete = messages.some(
-      (m) => m.role === "assistant" && (
+      (m) => m.role === "assistant" && !m.askUser && (
         !m.content ||
         m.thinkingChain?.some((g) => !g.entries.length && !g.durationMs)
       ),
