@@ -7908,8 +7908,9 @@ export function App() {
                   whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.7,
                   maxHeight: 340, overflowY: "auto",
                   padding: "16px 20px", borderRadius: 8,
-                  background: "var(--bg-secondary, #f5f5f5)",
-                  border: "1px solid var(--border-color, #e0e0e0)",
+                  background: "var(--bg1)",
+                  border: "1px solid var(--line)",
+                  color: "var(--text)",
                   marginBottom: 20,
                 }}>
                   {t("onboarding.agreement.content")}
@@ -7924,8 +7925,9 @@ export function App() {
                   placeholder={t("onboarding.agreement.confirmPlaceholder")}
                   style={{
                     width: "100%", padding: "10px 14px", fontSize: 15,
-                    borderRadius: 6, border: obAgreementError ? "2px solid #e53e3e" : "1px solid var(--border-color, #ccc)",
+                    borderRadius: 6, border: obAgreementError ? "2px solid #e53e3e" : "1px solid var(--line)",
                     outline: "none", boxSizing: "border-box",
+                    background: "var(--bg1)", color: "var(--text)",
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
