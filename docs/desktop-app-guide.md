@@ -280,8 +280,8 @@ IM 通道页面用于查看和管理所有已配置的即时通讯通道。
 
 ### 步骤 3：Python 环境
 
-- **内置 Python**：一键安装嵌入式 Python（推荐）
-- **系统 Python**：检测系统已安装的 Python 路径
+- **内置 Python**：检查安装包 bundled Python（推荐）
+- **环境检测**：检测 bundled Python 与 venv 状态
 - 路径过长时悬浮显示完整路径
 
 ### 步骤 4：安装
@@ -377,7 +377,7 @@ IM 通道页面用于查看和管理所有已配置的即时通讯通道。
 │   └── i18n/ ─── 国际化 (中/英)
 ├── Rust 后端 (Tauri Commands)
 │   ├── 工作区管理
-│   ├── Python 环境检测
+│   ├── Bundled Python + venv 环境检测
 │   ├── 服务启停控制
 │   └── HTTP 代理 (绕过 CORS)
 └── Python 后端 (FastAPI)

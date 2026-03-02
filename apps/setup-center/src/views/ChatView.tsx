@@ -64,7 +64,7 @@ function buildChainFromSummary(summary: ChainSummaryItem[]): ChainGroup[] {
         kind: "tool_end",
         toolId: `restored-${s.iteration}-${t.name}`,
         tool: t.name,
-        result: t.input_preview,
+        result: t.result_preview || t.input_preview,
         status: "done",
       });
     }
@@ -85,12 +85,38 @@ function buildChainFromSummary(summary: ChainSummaryItem[]): ChainGroup[] {
         toolId: `restored-${s.iteration}-${t.name}`,
         tool: t.name,
         args: {},
-        result: t.input_preview,
+        result: t.result_preview || t.input_preview,
         status: "done" as const,
         description: t.input_preview,
       })),
     };
   });
+}
+
+/** 将 ask_user 的结构化回答（JSON / option ID）转为人类可读文本 */
+function formatAskUserAnswer(answer: string, askUser: ChatAskUser): string {
+  const questions: ChatAskQuestion[] = askUser.questions?.length
+    ? askUser.questions
+    : [{ id: "__single__", prompt: askUser.question, options: askUser.options }];
+  try {
+    const parsed = JSON.parse(answer);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const formatted = questions.map((q) => {
+        const val = parsed[q.id];
+        if (!val) return null;
+        const vals = Array.isArray(val) ? val : [val];
+        const labels = vals.map((v: string) => {
+          if (v.startsWith("OTHER:")) return v.slice(6);
+          return q.options?.find((o) => o.id === v)?.label ?? v;
+        });
+        return `${q.prompt}: ${labels.join(", ")}`;
+      }).filter(Boolean).join(" | ");
+      if (formatted) return formatted;
+    }
+  } catch { /* not JSON */ }
+  const opt = askUser.options?.find((o) => o.id === answer);
+  if (opt) return opt.label;
+  return answer;
 }
 
 /** 用后端数据补全本地消息中缺失的 content / thinkingChain */
@@ -108,7 +134,7 @@ function patchMessagesWithBackend(
 
     const patches: Partial<ChatMessage> = {};
 
-    if (!m.content && backend.content) {
+    if (!m.content && backend.content && !m.askUser) {
       patches.content = backend.content;
     }
 
@@ -148,6 +174,7 @@ type StreamEvent =
   | { type: "thinking_end"; duration_ms?: number; has_thinking?: boolean }
   | { type: "chain_text"; content: string }
   | { type: "text_delta"; content: string }
+  | { type: "text"; content?: string; text?: string }
   | { type: "tool_call_start"; tool: string; args: Record<string, unknown>; id?: string }
   | { type: "tool_call_end"; tool: string; result: string; id?: string; is_error?: boolean }
   | { type: "plan_created"; plan: ChatPlan }
@@ -821,28 +848,7 @@ function AskUserBlock({ ask, onAnswer }: { ask: ChatAskUser; onAnswer: (answer: 
 
   // ─── 已回答状态 ───
   if (ask.answered) {
-    const displayAnswer = (() => {
-      // 尝试解析 JSON（多问题）
-      try {
-        const parsed = JSON.parse(ask.answer || "");
-        if (typeof parsed === "object" && !Array.isArray(parsed)) {
-          return normalizedQuestions.map((q) => {
-            const val = parsed[q.id];
-            if (!val) return null;
-            const vals = Array.isArray(val) ? val : [val];
-            const labels = vals.map((v: string) => {
-              if (v.startsWith("OTHER:")) return v.slice(6);
-              const opt = q.options?.find((o) => o.id === v);
-              return opt ? opt.label : v;
-            });
-            return `${q.prompt}: ${labels.join(", ")}`;
-          }).filter(Boolean).join(" | ");
-        }
-      } catch { /* not JSON, fall through */ }
-      // 单问题：查找选项标签
-      const answeredOpt = ask.options?.find((o) => o.id === ask.answer);
-      return answeredOpt ? answeredOpt.label : ask.answer;
-    })();
+    const displayAnswer = formatAskUserAnswer(ask.answer || "", ask);
     return (
       <div style={{ margin: "8px 0", padding: "10px 14px", borderRadius: 10, background: "rgba(14,165,233,0.06)", border: "1px solid rgba(14,165,233,0.15)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{ask.question}</div>
@@ -1890,7 +1896,7 @@ export function ChatView({
   const hydrateSeqRef = useRef(0);
 
   const mapBackendHistoryToMessages = useCallback(
-    (rows: { id: string; role: string; content: string; timestamp: number; chain_summary?: ChainSummaryItem[]; artifacts?: ChatArtifact[] }[]): ChatMessage[] => {
+    (rows: { id: string; role: string; content: string; timestamp: number; chain_summary?: ChainSummaryItem[]; artifacts?: ChatArtifact[]; ask_user?: { question: string; options?: { id: string; label: string }[]; questions?: ChatAskQuestion[] } }[]): ChatMessage[] => {
       return rows.map((m) => ({
         id: m.id,
         role: m.role as "user" | "assistant" | "system",
@@ -1898,6 +1904,7 @@ export function ChatView({
         timestamp: m.timestamp,
         ...(m.chain_summary?.length ? { thinkingChain: buildChainFromSummary(m.chain_summary) } : {}),
         ...(m.artifacts?.length ? { artifacts: m.artifacts } : {}),
+        ...(m.ask_user ? { askUser: m.ask_user, content: "" } : {}),
       }));
     },
     [],
@@ -1972,7 +1979,10 @@ export function ChatView({
       const agentId = conv?.agentProfileId || "default";
       setSelectedAgent(agentId);
     }
-  }, [activeConvId, conversations, hydrateConversationMessages, multiAgentEnabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- conversations 故意排除：
+    // 此 effect 语义是"切换对话时加载消息"，不应因 messageCount/title 等元数据变更而重新 hydrate，
+    // 否则流结束后 setConversations 更新 messageCount 会触发竞态覆盖。
+  }, [activeConvId, hydrateConversationMessages, multiAgentEnabled]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const isInitialScrollRef = useRef(true); // first scroll should be instant, not smooth
@@ -2106,7 +2116,7 @@ export function ChatView({
     if (patchedConvsRef.current.has(activeConvId)) return;
 
     const hasIncomplete = messages.some(
-      (m) => m.role === "assistant" && (
+      (m) => m.role === "assistant" && !m.askUser && (
         !m.content ||
         m.thinkingChain?.some((g) => !g.entries.length && !g.durationMs)
       ),
@@ -2397,7 +2407,8 @@ export function ChatView({
   }, []);
 
   // ── 发送消息（overrideText 用于 ask_user 回复等场景，绕过 inputText；targetConvId 用于自动出队等需要指定目标会话的场景） ──
-  const sendMessage = useCallback(async (overrideText?: string, targetConvId?: string) => {
+  // displayContent: 当发送给 API 的原文（如 JSON）不适合直接展示时，可指定用户气泡中的显示文本
+  const sendMessage = useCallback(async (overrideText?: string, targetConvId?: string, displayContent?: string) => {
     const text = (overrideText ?? inputText).trim();
     if (!text && pendingAttachments.length === 0) return;
 
@@ -2422,7 +2433,7 @@ export function ChatView({
     const userMsg: ChatMessage = {
       id: genId(),
       role: "user",
-      content: text,
+      content: displayContent || text,
       attachments: pendingAttachments.length > 0 ? [...pendingAttachments] : undefined,
       timestamp: Date.now(),
     };
@@ -2612,68 +2623,15 @@ export function ChatView({
         // ── 2. 再次检查 abort（read 可能返回 done:true 而非抛异常） ──
         if (abort.signal.aborted) break;
 
+        // 拆行：done 时 flush 全部 buffer，否则保留不完整的末行
+        let lines: string[];
         if (done) {
-          // 流结束：处理 buffer 中可能的残余内容（最后一行无换行符的情况）
-          if (buffer.trim()) {
-            const remaining = buffer.split("\n");
-            for (const line of remaining) {
-              if (!line.startsWith("data: ")) continue;
-              const data = line.slice(6).trim();
-              if (data === "[DONE]") continue;
-              try {
-                const event: StreamEvent = JSON.parse(data);
-                if (event.type === "text_delta") currentContent += event.content;
-                else if (event.type === "artifact") {
-                  currentArtifacts = [...currentArtifacts, {
-                    artifact_type: event.artifact_type,
-                    file_url: event.file_url,
-                    path: event.path,
-                    name: event.name,
-                    caption: event.caption,
-                    size: event.size,
-                  }];
-                } else if (event.type === "plan_created") currentPlan = event.plan;
-                else if (event.type === "plan_step_updated" && currentPlan) {
-                  const newSteps = currentPlan.steps.map((s) => {
-                    const matched = event.stepId ? s.id === event.stepId : false;
-                    return matched ? { ...s, status: event.status as ChatPlanStep["status"] } : s;
-                  });
-                  currentPlan = { ...currentPlan, steps: newSteps } as ChatPlan;
-                } else if (event.type === "plan_completed" && currentPlan) {
-                  currentPlan = { ...currentPlan, status: "completed" as const } as ChatPlan;
-                } else if (event.type === "plan_cancelled" && currentPlan) {
-                  currentPlan = { ...currentPlan, status: "cancelled" } as ChatPlan;
-                }
-                if (event.type === "done") {
-                  gracefulDone = true;
-                  if (currentPlan && currentPlan.status === "in_progress") {
-                    currentPlan = { ...currentPlan, status: "completed" as const };
-                  }
-                }
-              } catch { /* ignore malformed */ }
-            }
-          }
-          updateMessages((prev) => prev.map((m) =>
-            m.id === assistantMsg.id
-              ? {
-                  ...m,
-                  content: currentContent,
-                  thinking: currentThinking || null,
-                  agentName: currentAgent,
-                  toolCalls: currentToolCalls.length > 0 ? [...currentToolCalls] : null,
-                  plan: currentPlan ? { ...currentPlan } : null,
-                  askUser: currentAsk,
-                  artifacts: currentArtifacts.length > 0 ? [...currentArtifacts] : null,
-                  thinkingChain: chainGroups.length > 0 ? chainGroups.map(g => ({ ...g })) : null,
-                  streaming: false,
-                }
-              : m
-          ));
-          break;
+          lines = buffer.split("\n");
+          buffer = "";
+        } else {
+          lines = buffer.split("\n");
+          buffer = lines.pop() || "";
         }
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
@@ -2786,6 +2744,9 @@ export function ChatView({
                 break;
               case "text_delta":
                 currentContent += event.content;
+                break;
+              case "text":
+                currentContent += event.content ?? event.text ?? "";
                 break;
               case "tool_call_start": {
                 if (event.tool === "delegate_to_agent" && event.args?.agent_id) {
@@ -3084,6 +3045,8 @@ export function ChatView({
             // ignore malformed SSE
           }
         }
+
+        if (done) break;
       }
 
       // ── 循环结束后：判断是正常完成还是被用户中止 ──
@@ -3103,6 +3066,33 @@ export function ChatView({
               }
             : m
         ));
+        // 兜底对账：若 SSE 流正常完成却未交付任何有效响应，从 session history 回填。
+        // 注意：ask_user / 纯工具执行等结构化响应设计上不产生 text_delta，
+        // 需同时检查所有响应载体，避免将"无文本的正常响应"误判为"流失败"。
+        const streamDeliveredPayload = !!(
+          currentContent.trim() || currentAsk || currentToolCalls.length > 0
+        );
+        if (gracefulDone && !streamDeliveredPayload && convId) {
+          fetch(`${apiBase}/api/sessions/${encodeURIComponent(convId)}/history`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              const rows = Array.isArray(data?.messages) ? data.messages : [];
+              // Prefer assistant replies generated after this user turn; fallback to latest assistant.
+              const candidates = rows.filter((m: { role?: string; content?: string }) => m?.role === "assistant" && typeof m?.content === "string");
+              const newerThanUser = candidates.filter((m: { timestamp?: number }) => typeof m?.timestamp === "number" && m.timestamp >= userMsg.timestamp);
+              const lastAssistant = (newerThanUser.length > 0 ? newerThanUser : candidates).slice(-1)[0];
+              if (!lastAssistant?.content) return;
+              setMessages((prev) => prev.map((m) => {
+                if (m.id !== assistantMsg.id) return m;
+                const patched: ChatMessage = { ...m, content: m.content || lastAssistant.content };
+                if ((!m.thinkingChain || m.thinkingChain.length === 0) && Array.isArray(lastAssistant.chain_summary) && lastAssistant.chain_summary.length > 0) {
+                  patched.thinkingChain = buildChainFromSummary(lastAssistant.chain_summary);
+                }
+                return patched;
+              }));
+            })
+            .catch(() => {});
+        }
       }
     } catch (e: unknown) {
       const isAbort =
@@ -3182,12 +3172,18 @@ export function ChatView({
 
   // ── 处理用户回答 (ask_user) ──
   const handleAskAnswer = useCallback((msgId: string, answer: string) => {
+    const target = latestMessagesRef.current.find((m) => m.id === msgId);
+    const displayText = target?.askUser
+      ? formatAskUserAnswer(answer, target.askUser)
+      : undefined;
+
     setMessages((prev) => prev.map((m) =>
       m.id === msgId && m.askUser
         ? { ...m, askUser: { ...m.askUser, answered: true, answer } }
         : m
     ));
-    sendMessage(answer);
+    // reason_stream 在 ask_user 后中断流，用户回复通过新 /api/chat 请求继续处理
+    sendMessage(answer, undefined, displayText !== answer ? displayText : undefined);
   }, [sendMessage]);
 
   // ── 停止生成 ──

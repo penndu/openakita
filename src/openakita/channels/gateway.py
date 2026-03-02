@@ -855,6 +855,8 @@ class MessageGateway:
         self._processing_task: asyncio.Task | None = None
         self._running = False
         self._accepting = True  # False = drain 模式，拒绝新消息
+        self._started_adapters: list[str] = []
+        self._failed_adapters: list[str] = []
 
         # 中间件
         self._pre_process_hooks: list[Callable[[UnifiedMessage], Awaitable[UnifiedMessage]]] = []
@@ -1247,6 +1249,9 @@ class MessageGateway:
                 failed.append(name)
                 logger.error(f"Failed to start adapter {name}: {e}")
 
+        self._started_adapters = started
+        self._failed_adapters = failed
+
         # 启动消息处理循环
         self._processing_task = asyncio.create_task(self._process_loop())
 
@@ -1260,6 +1265,14 @@ class MessageGateway:
             )
         else:
             logger.info(f"MessageGateway started with {len(started)} adapters")
+
+    def get_started_adapters(self) -> list[str]:
+        """获取启动成功的适配器列表。"""
+        return list(self._started_adapters)
+
+    def get_failed_adapters(self) -> list[str]:
+        """获取启动失败的适配器列表。"""
+        return list(self._failed_adapters)
 
     async def _preload_whisper_async(self) -> None:
         """异步预加载 Whisper 模型"""
@@ -2084,25 +2097,24 @@ class MessageGateway:
             _chain_summary = None
             try:
                 _chain_summary = session.get_metadata("_last_chain_summary")
-                session.set_metadata("_last_chain_summary", None)  # 清除，避免下次复用
+                session.set_metadata("_last_chain_summary", None)
             except Exception:
                 pass
-            _save_text = response_text
+            _tool_summary = None
             try:
                 _agent_obj = getattr(self.agent_handler, "_agent_ref", None)
                 if _agent_obj and hasattr(_agent_obj, "build_tool_trace_summary"):
-                    _tool_summary = _agent_obj.build_tool_trace_summary()
+                    _tool_summary = _agent_obj.build_tool_trace_summary() or None
                     if _tool_summary:
-                        _save_text += _tool_summary
-                        logger.debug(f"[Gateway] Appended tool trace summary ({len(_tool_summary)} chars)")
+                        logger.debug(f"[Gateway] Tool trace summary ({len(_tool_summary)} chars)")
             except Exception:
                 pass
-            session.add_message(
-                role="assistant",
-                content=_save_text,
-                **({"chain_summary": _chain_summary} if _chain_summary else {}),
-            )
-
+            _msg_meta: dict = {}
+            if _chain_summary:
+                _msg_meta["chain_summary"] = _chain_summary
+            if _tool_summary:
+                _msg_meta["tool_summary"] = _tool_summary
+            session.add_message(role="assistant", content=response_text, **_msg_meta)
             self.session_manager.mark_dirty()
             self.session_manager.flush()
 
@@ -2170,20 +2182,19 @@ class MessageGateway:
                     session.set_metadata("_last_chain_summary", None)
                 except Exception:
                     pass
-                _int_save = response_text
+                _int_tool_summary = None
                 try:
                     _int_agent = getattr(self.agent_handler, "_agent_ref", None)
                     if _int_agent and hasattr(_int_agent, "build_tool_trace_summary"):
-                        _int_tool_summary = _int_agent.build_tool_trace_summary()
-                        if _int_tool_summary:
-                            _int_save += _int_tool_summary
+                        _int_tool_summary = _int_agent.build_tool_trace_summary() or None
                 except Exception:
                     pass
-                session.add_message(
-                    role="assistant",
-                    content=_int_save,
-                    **({"chain_summary": _int_chain} if _int_chain else {}),
-                )
+                _int_meta: dict = {}
+                if _int_chain:
+                    _int_meta["chain_summary"] = _int_chain
+                if _int_tool_summary:
+                    _int_meta["tool_summary"] = _int_tool_summary
+                session.add_message(role="assistant", content=response_text, **_int_meta)
                 self.session_manager.mark_dirty()  # 触发保存
 
                 # 发送响应

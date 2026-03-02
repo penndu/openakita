@@ -469,8 +469,8 @@ class TestMirrorConsistency:
         # pypi.org 作为兜底
         assert "pypi.org/simple" in content
 
-    def test_embedded_python_uses_connect_timeout(self):
-        """嵌入式 Python 下载应设置连接超时"""
+    def test_bundled_python_contract_in_main_rs(self):
+        """契约A：运行时应使用打包内置 Python（不走运行时下载）"""
         main_rs_path = (
             Path(__file__).parent.parent
             / "apps"
@@ -484,10 +484,59 @@ class TestMirrorConsistency:
 
         content = main_rs_path.read_text(encoding="utf-8")
 
-        # install_embedded_python_sync 中应有 connect_timeout
-        assert "connect_timeout" in content, (
-            "嵌入式 Python 下载的 HTTP 客户端应设置 connect_timeout"
+        assert "install_bundled_python_sync" in content, (
+            "应存在 install_bundled_python_sync 作为内置 Python 校验入口"
         )
+        assert "install_bundled_python" in content, (
+            "应暴露 install_bundled_python 命令供前端调用"
+        )
+        assert 'bundled.join("_internal").join("python.exe")' in content, (
+            "Windows 应从 _internal/python.exe 探测内置 Python"
+        )
+        assert 'bundled.join("_internal").join("python3")' in content, (
+            "Unix 应优先从 _internal/python3 探测内置 Python"
+        )
+        assert 'bundled.join("_internal").join("python")' in content, (
+            "Unix 应兼容 _internal/python 命名差异"
+        )
+
+    def test_python_diagnostic_contract_model_in_main_rs(self):
+        """Python 诊断应使用契约化模型（生产级：可扩展/可导出/可修复）"""
+        main_rs_path = (
+            Path(__file__).parent.parent
+            / "apps"
+            / "setup-center"
+            / "src-tauri"
+            / "src"
+            / "main.rs"
+        )
+        if not main_rs_path.exists():
+            pytest.skip("main.rs not found")
+
+        content = main_rs_path.read_text(encoding="utf-8")
+
+        # 新模型核心字段
+        assert "summary: String" in content
+        assert "contracts: Vec<PythonContractResult>" in content
+        assert "repair_plan: Vec<PythonRepairStep>" in content
+        assert "trace_id: String" in content
+        assert "generated_at: String" in content
+
+        # 契约化错误码（最小覆盖）
+        assert '"C1_BUNDLED_RUNTIME"' in content
+        assert '"C2_VENV_HEALTH"' in content
+        assert '"C3_OPENAKITA_IN_VENV"' in content
+        assert '"C4_RUNTIME_LAYOUT_COMPAT"' in content
+        assert '"PY_BUNDLE_MISSING"' in content
+        assert '"PY_VENV_MISSING"' in content
+        assert '"PY_OPENAKITA_IMPORT_FAIL"' in content
+
+        # 已不再依赖 system python 诊断项
+        assert "system_python_ok" not in content
+        assert "system_python_path" not in content
+
+        # 应提供报告导出命令
+        assert "export_python_diagnostic_report" in content
 
     def test_fetch_pypi_versions_has_fallback(self):
         """fetch_pypi_versions 应有多源回退（阿里云不支持 JSON API）"""

@@ -82,40 +82,11 @@ def verify_python_executable(path: str) -> bool:
 # 这消除了因用户 Anaconda、Windows Store 假桩、版本不一致等导致的冲突。
 
 
-def _get_python_from_configured_venv() -> str | None:
-    """从 PYTHON_VENV_PATH 环境变量（由 .env 配置注入）获取虚拟环境中的 Python。
-    Setup Center 在用户选择/创建 venv 后会将路径写入工作区 .env 中。"""
-    import os
-    venv_path = os.environ.get("PYTHON_VENV_PATH", "").strip()
-    if not venv_path:
-        return None
-    venv_dir = Path(venv_path).expanduser()
-    if not venv_dir.is_dir():
-        return None
-    py = _find_python_in_dir(venv_dir)
-    if not py:
-        return None
-    py_str = str(py)
-    if verify_python_executable(py_str):
-        logger.debug("使用配置的 venv Python (PYTHON_VENV_PATH): %s", py_str)
-        return py_str
-    logger.warning("配置的 venv Python 存在但验证失败: %s", py_str)
-    return None
-
-
 def get_configured_venv_path() -> str | None:
     """获取虚拟环境路径（供提示词构建等模块使用）。
 
-    优先级: PYTHON_VENV_PATH 环境变量 > 从当前 Python 解释器路径推断。
+    优先级: 从当前 Python 解释器路径推断。
     """
-    import os
-
-    venv_path = os.environ.get("PYTHON_VENV_PATH", "").strip()
-    if venv_path:
-        p = Path(venv_path).expanduser()
-        if p.is_dir():
-            return str(p)
-
     if not IS_FROZEN:
         if sys.prefix != sys.base_prefix:
             return sys.prefix
@@ -176,23 +147,16 @@ def get_python_executable() -> str | None:
     **只使用项目自带或项目自行安装的 Python，不使用用户系统 Python。**
 
     PyInstaller 环境下查找优先级:
-      1. Setup Center 配置的 venv (PYTHON_VENV_PATH)
-      2. 工作区 venv ({project_root}/data/venv/)
-      3. 全局 venv (~/.openakita/venv/)
-      4. 打包内置 Python (_internal/python.exe)
-      5. 嵌入式 Python (~/.openakita/runtime/python/)
+      1. 工作区 venv ({project_root}/data/venv/)
+      2. 全局 venv (~/.openakita/venv/)
+      3. 打包内置 Python (_internal/python.exe)
 
     常规开发环境下: 返回 sys.executable
     """
     if not IS_FROZEN:
         return sys.executable
 
-    # 1. 用户通过 Setup Center 配置的 venv 路径（PYTHON_VENV_PATH）— 最高优先级
-    configured = _get_python_from_configured_venv()
-    if configured:
-        return configured
-
-    # 2. 检查 {project_root}/data/venv/ — 工作区虚拟环境
+    # 1. 检查 {project_root}/data/venv/ — 工作区虚拟环境
     try:
         from .config import settings
         workspace_venv = settings.project_root / "data" / "venv"
@@ -207,7 +171,7 @@ def get_python_executable() -> str | None:
 
     root = _get_openakita_root()
 
-    # 3. 检查 ~/.openakita/venv/
+    # 2. 检查 ~/.openakita/venv/
     if sys.platform == "win32":
         venv_python = root / "venv" / "Scripts" / "python.exe"
     else:
@@ -219,30 +183,16 @@ def get_python_executable() -> str | None:
         else:
             logger.warning(f"全局 venv Python 验证失败，跳过: {venv_python}")
 
-    # 4. 打包内置 Python（_internal/ 目录，构建时捆绑的同版本 Python + pip）
+    # 3. 打包内置 Python（_internal/ 目录，构建时捆绑的同版本 Python + pip）
     bundled = _get_bundled_internal_python()
     if bundled:
         return bundled
 
-    # 5. 检查 embedded python (~/.openakita/runtime/python/)
-    runtime_dir = root / "runtime" / "python"
-    if runtime_dir.exists():
-        for tag_dir in sorted(runtime_dir.iterdir(), reverse=True):
-            if not tag_dir.is_dir():
-                continue
-            for asset_dir in tag_dir.iterdir():
-                if not asset_dir.is_dir():
-                    continue
-                py = _find_python_in_dir(asset_dir)
-                if py and verify_python_executable(str(py)):
-                    logger.debug(f"使用 embedded Python: {py}")
-                    return str(py)
-
     logger.warning(
         "未找到项目自带的 Python 解释器。"
-        "已搜索: 配置的 venv → 工作区 venv → ~/.openakita/venv → "
-        "打包内置 Python → 嵌入式 Python。"
-        "请前往「设置中心 → Python 环境」使用「一键修复」自动下载安装。"
+        "已搜索: 工作区 venv → ~/.openakita/venv → "
+        "打包内置 Python。"
+        "请重新安装 OpenAkita，确保安装包资源完整。"
     )
     return None
 

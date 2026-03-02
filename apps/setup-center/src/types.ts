@@ -59,12 +59,51 @@ export type PythonCandidate = {
   isUsable: boolean;
 };
 
-export type EmbeddedPythonInstallResult = {
+export type BundledPythonInstallResult = {
   pythonCommand: string[];
   pythonPath: string;
   installDir: string;
   assetName: string;
   tag: string;
+};
+
+export type PythonContractStatus = "pass" | "warn" | "fail";
+export type PythonSummaryStatus = "healthy" | "repairable" | "broken";
+
+export type PythonContractResult = {
+  id: string;
+  title: string;
+  status: PythonContractStatus;
+  code: string;
+  evidence: string[];
+  autoFix: boolean;
+  fixHint?: string | null;
+};
+
+export type PythonEnvironmentSnapshot = {
+  platform: string;
+  bundledPythonPath?: string | null;
+  venvPath?: string | null;
+  venvPythonVersion?: string | null;
+  openakitaVersion?: string | null;
+};
+
+export type PythonRepairStep = {
+  id: string;
+  title: string;
+  description: string;
+  destructive: boolean;
+  requiresConfirmation: boolean;
+  enabled: boolean;
+};
+
+export type PythonDiagnostic = {
+  summary: PythonSummaryStatus;
+  contracts: PythonContractResult[];
+  environment: PythonEnvironmentSnapshot;
+  repairPlan: PythonRepairStep[];
+  traceId: string;
+  generatedAt: string;
 };
 
 export type InstallSource = "pypi" | "github" | "local";
@@ -200,7 +239,7 @@ export type ChainSummaryItem = {
   iteration: number;
   thinking_preview: string;
   thinking_duration_ms: number;
-  tools: { name: string; input_preview: string }[];
+  tools: { name: string; input_preview: string; result_preview?: string }[];
   context_compressed?: { before_tokens: number; after_tokens: number };
 };
 

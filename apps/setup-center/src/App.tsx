@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -19,8 +19,8 @@ import { AgentSystemView } from "./views/AgentSystemView";
 import type {
   EndpointSummary as EndpointSummaryType,
   PlatformInfo, WorkspaceSummary, ProviderInfo, ListedModel,
-  EndpointDraft, PythonCandidate, EmbeddedPythonInstallResult, InstallSource,
-  EnvMap, StepId, Step,
+  EndpointDraft, PythonCandidate, BundledPythonInstallResult, InstallSource,
+  EnvMap, StepId, Step, PythonDiagnostic,
 } from "./types";
 import {
   IconRefresh, IconCheck, IconCheckCircle, IconX, IconXCircle,
@@ -31,7 +31,7 @@ import {
 } from "./icons";
 import logoUrl from "./assets/logo.png";
 import "highlight.js/styles/github.css";
-import { getThemePref, setThemePref, type Theme } from "./theme";
+import { getThemePref, setThemePref, THEME_CHANGE_EVENT, type Theme } from "./theme";
 import { BUILTIN_PROVIDERS, STT_RECOMMENDED_MODELS, PIP_INDEX_PRESETS } from "./constants";
 import {
   isLocalProvider, localProviderPlaceholderKey, friendlyFetchError,
@@ -69,17 +69,24 @@ import { Topbar } from "./components/Topbar";
 import { useNotifications } from "./hooks/useNotifications";
 import { useVersionCheck, compareSemver } from "./hooks/useVersionCheck";
 
+const THEME_I18N_KEYS: Record<Theme, string> = { system: "topbar.themeSystem", dark: "topbar.themeDark", light: "topbar.themeLight" };
+
 export function App() {
   const { t, i18n } = useTranslation();
   const [themePrefState, setThemePrefState] = useState<Theme>(getThemePref());
+  useEffect(() => {
+    const handler = (e: Event) => setThemePrefState((e as CustomEvent<Theme>).detail);
+    window.addEventListener(THEME_CHANGE_EVENT, handler);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, handler);
+  }, []);
   const toggleTheme = useCallback(() => {
     let next: Theme = "system";
     if (themePrefState === "system") next = "dark";
     else if (themePrefState === "dark") next = "light";
     else next = "system";
     setThemePref(next);
-    setThemePrefState(next);
-  }, [themePrefState]);
+    setNotice(t(THEME_I18N_KEYS[next]));
+  }, [themePrefState, t]);
   const [info, setInfo] = useState<PlatformInfo | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string | null>(null);
@@ -323,19 +330,8 @@ export function App() {
   const [pypiVersions, setPypiVersions] = useState<string[]>([]);
   const [pypiVersionsLoading, setPypiVersionsLoading] = useState(false);
   const [selectedPypiVersion, setSelectedPypiVersion] = useState<string>(""); // "" = 推荐同版本
-  // custom python / venv
-  const [customPythonPath, setCustomPythonPath] = useState<string>("");
-  const [customVenvPath, setCustomVenvPath] = useState<string>("");
-  const [customPathStatus, setCustomPathStatus] = useState<string>("");
-  const [customVenvStatus, setCustomVenvStatus] = useState<string>("");
   // python diagnostics / repair
-  const [pyDiag, setPyDiag] = useState<{
-    embeddedPythonOk: boolean; embeddedPythonPath: string | null;
-    venvOk: boolean; venvPath: string | null; venvPythonVersion: string | null;
-    openakitaInstalled: boolean; openakitaVersion: string | null;
-    systemPythonOk: boolean; systemPythonPath: string | null;
-    issues: string[];
-  } | null>(null);
+  const [pyDiag, setPyDiag] = useState<PythonDiagnostic | null>(null);
   const [repairStage, setRepairStage] = useState<string>("");
   const [repairPercent, setRepairPercent] = useState<number>(0);
   const [repairDetail, setRepairDetail] = useState<string>("");
@@ -479,6 +475,10 @@ export function App() {
   // unified env draft (full coverage)
   const [envDraft, setEnvDraft] = useState<EnvMap>({});
   const envLoadedForWs = useRef<string | null>(null);
+
+  const envFieldCtx = useMemo<EnvFieldCtx>(() => ({
+    envDraft, setEnvDraft, secretShown, setSecretShown, busy, t,
+  }), [envDraft, secretShown, busy, t]);
 
   async function refreshAll() {
     setError(null);
@@ -927,13 +927,13 @@ export function App() {
 
   async function doDetectPython() {
     setError(null);
-    setBusy("检测系统 Python...");
+    setBusy("检测项目 Python 环境...");
     try {
       const cands = await invoke<PythonCandidate[]>("detect_python");
       setPythonCandidates(cands);
       const firstUsable = cands.findIndex((c) => c.isUsable);
       setSelectedPythonIdx(firstUsable);
-      setNotice(firstUsable >= 0 ? "已找到可用 Python（3.11+）" : "未找到可用 Python（建议安装内置 Python）");
+      setNotice(firstUsable >= 0 ? "已找到可用 Python（3.11+）" : "未找到可用内置 Python（请检查安装包完整性）");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -943,22 +943,22 @@ export function App() {
 
   async function doInstallEmbeddedPython() {
     setError(null);
-    setBusy("下载/安装内置 Python...");
+    setBusy("检查内置 Python...");
     try {
-      setVenvStatus("下载/安装内置 Python 中...");
-      const r = await invoke<EmbeddedPythonInstallResult>("install_embedded_python", { pythonSeries: "3.11" });
+      setVenvStatus("检查内置 Python 中...");
+      const r = await invoke<BundledPythonInstallResult>("install_bundled_python", { pythonSeries: "3.11" });
       const cand: PythonCandidate = {
         command: r.pythonCommand,
-        versionText: `embedded (${r.tag}): ${r.assetName}`,
+        versionText: `bundled (${r.tag}): ${r.assetName}`,
         isUsable: true,
       };
       setPythonCandidates((prev) => [cand, ...prev.filter((p) => p.command.join(" ") !== cand.command.join(" "))]);
       setSelectedPythonIdx(0);
       setVenvStatus(`内置 Python 就绪：${r.pythonPath}`);
-      setNotice("内置 Python 安装完成，可以继续创建 venv");
+      setNotice("内置 Python 可用，可以继续创建 venv");
     } catch (e) {
       setError(String(e));
-      setVenvStatus(`内置 Python 安装失败：${String(e)}`);
+      setVenvStatus(`内置 Python 不可用：${String(e)}`);
     } finally {
       setBusy(null);
     }
@@ -985,81 +985,20 @@ export function App() {
     }
   }
 
-  async function persistPythonEnvConfig(venvPath: string, pythonExe?: string) {
+  async function persistPythonEnvConfig(venvPath: string) {
     if (!currentWorkspaceId) return;
     try {
       const entries: { key: string; value: string }[] = [
         { key: "PYTHON_VENV_PATH", value: venvPath },
       ];
-      if (pythonExe) {
-        entries.push({ key: "PYTHON_EXECUTABLE", value: pythonExe });
-      }
       await invoke("workspace_update_env", { workspaceId: currentWorkspaceId, entries });
       setEnvDraft((prev) => {
         const next = { ...prev };
         next["PYTHON_VENV_PATH"] = venvPath;
-        if (pythonExe) next["PYTHON_EXECUTABLE"] = pythonExe;
         return next;
       });
     } catch {
       // best-effort
-    }
-  }
-
-  async function doValidateCustomPython() {
-    if (!customPythonPath.trim()) return;
-    setCustomPathStatus(t("config.pyValidating"));
-    try {
-      const cand = await invoke<PythonCandidate>("validate_python_path", { path: customPythonPath.trim() });
-      setPythonCandidates((prev) => {
-        const cmd = cand.command.join(" ");
-        return [cand, ...prev.filter((p) => p.command.join(" ") !== cmd)];
-      });
-      setSelectedPythonIdx(0);
-      setCustomPathStatus(t("config.pyValidateOk") + `: ${cand.versionText}`);
-    } catch (e) {
-      setCustomPathStatus(t("config.pyValidateFail") + `: ${String(e)}`);
-    }
-  }
-
-  async function doValidateCustomVenv() {
-    if (!customVenvPath.trim()) return;
-    setCustomVenvStatus(t("config.pyValidating"));
-    try {
-      const cand = await invoke<PythonCandidate>("validate_venv_path", { path: customVenvPath.trim() });
-      setPythonCandidates((prev) => {
-        const cmd = cand.command.join(" ");
-        return [cand, ...prev.filter((p) => p.command.join(" ") !== cmd)];
-      });
-      setSelectedPythonIdx(0);
-      setCustomVenvStatus(t("config.pyVenvValidateOk") + `: ${cand.versionText}`);
-    } catch (e) {
-      setCustomVenvStatus(t("config.pyVenvValidateFail") + `: ${String(e)}`);
-    }
-  }
-
-  async function doUseCustomVenvAsActive() {
-    if (!customVenvPath.trim()) return;
-    setBusy(t("config.pyValidating"));
-    try {
-      const cand = await invoke<PythonCandidate>("validate_venv_path", { path: customVenvPath.trim() });
-      if (!cand.isUsable) {
-        setError(t("config.pyVenvValidateFail"));
-        return;
-      }
-      await persistPythonEnvConfig(customVenvPath.trim(), cand.command[0]);
-      setVenvStatus(t("config.pyVenvReady") + `: ${customVenvPath.trim()}`);
-      setVenvReady(true);
-      setPythonCandidates((prev) => {
-        const cmd = cand.command.join(" ");
-        return [cand, ...prev.filter((p) => p.command.join(" ") !== cmd)];
-      });
-      setSelectedPythonIdx(0);
-      setNotice(t("config.pyVenvReady"));
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(null);
     }
   }
 
@@ -1114,12 +1053,17 @@ export function App() {
     });
 
     try {
-      const d = await invoke<NonNullable<typeof pyDiag>>("repair_python_env", { venvDir });
+      const forceRebuild = pyDiag?.summary === "healthy"
+        ? confirm(t("adv.repairHealthyConfirm"))
+        : false;
+      if (pyDiag?.summary === "healthy" && !forceRebuild) return;
+      const d = await invoke<NonNullable<typeof pyDiag>>("repair_python_env", { venvDir, forceRebuild });
       setPyDiag(d);
-      if (d && d.issues.length === 0) {
+      if (d && d.summary === "healthy") {
         setNotice(t("config.pyRepairDone"));
         setVenvReady(true);
-        setOpenakitaInstalled(!!d.openakitaInstalled);
+        const openakitaOk = d.contracts.some((c) => c.id === "C3_OPENAKITA_IN_VENV" && c.status === "pass");
+        setOpenakitaInstalled(openakitaOk);
         await persistPythonEnvConfig(venvDir);
         // Re-detect Python candidates
         try {
@@ -1129,7 +1073,8 @@ export function App() {
           setSelectedPythonIdx(firstUsable);
         } catch { /* best-effort */ }
       } else {
-        setError(t("config.pyRepairFail") + (d?.issues?.length ? `: ${d.issues.join("; ")}` : ""));
+        const failed = d?.contracts?.filter((c) => c.status !== "pass").map((c) => `${c.code}`).join("; ");
+        setError(t("config.pyRepairFail") + (failed ? `: ${failed}` : ""));
       }
     } catch (e) {
       setError(t("config.pyRepairFail") + `: ${String(e)}`);
@@ -4184,22 +4129,25 @@ export function App() {
               </details>
               </div>
 
-              {/* 连接测试结果 */}
-              {connTestResult && (
-                <div className={`connTestResult ${connTestResult.ok ? "connTestOk" : "connTestFail"}`}>
-                  {connTestResult.ok
-                    ? `${t("llm.testSuccess")} · ${connTestResult.latencyMs}ms · ${t("llm.testModelCount", { count: connTestResult.modelCount ?? 0 })}`
-                    : `${t("llm.testFailed")}：${connTestResult.error} (${connTestResult.latencyMs}ms)`}
-                </div>
-              )}
+              {/* 连接测试结果（预留固定高度，避免把底部按钮“顶”动） */}
+              <div className="connTestSlot">
+                {connTestResult ? (
+                  <div className={`connTestResult ${connTestResult.ok ? "connTestOk" : "connTestFail"}`}>
+                    {connTestResult.ok
+                      ? `${t("llm.testSuccess")} · ${connTestResult.latencyMs}ms · ${t("llm.testModelCount", { count: connTestResult.modelCount ?? 0 })}`
+                      : `${t("llm.testFailed")}：${connTestResult.error} (${connTestResult.latencyMs}ms)`}
+                  </div>
+                ) : (
+                  <div className="connTestResult connTestPlaceholder" />
+                )}
+              </div>
 
               {/* Footer — fixed at bottom */}
               <div className="dialogFooter">
-                <button className="btnSmall" style={{ padding: "8px 18px" }} onClick={() => { setAddEpDialogOpen(false); resetEndpointEditor(); setConnTestResult(null); }}>{t("common.cancel")}</button>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button className="btnSecondary endpointFooterBtn" onClick={() => { setAddEpDialogOpen(false); resetEndpointEditor(); setConnTestResult(null); }}>{t("common.cancel")}</button>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                   <button
-                    className="btnSmall"
-                    style={{ padding: "8px 18px" }}
+                    className="btnSecondary endpointFooterBtn"
                     disabled={(!apiKeyValue.trim() && !isLocalProvider(selectedProvider)) || !baseUrl.trim() || connTesting}
                     onClick={() => doTestConnection({ testApiType: apiType, testBaseUrl: baseUrl, testApiKey: apiKeyValue.trim() || (isLocalProvider(selectedProvider) ? localProviderPlaceholderKey(selectedProvider) : ""), testProviderSlug: selectedProvider?.slug })}
                   >
@@ -4214,15 +4162,17 @@ export function App() {
                     if (!currentWorkspaceId && dataMode !== "remote") missing.push(t("workspace.title") || "工作区");
                     const btnDisabled = missing.length > 0 || !!busy;
                     return (
-                      <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                        <button className="btnPrimary" style={{ padding: "8px 18px" }} onClick={async () => { const ok = await doSaveEndpoint(); if (ok) { setAddEpDialogOpen(false); setConnTestResult(null); } }} disabled={btnDisabled}>
+                      <div className="endpointPrimaryWrap">
+                        <button className="btnPrimary endpointFooterBtn" onClick={async () => { const ok = await doSaveEndpoint(); if (ok) { setAddEpDialogOpen(false); setConnTestResult(null); } }} disabled={btnDisabled}>
                           {isEditingEndpoint ? t("common.save") : t("llm.addEndpoint")}
                         </button>
-                        {btnDisabled && !busy && missing.length > 0 && (
-                          <span style={{ fontSize: 11, color: "var(--muted)", maxWidth: 220, textAlign: "right" }}>
+                        <span className="endpointPrimaryHint">
+                          {btnDisabled && !busy && missing.length > 0 ? (
+                            <>
                             {t("common.missingFields") || "缺少"}: {missing.join(", ")}
-                          </span>
-                        )}
+                            </>
+                          ) : null}
+                        </span>
                       </div>
                     );
                   })()}
@@ -4572,11 +4522,10 @@ export function App() {
               )}
 
               <div className="dialogFooter">
-                <button className="btnSmall" onClick={() => { setAddCompDialogOpen(false); setConnTestResult(null); }}>{t("common.cancel")}</button>
-                <div style={{ display: "flex", gap: 8 }}>
+                <button className="btnSecondary endpointFooterBtn" onClick={() => { setAddCompDialogOpen(false); setConnTestResult(null); }}>{t("common.cancel")}</button>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                   <button
-                    className="btnSmall"
-                    style={{ padding: "8px 16px", borderRadius: 8 }}
+                    className="btnSecondary endpointFooterBtn"
                     disabled={(!compilerApiKeyValue.trim() && !isLocalProvider(providers.find((p) => p.slug === compilerProviderSlug))) || !compilerBaseUrl.trim() || connTesting}
                     onClick={() => { const _cp = providers.find((p) => p.slug === compilerProviderSlug); doTestConnection({
                       testApiType: compilerApiType,
@@ -4596,15 +4545,15 @@ export function App() {
                     if (!currentWorkspaceId && dataMode !== "remote") cMissing.push(t("workspace.title") || "工作区");
                     const cBtnDisabled = cMissing.length > 0 || !!busy;
                     return (
-                      <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                        <button className="btnPrimary" style={{ padding: "8px 20px", borderRadius: 8 }} onClick={async () => { const ok = await doSaveCompilerEndpoint(); if (ok) { setAddCompDialogOpen(false); setConnTestResult(null); } }} disabled={cBtnDisabled}>
+                      <div className="endpointPrimaryWrap">
+                        <button className="btnPrimary endpointFooterBtn" onClick={async () => { const ok = await doSaveCompilerEndpoint(); if (ok) { setAddCompDialogOpen(false); setConnTestResult(null); } }} disabled={cBtnDisabled}>
                           {t("llm.addEndpoint")}
                         </button>
-                        {cBtnDisabled && !busy && cMissing.length > 0 && (
-                          <span style={{ fontSize: 11, color: "var(--muted)", maxWidth: 220, textAlign: "right" }}>
-                            {t("common.missingFields") || "缺少"}: {cMissing.join(", ")}
-                          </span>
-                        )}
+                        <span className="endpointPrimaryHint">
+                          {cBtnDisabled && !busy && cMissing.length > 0 ? (
+                            <>{t("common.missingFields") || "缺少"}: {cMissing.join(", ")}</>
+                          ) : null}
+                        </span>
                       </div>
                     );
                   })()}
@@ -4732,11 +4681,10 @@ export function App() {
               )}
 
               <div className="dialogFooter">
-                <button className="btnSmall" onClick={() => { setAddSttDialogOpen(false); setConnTestResult(null); }}>{t("common.cancel")}</button>
-                <div style={{ display: "flex", gap: 8 }}>
+                <button className="btnSecondary endpointFooterBtn" onClick={() => { setAddSttDialogOpen(false); setConnTestResult(null); }}>{t("common.cancel")}</button>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                   <button
-                    className="btnSmall"
-                    style={{ padding: "8px 16px", borderRadius: 8 }}
+                    className="btnSecondary endpointFooterBtn"
                     disabled={(!sttApiKeyValue.trim() && !isLocalProvider(providers.find((p) => p.slug === sttProviderSlug))) || !sttBaseUrl.trim() || connTesting}
                     onClick={() => { const _sp = providers.find((p) => p.slug === sttProviderSlug); doTestConnection({
                       testApiType: sttApiType,
@@ -4755,15 +4703,15 @@ export function App() {
                     if (!currentWorkspaceId && dataMode !== "remote") sMissing.push(t("workspace.title") || "工作区");
                     const sBtnDisabled = sMissing.length > 0 || !!busy;
                     return (
-                      <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                        <button className="btnPrimary" style={{ padding: "8px 20px", borderRadius: 8 }} onClick={async () => { const ok = await doSaveSttEndpoint(); if (ok) { setAddSttDialogOpen(false); setConnTestResult(null); } }} disabled={sBtnDisabled}>
+                      <div className="endpointPrimaryWrap">
+                        <button className="btnPrimary endpointFooterBtn" onClick={async () => { const ok = await doSaveSttEndpoint(); if (ok) { setAddSttDialogOpen(false); setConnTestResult(null); } }} disabled={sBtnDisabled}>
                           {t("llm.addStt")}
                         </button>
-                        {sBtnDisabled && !busy && sMissing.length > 0 && (
-                          <span style={{ fontSize: 11, color: "var(--muted)", maxWidth: 220, textAlign: "right" }}>
-                            {t("common.missingFields") || "缺少"}: {sMissing.join(", ")}
-                          </span>
-                        )}
+                        <span className="endpointPrimaryHint">
+                          {sBtnDisabled && !busy && sMissing.length > 0 ? (
+                            <>{t("common.missingFields") || "缺少"}: {sMissing.join(", ")}</>
+                          ) : null}
+                        </span>
                       </div>
                     );
                   })()}
@@ -5051,7 +4999,7 @@ export function App() {
       } catch (e) { setError(String(e)); } finally { setBusy(null); }
     }
 
-    async function runRepair() {
+    async function runRepair(forceRebuild = false) {
       if (!venvDir) return;
       setBusy(t("adv.repairing"));
       setRepairStage(""); setRepairPercent(0); setRepairDetail("");
@@ -5063,11 +5011,24 @@ export function App() {
         if (p.detail) setRepairDetail(String(p.detail));
       });
       try {
-        const d = await invoke<NonNullable<typeof pyDiag>>("repair_python_env", { venvDir });
+        const d = await invoke<NonNullable<typeof pyDiag>>("repair_python_env", { venvDir, forceRebuild });
         setPyDiag(d);
-        if (d && d.issues.length === 0) setNotice(t("adv.repairDone"));
+        if (d && d.summary === "healthy") setNotice(t("adv.repairDone"));
         else if (d) setError(t("adv.repairPartial"));
       } catch (e) { setError(String(e)); } finally { unlisten(); setBusy(null); setRepairStage(""); }
+    }
+
+    async function runExportDiagReport() {
+      if (!venvDir) return;
+      setBusy(t("adv.diagnosing"));
+      try {
+        const reportPath = await invoke<string>("export_python_diagnostic_report", { venvDir });
+        setNotice(t("adv.diagReportExported", { path: reportPath }));
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(null);
+      }
     }
 
     async function runReset(removeVenv: boolean, removeEmbedded: boolean) {
@@ -5261,11 +5222,17 @@ export function App() {
       </div>
     );
 
-    const diagItem = (label: string, ok: boolean | undefined, detail?: string | null) => (
+    const diagItem = (label: string, status: "pass" | "warn" | "fail" | undefined, detail?: string | null) => (
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", fontSize: 13 }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: ok ? "#10b981" : "#ef4444" }} />
+        <span style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          flexShrink: 0,
+          background: status === "pass" ? "#10b981" : status === "warn" ? "#f59e0b" : "#ef4444",
+        }} />
         <span style={{ fontWeight: 500, minWidth: 140 }}>{label}</span>
-        <span style={{ color: "var(--muted)", fontSize: 12, wordBreak: "break-all" }}>{detail || (ok ? "OK" : "—")}</span>
+        <span style={{ color: "var(--muted)", fontSize: 12, wordBreak: "break-all" }}>{detail || "—"}</span>
       </div>
     );
 
@@ -5278,12 +5245,22 @@ export function App() {
               <div className="cardHint" style={{ marginBottom: 8 }}>{t("adv.pythonHint")}</div>
               {pyDiag ? (
                 <>
-                  {diagItem(t("adv.pyEmbedded"), pyDiag.embeddedPythonOk, pyDiag.embeddedPythonPath)}
-                  {diagItem(t("adv.pyVenv"), pyDiag.venvOk, pyDiag.venvPythonVersion ? `${pyDiag.venvPythonVersion} — ${pyDiag.venvPath}` : pyDiag.venvPath)}
-                  {diagItem(t("adv.pyOpenakita"), pyDiag.openakitaInstalled, pyDiag.openakitaVersion)}
-                  {pyDiag.issues.length > 0 && (
+                  <div className="cardHint" style={{ marginBottom: 6 }}>
+                    {t("adv.diagSummary")}:{" "}
+                    <b>{pyDiag.summary === "healthy" ? t("adv.summaryHealthy") : pyDiag.summary === "repairable" ? t("adv.summaryRepairable") : t("adv.summaryBroken")}</b>
+                  </div>
+                  {pyDiag.contracts.map((c) => (
+                    <div key={c.id}>
+                      {diagItem(c.title, c.status, `${c.code}${c.evidence?.[0] ? ` — ${c.evidence[0]}` : ""}`)}
+                    </div>
+                  ))}
+                  {pyDiag.contracts.some((c) => c.status !== "pass") && (
                     <div style={{ marginTop: 8, padding: "8px 12px", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, fontSize: 12, color: "var(--warning)" }}>
-                      {pyDiag.issues.map((issue, i) => <div key={i} style={{ padding: "2px 0" }}>⚠ {issue}</div>)}
+                      {pyDiag.contracts.filter((c) => c.status !== "pass").map((c) => (
+                        <div key={c.id} style={{ padding: "2px 0" }}>
+                          ⚠ {c.fixHint || c.code}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </>
@@ -5306,7 +5283,22 @@ export function App() {
               )}
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                 <button className="btnSmall" onClick={runDiagnose} disabled={!!busy}>{t("adv.diagnose")}</button>
-                <button className="btnSmall btnSmallPrimary" onClick={runRepair} disabled={!!busy || !pyDiag?.issues.length}>{t("adv.repair")}</button>
+                <button
+                  className="btnSmall btnSmallPrimary"
+                  onClick={() => {
+                    if (!pyDiag) return;
+                    if (pyDiag.summary === "healthy") {
+                      if (!confirm(t("adv.repairHealthyConfirm"))) return;
+                      runRepair(true);
+                      return;
+                    }
+                    runRepair(false);
+                  }}
+                  disabled={!!busy || !pyDiag}
+                >
+                  {pyDiag?.summary === "healthy" ? t("adv.repairCautious") : t("adv.repair")}
+                </button>
+                <button className="btnSmall" onClick={runExportDiagReport} disabled={!!busy}>{t("adv.exportDiagReport")}</button>
                 <button className="btnSmall btnSmallDanger" onClick={() => {
                   if (confirm(t("adv.resetConfirm"))) runReset(true, true);
                 }} disabled={!!busy}>{t("adv.reset")}</button>
@@ -6264,17 +6256,17 @@ export function App() {
           updateTask("python-check", { status: "done", detail: pyCheck });
           logTask("检查 Python 环境", "done", pyCheck);
         } catch {
-          log("未找到 Python 环境，正在安装嵌入式 Python...");
-          updateTask("python-check", { detail: "正在安装嵌入式 Python..." });
-          logTask("检查 Python 环境", "running", "正在安装嵌入式 Python...");
+          log("未找到 Python 环境，正在检查内置 Python...");
+          updateTask("python-check", { detail: "正在检查内置 Python..." });
+          logTask("检查 Python 环境", "running", "正在检查内置 Python...");
             try {
-            await invoke("install_embedded_python", { pythonSeries: "3.11", logPath: obLogPath ?? null });
-            log("✓ 嵌入式 Python 安装完成");
+            await invoke("install_bundled_python", { pythonSeries: "3.11", logPath: obLogPath ?? null });
+            log("✓ 内置 Python 可用");
             pyReady = true;
-            updateTask("python-check", { status: "done", detail: "嵌入式 Python" });
-            logTask("检查 Python 环境", "done", "嵌入式 Python");
+            updateTask("python-check", { status: "done", detail: "内置 Python" });
+            logTask("检查 Python 环境", "done", "内置 Python");
           } catch (pyErr) {
-            log(`⚠ 嵌入式 Python 安装失败: ${String(pyErr)}`);
+            log(`⚠ 内置 Python 不可用: ${String(pyErr)}`);
             updateTask("python-check", { status: "error", detail: String(pyErr) });
             logTask("检查 Python 环境", "error", String(pyErr));
             hasErr = true;
@@ -6416,8 +6408,10 @@ export function App() {
   }
 
   function renderOnboarding() {
-    const obStepDots = ["ob-welcome", "ob-agreement", "ob-llm", "ob-im", "ob-modules", "ob-cli", "ob-progress", "ob-done"] as OnboardingStep[];
-    const obCurrentIdx = obStepDots.indexOf(obStep);
+    // Progress/done are transitional states and should not create extra indicator dots.
+    const obStepDots = ["ob-welcome", "ob-agreement", "ob-llm", "ob-im", "ob-modules", "ob-cli"] as OnboardingStep[];
+    const obCurrentIdxRaw = obStepDots.indexOf(obStep);
+    const obCurrentIdx = obCurrentIdxRaw >= 0 ? obCurrentIdxRaw : obStepDots.length - 1;
 
     const stepIndicator = (
       <div className="obStepIndicator">
@@ -6662,8 +6656,9 @@ export function App() {
                   whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.7,
                   maxHeight: 340, overflowY: "auto",
                   padding: "16px 20px", borderRadius: 8,
-                  background: "var(--bg-secondary, #f5f5f5)",
-                  border: "1px solid var(--border-color, #e0e0e0)",
+                  background: "var(--bg1)",
+                  border: "1px solid var(--line)",
+                  color: "var(--text)",
                   marginBottom: 20,
                 }}>
                   {t("onboarding.agreement.content")}
@@ -6678,8 +6673,9 @@ export function App() {
                   placeholder={t("onboarding.agreement.confirmPlaceholder")}
                   style={{
                     width: "100%", padding: "10px 14px", fontSize: 15,
-                    borderRadius: 6, border: obAgreementError ? "2px solid #e53e3e" : "1px solid var(--border-color, #ccc)",
+                    borderRadius: 6, border: obAgreementError ? "2px solid #e53e3e" : "1px solid var(--line)",
                     outline: "none", boxSizing: "border-box",
+                    background: "var(--bg1)", color: "var(--text)",
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -6917,9 +6913,7 @@ export function App() {
               <div className="obFooterBtns">
                 <button onClick={() => setObStep("ob-modules")}>{t("config.prev")}</button>
                 <button className="btnPrimary" onClick={() => { setObStep("ob-progress"); obRunSetup(); }}>
-                  {obSelectedModules.size > 0
-                    ? t("onboarding.modules.installAndContinue")
-                    : t("onboarding.modules.skipAndContinue")}
+                  {t("onboarding.modules.startInstall")}
                 </button>
               </div>
             </div>
@@ -7116,6 +7110,7 @@ export function App() {
               apiBaseUrl={apiBaseUrl}
               serviceRunning={!!serviceStatus?.running}
               dataMode={dataMode}
+              onNotice={setNotice}
             />
           )}
         </div>
@@ -7369,16 +7364,19 @@ export function App() {
   // ── Onboarding 全屏模式 (隐藏侧边栏和顶部状态栏) ──
   if (view === "onboarding") {
     return (
+      <EnvFieldContext.Provider value={envFieldCtx}>
       <div className="onboardingShell">
         {renderOnboarding()}
 
         <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
         <ToastContainer busy={busy} notice={notice} error={error} onDismissNotice={() => setNotice(null)} onDismissError={() => setError(null)} />
       </div>
+      </EnvFieldContext.Provider>
     );
   }
 
   return (
+    <EnvFieldContext.Provider value={envFieldCtx}>
     <div className={`appShell ${sidebarCollapsed ? "appShellCollapsed" : ""}`}>
       <Sidebar
         collapsed={sidebarCollapsed}
@@ -7726,6 +7724,7 @@ export function App() {
         apiBase={httpApiBase()}
       />
     </div>
+    </EnvFieldContext.Provider>
   );
 }
 

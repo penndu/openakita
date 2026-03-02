@@ -3,6 +3,54 @@
 ; - 卸载时强制杀掉残留进程（Setup Center 本体 + OpenAkita 后台服务）
 ; - 勾选"清理用户数据"时，删除用户目录下的 ~/.openakita
 
+; ── PATH 辅助脚本 ──
+; 通过 PowerShell 安全地读写 PATH 注册表值，解决：
+; 1. NSIS ReadRegStr 字符串长度上限导致长 PATH 被截断/清空
+; 2. 保持 REG_EXPAND_SZ 类型（保留 %USERPROFILE% 等环境变量引用）
+; 3. 使用分号分割后逐条精确比较，避免子字符串误匹配
+!macro _OpenAkita_WritePathHelper
+  InitPluginsDir
+  FileOpen $R9 "$PLUGINSDIR\_oa_pathhelper.ps1" w
+  FileWrite $R9 "param([string]$$Action, [string]$$BinDir, [string]$$RegPath)$\r$\n"
+  FileWrite $R9 "$$ErrorActionPreference = 'Stop'$\r$\n"
+  FileWrite $R9 "try {$\r$\n"
+  FileWrite $R9 "    $$key = Get-Item -LiteralPath $$RegPath -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $R9 "    if (-not $$key) {$\r$\n"
+  FileWrite $R9 "        if ($$Action -eq 'add') {$\r$\n"
+  FileWrite $R9 "            New-Item -Path $$RegPath -Force | Out-Null$\r$\n"
+  FileWrite $R9 "            New-ItemProperty -Path $$RegPath -Name 'Path' -Value $$BinDir -PropertyType ExpandString | Out-Null$\r$\n"
+  FileWrite $R9 "        }$\r$\n"
+  FileWrite $R9 "        exit 0$\r$\n"
+  FileWrite $R9 "    }$\r$\n"
+  FileWrite $R9 "    $$cur = $$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')$\r$\n"
+  FileWrite $R9 "    $$bn = $$BinDir.TrimEnd([char]92)$\r$\n"
+  FileWrite $R9 "    if ($$Action -eq 'add') {$\r$\n"
+  FileWrite $R9 "        if (-not $$cur) {$\r$\n"
+  FileWrite $R9 "            Set-ItemProperty -LiteralPath $$RegPath -Name 'Path' -Value $$BinDir -Type ExpandString$\r$\n"
+  FileWrite $R9 "        } else {$\r$\n"
+  FileWrite $R9 "            $$entries = $$cur -split ';'$\r$\n"
+  FileWrite $R9 "            $$found = $$entries | Where-Object { $$_.TrimEnd([char]92) -ieq $$bn }$\r$\n"
+  FileWrite $R9 "            if (-not $$found) {$\r$\n"
+  FileWrite $R9 '                $$np = "$$cur;$$BinDir"$\r$\n'
+  FileWrite $R9 "                Set-ItemProperty -LiteralPath $$RegPath -Name 'Path' -Value $$np -Type ExpandString$\r$\n"
+  FileWrite $R9 "            }$\r$\n"
+  FileWrite $R9 "        }$\r$\n"
+  FileWrite $R9 "    } elseif ($$Action -eq 'remove') {$\r$\n"
+  FileWrite $R9 "        if ($$cur) {$\r$\n"
+  FileWrite $R9 "            $$filtered = ($$cur -split ';') | Where-Object { $$_ -and ($$_.TrimEnd([char]92) -ine $$bn) }$\r$\n"
+  FileWrite $R9 "            $$np = $$filtered -join ';'$\r$\n"
+  FileWrite $R9 "            if ($$np -cne $$cur) {$\r$\n"
+  FileWrite $R9 "                Set-ItemProperty -LiteralPath $$RegPath -Name 'Path' -Value $$np -Type ExpandString$\r$\n"
+  FileWrite $R9 "            }$\r$\n"
+  FileWrite $R9 "        }$\r$\n"
+  FileWrite $R9 "    }$\r$\n"
+  FileWrite $R9 "    exit 0$\r$\n"
+  FileWrite $R9 "} catch {$\r$\n"
+  FileWrite $R9 "    exit 1$\r$\n"
+  FileWrite $R9 "}$\r$\n"
+  FileClose $R9
+!macroend
+
 !macro _OpenAkita_KillPid pid
   StrCpy $0 "${pid}"
   ; 仅在 pid 非空时执行 kill；优先 PowerShell 不弹窗，失败则兜底 taskkill（会闪黑框）

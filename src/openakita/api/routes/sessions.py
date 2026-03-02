@@ -87,12 +87,17 @@ async def get_session_history(
     if not session:
         return {"messages": []}
 
+    _TOOL_SUMMARY_LEGACY_MARKER = "\n\n[执行摘要]"
+
     result = []
     for i, msg in enumerate(session.context.messages):
         role = msg.get("role", "user")
         content = msg.get("content", "")
         if not isinstance(content, str):
             content = str(content) if content else ""
+        # Strip legacy inline tool summary from old sessions
+        if role == "assistant" and _TOOL_SUMMARY_LEGACY_MARKER in content:
+            content = content[:content.index(_TOOL_SUMMARY_LEGACY_MARKER)]
         ts = msg.get("timestamp", "")
         epoch_ms = 0
         if ts:
@@ -115,6 +120,9 @@ async def get_session_history(
         artifacts = msg.get("artifacts")
         if artifacts:
             entry["artifacts"] = artifacts
+        ask_user = msg.get("ask_user")
+        if ask_user:
+            entry["ask_user"] = ask_user
         result.append(entry)
 
     return {"messages": result}

@@ -298,6 +298,7 @@ export function SkillManager({
   apiBaseUrl = "http://127.0.0.1:18900",
   serviceRunning = false,
   dataMode = "local",
+  onNotice,
 }: {
   venvDir: string;
   currentWorkspaceId: string | null;
@@ -307,6 +308,7 @@ export function SkillManager({
   apiBaseUrl?: string;
   serviceRunning?: boolean;
   dataMode?: "local" | "remote";
+  onNotice?: (msg: string) => void;
 }) {
   const [tab, setTab] = useState<"installed" | "marketplace">("installed");
   const [skills, setSkills] = useState<SkillInfo[]>([]);
@@ -328,8 +330,8 @@ export function SkillManager({
   const marketRequestId = useRef(0);  // 用于取消过期请求
   const { t } = useTranslation();
 
-  // ── 加载已安装技能 ──
-  const loadSkills = useCallback(async () => {
+  // ── 加载已安装技能（返回 true 表示成功，false 表示出错） ──
+  const loadSkills = useCallback(async (): Promise<boolean> => {
     setLoading(true);
     setError(null);
     try {
@@ -360,13 +362,14 @@ export function SkillManager({
           // Tauri 也失败了——如果 HTTP 也失败了，显示错误
           if (httpError) {
             setError(`技能列表获取失败 (HTTP: ${httpError})`);
+            return false;
           }
         }
       }
 
       if (!data) {
         setSkills([]);
-        return;
+        return !httpError;
       }
 
       const list: SkillInfo[] = (data.skills || []).map((s: Record<string, unknown>) => ({
@@ -389,8 +392,10 @@ export function SkillManager({
       for (const s of list) draft[s.name] = s.enabled !== false;
       setEnabledDraft(draft);
       setEnabledDirty(false);
+      return true;
     } catch (e) {
       setError(String(e));
+      return false;
     } finally {
       setLoading(false);
     }
@@ -591,7 +596,9 @@ export function SkillManager({
         installs: typeof s.installs === "number" ? s.installs : undefined,
         tags: [],
         installed: skills.some((local) => {
-          if (local.name !== skillId) return false;
+          const nameMatch = local.name === skillId;
+          const dirMatch = local.path ? local.path.replace(/\\/g, "/").split("/").pop() === skillId : false;
+          if (!nameMatch && !dirMatch) return false;
           if (local.sourceUrl && installUrl) return local.sourceUrl === installUrl;
           return true;
         }),
@@ -721,15 +728,24 @@ export function SkillManager({
         s.url === skill.url ? { ...s, installed: true } : s
       ));
       await loadSkills();
-      // 安装后自动切换到「已安装」标签并展开配置面板
       setTab("installed");
       setExpandedSkill(skill.name);
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      if (msg.includes("已存在") || msg.toLowerCase().includes("already exist")) {
+        setMarketplace((prev) => prev.map((s) =>
+          s.url === skill.url ? { ...s, installed: true } : s
+        ));
+        await loadSkills();
+        onNotice?.(t("skills.alreadyInstalled"));
+        setTab("installed");
+      } else {
+        setError(msg);
+      }
     } finally {
       setInstalling(null);
     }
-  }, [loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl]);
+  }, [loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, onNotice, t]);
 
   // ── 手动输入链接安装技能 ──
   const handleManualInstall = useCallback(async () => {
@@ -776,11 +792,19 @@ export function SkillManager({
       await loadSkills();
       setTab("installed");
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      if (msg.includes("已存在") || msg.toLowerCase().includes("already exist")) {
+        setManualUrl("");
+        await loadSkills();
+        onNotice?.(t("skills.alreadyInstalled"));
+        setTab("installed");
+      } else {
+        setError(msg);
+      }
     } finally {
       setManualInstalling(false);
     }
-  }, [manualUrl, loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, t]);
+  }, [manualUrl, loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, t, onNotice]);
 
   // Debounced search: trigger API call when user stops typing
   useEffect(() => {
@@ -823,9 +847,10 @@ export function SkillManager({
                 });
                 const data = await res.json();
                 if (data.error) { setError(typeof data.error === "string" ? data.error : JSON.stringify(data.error)); return; }
-              } catch (e) { setError(String(e)); }
+              } catch (e) { setError(String(e)); return; }
             }
-            await loadSkills();
+            const ok = await loadSkills();
+            if (ok) onNotice?.(t("skills.refreshed"));
           }}
           disabled={loading}
           style={{ fontSize: 12, padding: "6px 14px", borderRadius: 8, border: "1px solid var(--line)", cursor: "pointer" }}
@@ -842,7 +867,7 @@ export function SkillManager({
         <div style={{ display: "grid", gap: 10 }}>
           {/* 搜索 + AI 整理 */}
           {skillsWithConfig.length > 0 && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
               <div style={{ flex: 1, position: "relative" }}>
                 <IconSearch size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }} />
                 <input
@@ -856,7 +881,7 @@ export function SkillManager({
                 <button
                   onClick={handleAiOrganize}
                   disabled={aiOrganizing}
-                  style={{ fontSize: 12, padding: "6px 14px", borderRadius: 8, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap" }}
+                  style={{ fontSize: 12, padding: "0 14px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap" }}
                   title={t("skills.aiOrganizeHint")}
                 >
                   {aiOrganizing ? t("common.loading") : t("skills.aiOrganize")}

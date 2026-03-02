@@ -46,14 +46,14 @@ jobs:
             suffix: "-ubuntu24-arm64"
           # macOS - Apple Silicon (arm64)
           - platform: macos-latest
-            bundles: "dmg"
+            bundles: "app,dmg"
             args: "--target aarch64-apple-darwin"
             rust_target: "aarch64-apple-darwin"
             build_mode: "core"
             suffix: "-macos-arm64"
           # macOS - Intel (x86_64)
           - platform: macos-15-intel
-            bundles: "dmg"
+            bundles: "app,dmg"
             args: "--target x86_64-apple-darwin"
             rust_target: "x86_64-apple-darwin"
             build_mode: "core"
@@ -146,6 +146,9 @@ jobs:
           echo "Resources copied:"
           du -sh "$RESOURCE_DIR"/*
 
+      - name: Verify bundled Python contract
+        run: python build/verify_bundled_python_contract.py --backend-dir apps/setup-center/src-tauri/resources/openakita-server
+
       - name: Codesign embedded binaries for macOS notarization
         if: runner.os == 'macOS'
         env:
@@ -175,6 +178,11 @@ jobs:
 
           echo "Signing embedded binaries with identity: ${IDENTITY}"
           find "$RESOURCE_DIR" -type f -perm +111 | while read -r bin; do
+            # Sign Python.framework as a bundle explicitly (below), not per-file.
+            if [[ "$bin" == *"/Python.framework/"* ]]; then
+              echo "  Skipping Python.framework inner binary at resource stage: $bin"
+              continue
+            fi
             echo "  Signing: $bin"
             codesign --force --options runtime --timestamp --sign "$IDENTITY" "$bin"
           done
@@ -251,6 +259,132 @@ jobs:
           done
           echo "All $MAX_ATTEMPTS attempts failed"
           exit 1
+
+      - name: Re-sign final macOS app bundles for notarization
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_CERTIFICATE:-}" ] || [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY not configured, skipping final app re-sign."
+            exit 0
+          fi
+
+          TARGET_BASE="apps/setup-center/src-tauri/target"
+          if [ -n "${{ matrix.rust_target }}" ]; then
+            BUNDLE_DIR="${TARGET_BASE}/${{ matrix.rust_target }}/release/bundle"
+          else
+            BUNDLE_DIR="${TARGET_BASE}/release/bundle"
+          fi
+
+          # Only sign top-level .app bundles (under macos/), NOT nested Python.app etc.
+          # The previous `find` without -maxdepth picked up nested Python.app bundles
+          # and re-signed them AFTER the main app was sealed, breaking the seal.
+          MACOS_BUNDLE_DIR="${BUNDLE_DIR}/macos"
+          APPS=()
+          if [ -d "${MACOS_BUNDLE_DIR}" ]; then
+            while IFS= read -r -d '' app; do
+              APPS+=("${app}")
+            done < <(find "${MACOS_BUNDLE_DIR}" -maxdepth 1 -type d -name "*.app" -print0)
+          fi
+          if [ "${#APPS[@]}" -eq 0 ]; then
+            echo "No .app bundles found under ${MACOS_BUNDLE_DIR}; skip."
+            exit 0
+          fi
+
+          IDENTITY="${APPLE_SIGNING_IDENTITY}"
+          for app in "${APPS[@]}"; do
+            FRAMEWORK_DIR="${app}/Contents/Resources/resources/openakita-server/_internal/Python.framework"
+            if [ -d "${FRAMEWORK_DIR}" ]; then
+              SIGNED_REALPATHS_FILE="$(mktemp)"
+
+              # Apple code-signing requires strict inside-out order:
+              #   innermost executables → containing bundles → framework version binaries
+              # Each layer's signature seals its contents, so inner layers must
+              # be fully signed before outer layers that reference them.
+
+              # 1) Sign executables inside Python.app bundles (deepest level).
+              for pybin in \
+                "${FRAMEWORK_DIR}/Resources/Python.app/Contents/MacOS/Python" \
+                "${FRAMEWORK_DIR}/Versions/3.11/Resources/Python.app/Contents/MacOS/Python" \
+                "${FRAMEWORK_DIR}/Versions/Current/Resources/Python.app/Contents/MacOS/Python"; do
+                if [ -f "${pybin}" ]; then
+                  REAL_PYBIN="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${pybin}")"
+                  if grep -Fqx -- "${REAL_PYBIN}" "${SIGNED_REALPATHS_FILE}"; then
+                    continue
+                  fi
+                  echo "Signing Python.app executable: ${pybin}"
+                  codesign --force --options runtime --timestamp --sign "${IDENTITY}" "${REAL_PYBIN}"
+                  printf '%s\n' "${REAL_PYBIN}" >> "${SIGNED_REALPATHS_FILE}"
+                fi
+              done
+
+              # 2) Sign Python.app bundles (seals the executables from step 1).
+              for pyapp in \
+                "${FRAMEWORK_DIR}/Resources/Python.app" \
+                "${FRAMEWORK_DIR}/Versions/3.11/Resources/Python.app" \
+                "${FRAMEWORK_DIR}/Versions/Current/Resources/Python.app"; do
+                if [ -d "${pyapp}" ]; then
+                  REAL_PYAPP="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${pyapp}")"
+                  if grep -Fqx -- "${REAL_PYAPP}" "${SIGNED_REALPATHS_FILE}"; then
+                    continue
+                  fi
+                  echo "Signing Python.app bundle: ${pyapp}"
+                  codesign --force --options runtime --timestamp --sign "${IDENTITY}" "${REAL_PYAPP}"
+                  printf '%s\n' "${REAL_PYAPP}" >> "${SIGNED_REALPATHS_FILE}"
+                fi
+              done
+
+              # 3) Sign framework version main binaries LAST.
+              #    Their signatures seal Resources/ (including the signed Python.app).
+              for fwbin in \
+                "${FRAMEWORK_DIR}/Versions/3.11/Python" \
+                "${FRAMEWORK_DIR}/Versions/Current/Python"; do
+                if [ -f "${fwbin}" ]; then
+                  REAL_FWBIN="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${fwbin}")"
+                  if grep -Fqx -- "${REAL_FWBIN}" "${SIGNED_REALPATHS_FILE}"; then
+                    continue
+                  fi
+                  echo "Signing framework version binary: ${fwbin}"
+                  codesign --force --options runtime --timestamp --sign "${IDENTITY}" "${REAL_FWBIN}"
+                  printf '%s\n' "${REAL_FWBIN}" >> "${SIGNED_REALPATHS_FILE}"
+                fi
+              done
+
+              rm -f "${SIGNED_REALPATHS_FILE}"
+            fi
+
+            echo "Signing app bundle root: ${app}"
+            codesign --force --options runtime --timestamp --sign "${IDENTITY}" "${app}"
+            echo "Verifying app signature (deep): ${app}"
+            codesign --verify --deep --strict --verbose=2 "${app}"
+          done
+
+          # Recreate DMG from the signed .app.
+          # Tauri creates the DMG during build (step 20) BEFORE our re-signing,
+          # so the DMG contains the original Tauri-signed app without runtime
+          # hardening or timestamps.  We must rebuild it.
+          DMG_DIR="${BUNDLE_DIR}/dmg"
+          if [ -d "${DMG_DIR}" ]; then
+            for dmg_file in "${DMG_DIR}"/*.dmg; do
+              [ -f "${dmg_file}" ] || continue
+              if [ "${#APPS[@]}" -gt 0 ]; then
+                app="${APPS[0]}"
+                app_name="$(basename "${app}" .app)"
+                echo "Recreating DMG from signed app: ${dmg_file}"
+                rm -f "${dmg_file}"
+                hdiutil create \
+                  -volname "${app_name}" \
+                  -srcfolder "${app}" \
+                  -ov -format UDZO \
+                  "${dmg_file}"
+                echo "DMG recreated: ${dmg_file}"
+              fi
+            done
+          fi
 
       - name: Notarize macOS artifacts (manual notarytool)
         if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.enable_notarization == true || inputs.enable_notarization == 'true')

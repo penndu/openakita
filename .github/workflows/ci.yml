@@ -318,6 +318,9 @@ jobs:
           rm -rf "$RESOURCE_DIR/openakita-server"
           cp -r dist/openakita-server "$RESOURCE_DIR/openakita-server"
 
+      - name: Verify bundled Python contract
+        run: python build/verify_bundled_python_contract.py --backend-dir apps/setup-center/src-tauri/resources/openakita-server
+
       - name: Create gitignored placeholders
         run: |
           mkdir -p identity/personas

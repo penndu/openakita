@@ -39,9 +39,12 @@ export function applyTheme(theme: Theme) {
   }
 }
 
+export const THEME_CHANGE_EVENT = "openakita-theme-change";
+
 export function setThemePref(theme: Theme) {
   localStorage.setItem("openakita-theme-pref", theme);
   applyTheme(theme);
+  window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT, { detail: theme }));
 }
 
 export function getThemePref(): Theme {

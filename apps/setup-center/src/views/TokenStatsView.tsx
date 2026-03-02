@@ -71,7 +71,7 @@ function fmtCost(n: number): string {
 function MiniBar({ value, max, color = "var(--brand)" }: { value: number; max: number; color?: string }) {
   const pct = max > 0 ? Math.min(value / max, 1) * 100 : 0;
   return (
-    <div style={{ width: "100%", height: 6, background: "var(--bg-secondary)", borderRadius: 3, overflow: "hidden" }}>
+    <div style={{ width: "100%", height: 6, background: "var(--bg1)", borderRadius: 3, overflow: "hidden" }}>
       <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 3, transition: "width 0.3s" }} />
     </div>
   );
@@ -200,7 +200,7 @@ export function TokenStatsView({
           </h3>
           <div style={{
             display: "flex", alignItems: "flex-end", gap: 2, height: 100,
-            padding: "0 4px", background: "var(--bg-secondary)", borderRadius: 8,
+            padding: "0 4px", background: "var(--bg1)", borderRadius: 8,
           }}>
             {timeline.map((r, i) => {
               const h = (r.total_tokens / maxTl) * 90;

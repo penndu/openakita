@@ -122,6 +122,95 @@ export function IMView({
   const { t } = useTranslation();
   const api = apiBaseUrl || DEFAULT_API;
   const [tab, setTab] = useState<"messages" | "bots">("messages");
+  const [channels, setChannels] = useState<IMChannel[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<IMSession[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<IMMessage[]>([]);
+  const [totalMessages, setTotalMessages] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const getChannelDisplayName = useCallback((ch: IMChannel): string => {
+    const key = `status.${(ch.channel || "").toLowerCase()}`;
+    const translated = t(key);
+    return translated && translated !== key ? translated : (ch.name || ch.channel);
+  }, [t]);
+
+  const fetchChannels = useCallback(async () => {
+    if (!serviceRunning) return;
+    try {
+      const res = await fetch(`${api}/api/im/channels`);
+      if (res.ok) {
+        const data = await res.json();
+        setChannels(data.channels || []);
+      }
+    } catch { /* ignore */ }
+  }, [serviceRunning, api]);
+
+  const fetchSessions = useCallback(async (channel: string): Promise<IMSession[]> => {
+    if (!serviceRunning) return [];
+    try {
+      const res = await fetch(`${api}/api/im/sessions?channel=${encodeURIComponent(channel)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const list: IMSession[] = data.sessions || [];
+        setSessions(list);
+        return list;
+      }
+    } catch { /* ignore */ }
+    return [];
+  }, [serviceRunning, api]);
+
+  const fetchMessages = useCallback(async (sessionId: string, limit = 50, offset = 0) => {
+    if (!serviceRunning) return;
+    try {
+      const res = await fetch(`${api}/api/im/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}&offset=${offset}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages || []);
+        setTotalMessages(data.total || 0);
+      }
+    } catch { /* ignore */ }
+  }, [serviceRunning, api]);
+
+  useEffect(() => {
+    fetchChannels();
+  }, [fetchChannels]);
+
+  useEffect(() => {
+    if (!serviceRunning) return;
+    const channelTimer = setInterval(() => {
+      fetchChannels();
+      if (selectedChannel) fetchSessions(selectedChannel);
+    }, 15000);
+    return () => clearInterval(channelTimer);
+  }, [serviceRunning, selectedChannel, fetchChannels, fetchSessions]);
+
+  useEffect(() => {
+    if (!serviceRunning || !selectedSessionId) return;
+    fetchMessages(selectedSessionId);
+    const msgTimer = setInterval(() => {
+      fetchMessages(selectedSessionId);
+    }, 8000);
+    return () => clearInterval(msgTimer);
+  }, [serviceRunning, selectedSessionId, fetchMessages]);
+
+  const handleSelectChannel = useCallback(async (ch: string) => {
+    setSelectedChannel(ch);
+    setSelectedSessionId(null);
+    setMessages([]);
+    const list = await fetchSessions(ch);
+    if (list.length > 0) {
+      const first = list[0];
+      setSelectedSessionId(first.sessionId);
+      fetchMessages(first.sessionId);
+    }
+  }, [fetchSessions, fetchMessages]);
+
+  const handleSelectSession = useCallback((sid: string) => {
+    setSelectedSessionId(sid);
+    fetchMessages(sid);
+  }, [fetchMessages]);
 
   if (!serviceRunning) {
     return (
@@ -273,7 +362,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
             >
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {ch.status === "online" ? <DotGreen /> : <DotGray />}
-                <span className="imChannelName">{ch.name}</span>
+                <span className="imChannelName">{getChannelDisplayName(ch)}</span>
               </div>
               <span className="imChannelCount">{ch.sessionCount}</span>
             </div>

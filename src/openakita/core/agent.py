@@ -3318,15 +3318,15 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
             gateway=None,  # CLI 无 Gateway
         )
 
-        # 记录 Assistant 响应到 Session（追加工具执行摘要）
-        _cli_save_text = response
+        # 记录 Assistant 响应到 Session（工具执行摘要作为独立字段）
+        _cli_meta: dict = {}
         try:
             _cli_tool_summary = self.build_tool_trace_summary()
             if _cli_tool_summary:
-                _cli_save_text += _cli_tool_summary
+                _cli_meta["tool_summary"] = _cli_tool_summary
         except Exception:
             pass
-        self._cli_session.add_message("assistant", _cli_save_text)
+        self._cli_session.add_message("assistant", response, **_cli_meta)
 
         # 同步更新旧属性（保持向后兼容：conversation_history 属性、/status 命令等依赖）
         self._conversation_history.append(
@@ -3577,10 +3577,15 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         if history_messages and history_messages[-1].get("role") == "user":
             history_messages = history_messages[:-1]
 
+        _TOOL_SUMMARY_LEGACY_MARKER = "\n\n[执行摘要]"
+
         messages: list[dict] = []
         for msg in history_messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            # Strip legacy inline tool summary from old sessions
+            if role == "assistant" and _TOOL_SUMMARY_LEGACY_MARKER in content:
+                content = content[:content.index(_TOOL_SUMMARY_LEGACY_MARKER)]
             if role in ("user", "assistant") and content:
                 if messages and messages[-1]["role"] == role:
                     messages[-1]["content"] += "\n" + content
@@ -4186,6 +4191,8 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 # 收集回复文本（用于 session 保存 & memory）
                 if event.get("type") == "text_delta":
                     _reply_text += event.get("content", "")
+                elif event.get("type") == "ask_user" and not _reply_text:
+                    _reply_text = event.get("question", "")
                 yield event
 
             # === 共享收尾（始终执行，即使回复文本为空也要记录 memory/trace） ===
@@ -4259,10 +4266,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
           [执行摘要]
           - tool_name({key: val}) → result_hint...
 
-        该摘要追加到 assistant 消息末尾并保存到 session，
-        使下一轮 LLM 能感知上一轮的工具操作。
-        当上下文 token 逼近上限时由 ContextManager 自然压缩。
-
+        调用方将返回值存入消息的 ``tool_summary`` 元数据字段（不要拼入 content）。
         空字符串表示无工具调用。
         """
         from .tool_executor import save_overflow, smart_truncate
@@ -4369,22 +4373,33 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         """
         if not react_trace:
             return None
-        return [
-            {
+        summaries = []
+        for t in react_trace:
+            results_by_id: dict[str, str] = {}
+            for tr in t.get("tool_results", []):
+                tid = tr.get("tool_use_id", "")
+                if tid:
+                    results_by_id[tid] = str(tr.get("result_content", ""))[:120]
+            tools = []
+            for tc in t.get("tool_calls", []):
+                tool_entry: dict = {
+                    "name": tc.get("name", ""),
+                    "input_preview": str(tc.get("input", tc.get("input_preview", "")))[:80],
+                }
+                tc_id = tc.get("id", "")
+                if tc_id and tc_id in results_by_id:
+                    tool_entry["result_preview"] = results_by_id[tc_id]
+                tools.append(tool_entry)
+            item: dict = {
                 "iteration": t.get("iteration", 0),
                 "thinking_preview": (t.get("thinking") or "")[:150],
                 "thinking_duration_ms": t.get("thinking_duration_ms", 0),
-                "tools": [
-                    {
-                        "name": tc.get("name", ""),
-                        "input_preview": str(tc.get("input", tc.get("input_preview", "")))[:80],
-                    }
-                    for tc in t.get("tool_calls", [])
-                ],
-                **({"context_compressed": t["context_compressed"]} if t.get("context_compressed") else {}),
+                "tools": tools,
             }
-            for t in react_trace
-        ]
+            if t.get("context_compressed"):
+                item["context_compressed"] = t["context_compressed"]
+            summaries.append(item)
+        return summaries
 
     async def _compile_prompt(self, user_message: str) -> tuple[str, str]:
         """
