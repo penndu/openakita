@@ -66,6 +66,48 @@ def verify_bundled_python_contract(output_dir: Path) -> None:
     print("  [OK] Bundled Python pip check passed")
 
 
+def normalize_macos_bundled_python(output_dir: Path) -> None:
+    """Normalize macOS bundled python entrypoint to framework interpreter.
+
+    On macOS, the copied `python3` launcher may be a thin wrapper that tries to
+    spawn Python.app and can fail after relocation. We make `_internal/python3`
+    a deterministic symlink to the framework interpreter inside the same bundle.
+    """
+    if sys.platform != "darwin":
+        return
+
+    internal_dir = output_dir / "_internal"
+    framework_candidates = sorted(
+        internal_dir.glob("Python.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python")
+    )
+    if not framework_candidates:
+        print("  [WARN] macOS framework interpreter not found; skip python entrypoint normalization")
+        return
+
+    # Prefer the same major.minor as current build interpreter, fallback to latest.
+    target = framework_candidates[-1]
+    wanted = f"{sys.version_info.major}.{sys.version_info.minor}"
+    for cand in framework_candidates:
+        if f"/Versions/{wanted}/" in str(cand):
+            target = cand
+            break
+
+    try:
+        target.chmod(target.stat().st_mode | 0o111)
+    except Exception:
+        # Keep best effort; verification step will catch non-executable targets.
+        pass
+
+    rel_target = os.path.relpath(target, internal_dir)
+    for entry_name in ("python3", "python"):
+        entry = internal_dir / entry_name
+        if entry.exists() or entry.is_symlink():
+            entry.unlink()
+        entry.symlink_to(rel_target)
+
+    print(f"  [OK] Normalized macOS bundled python entrypoint -> {target}")
+
+
 def check_pyinstaller():
     """Check if PyInstaller is installed"""
     try:
@@ -196,6 +238,7 @@ def build_backend(mode: str):
     except Exception as e:
         print(f"  [WARN] Exception during verification: {e}")
 
+    normalize_macos_bundled_python(OUTPUT_DIR)
     verify_bundled_python_contract(OUTPUT_DIR)
 
     # Calculate size
