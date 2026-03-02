@@ -57,6 +57,13 @@ export function IMView({ serviceRunning }: { serviceRunning: boolean }) {
   const [totalMessages, setTotalMessages] = useState(0);
   const [loading, setLoading] = useState(false);
 
+  const getChannelDisplayName = useCallback((ch: IMChannel): string => {
+    const key = `status.${(ch.channel || "").toLowerCase()}`;
+    const translated = t(key);
+    // i18next returns key itself when translation is missing
+    return translated && translated !== key ? translated : (ch.name || ch.channel);
+  }, [t]);
+
   const fetchChannels = useCallback(async () => {
     if (!serviceRunning) return;
     try {
@@ -168,7 +175,7 @@ export function IMView({ serviceRunning }: { serviceRunning: boolean }) {
             >
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {ch.status === "online" ? <DotGreen /> : <DotGray />}
-                <span className="imChannelName">{ch.name}</span>
+                <span className="imChannelName">{getChannelDisplayName(ch)}</span>
               </div>
               <span className="imChannelCount">{ch.sessionCount}</span>
             </div>
