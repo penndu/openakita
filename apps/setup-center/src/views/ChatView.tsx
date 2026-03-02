@@ -1612,13 +1612,14 @@ export function ChatView({
   const hydrateSeqRef = useRef(0);
 
   const mapBackendHistoryToMessages = useCallback(
-    (rows: { id: string; role: string; content: string; timestamp: number; chain_summary?: ChainSummaryItem[] }[]): ChatMessage[] => {
+    (rows: { id: string; role: string; content: string; timestamp: number; chain_summary?: ChainSummaryItem[]; ask_user?: { question: string; options?: { id: string; label: string }[]; questions?: ChatAskQuestion[] } }[]): ChatMessage[] => {
       return rows.map((m) => ({
         id: m.id,
         role: m.role as "user" | "assistant" | "system",
         content: m.content,
         timestamp: m.timestamp,
         ...(m.chain_summary?.length ? { thinkingChain: buildChainFromSummary(m.chain_summary) } : {}),
+        ...(m.ask_user ? { askUser: m.ask_user, content: "" } : {}),
       }));
     },
     [],

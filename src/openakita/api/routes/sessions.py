@@ -116,6 +116,9 @@ async def get_session_history(
         chain_summary = msg.get("chain_summary")
         if chain_summary:
             entry["chain_summary"] = chain_summary
+        ask_user = msg.get("ask_user")
+        if ask_user:
+            entry["ask_user"] = ask_user
         result.append(entry)
 
     return {"messages": result}

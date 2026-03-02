@@ -254,6 +254,13 @@ async def _stream_chat(
                     _msg_meta["chain_summary"] = _chain_summary
                 if _tool_summary:
                     _msg_meta["tool_summary"] = _tool_summary
+                if _ask_user_question:
+                    _ask_user_data: dict = {"question": _ask_user_question}
+                    if _ask_user_options:
+                        _ask_user_data["options"] = _ask_user_options
+                    if _ask_user_questions:
+                        _ask_user_data["questions"] = _ask_user_questions
+                    _msg_meta["ask_user"] = _ask_user_data
                 session.add_message("assistant", assistant_text_to_save, **_msg_meta)
                 if session_manager:
                     session_manager.mark_dirty()
