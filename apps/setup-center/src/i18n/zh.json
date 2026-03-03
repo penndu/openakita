@@ -599,6 +599,10 @@
     "baseUrlHint": "使用中转站或代理服务时可修改为自定义地址",
     "codingPlan": "Coding Plan（编程套餐）",
     "codingPlanHint": "启用后将使用服务商的 Coding Plan 专用端点和协议",
+    "codingPlanModelHint": "Coding Plan 端点可能无法拉取模型列表，此时可在模型栏手动输入模型名称",
+    "providerNote": {
+      "nvidiaNim": "⚠ NVIDIA 免费 API 会限制模型最大输出 Token，建议在高级选项中设置合适的值"
+    },
     "advanced": "高级选项",
     "advancedParams": "高级参数",
     "advApiType": "API 协议类型",

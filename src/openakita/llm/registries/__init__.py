@@ -80,6 +80,7 @@ def _entry_to_provider_info(entry: dict) -> ProviderInfo:
         is_local=entry.get("is_local", False),
         coding_plan_base_url=entry.get("coding_plan_base_url"),
         coding_plan_api_type=entry.get("coding_plan_api_type"),
+        note=entry.get("note"),
     )
 
 

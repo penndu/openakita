@@ -259,7 +259,8 @@
     "api_key_env_suggestion": "NVIDIA_API_KEY",
     "supports_model_list": true,
     "supports_capability_api": false,
-    "registry_class": "OpenAIRegistry"
+    "registry_class": "OpenAIRegistry",
+    "note": "llm.providerNote.nvidiaNim"
   },
   {
     "name": "Groq",

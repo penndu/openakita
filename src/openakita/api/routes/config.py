@@ -373,6 +373,7 @@ async def list_providers_api():
                     "is_local": getattr(p, "is_local", False),
                     "coding_plan_base_url": getattr(p, "coding_plan_base_url", None),
                     "coding_plan_api_type": getattr(p, "coding_plan_api_type", None),
+                    "note": getattr(p, "note", None),
                 }
                 for p in providers
             ]

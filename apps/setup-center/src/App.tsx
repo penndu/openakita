@@ -74,6 +74,7 @@ type ProviderInfo = {
   coding_plan_api_type?: string;
   default_context_window?: number;  // 订阅/编程类端点建议上下文（如 200000）
   default_max_tokens?: number;      // 建议最大输出 token
+  note?: string;                    // i18n key — 显示在服务商选择下方的提示信息
 };
 
 // 内置 Provider 列表（打包模式下 venv 不可用时作为回退）
@@ -5012,6 +5013,9 @@ export function App() {
                   disabled={providers.length === 0}
                 />
                 {providerApplyUrl && <div className="help" style={{ marginTop: 6, paddingLeft: 2 }}>Key: <a href={providerApplyUrl} target="_blank" rel="noreferrer">{providerApplyUrl}</a></div>}
+                {selectedProvider?.note && (
+                  <div className="help" style={{ marginTop: 6, paddingLeft: 2, color: "var(--warning, #e6a23c)" }}>{t(selectedProvider.note)}</div>
+                )}
               </div>
 
               {/* Coding Plan toggle — only shown when provider supports it */}
@@ -5027,6 +5031,9 @@ export function App() {
                     <span style={{ fontSize: 13, fontWeight: 500 }}>{t("llm.codingPlan")}</span>
                   </label>
                   <div className="help" style={{ marginTop: 4, paddingLeft: 24 }}>{t("llm.codingPlanHint")}</div>
+                  {codingPlanMode && (
+                    <div className="help" style={{ marginTop: 4, paddingLeft: 24, color: "var(--warning, #e6a23c)" }}>{t("llm.codingPlanModelHint")}</div>
+                  )}
                 </div>
               )}
 

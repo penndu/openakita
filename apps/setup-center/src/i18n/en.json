@@ -599,6 +599,10 @@
     "baseUrlHint": "Modify when using a proxy or relay service",
     "codingPlan": "Coding Plan",
     "codingPlanHint": "Use the provider's Coding Plan dedicated endpoint and protocol",
+    "codingPlanModelHint": "Coding Plan endpoints may not support model listing — you can manually type the model name",
+    "providerNote": {
+      "nvidiaNim": "⚠ NVIDIA free API limits the max output tokens. Consider setting an appropriate value in Advanced Options"
+    },
     "advanced": "Advanced Options",
     "advancedParams": "Advanced Parameters",
     "advApiType": "API Protocol",
