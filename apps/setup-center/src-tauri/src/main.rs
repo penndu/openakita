@@ -186,15 +186,25 @@ fn bundled_backend_dir() -> PathBuf {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
 
-    // macOS: exe 在 .app/Contents/MacOS/，resources 在 .app/Contents/Resources/
+    // macOS: exe 在 .app/Contents/MacOS/，Tauri 将 resources 放在
+    // .app/Contents/Resources/ 下并保留原始目录结构。
+    // tauri.conf.json 配置 "resources": ["resources/openakita-server/"]，
+    // 因此实际路径是 .app/Contents/Resources/resources/openakita-server/
     #[cfg(target_os = "macos")]
     {
-        let macos_resource = exe_dir
-            .parent() // Contents/
-            .map(|p| p.join("Resources").join("openakita-server"))
-            .unwrap_or_else(|| exe_dir.join("resources").join("openakita-server"));
-        if macos_resource.exists() {
-            return macos_resource;
+        if let Some(contents_dir) = exe_dir.parent() {
+            let primary = contents_dir
+                .join("Resources")
+                .join("resources")
+                .join("openakita-server");
+            if primary.exists() {
+                return primary;
+            }
+            // 兼容可能的简化布局（无额外 resources/ 前缀）
+            let fallback = contents_dir.join("Resources").join("openakita-server");
+            if fallback.exists() {
+                return fallback;
+            }
         }
     }
 
