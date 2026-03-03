@@ -185,7 +185,12 @@
     "reload": "Reload",
     "reloadHint": "Rescan and reload all skills from backend",
     "refreshed": "Skills list refreshed",
-    "alreadyInstalled": "This skill is already installed"
+    "alreadyInstalled": "This skill is already installed",
+    "importLocal": "Import Local",
+    "importLocalTitle": "Select local skill folder",
+    "importLocalImporting": "Importing...",
+    "importLocalSuccess": "Local skill imported successfully",
+    "importLocalNoSkillMd": "No SKILL.md found in the selected folder. Please choose a valid skill directory."
   },
   "mcp": {
     "title": "MCP Server Management",

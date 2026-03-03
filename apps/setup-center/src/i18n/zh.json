@@ -185,7 +185,12 @@
     "reload": "刷新",
     "reloadHint": "让后端重新扫描加载所有技能",
     "refreshed": "已刷新技能列表",
-    "alreadyInstalled": "该技能已安装"
+    "alreadyInstalled": "该技能已安装",
+    "importLocal": "导入本地",
+    "importLocalTitle": "选择本地技能文件夹",
+    "importLocalImporting": "正在导入...",
+    "importLocalSuccess": "本地技能导入成功",
+    "importLocalNoSkillMd": "所选文件夹中未找到 SKILL.md，请确认是有效的技能目录"
   },
   "mcp": {
     "title": "MCP 服务器管理",

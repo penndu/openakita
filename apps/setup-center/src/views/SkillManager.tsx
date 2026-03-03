@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { SkillInfo, SkillConfigField, MarketplaceSkill, EnvMap } from "../types";
 import { envGet, envSet } from "../utils";
-import { IconGear, IconZap, IconPackage, IconStar, IconCheck, IconX, IconDownload, IconSearch, IconConfig } from "../icons";
+import { IconGear, IconZap, IconPackage, IconStar, IconCheck, IconX, IconDownload, IconSearch, IconConfig, IconFolderOpen } from "../icons";
 
 // ─── i18n 辅助：按当前语言优先显示中文名/描述 ───
 
@@ -327,6 +327,7 @@ export function SkillManager({
   const [savingEnabled, setSavingEnabled] = useState(false);
   const [installedSearch, setInstalledSearch] = useState("");
   const [aiOrganizing, setAiOrganizing] = useState(false);
+  const [localImporting, setLocalImporting] = useState(false);
   const marketRequestId = useRef(0);  // 用于取消过期请求
   const { t } = useTranslation();
 
@@ -579,6 +580,63 @@ export function SkillManager({
       setAiOrganizing(false);
     }
   }, [serviceRunning, apiBaseUrl, skillsWithConfig, loadSkills]);
+
+  // ── 导入本地技能 ──
+  const handleImportLocal = useCallback(async () => {
+    if (dataMode === "remote") return;
+    setLocalImporting(true);
+    setError(null);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, multiple: false, title: t("skills.importLocalTitle") });
+      if (!selected) { setLocalImporting(false); return; }
+
+      const folderPath = typeof selected === "string" ? selected : String(selected);
+
+      let installed = false;
+
+      if (serviceRunning && apiBaseUrl) {
+        const res = await fetch(`${apiBaseUrl}/api/skills/install`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: folderPath }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        installed = true;
+        try {
+          await fetch(`${apiBaseUrl}/api/skills/reload`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+            signal: AbortSignal.timeout(10_000),
+          });
+        } catch { /* reload 失败不阻塞 */ }
+      }
+
+      if (!installed && currentWorkspaceId) {
+        await invoke<string>("openakita_install_skill", {
+          venvDir,
+          workspaceId: currentWorkspaceId,
+          url: folderPath,
+        });
+      }
+
+      await loadSkills();
+      onNotice?.(t("skills.importLocalSuccess"));
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes("已存在") || msg.toLowerCase().includes("already exist")) {
+        await loadSkills();
+        onNotice?.(t("skills.alreadyInstalled"));
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setLocalImporting(false);
+    }
+  }, [dataMode, serviceRunning, apiBaseUrl, currentWorkspaceId, venvDir, loadSkills, onNotice, t]);
 
   // ── 搜索 skills.sh 市场技能 ──
   const parseMarketplaceResponse = useCallback((data: Record<string, unknown>) => {
@@ -866,6 +924,17 @@ export function SkillManager({
                   style={{ width: "100%", fontSize: 13, paddingLeft: 32 }}
                 />
               </div>
+              {dataMode !== "remote" && (
+                <button
+                  onClick={handleImportLocal}
+                  disabled={localImporting}
+                  style={{ fontSize: 12, padding: "0 14px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}
+                  title={t("skills.importLocalTitle")}
+                >
+                  <IconFolderOpen size={13} />
+                  {localImporting ? t("skills.importLocalImporting") : t("skills.importLocal")}
+                </button>
+              )}
               {serviceRunning && (
                 <button
                   onClick={handleAiOrganize}
@@ -885,6 +954,16 @@ export function SkillManager({
               <div style={{ marginBottom: 8, display: "flex", justifyContent: "center" }}><IconZap size={36} /></div>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>{t("skills.noSkills")}</div>
               <div className="help">{t("skills.noSkillsHint")}</div>
+              {dataMode !== "remote" && (
+                <button
+                  onClick={handleImportLocal}
+                  disabled={localImporting}
+                  style={{ marginTop: 12, fontSize: 12, padding: "6px 16px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                >
+                  <IconFolderOpen size={13} />
+                  {localImporting ? t("skills.importLocalImporting") : t("skills.importLocal")}
+                </button>
+              )}
             </div>
           )}
           {installedSearch && filteredSkills.length === 0 && skillsWithConfig.length > 0 && (
