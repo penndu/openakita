@@ -11,6 +11,8 @@ let _ws: WebSocket | null = null;
 let _handlers: WsEventHandler[] = [];
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let _reconnectDelay = 1000;
+let _reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 120;
 let _connected = false;
 let _intentionallyClosed = false;
 
@@ -36,6 +38,7 @@ function _connect(): void {
   _ws.onopen = () => {
     _connected = true;
     _reconnectDelay = 1000;
+    _reconnectAttempts = 0;
   };
 
   _ws.onmessage = (ev) => {
@@ -72,6 +75,11 @@ function _connect(): void {
 
 function _scheduleReconnect(): void {
   if (_reconnectTimer || _intentionallyClosed) return;
+  _reconnectAttempts++;
+  if (_reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    console.warn(`[WS] Gave up reconnecting after ${MAX_RECONNECT_ATTEMPTS} attempts`);
+    return;
+  }
   _reconnectTimer = setTimeout(async () => {
     _reconnectTimer = null;
     _reconnectDelay = Math.min(_reconnectDelay * 2, 30000);
@@ -107,6 +115,7 @@ export function onWsEvent(handler: WsEventHandler): () => void {
 
 export function disconnectWs(): void {
   _intentionallyClosed = true;
+  _reconnectAttempts = 0;
   if (_reconnectTimer) {
     clearTimeout(_reconnectTimer);
     _reconnectTimer = null;

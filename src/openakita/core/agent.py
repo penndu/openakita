@@ -459,6 +459,7 @@ class Agent:
         # Agent profile and custom prompt (set by AgentFactory)
         self._agent_profile = None
         self._custom_prompt_suffix: str = ""
+        self._preferred_endpoint: str | None = None
 
         # Handler Registry（模块化工具执行）
         self.handler_registry = SystemHandlerRegistry()
@@ -3950,6 +3951,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         session: Any = None,
         gateway: Any = None,
         *,
+        endpoint_override: str | None = None,
         thinking_mode: str | None = None,
         thinking_depth: str | None = None,
     ) -> str:
@@ -3965,6 +3967,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
             session_id: 会话 ID
             session: Session 对象
             gateway: MessageGateway 对象
+            endpoint_override: 端点覆盖（为 None 时使用 _preferred_endpoint）
             thinking_mode: 思考模式覆盖 ('auto'/'on'/'off'/None)
             thinking_depth: 思考深度 ('low'/'medium'/'high'/None)
 
@@ -3973,6 +3976,8 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         """
         if not self._initialized:
             await self.initialize()
+
+        endpoint_override = endpoint_override or self._preferred_endpoint
 
         # === 停止指令检测 ===
         message_lower = message.strip().lower()
@@ -4052,6 +4057,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 thinking_mode=_thinking_mode, thinking_depth=_thinking_depth,
                 progress_callback=_progress_cb,
                 session=session,
+                endpoint_override=endpoint_override,
             )
 
             # === flush 残留的 IM 进度消息，确保思维链先于回答到达 ===
@@ -4112,6 +4118,8 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         """
         if not self._initialized:
             await self.initialize()
+
+        endpoint_override = endpoint_override or self._preferred_endpoint
 
         # === 停止指令检测 ===
         message_lower = message.strip().lower()
@@ -4996,6 +5004,7 @@ NEXT: 建议的下一步（如有）"""
         thinking_depth: str | None = None,
         progress_callback: Any = None,
         session: Any = None,
+        endpoint_override: str | None = None,
     ) -> str:
         """
         使用指定的消息上下文进行对话（委托给 ReasoningEngine）
@@ -5011,6 +5020,7 @@ NEXT: 建议的下一步（如有）"""
             thinking_mode: 思考模式覆盖 ('auto'/'on'/'off'/None)
             thinking_depth: 思考深度 ('low'/'medium'/'high'/None)
             progress_callback: 进度回调 async fn(str) -> None，IM 实时思维链
+            endpoint_override: 端点覆盖
 
         Returns:
             最终响应文本
@@ -5055,6 +5065,7 @@ NEXT: 建议的下一步（如有）"""
             thinking_depth=thinking_depth,
             progress_callback=progress_callback,
             agent_profile_id=_agent_profile_id,
+            endpoint_override=endpoint_override,
         )
 
         # ==================== 以下为旧代码（保留参考，后续完全清理） ====================

@@ -6,6 +6,7 @@ Skills route: GET /api/skills, POST /api/skills/config, GET /api/skills/marketpl
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -13,6 +14,15 @@ import httpx
 from fastapi import APIRouter, Request
 
 logger = logging.getLogger(__name__)
+
+
+def _notify_skills_changed(action: str = "reload") -> None:
+    """Fire-and-forget WS broadcast for skill state changes."""
+    try:
+        from openakita.api.routes.websocket import broadcast_event
+        asyncio.ensure_future(broadcast_event("skills:changed", {"action": action}))
+    except Exception:
+        pass
 
 router = APIRouter()
 
@@ -295,6 +305,7 @@ async def install_skill(request: Request):
     except Exception as e:
         logger.warning(f"Post-install reload failed (skill was installed): {e}")
 
+    _notify_skills_changed("install")
     return {"status": "ok", "url": url}
 
 
@@ -329,6 +340,7 @@ async def reload_skills(request: Request):
             reloaded = loader.reload_skill(skill_name)
             if reloaded:
                 _apply_allowlist_and_rebuild_catalog(request)
+                _notify_skills_changed("reload")
                 return {"status": "ok", "reloaded": [skill_name]}
             else:
                 return {"error": f"Skill '{skill_name}' not found or reload failed"}
@@ -338,6 +350,7 @@ async def reload_skills(request: Request):
 
             pruned = _apply_allowlist_and_rebuild_catalog(request)
             total = len(registry.list_all())
+            _notify_skills_changed("reload")
             return {
                 "status": "ok",
                 "reloaded": "all",

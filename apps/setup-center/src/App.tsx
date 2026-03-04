@@ -887,6 +887,10 @@ export function App() {
         }
       } else if (event === "service_status_changed") {
         refreshStatus().catch(() => {});
+      } else if (event === "skills:changed") {
+        refreshStatus().catch(() => {});
+      } else if (event === "im:channel_status" || event === "im:new_message") {
+        refreshStatus().catch(() => {});
       }
     });
     return unsub;
@@ -1695,11 +1699,9 @@ export function App() {
   const fetchDisabledViews = useCallback(async () => {
     if (!shouldUseHttpApi()) return;
     try {
-      const resp = await fetch(`${httpApiBase()}/api/config/disabled-views`);
-      if (resp.ok) {
-        const data = await resp.json();
-        setDisabledViews(data.disabled_views || []);
-      }
+      const resp = await safeFetch(`${httpApiBase()}/api/config/disabled-views`);
+      const data = await resp.json();
+      setDisabledViews(data.disabled_views || []);
     } catch { /* ignore */ }
   }, [serviceStatus?.running, dataMode, apiBaseUrl]);
 
@@ -1708,11 +1710,9 @@ export function App() {
   const fetchAgentMode = useCallback(async () => {
     if (!shouldUseHttpApi()) return;
     try {
-      const res = await fetch(`${httpApiBase()}/api/config/agent-mode`);
-      if (res.ok) {
-        const data = await res.json();
-        setMultiAgentEnabled(data.multi_agent_enabled ?? false);
-      }
+      const res = await safeFetch(`${httpApiBase()}/api/config/agent-mode`);
+      const data = await res.json();
+      setMultiAgentEnabled(data.multi_agent_enabled ?? false);
     } catch (e) {
       console.warn("Failed to fetch agent mode:", e);
     }
@@ -1723,14 +1723,12 @@ export function App() {
   const toggleMultiAgent = useCallback(async () => {
     const next = !multiAgentEnabled;
     try {
-      const res = await fetch(`${httpApiBase()}/api/config/agent-mode`, {
+      await safeFetch(`${httpApiBase()}/api/config/agent-mode`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: next }),
       });
-      if (res.ok) {
-        setMultiAgentEnabled(next);
-      }
+      setMultiAgentEnabled(next);
     } catch (e) {
       console.error("Failed to toggle agent mode:", e);
     }
@@ -1743,7 +1741,7 @@ export function App() {
     setDisabledViews(next);
     if (shouldUseHttpApi()) {
       try {
-        await fetch(`${httpApiBase()}/api/config/disabled-views`, {
+        await safeFetch(`${httpApiBase()}/api/config/disabled-views`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ views: next }),
@@ -2941,37 +2939,33 @@ export function App() {
         let endpointSummaryResolved = false;
         try {
           // Try new config API (may not exist in older service versions)
-          const envRes = await fetch(`${effectiveApiBaseUrl}/api/config/env`);
-          if (envRes.ok) {
-            const envData = await envRes.json();
-            const env = envData.env || {};
-            setEnvDraft((prev) => ({ ...prev, ...env }));
-            envLoadedForWs.current = "__remote__";
+          const envRes = await safeFetch(`${effectiveApiBaseUrl}/api/config/env`);
+          const envData = await envRes.json();
+          const env = envData.env || {};
+          setEnvDraft((prev) => ({ ...prev, ...env }));
+          envLoadedForWs.current = "__remote__";
 
-            const epRes = await fetch(`${effectiveApiBaseUrl}/api/config/endpoints`);
-            if (epRes.ok) {
-              const epData = await epRes.json();
-              const eps = Array.isArray(epData?.endpoints) ? epData.endpoints : [];
-              const list = eps
-                .map((e: any) => {
-                  const keyEnv = String(e?.api_key_env || "");
-                  const keyPresent = !!(keyEnv && (env[keyEnv] ?? "").trim());
-                  return {
-                    name: String(e?.name || ""),
-                    provider: String(e?.provider || ""),
-                    apiType: String(e?.api_type || ""),
-                    baseUrl: String(e?.base_url || ""),
-                    model: String(e?.model || ""),
-                    keyEnv,
-                    keyPresent,
-                  };
-                })
-                .filter((e: any) => e.name);
-              if (list.length > 0) {
-                setEndpointSummary(list);
-                endpointSummaryResolved = true;
-              }
-            }
+          const epRes = await safeFetch(`${effectiveApiBaseUrl}/api/config/endpoints`);
+          const epData = await epRes.json();
+          const eps = Array.isArray(epData?.endpoints) ? epData.endpoints : [];
+          const list = eps
+            .map((e: any) => {
+              const keyEnv = String(e?.api_key_env || "");
+              const keyPresent = !!(keyEnv && (env[keyEnv] ?? "").trim());
+              return {
+                name: String(e?.name || ""),
+                provider: String(e?.provider || ""),
+                apiType: String(e?.api_type || ""),
+                baseUrl: String(e?.base_url || ""),
+                model: String(e?.model || ""),
+                keyEnv,
+                keyPresent,
+              };
+            })
+            .filter((e: any) => e.name);
+          if (list.length > 0) {
+            setEndpointSummary(list);
+            endpointSummaryResolved = true;
           }
         } catch {
           // Config API not available — will fall back below
@@ -2980,32 +2974,29 @@ export function App() {
         // Fall back: try /api/models (always available in running service)
         if (!endpointSummaryResolved) {
           try {
-            const modelsRes = await fetch(`${effectiveApiBaseUrl}/api/models`);
-            if (modelsRes.ok) {
-              const modelsData = await modelsRes.json();
-              const models = Array.isArray(modelsData?.models) ? modelsData.models : [];
-              const list = models.map((m: any) => ({
-                name: String(m?.name || m?.endpoint || ""),
-                provider: String(m?.provider || ""),
-                apiType: "",
-                baseUrl: "",
-                model: String(m?.model || ""),
-                keyEnv: "",
-                keyPresent: m?.has_api_key === true,
-              })).filter((e: any) => e.name);
-              if (list.length > 0) {
-                setEndpointSummary(list);
-                endpointSummaryResolved = true;
-                // Also populate endpointHealth from /api/models status
-                const healthFromModels: Record<string, any> = {};
-                for (const m of models) {
-                  const n = String(m?.name || m?.endpoint || "");
-                  if (!n) continue;
-                  const s = String(m?.status || "unknown");
-                  healthFromModels[n] = { status: s, latencyMs: null, error: s === "unhealthy" ? "endpoint unhealthy" : null };
-                }
-                setEndpointHealth((prev: any) => ({ ...healthFromModels, ...prev }));
+            const modelsRes = await safeFetch(`${effectiveApiBaseUrl}/api/models`);
+            const modelsData = await modelsRes.json();
+            const models = Array.isArray(modelsData?.models) ? modelsData.models : [];
+            const list = models.map((m: any) => ({
+              name: String(m?.name || m?.endpoint || ""),
+              provider: String(m?.provider || ""),
+              apiType: "",
+              baseUrl: "",
+              model: String(m?.model || ""),
+              keyEnv: "",
+              keyPresent: m?.has_api_key === true,
+            })).filter((e: any) => e.name);
+            if (list.length > 0) {
+              setEndpointSummary(list);
+              endpointSummaryResolved = true;
+              const healthFromModels: Record<string, any> = {};
+              for (const m of models) {
+                const n = String(m?.name || m?.endpoint || "");
+                if (!n) continue;
+                const s = String(m?.status || "unknown");
+                healthFromModels[n] = { status: s, latencyMs: null, error: s === "unhealthy" ? "endpoint unhealthy" : null };
               }
+              setEndpointHealth((prev: any) => ({ ...healthFromModels, ...prev }));
             }
           } catch { /* ignore */ }
         }
@@ -3035,21 +3026,19 @@ export function App() {
 
         // Skills via HTTP
         try {
-          const skRes = await fetch(`${effectiveApiBaseUrl}/api/skills`);
-          if (skRes.ok) {
-            const skData = await skRes.json();
-            const skills = Array.isArray(skData?.skills) ? skData.skills : [];
-            const systemCount = skills.filter((s: any) => !!s.system).length;
-            const externalCount = skills.length - systemCount;
-            setSkillSummary({ count: skills.length, systemCount, externalCount });
-            setSkillsDetail(
-              skills.map((s: any) => ({
-                name: String(s?.name || ""), description: String(s?.description || ""),
-                system: !!s?.system, enabled: typeof s?.enabled === "boolean" ? s.enabled : undefined,
-                tool_name: s?.tool_name ?? null, category: s?.category ?? null, path: s?.path ?? null,
-              })),
-            );
-          }
+          const skRes = await safeFetch(`${effectiveApiBaseUrl}/api/skills`);
+          const skData = await skRes.json();
+          const skills = Array.isArray(skData?.skills) ? skData.skills : [];
+          const systemCount = skills.filter((s: any) => !!s.system).length;
+          const externalCount = skills.length - systemCount;
+          setSkillSummary({ count: skills.length, systemCount, externalCount });
+          setSkillsDetail(
+            skills.map((s: any) => ({
+              name: String(s?.name || ""), description: String(s?.description || ""),
+              system: !!s?.system, enabled: typeof s?.enabled === "boolean" ? s.enabled : undefined,
+              tool_name: s?.tool_name ?? null, category: s?.category ?? null, path: s?.path ?? null,
+            })),
+          );
         } catch {
           // Fall back to Tauri for skills (local mode only)
           if (effectiveDataMode !== "remote" && currentWorkspaceId) {
@@ -3084,16 +3073,14 @@ export function App() {
         }
         // IM channels (HTTP API mode)
         try {
-          const imRes = await fetch(`${effectiveApiBaseUrl}/api/im/channels`, { signal: AbortSignal.timeout(5000) });
-          if (imRes.ok) {
-            const imData = await imRes.json();
-            const channels = imData.channels || [];
-            const h: Record<string, { status: string; error: string | null; lastCheckedAt: string | null }> = {};
-            for (const c of channels) {
-              h[c.channel || c.name] = { status: c.status || "unknown", error: c.error || null, lastCheckedAt: c.last_checked_at || null };
-            }
-            if (Object.keys(h).length > 0) setImHealth(h);
+          const imRes = await safeFetch(`${effectiveApiBaseUrl}/api/im/channels`, { signal: AbortSignal.timeout(5000) });
+          const imData = await imRes.json();
+          const channels = imData.channels || [];
+          const h: Record<string, { status: string; error: string | null; lastCheckedAt: string | null }> = {};
+          for (const c of channels) {
+            h[c.channel || c.name] = { status: c.status || "unknown", error: c.error || null, lastCheckedAt: c.last_checked_at || null };
           }
+          if (Object.keys(h).length > 0) setImHealth(h);
         } catch { /* IM status is optional */ }
         return;
       }
@@ -3166,16 +3153,14 @@ export function App() {
       // Auto-fetch IM channel status from running service
       if (useHttpApi) {
         try {
-          const imRes = await fetch(`${effectiveApiBaseUrl}/api/im/channels`, { signal: AbortSignal.timeout(5000) });
-          if (imRes.ok) {
-            const imData = await imRes.json();
-            const channels = imData.channels || [];
-            const h: Record<string, { status: string; error: string | null; lastCheckedAt: string | null }> = {};
-            for (const c of channels) {
-              h[c.channel || c.name] = { status: c.status || "unknown", error: c.error || null, lastCheckedAt: c.last_checked_at || null };
-            }
-            if (Object.keys(h).length > 0) setImHealth(h);
+          const imRes = await safeFetch(`${effectiveApiBaseUrl}/api/im/channels`, { signal: AbortSignal.timeout(5000) });
+          const imData = await imRes.json();
+          const channels = imData.channels || [];
+          const h: Record<string, { status: string; error: string | null; lastCheckedAt: string | null }> = {};
+          for (const c of channels) {
+            h[c.channel || c.name] = { status: c.status || "unknown", error: c.error || null, lastCheckedAt: c.last_checked_at || null };
           }
+          if (Object.keys(h).length > 0) setImHealth(h);
         } catch { /* ignore - IM status is optional */ }
       }
       // ── Multi-process detection (local mode only) ──
@@ -7650,6 +7635,7 @@ export function App() {
             await logout();
             setWebAuthed(false);
           } : undefined}
+          webAccessUrl={IS_TAURI && (serviceStatus?.running ?? false) ? `http://127.0.0.1:18900` : undefined}
         />
 
         {/* ChatView 始终挂载，切走时隐藏以保留聊天记录 */}

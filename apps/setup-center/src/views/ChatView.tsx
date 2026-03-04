@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { setThemePref } from "../theme";
 import type { Theme } from "../theme";
 import { invoke, downloadFile, openFileWithDefault, showInFolder, readFileBase64, onDragDrop, IS_TAURI } from "../platform";
+import { safeFetch } from "../providers";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -1705,7 +1706,7 @@ export function ChatView({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const [agentProfiles, setAgentProfiles] = useState<{id:string;name:string;description:string;icon:string;color:string;name_i18n?:Record<string,string>;description_i18n?:Record<string,string>}[]>([]);
+  const [agentProfiles, setAgentProfiles] = useState<{id:string;name:string;description:string;icon:string;color:string;name_i18n?:Record<string,string>;description_i18n?:Record<string,string>;preferred_endpoint?:string|null}[]>([]);
   const [selectedAgent, setSelectedAgent] = useState("default");
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1904,8 +1905,8 @@ export function ChatView({
     }
 
     try {
-      const res = await fetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`);
-      const data = res.ok ? await res.json() : null;
+      const res = await safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`);
+      const data = await res.json();
       const backendMsgs = Array.isArray(data?.messages) ? mapBackendHistoryToMessages(data.messages) : [];
 
       const chosen = backendMsgs.length >= localCount ? backendMsgs : localMsgs;
@@ -1949,11 +1950,12 @@ export function ChatView({
     }
 
     isInitialScrollRef.current = true;
+    const conv = conversations.find((c) => c.id === activeConvId);
     if (multiAgentEnabled) {
-      const conv = conversations.find((c) => c.id === activeConvId);
       const agentId = conv?.agentProfileId || "default";
       setSelectedAgent(agentId);
     }
+    setSelectedEndpoint(conv?.endpointId || "auto");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- conversations 故意排除：
     // 此 effect 语义是"切换对话时加载消息"，不应因 messageCount/title 等元数据变更而重新 hydrate，
     // 否则流结束后 setConversations 更新 messageCount 会触发竞态覆盖。
@@ -1971,8 +1973,7 @@ export function ChatView({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${apiBaseUrl}/api/stats/tokens/context`);
-        if (!res.ok) return;
+        const res = await safeFetch(`${apiBaseUrl}/api/stats/tokens/context`);
         const data = await res.json();
         if (cancelled) return;
         if (typeof data.context_tokens === "number") setContextTokens(data.context_tokens);
@@ -1990,11 +1991,9 @@ export function ChatView({
     if (!visible) return;
     const fetchProfiles = async () => {
       try {
-        const res = await fetch(`${apiBaseUrl}/api/agents/profiles`);
-        if (res.ok) {
-          const data = await res.json();
-          setAgentProfiles(data.profiles || []);
-        }
+        const res = await safeFetch(`${apiBaseUrl}/api/agents/profiles`);
+        const data = await res.json();
+        setAgentProfiles(data.profiles || []);
       } catch (e) {
         console.warn("Failed to fetch agent profiles:", e);
       }
@@ -2019,6 +2018,30 @@ export function ChatView({
     });
   }, [selectedAgent, multiAgentEnabled]);
 
+  // Sync selectedEndpoint → current conversation's endpointId
+  const prevSelectedEndpointRef = useRef(selectedEndpoint);
+  useEffect(() => {
+    if (selectedEndpoint === prevSelectedEndpointRef.current) return;
+    prevSelectedEndpointRef.current = selectedEndpoint;
+    const convId = activeConvIdRef.current;
+    if (!convId) return;
+    const epVal = selectedEndpoint === "auto" ? undefined : selectedEndpoint;
+    setConversations((prev) => {
+      const current = prev.find((c) => c.id === convId);
+      if ((current?.endpointId || undefined) === epVal) return prev;
+      return prev.map((c) => c.id === convId ? { ...c, endpointId: epVal } : c);
+    });
+  }, [selectedEndpoint]);
+
+  // Validate selectedEndpoint against current endpoints list
+  useEffect(() => {
+    if (selectedEndpoint === "auto") return;
+    if (endpoints.length === 0) return;
+    if (!endpoints.some((ep) => ep.name === selectedEndpoint)) {
+      setSelectedEndpoint("auto");
+    }
+  }, [endpoints, selectedEndpoint]);
+
   useEffect(() => {
     if (!agentMenuOpen) return;
     const handler = (e: MouseEvent) => {
@@ -2041,8 +2064,8 @@ export function ChatView({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${apiBaseUrl}/api/sessions?channel=desktop`);
-        if (!res.ok || cancelled) return;
+        const res = await safeFetch(`${apiBaseUrl}/api/sessions?channel=desktop`);
+        if (cancelled) return;
         const data = await res.json();
         const backendSessions: { id: string; title: string; lastMessage: string; timestamp: number; messageCount: number; agentProfileId?: string }[] = data.sessions || [];
         if (backendSessions.length === 0 || cancelled) return;
@@ -2101,8 +2124,8 @@ export function ChatView({
     patchedConvsRef.current.add(activeConvId);
     const convId = activeConvId;
 
-    fetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`)
-      .then((r) => (r.ok ? r.json() : null))
+    safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`)
+      .then((r) => r.json())
       .then((data) => {
         if (!data?.messages?.length) return;
         setMessages((prev) => patchMessagesWithBackend(prev, data.messages));
@@ -2121,8 +2144,7 @@ export function ChatView({
   const uploadFile = useCallback(async (file: Blob, filename: string): Promise<string> => {
     const form = new FormData();
     form.append("file", file, filename);
-    const res = await fetch(`${apiBase}/api/upload`, { method: "POST", body: form });
-    if (!res.ok) throw new Error(`上传失败: ${res.status}`);
+    const res = await safeFetch(`${apiBase}/api/upload`, { method: "POST", body: form });
     const data = await res.json();
     return data.url as string;  // 后端返回 { url: "/api/uploads/<filename>" }
   }, [apiBase]);
@@ -2305,6 +2327,7 @@ export function ChatView({
     setPendingAttachments([]);
     setDisplayActiveSubAgents([]);
     setDisplaySubAgentTasks([]);
+    setSelectedEndpoint("auto");
     setConversations((prev) => [{
       id,
       title: "新对话",
@@ -2335,7 +2358,7 @@ export function ChatView({
 
     // 通知后端删除（不阻塞 UI）
     if (serviceRunning) {
-      fetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}`, {
+      safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}`, {
         method: "DELETE",
       }).catch(() => {});
     }
@@ -2439,6 +2462,7 @@ export function ChatView({
         messageCount: 1,
         status: "running",
         agentProfileId: multiAgentEnabled ? selectedAgent : undefined,
+        endpointId: selectedEndpoint !== "auto" ? selectedEndpoint : undefined,
       }, ...prev]);
     } else {
       updateConvStatus(convId, "running");
@@ -2754,8 +2778,8 @@ export function ChatView({
                   sctx.isDelegating = true;
                   if (sctx.pollingTimer) clearInterval(sctx.pollingTimer);
                   const doFetch = () => {
-                    fetch(`${apiBase}/api/agents/sub-tasks?conversation_id=${encodeURIComponent(thisConvId)}`)
-                      .then((r) => r.ok ? r.json() : [])
+                    safeFetch(`${apiBase}/api/agents/sub-tasks?conversation_id=${encodeURIComponent(thisConvId)}`)
+                      .then((r) => r.json())
                       .then((data: SubAgentTask[]) => {
                         if (!Array.isArray(data)) return;
                         const c = streamContexts.current.get(thisConvId);
@@ -2800,8 +2824,8 @@ export function ChatView({
                   ), undefined);
                   sctx.isDelegating = false;
                   if (sctx.pollingTimer) { clearInterval(sctx.pollingTimer); sctx.pollingTimer = null; }
-                  fetch(`${apiBase}/api/agents/sub-tasks?conversation_id=${encodeURIComponent(thisConvId)}`)
-                    .then((r) => r.ok ? r.json() : [])
+                  safeFetch(`${apiBase}/api/agents/sub-tasks?conversation_id=${encodeURIComponent(thisConvId)}`)
+                    .then((r) => r.json())
                     .then((data: SubAgentTask[]) => {
                       if (!Array.isArray(data)) return;
                       const c = streamContexts.current.get(thisConvId);
@@ -2826,8 +2850,8 @@ export function ChatView({
                 }
                 // Refresh profiles when a new agent is created
                 if (event.tool === "create_agent" && !(event.is_error || (event.result || "").startsWith("❌"))) {
-                  fetch(`${apiBase}/api/agents/profiles`)
-                    .then((r) => r.ok ? r.json() : null)
+                  safeFetch(`${apiBase}/api/agents/profiles`)
+                    .then((r) => r.json())
                     .then((data) => { if (data?.profiles) setAgentProfiles(data.profiles); })
                     .catch(() => {});
                 }
@@ -3048,8 +3072,8 @@ export function ChatView({
           currentContent.trim() || currentAsk || currentToolCalls.length > 0
         );
         if (gracefulDone && !streamDeliveredPayload && convId) {
-          fetch(`${apiBase}/api/sessions/${encodeURIComponent(convId)}/history`)
-            .then((r) => (r.ok ? r.json() : null))
+          safeFetch(`${apiBase}/api/sessions/${encodeURIComponent(convId)}/history`)
+            .then((r) => r.json())
             .then((data) => {
               const rows = Array.isArray(data?.messages) ? data.messages : [];
               // Prefer assistant replies generated after this user turn; fallback to latest assistant.
@@ -3123,19 +3147,17 @@ export function ChatView({
         if (conv && !conv.titleGenerated && (conv.messageCount || 0) <= 2) {
           (async () => {
             try {
-              const res = await fetch(`${apiBase}/api/sessions/generate-title`, {
+              const res = await safeFetch(`${apiBase}/api/sessions/generate-title`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: text }),
                 signal: AbortSignal.timeout(15000),
               });
-              if (res.ok) {
-                const data = await res.json();
-                if (data.title) {
-                  setConversations((p) => p.map((c) =>
-                    c.id === thisConvId ? { ...c, title: data.title, titleGenerated: true } : c
-                  ));
-                }
+              const data = await res.json();
+              if (data.title) {
+                setConversations((p) => p.map((c) =>
+                  c.id === thisConvId ? { ...c, title: data.title, titleGenerated: true } : c
+                ));
               }
             } catch { /* fallback: keep truncated title */ }
           })();
@@ -3178,7 +3200,7 @@ export function ChatView({
   const [queueExpanded, setQueueExpanded] = useState(true);
 
   const handleSkipStep = useCallback(() => {
-    fetch(`${apiBase}/api/chat/skip`, {
+    safeFetch(`${apiBase}/api/chat/skip`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conversation_id: activeConvId, reason: "用户从界面跳过步骤" }),
@@ -3186,7 +3208,7 @@ export function ChatView({
   }, [apiBase, activeConvId]);
 
   const handleCancelTask = useCallback(() => {
-    fetch(`${apiBase}/api/chat/cancel`, {
+    safeFetch(`${apiBase}/api/chat/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conversation_id: activeConvId, reason: "用户从界面取消任务" }),
@@ -3215,7 +3237,7 @@ export function ChatView({
     const ctx = activeConvId ? streamContexts.current.get(activeConvId) : null;
     if (ctx) ctx.messages = inserter(ctx.messages);
     setMessages(inserter);
-    fetch(`${apiBase}/api/chat/insert`, {
+    safeFetch(`${apiBase}/api/chat/insert`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conversation_id: activeConvId, message: text }),
@@ -3958,7 +3980,15 @@ export function ChatView({
               >
                 <span className="chatModelPickerLabel">
                   {selectedEndpoint === "auto"
-                    ? t("chat.selectModel")
+                    ? (() => {
+                        const ap = multiAgentEnabled ? agentProfiles.find(p => p.id === selectedAgent) : null;
+                        const pe = ap?.preferred_endpoint;
+                        if (pe) {
+                          const ep = endpoints.find(e => e.name === pe);
+                          return `${t("chat.selectModel")} → ${ep ? ep.model : pe}`;
+                        }
+                        return t("chat.selectModel");
+                      })()
                     : (() => { const ep = endpoints.find(e => e.name === selectedEndpoint); return ep ? ep.model : selectedEndpoint; })()}
                 </span>
                 <IconChevronDown size={12} />
@@ -3971,16 +4001,21 @@ export function ChatView({
                   >
                     {t("chat.selectModel")}
                   </div>
-                  {endpoints.map((ep) => (
-                    <div
-                      key={ep.name}
-                      className={`chatModelMenuItem ${selectedEndpoint === ep.name ? "chatModelMenuItemActive" : ""}`}
-                      onClick={() => { setSelectedEndpoint(ep.name); setModelMenuOpen(false); }}
-                    >
-                      <span style={{ fontWeight: 600 }}>{ep.model}</span>
-                      <span style={{ fontSize: 11, opacity: 0.5, marginLeft: 6 }}>{ep.name}</span>
-                    </div>
-                  ))}
+                  {endpoints.map((ep) => {
+                    const hs = ep.health?.status;
+                    const dot = hs === "healthy" ? "🟢" : hs === "degraded" ? "🟡" : hs === "unhealthy" ? "🔴" : "⚪";
+                    return (
+                      <div
+                        key={ep.name}
+                        className={`chatModelMenuItem ${selectedEndpoint === ep.name ? "chatModelMenuItemActive" : ""}`}
+                        onClick={() => { setSelectedEndpoint(ep.name); setModelMenuOpen(false); }}
+                      >
+                        <span style={{ fontSize: 8, marginRight: 6, lineHeight: 1 }}>{dot}</span>
+                        <span style={{ fontWeight: 600 }}>{ep.model}</span>
+                        <span style={{ fontSize: 11, opacity: 0.5, marginLeft: 6 }}>{ep.name}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               {multiAgentEnabled && agentProfiles.length > 0 && (

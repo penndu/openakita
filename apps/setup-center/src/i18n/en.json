@@ -50,7 +50,8 @@
     "refreshed": "Refreshed",
     "themeSystem": "Theme: Follow system",
     "themeDark": "Theme: Dark",
-    "themeLight": "Theme: Light"
+    "themeLight": "Theme: Light",
+    "webAccess": "Web Access"
   },
   "tokenStats": {
     "serviceNotRunning": "Service not running, unable to view stats",
@@ -1042,6 +1043,8 @@
     "color": "Color",
     "skills": "Skills",
     "prompt": "Custom Prompt",
+    "preferredEndpoint": "Preferred Model",
+    "preferredEndpointAuto": "Auto (by priority)",
     "id": "ID",
     "confirmDelete": "Are you sure you want to delete this Agent?",
     "disabled": "Multi-Agent mode is off",

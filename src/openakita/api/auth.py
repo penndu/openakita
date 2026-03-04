@@ -126,6 +126,7 @@ class WebAccessConfig:
     def __init__(self, data_dir: Path) -> None:
         self._path = data_dir / "web_access.json"
         self._data: dict[str, Any] = {}
+        self._lock = __import__("threading").Lock()
         self._load()
 
     def _load(self) -> None:
@@ -182,8 +183,11 @@ class WebAccessConfig:
             self._save()
 
     def _save(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(self._data, indent=2) + "\n", "utf-8")
+        with self._lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._data, indent=2) + "\n", "utf-8")
+            tmp.replace(self._path)
 
     @property
     def jwt_secret(self) -> str:

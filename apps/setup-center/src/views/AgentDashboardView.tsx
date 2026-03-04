@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconRefresh } from "../icons";
+import { safeFetch } from "../providers";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -214,11 +215,9 @@ export function AgentDashboardView({
 
   const fetchTopo = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBaseUrl}/api/agents/topology`);
-      if (res.ok) {
-        const data: TopoData = await res.json();
-        setTopoData(data);
-      }
+      const res = await safeFetch(`${apiBaseUrl}/api/agents/topology`);
+      const data: TopoData = await res.json();
+      setTopoData(data);
     } catch { /* silent */ }
   }, [apiBaseUrl]);
 

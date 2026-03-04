@@ -109,14 +109,27 @@ export async function authFetch(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
+  // Snapshot body for potential retry (ReadableStream can only be consumed once)
+  let retryInit = init;
+  if (init?.body instanceof ReadableStream) {
+    try {
+      const [s1, s2] = init.body.tee();
+      init = { ...init, body: s1 };
+      retryInit = { ...init, body: s2 };
+    } catch {
+      // Stream already locked/consumed — retry will reuse original init (may fail, but won't break first request)
+    }
+  }
+
   const res = await fetch(url, { ...init, headers, credentials: "include" });
 
   // If 401 and we had a token, try one refresh then retry
   if (res.status === 401 && token) {
     const newToken = await refreshAccessToken(apiBase);
     if (newToken) {
-      headers.set("Authorization", `Bearer ${newToken}`);
-      return fetch(url, { ...init, headers, credentials: "include" });
+      const retryHeaders = new Headers(retryInit?.headers);
+      retryHeaders.set("Authorization", `Bearer ${newToken}`);
+      return fetch(url, { ...retryInit, headers: retryHeaders, credentials: "include" });
     }
   }
 

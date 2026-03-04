@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { safeFetch } from "../providers";
 
 interface Agent {
   id: string;
@@ -42,8 +43,7 @@ export function AgentStoreView({ apiBaseUrl, visible }: AgentStoreViewProps) {
       const params = new URLSearchParams({ sort, page: String(page), limit: "20" });
       if (query) params.set("q", query);
       if (category) params.set("category", category);
-      const resp = await fetch(`${apiBaseUrl}/api/hub/agents?${params}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const resp = await safeFetch(`${apiBaseUrl}/api/hub/agents?${params}`);
       const data = await resp.json();
       setAgents(data.agents || data.data || []);
       setTotal(data.total || 0);
@@ -63,14 +63,10 @@ export function AgentStoreView({ apiBaseUrl, visible }: AgentStoreViewProps) {
     setInstalling(agentId);
     setNotice("");
     try {
-      const resp = await fetch(`${apiBaseUrl}/api/hub/agents/${agentId}/install`, { method: "POST" });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        throw new Error(body.detail || `HTTP ${resp.status}`);
-      }
+      const resp = await safeFetch(`${apiBaseUrl}/api/hub/agents/${agentId}/install`, { method: "POST" });
       const data = await resp.json();
       setNotice(t("agentStore.installSuccess", { name: data.profile?.name || agentId }));
-      fetch(`${apiBaseUrl}/api/skills/reload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+      safeFetch(`${apiBaseUrl}/api/skills/reload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
     } catch (e: any) {
       setNotice(t("agentStore.installFail", { msg: e.message }));
     } finally {

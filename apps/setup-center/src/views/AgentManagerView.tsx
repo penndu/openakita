@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { IconBot, IconRefresh, IconPlus, IconEdit, IconTrash } from "../icons";
+import { safeFetch } from "../providers";
 
 type AgentProfile = {
   id: string;
@@ -12,6 +13,7 @@ type AgentProfile = {
   skills: string[];
   skills_mode: string;
   custom_prompt: string;
+  preferred_endpoint?: string | null;
   category?: string;
   hidden?: boolean;
   user_customized?: boolean;
@@ -21,6 +23,14 @@ type SkillItem = {
   name: string;
   enabled: boolean;
   name_i18n?: Record<string, string> | null;
+};
+
+type ModelInfo = {
+  name: string;
+  provider: string;
+  model: string;
+  status: string;
+  has_api_key: boolean;
 };
 
 const EMPTY_PROFILE: AgentProfile = {
@@ -33,6 +43,7 @@ const EMPTY_PROFILE: AgentProfile = {
   skills: [],
   skills_mode: "all",
   custom_prompt: "",
+  preferred_endpoint: null,
   category: "",
   hidden: false,
 };
@@ -153,6 +164,7 @@ export function AgentManagerView({
   const [saving, setSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [availableSkills, setAvailableSkills] = useState<SkillItem[]>([]);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [iconCat, setIconCat] = useState("common");
   const [toastMsg, setToastMsg] = useState<{ text: string; type: "ok" | "err" } | null>(null);
@@ -187,11 +199,9 @@ export function AgentManagerView({
 
   const fetchCategories = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBaseUrl}/api/agents/categories`);
-      if (res.ok) {
-        const data = await res.json();
-        setCategories(data.categories || []);
-      }
+      const res = await safeFetch(`${apiBaseUrl}/api/agents/categories`);
+      const data = await res.json();
+      setCategories(data.categories || []);
     } catch (e) {
       console.warn("Failed to fetch categories:", e);
     }
@@ -201,11 +211,9 @@ export function AgentManagerView({
     if (!multiAgentEnabled) return;
     setLoading(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/agents/profiles?include_hidden=true`);
-      if (res.ok) {
-        const data = await res.json();
-        setProfiles(data.profiles || []);
-      }
+      const res = await safeFetch(`${apiBaseUrl}/api/agents/profiles?include_hidden=true`);
+      const data = await res.json();
+      setProfiles(data.profiles || []);
     } catch (e) {
       console.warn("Failed to fetch profiles:", e);
     }
@@ -214,28 +222,31 @@ export function AgentManagerView({
 
   const fetchSkills = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBaseUrl}/api/skills`);
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableSkills(data.skills || []);
-      }
+      const res = await safeFetch(`${apiBaseUrl}/api/skills`);
+      const data = await res.json();
+      setAvailableSkills(data.skills || []);
     } catch {
       /* skills endpoint may not be available */
     }
   }, [apiBaseUrl]);
 
+  const fetchModels = useCallback(async () => {
+    try {
+      const res = await safeFetch(`${apiBaseUrl}/api/models`);
+      const data = await res.json();
+      setAvailableModels(data.models || []);
+    } catch {
+      /* models endpoint may not be available */
+    }
+  }, [apiBaseUrl]);
+
   const handleExport = useCallback(async (profileId: string) => {
     try {
-      const res = await fetch(`${apiBaseUrl}/api/agents/package/export`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/agents/package/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile_id: profileId }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        showToast(data.detail || "导出失败", "err");
-        return;
-      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -253,15 +264,11 @@ export function AgentManagerView({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch(`${apiBaseUrl}/api/agents/package/import`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/agents/package/import`, {
         method: "POST",
         body: formData,
       });
       const data = await res.json();
-      if (!res.ok) {
-        showToast(data.detail || "导入失败", "err");
-        return;
-      }
       showToast(`Agent「${data.profile?.name || ""}」导入成功`);
       fetchProfiles();
     } catch (err) { showToast(String(err), "err"); }
@@ -273,8 +280,9 @@ export function AgentManagerView({
       fetchProfiles();
       fetchSkills();
       fetchCategories();
+      fetchModels();
     }
-  }, [visible, multiAgentEnabled, fetchProfiles, fetchSkills, fetchCategories]);
+  }, [visible, multiAgentEnabled, fetchProfiles, fetchSkills, fetchCategories, fetchModels]);
 
   const openCreateEditor = () => {
     setEditingProfile({ ...EMPTY_PROFILE });
@@ -317,6 +325,7 @@ export function AgentManagerView({
         skills: editingProfile.skills,
         skills_mode: editingProfile.skills_mode,
         custom_prompt: editingProfile.custom_prompt,
+        preferred_endpoint: editingProfile.preferred_endpoint || null,
         category: editingProfile.category || "",
       };
 
@@ -325,20 +334,15 @@ export function AgentManagerView({
         : `${apiBaseUrl}/api/agents/profiles/${editingProfile.id}`;
       const method = isCreating ? "POST" : "PUT";
 
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        closeEditor();
-        fetchProfiles();
-        showToast(t("agentManager.saveSuccess"), "ok");
-      } else {
-        const data = await res.json().catch(() => ({}));
-        showToast(extractErrorMsg(data.detail, res.statusText || t("agentManager.saveFailed")), "err");
-      }
+      closeEditor();
+      fetchProfiles();
+      showToast(t("agentManager.saveSuccess"), "ok");
     } catch (e) {
       showToast(String(e) || t("agentManager.saveFailed"), "err");
     }
@@ -347,15 +351,10 @@ export function AgentManagerView({
 
   const handleDelete = async (profileId: string) => {
     try {
-      const res = await fetch(`${apiBaseUrl}/api/agents/profiles/${profileId}`, { method: "DELETE" });
-      if (res.ok) {
-        setConfirmDeleteId(null);
-        fetchProfiles();
-        showToast(t("agentManager.deleteSuccess"), "ok");
-      } else {
-        const data = await res.json().catch(() => ({}));
-        showToast(extractErrorMsg(data.detail, t("agentManager.deleteFailed")), "err");
-      }
+      await safeFetch(`${apiBaseUrl}/api/agents/profiles/${profileId}`, { method: "DELETE" });
+      setConfirmDeleteId(null);
+      fetchProfiles();
+      showToast(t("agentManager.deleteSuccess"), "ok");
     } catch (e) {
       showToast(String(e) || t("agentManager.deleteFailed"), "err");
     }
@@ -372,15 +371,13 @@ export function AgentManagerView({
 
   const handleVisibility = async (profileId: string, hidden: boolean) => {
     try {
-      const res = await fetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/visibility`, {
+      await safeFetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/visibility`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hidden }),
       });
-      if (res.ok) {
-        fetchProfiles();
-        showToast(t(hidden ? "agentManager.hideSuccess" : "agentManager.restoreSuccess"), "ok");
-      }
+      fetchProfiles();
+      showToast(t(hidden ? "agentManager.hideSuccess" : "agentManager.restoreSuccess"), "ok");
     } catch (e) {
       showToast(String(e), "err");
     }
@@ -388,16 +385,11 @@ export function AgentManagerView({
 
   const handleReset = async (profileId: string) => {
     try {
-      const res = await fetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/reset`, {
+      await safeFetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/reset`, {
         method: "POST",
       });
-      if (res.ok) {
-        fetchProfiles();
-        showToast(t("agentManager.resetSuccess"), "ok");
-      } else {
-        const data = await res.json().catch(() => ({}));
-        showToast(extractErrorMsg(data.detail, t("agentManager.resetFailed")), "err");
-      }
+      fetchProfiles();
+      showToast(t("agentManager.resetSuccess"), "ok");
     } catch (e) {
       showToast(String(e), "err");
     }
@@ -426,21 +418,16 @@ export function AgentManagerView({
     const ascii = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const id = ascii && /^[a-z]/.test(ascii) ? ascii : `cat-${Date.now()}`;
     try {
-      const res = await fetch(`${apiBaseUrl}/api/agents/categories`, {
+      await safeFetch(`${apiBaseUrl}/api/agents/categories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, label, color: newCatColor }),
       });
-      if (res.ok) {
-        showToast(`已添加分类「${label}」`);
-        setAddingCategory(false);
-        setNewCatLabel("");
-        setNewCatColor("#6b7280");
-        fetchCategories();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        showToast(extractErrorMsg(data.detail, "添加失败"), "err");
-      }
+      showToast(`已添加分类「${label}」`);
+      setAddingCategory(false);
+      setNewCatLabel("");
+      setNewCatColor("#6b7280");
+      fetchCategories();
     } catch (err) { showToast(String(err), "err"); }
   };
 
@@ -543,15 +530,10 @@ export function AgentManagerView({
                 onClick={async (e) => {
                   e.stopPropagation();
                   try {
-                    const res = await fetch(`${apiBaseUrl}/api/agents/categories/${cat.id}`, { method: "DELETE" });
-                    if (res.ok) {
-                      showToast(`已删除分类「${cat.label}」`);
-                      if (activeCategory === cat.id) setActiveCategory("");
-                      fetchCategories();
-                    } else {
-                      const data = await res.json().catch(() => ({}));
-                      showToast(data.detail || "删除失败", "err");
-                    }
+                    await safeFetch(`${apiBaseUrl}/api/agents/categories/${cat.id}`, { method: "DELETE" });
+                    showToast(`已删除分类「${cat.label}」`);
+                    if (activeCategory === cat.id) setActiveCategory("");
+                    fetchCategories();
                   } catch (err) { showToast(String(err), "err"); }
                 }}
                 title="删除此分类"
@@ -1096,6 +1078,21 @@ export function AgentManagerView({
                 })}
               </div>
             )}
+
+            {/* Preferred Endpoint */}
+            <label style={labelStyle}>{t("agentManager.preferredEndpoint")}</label>
+            <select
+              value={editingProfile.preferred_endpoint || ""}
+              onChange={(e) => setEditingProfile((p) => ({ ...p, preferred_endpoint: e.target.value || null }))}
+              style={{ ...inputStyle, cursor: "pointer" }}
+            >
+              <option value="">{t("agentManager.preferredEndpointAuto")}</option>
+              {availableModels.map((m) => (
+                <option key={m.name} value={m.name} disabled={m.status !== "healthy"}>
+                  {m.name} ({m.model}){m.status !== "healthy" ? " ⚠" : ""}
+                </option>
+              ))}
+            </select>
 
             {/* Custom Prompt */}
             <label style={labelStyle}>{t("agentManager.prompt")}</label>

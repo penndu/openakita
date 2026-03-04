@@ -238,8 +238,13 @@ export async function fetchModelsDirectly(params: {
  */
 export async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
   const effectiveInit = init?.signal ? init : { ...init, signal: AbortSignal.timeout(10_000) };
+  let apiBase = "";
+  if (IS_WEB && url.startsWith("http")) {
+    try { apiBase = new URL(url).origin; } catch { /* relative url, keep "" */ }
+    if (!apiBase || apiBase === "null" || apiBase === window.location.origin) apiBase = "";
+  }
   const res = IS_WEB
-    ? await authFetch(url, effectiveInit)
+    ? await authFetch(url, effectiveInit, apiBase)
     : await fetch(url, effectiveInit);
   if (!res.ok) {
     let detail = res.statusText;

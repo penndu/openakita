@@ -123,6 +123,29 @@ class TestAgentProfile:
         p = AgentProfile(id="a", name="A")
         assert p.created_at != ""
 
+    def test_preferred_endpoint_default_none(self):
+        p = AgentProfile(id="a", name="A")
+        assert p.preferred_endpoint is None
+
+    def test_preferred_endpoint_roundtrip(self):
+        p = _make_profile(preferred_endpoint="claude-primary")
+        d = p.to_dict()
+        assert d["preferred_endpoint"] == "claude-primary"
+        restored = AgentProfile.from_dict(d)
+        assert restored.preferred_endpoint == "claude-primary"
+
+    def test_preferred_endpoint_none_roundtrip(self):
+        p = _make_profile(preferred_endpoint=None)
+        d = p.to_dict()
+        assert d["preferred_endpoint"] is None
+        restored = AgentProfile.from_dict(d)
+        assert restored.preferred_endpoint is None
+
+    def test_preferred_endpoint_from_dict_missing_key(self):
+        data = {"id": "x", "name": "X"}
+        p = AgentProfile.from_dict(data)
+        assert p.preferred_endpoint is None
+
 
 # ================================================================
 # ProfileStore Tests
@@ -170,6 +193,20 @@ class TestProfileStore:
         updated = store.update("test-agent", {"description": "Updated desc"})
         assert updated.description == "Updated desc"
         assert updated.name == "Test Agent"
+
+    def test_update_preferred_endpoint(self, store: ProfileStore):
+        store.save(_make_profile())
+        updated = store.update("test-agent", {"preferred_endpoint": "my-endpoint"})
+        assert updated.preferred_endpoint == "my-endpoint"
+        updated2 = store.update("test-agent", {"preferred_endpoint": None})
+        assert updated2.preferred_endpoint is None
+
+    def test_update_system_preferred_endpoint_marks_customized(self, store: ProfileStore):
+        sys_profile = _make_profile("sys", "System", agent_type=AgentType.SYSTEM)
+        store.save(sys_profile)
+        updated = store.update("sys", {"preferred_endpoint": "claude-primary"})
+        assert updated.preferred_endpoint == "claude-primary"
+        assert updated.user_customized is True
 
     def test_update_system_blocks_immutable_fields(self, store: ProfileStore):
         sys_profile = _make_profile("sys", "System", agent_type=AgentType.SYSTEM)
@@ -421,6 +458,46 @@ class TestDelegationRequest:
         assert req.to_agent == "helper"
         assert req.depth == 2
         assert req.parent_request_id is None
+
+
+# ================================================================
+# AgentFactory Tests
+# ================================================================
+
+class TestAgentFactory:
+    @pytest.mark.asyncio
+    async def test_create_sets_preferred_endpoint(self):
+        from openakita.agents.factory import AgentFactory
+        factory = AgentFactory()
+        profile = _make_profile("ep-agent", "EP Agent", preferred_endpoint="my-endpoint")
+        with patch("openakita.core.agent.Agent") as MockAgent:
+            mock_instance = MagicMock()
+            mock_instance.initialize = AsyncMock()
+            mock_instance._agent_profile = None
+            mock_instance._custom_prompt_suffix = ""
+            mock_instance._preferred_endpoint = None
+            mock_instance.skill_catalog = MagicMock()
+            mock_instance.skill_catalog.get_registry.return_value = MagicMock(list_skills=MagicMock(return_value=[]))
+            MockAgent.return_value = mock_instance
+            agent = await factory.create(profile)
+            assert agent._preferred_endpoint == "my-endpoint"
+
+    @pytest.mark.asyncio
+    async def test_create_no_preferred_endpoint(self):
+        from openakita.agents.factory import AgentFactory
+        factory = AgentFactory()
+        profile = _make_profile("plain-agent", "Plain Agent")
+        with patch("openakita.core.agent.Agent") as MockAgent:
+            mock_instance = MagicMock()
+            mock_instance.initialize = AsyncMock()
+            mock_instance._agent_profile = None
+            mock_instance._custom_prompt_suffix = ""
+            mock_instance._preferred_endpoint = None
+            mock_instance.skill_catalog = MagicMock()
+            mock_instance.skill_catalog.get_registry.return_value = MagicMock(list_skills=MagicMock(return_value=[]))
+            MockAgent.return_value = mock_instance
+            agent = await factory.create(profile)
+            assert agent._preferred_endpoint is None
 
 
 # ================================================================

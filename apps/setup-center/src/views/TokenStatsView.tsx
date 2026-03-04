@@ -1,6 +1,7 @@
 // ─── TokenStatsView: Token 用量统计面板 ───
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { safeFetch } from "../providers";
 
 type PeriodKey = "1d" | "3d" | "1w" | "1m" | "6m" | "1y";
 
@@ -101,11 +102,11 @@ export function TokenStatsView({
     try {
       const base = `${apiBaseUrl}/api/stats/tokens`;
       const results = await Promise.allSettled([
-        fetch(`${base}/total?period=${period}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
-        fetch(`${base}/summary?period=${period}&group_by=endpoint_name`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
-        fetch(`${base}/summary?period=${period}&group_by=operation_type`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
-        fetch(`${base}/timeline?period=${period}&interval=${period === "1d" ? "hour" : "day"}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
-        fetch(`${base}/sessions?period=${period}&limit=20`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        safeFetch(`${base}/total?period=${period}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        safeFetch(`${base}/summary?period=${period}&group_by=endpoint_name`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        safeFetch(`${base}/summary?period=${period}&group_by=operation_type`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        safeFetch(`${base}/timeline?period=${period}&interval=${period === "1d" ? "hour" : "day"}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        safeFetch(`${base}/sessions?period=${period}&limit=20`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
       ]);
       const val = (i: number) => results[i].status === "fulfilled" ? (results[i] as PromiseFulfilledResult<any>).value : null;
       setTotal(val(0)?.data || null);

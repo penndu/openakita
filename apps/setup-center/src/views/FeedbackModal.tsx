@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconX, IconInfo } from "../icons";
+import { safeFetch } from "../providers";
 
 const TURNSTILE_SITE_KEY = "0x4AAAAAACgY6e8TLK4RVrQk";
 
@@ -64,7 +65,7 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
   // Fetch system info on open (only needed for bug mode, but pre-fetch)
   useEffect(() => {
     if (!open) return;
-    fetch(`${apiBase}/api/system-info`, { signal: AbortSignal.timeout(5000) })
+    safeFetch(`${apiBase}/api/system-info`, { signal: AbortSignal.timeout(5000) })
       .then((r) => r.json())
       .then(setSystemInfo)
       .catch(() => setSystemInfo(null));
@@ -154,22 +155,11 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
         form.append("contact_wechat", contactWechat.trim());
       }
 
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         method: "POST",
         body: form,
         signal: AbortSignal.timeout(60_000),
       });
-
-      if (!res.ok) {
-        const body = await res.text();
-        let detail = "";
-        try {
-          const parsed = JSON.parse(body).detail;
-          detail = typeof parsed === "string" ? parsed : JSON.stringify(parsed) || body;
-        } catch { detail = body; }
-        setSubmitResult({ ok: false, msg: `${res.status}: ${detail}` });
-        return;
-      }
 
       const data = await res.json();
 
@@ -194,7 +184,7 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
       setImageFiles([]);
       setImagePreviews((old) => { old.forEach(URL.revokeObjectURL); return []; });
     } catch (err: any) {
-      setSubmitResult({ ok: false, msg: `${t("feedback.uploadFailedNetwork")}\n${err?.message || String(err)}` });
+      setSubmitResult({ ok: false, msg: err?.message || t("feedback.uploadFailedNetwork") });
     } finally {
       setSubmitting(false);
     }

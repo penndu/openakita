@@ -5,6 +5,7 @@ import {
   IconChevronDown, IconChevronRight, IconInfo,
   DotGreen, DotGray, DotYellow,
 } from "../icons";
+import { safeFetch } from "../providers";
 
 type MCPTool = {
   name: string;
@@ -97,12 +98,10 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
     if (!serviceRunning) return;
     setLoading(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/mcp/servers`);
-      if (res.ok) {
-        const data = await res.json();
-        setServers(data.servers || []);
-        setMcpEnabled(data.mcp_enabled !== false);
-      }
+      const res = await safeFetch(`${apiBaseUrl}/api/mcp/servers`);
+      const data = await res.json();
+      setServers(data.servers || []);
+      setMcpEnabled(data.mcp_enabled !== false);
     } catch { /* ignore */ }
     setLoading(false);
   }, [serviceRunning, apiBaseUrl]);
@@ -117,7 +116,7 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
   const connectServer = async (name: string) => {
     setBusy(name);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/mcp/connect`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/mcp/connect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ server_name: name }),
@@ -138,7 +137,7 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
   const disconnectServer = async (name: string) => {
     setBusy(name);
     try {
-      await fetch(`${apiBaseUrl}/api/mcp/disconnect`, {
+      await safeFetch(`${apiBaseUrl}/api/mcp/disconnect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ server_name: name }),
@@ -155,7 +154,7 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
     if (!confirm(t("mcp.confirmDelete", { name }))) return;
     setBusy(name);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" });
+      const res = await safeFetch(`${apiBaseUrl}/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" });
       const data = await res.json();
       if (data.status === "ok") {
         showMsg(`${t("mcp.deleted")} ${name}`, true);
@@ -185,7 +184,7 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
         }
       }
       const parsedArgs = parseArgs(form.args);
-      const res = await fetch(`${apiBaseUrl}/api/mcp/servers/add`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/mcp/servers/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -200,7 +199,7 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
         }),
       });
       const data = await res.json();
-      if (res.ok && data.status === "ok") {
+      if (data.status === "ok") {
         const cr = data.connect_result;
         let connMsg = "";
         if (cr) {
@@ -226,11 +225,9 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
   const loadInstructions = async (name: string) => {
     if (instructions[name]) return;
     try {
-      const res = await fetch(`${apiBaseUrl}/api/mcp/instructions/${encodeURIComponent(name)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setInstructions(prev => ({ ...prev, [name]: data.instructions || t("mcp.noInstructions") }));
-      }
+      const res = await safeFetch(`${apiBaseUrl}/api/mcp/instructions/${encodeURIComponent(name)}`);
+      const data = await res.json();
+      setInstructions(prev => ({ ...prev, [name]: data.instructions || t("mcp.noInstructions") }));
     } catch { /* ignore */ }
   };
 

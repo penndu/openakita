@@ -6,6 +6,7 @@ import {
   IconX, IconLink, IconPower, IconRefresh,
   IconLaptop, IconMoon, IconSun, IconGlobe,
 } from "../icons";
+import { openExternalUrl } from "../platform";
 
 export type TopbarProps = {
   wsDropdownOpen: boolean;
@@ -30,6 +31,7 @@ export type TopbarProps = {
   themePrefState: Theme;
   isWeb?: boolean;
   onLogout?: () => void;
+  webAccessUrl?: string;
 };
 
 export function Topbar({
@@ -41,7 +43,7 @@ export function Topbar({
   onCreateWorkspace,
   serviceRunning, endpointCount, dataMode, busy,
   onDisconnect, onConnect, onStart, onRefreshAll,
-  toggleTheme, themePrefState, isWeb, onLogout,
+  toggleTheme, themePrefState, isWeb, onLogout, webAccessUrl,
 }: TopbarProps) {
   const { t, i18n } = useTranslation();
 
@@ -150,6 +152,22 @@ export function Topbar({
           {serviceRunning ? <DotGreen /> : <DotGray />}
           <span>{serviceRunning ? t("topbar.running") : t("topbar.stopped")}</span>
         </span>
+        {webAccessUrl && serviceRunning && !isWeb && (
+          <span
+            className="topbarWebAccess"
+            onClick={() => openExternalUrl(webAccessUrl)}
+            title={webAccessUrl}
+            style={{
+              cursor: "pointer", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 3,
+              color: "var(--accent, #5B8DEF)", opacity: 0.85,
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0.85"; }}
+          >
+            <IconGlobe size={11} />
+            <span style={{ textDecoration: "underline" }}>{t("topbar.webAccess")}</span>
+          </span>
+        )}
         <span className="topbarEpCount">{t("topbar.endpoints", { count: endpointCount })}</span>
         {dataMode === "remote" && <span className="pill" style={{ fontSize: 10, marginLeft: 4, background: "#e3f2fd", color: "#1565c0" }}>{t("connect.remoteMode")}</span>}
       </div>

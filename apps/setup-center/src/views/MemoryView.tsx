@@ -3,6 +3,7 @@ import {
   IconRefresh, IconTrash, IconEdit, IconCheck, IconX,
   IconSearch, IconBrain, IconLoader,
 } from "../icons";
+import { safeFetch } from "../providers";
 
 type MemoryItem = {
   id: string;
@@ -98,8 +99,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       const params = new URLSearchParams();
       if (searchQuery) params.set("search", searchQuery);
       if (filterType) params.set("type", filterType);
-      const res = await fetch(`${API_BASE}/api/memories?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await safeFetch(`${API_BASE}/api/memories?${params}`);
       const data = await res.json();
       setMemories(data.memories || []);
     } catch (e: any) {
@@ -112,8 +112,8 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
   const loadStats = useCallback(async () => {
     if (!serviceRunning) return;
     try {
-      const res = await fetch(`${API_BASE}/api/memories/stats`);
-      if (res.ok) setStats(await res.json());
+      const res = await safeFetch(`${API_BASE}/api/memories/stats`);
+      setStats(await res.json());
     } catch { /* ignore */ }
   }, [serviceRunning]);
 
@@ -124,8 +124,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/memories/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await safeFetch(`${API_BASE}/api/memories/${id}`, { method: "DELETE" });
       setMemories(prev => prev.filter(m => m.id !== id));
       setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
       loadStats();
@@ -138,12 +137,11 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
     if (selected.size === 0) return;
     if (!confirm(`确定删除选中的 ${selected.size} 条记忆？`)) return;
     try {
-      const res = await fetch(`${API_BASE}/api/memories/batch-delete`, {
+      const res = await safeFetch(`${API_BASE}/api/memories/batch-delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: Array.from(selected) }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setMemories(prev => prev.filter(m => !selected.has(m.id)));
       setSelected(new Set());
@@ -156,12 +154,11 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
 
   const handleUpdate = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/memories/${id}`, {
+      await safeFetch(`${API_BASE}/api/memories/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: editContent, importance_score: editScore }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setMemories(prev => prev.map(m =>
         m.id === id ? { ...m, content: editContent, importance_score: editScore } : m
       ));
@@ -183,8 +180,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
     setReviewResult(null);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/memories/review`, { method: "POST" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await safeFetch(`${API_BASE}/api/memories/review`, { method: "POST" });
       const data = await res.json();
       setReviewResult(data.review);
       await loadMemories();

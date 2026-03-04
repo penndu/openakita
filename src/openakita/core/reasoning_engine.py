@@ -456,6 +456,7 @@ class ReasoningEngine:
         thinking_depth: str | None = None,
         progress_callback: Any = None,
         agent_profile_id: str = "default",
+        endpoint_override: str | None = None,
     ) -> str:
         """
         主推理循环: Reason -> Act -> Observe。
@@ -473,6 +474,7 @@ class ReasoningEngine:
             thinking_mode: 思考模式覆盖 ('auto'/'on'/'off'/None)
             thinking_depth: 思考深度 ('low'/'medium'/'high'/None)
             progress_callback: 进度回调 async fn(str) -> None，用于 IM 实时输出思维链
+            endpoint_override: 端点覆盖（来自 Agent profile 或 API 请求）
 
         Returns:
             最终响应文本
@@ -530,6 +532,26 @@ class ReasoningEngine:
 
         working_messages = list(messages)
         current_model = self._brain.model
+
+        # === 端点覆盖 ===
+        if endpoint_override:
+            if not conversation_id:
+                conversation_id = f"_run_{uuid.uuid4().hex[:12]}"
+            llm_client = getattr(self._brain, "_llm_client", None)
+            if llm_client and hasattr(llm_client, "switch_model"):
+                ok, msg = llm_client.switch_model(
+                    endpoint_name=endpoint_override,
+                    hours=0.05,
+                    reason=f"agent profile endpoint override: {endpoint_override}",
+                    conversation_id=conversation_id,
+                )
+                if ok:
+                    _provider = llm_client._providers.get(endpoint_override)
+                    if _provider:
+                        current_model = _provider.model
+                    logger.info(f"[EndpointOverride] Switched to {endpoint_override} for {conversation_id}")
+                else:
+                    logger.warning(f"[EndpointOverride] Failed to switch to {endpoint_override}: {msg}, using default")
 
         # ForceToolCall 配置
         # IM 保留至少 2 次重试，防止模型声称执行了操作但未调用工具（幻觉）

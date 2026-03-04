@@ -72,6 +72,9 @@ class AgentProfile:
     # 能力边界
     fallback_profile_id: str | None = None
 
+    # 首选 LLM 端点（为 None 或空字符串时使用全局优先级，不可用时自动回退）
+    preferred_endpoint: str | None = None
+
     # 元数据
     created_by: str = "system"
     created_at: str = ""
@@ -202,7 +205,7 @@ class ProfileStore:
     # 仅用于判断"用户是否实质修改了系统 Agent"的字段集（hidden/visibility 不算）
     _CUSTOMIZATION_FIELDS = frozenset({
         "name", "description", "icon", "color", "skills", "skills_mode",
-        "custom_prompt", "category", "fallback_profile_id",
+        "custom_prompt", "category", "fallback_profile_id", "preferred_endpoint",
     })
 
     def update(self, profile_id: str, updates: dict[str, Any]) -> AgentProfile:

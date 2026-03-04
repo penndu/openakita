@@ -66,10 +66,14 @@ class AgentFactory:
         if profile.custom_prompt:
             agent._custom_prompt_suffix = profile.custom_prompt
 
+        if profile.preferred_endpoint:
+            agent._preferred_endpoint = profile.preferred_endpoint
+
         logger.info(
             f"AgentFactory created: {profile.id} "
             f"(skills_mode={profile.skills_mode.value}, "
-            f"skills={profile.skills})"
+            f"skills={profile.skills}, "
+            f"preferred_endpoint={profile.preferred_endpoint or 'auto'})"
         )
         return agent
 

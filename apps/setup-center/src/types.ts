@@ -305,6 +305,7 @@ export type ChatConversation = {
   pinned?: boolean;
   titleGenerated?: boolean;
   agentProfileId?: string;
+  endpointId?: string;
   status?: ConversationStatus;
 };
 

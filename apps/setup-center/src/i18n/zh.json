@@ -50,7 +50,8 @@
     "refreshed": "已刷新",
     "themeSystem": "主题: 跟随系统",
     "themeDark": "主题: 暗色",
-    "themeLight": "主题: 亮色"
+    "themeLight": "主题: 亮色",
+    "webAccess": "网页访问"
   },
   "tokenStats": {
     "serviceNotRunning": "服务未运行，无法查看统计",
@@ -1042,6 +1043,8 @@
     "color": "颜色",
     "skills": "技能",
     "prompt": "自定义提示词",
+    "preferredEndpoint": "首选模型",
+    "preferredEndpointAuto": "自动选择（按优先级）",
     "id": "ID",
     "confirmDelete": "确定删除该 Agent？",
     "disabled": "多Agent模式未开启",

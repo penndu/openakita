@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { safeFetch } from "../providers";
 
 interface Skill {
   id: string;
@@ -56,8 +57,7 @@ export function SkillStoreView({ apiBaseUrl, visible }: SkillStoreViewProps) {
       if (query) params.set("q", query);
       if (category) params.set("category", category);
       if (trustLevel) params.set("trust_level", trustLevel);
-      const resp = await fetch(`${apiBaseUrl}/api/hub/skills?${params}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const resp = await safeFetch(`${apiBaseUrl}/api/hub/skills?${params}`);
       const data = await resp.json();
       setSkills(data.skills || data.data || []);
       setTotal(data.total || 0);
@@ -77,14 +77,10 @@ export function SkillStoreView({ apiBaseUrl, visible }: SkillStoreViewProps) {
     setInstalling(skillId);
     setNotice("");
     try {
-      const resp = await fetch(`${apiBaseUrl}/api/hub/skills/${skillId}/install`, { method: "POST" });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        throw new Error(body.detail || `HTTP ${resp.status}`);
-      }
+      const resp = await safeFetch(`${apiBaseUrl}/api/hub/skills/${skillId}/install`, { method: "POST" });
       const data = await resp.json();
       setNotice(t("skillStore.installSuccess", { name: data.skill_name || skillId }));
-      fetch(`${apiBaseUrl}/api/skills/reload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+      safeFetch(`${apiBaseUrl}/api/skills/reload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
     } catch (e: any) {
       setNotice(t("skillStore.installFail", { msg: e.message }));
     } finally {

@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import type { SkillInfo, SkillConfigField, MarketplaceSkill, EnvMap } from "../types";
 import { envGet, envSet } from "../utils";
 import { IconGear, IconZap, IconPackage, IconStar, IconCheck, IconX, IconDownload, IconSearch, IconConfig, IconFolderOpen } from "../icons";
+import { safeFetch } from "../providers";
 
 // ─── i18n 辅助：按当前语言优先显示中文名/描述 ───
 
@@ -343,12 +344,8 @@ export function SkillManager({
       // 优先从运行中的服务 HTTP API 获取（远程模式或本地服务运行时）
       if (serviceRunning && apiBaseUrl != null) {
         try {
-          const res = await fetch(`${apiBaseUrl}/api/skills`, { signal: AbortSignal.timeout(5000) });
-          if (res.ok) {
-            data = await res.json();
-          } else {
-            httpError = `HTTP ${res.status}`;
-          }
+          const res = await safeFetch(`${apiBaseUrl}/api/skills`, { signal: AbortSignal.timeout(5000) });
+          data = await res.json();
         } catch (e) {
           httpError = String(e);
         }
@@ -489,19 +486,18 @@ export function SkillManager({
       };
 
       if (serviceRunning && apiBaseUrl != null) {
-        const res = await fetch(`${apiBaseUrl}/api/config/skills`, {
+        const res = await safeFetch(`${apiBaseUrl}/api/config/skills`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content }),
           signal: AbortSignal.timeout(5000),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
         // 通知后端热重载
         try {
-          await fetch(`${apiBaseUrl}/api/skills/reload`, {
+          await safeFetch(`${apiBaseUrl}/api/skills/reload`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
@@ -549,7 +545,7 @@ export function SkillManager({
         "4. 先列出你的分析和建议，征得我同意后再执行变更",
       ].join("\n");
 
-      const res = await fetch(`${apiBaseUrl}/api/chat`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -559,8 +555,6 @@ export function SkillManager({
         }),
         signal: AbortSignal.timeout(120_000),
       });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       // SSE 流式消息只需触发，AI 的回复在聊天界面可见
       // 读完流确保不 abort
@@ -594,7 +588,7 @@ export function SkillManager({
       let installed = false;
 
       if (serviceRunning && apiBaseUrl != null) {
-        const res = await fetch(`${apiBaseUrl}/api/skills/install`, {
+        const res = await safeFetch(`${apiBaseUrl}/api/skills/install`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: folderPath }),
@@ -604,7 +598,7 @@ export function SkillManager({
         if (data.error) throw new Error(data.error);
         installed = true;
         try {
-          await fetch(`${apiBaseUrl}/api/skills/reload`, {
+          await safeFetch(`${apiBaseUrl}/api/skills/reload`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
@@ -674,10 +668,10 @@ export function SkillManager({
         // 远程模式：只走后端 API 代理（Tauri 不可用）
         if (serviceRunning && apiBaseUrl != null) {
           try {
-            const res = await fetch(`${apiBaseUrl}/api/skills/marketplace?q=${encodeURIComponent(q)}`, {
+            const res = await safeFetch(`${apiBaseUrl}/api/skills/marketplace?q=${encodeURIComponent(q)}`, {
               signal: AbortSignal.timeout(10000),
             });
-            if (res.ok) data = await res.json();
+            data = await res.json();
           } catch { /* fallback to direct */ }
         }
         // 备选：直接请求（可能被 CORS 阻止）
@@ -697,10 +691,10 @@ export function SkillManager({
         // 方式2: 通过后端 API 代理
         if (!data && serviceRunning && apiBaseUrl != null) {
           try {
-            const res = await fetch(`${apiBaseUrl}/api/skills/marketplace?q=${encodeURIComponent(q)}`, {
+            const res = await safeFetch(`${apiBaseUrl}/api/skills/marketplace?q=${encodeURIComponent(q)}`, {
               signal: AbortSignal.timeout(10000),
             });
-            if (res.ok) data = await res.json();
+            data = await res.json();
           } catch { /* fallback */ }
         }
 
@@ -750,7 +744,7 @@ export function SkillManager({
 
       // 方式1：服务运行中 → HTTP API 安装（首选，不回退 Tauri 避免 venv 缺失报错）
       if (serviceRunning && apiBaseUrl != null) {
-        const res = await fetch(`${apiBaseUrl}/api/skills/install`, {
+        const res = await safeFetch(`${apiBaseUrl}/api/skills/install`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: skill.url }),
@@ -761,7 +755,7 @@ export function SkillManager({
         installed = true;
         // 安装成功后通知后端热重载技能
         try {
-          await fetch(`${apiBaseUrl}/api/skills/reload`, {
+          await safeFetch(`${apiBaseUrl}/api/skills/reload`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
@@ -816,7 +810,7 @@ export function SkillManager({
       let installed = false;
 
       if (serviceRunning && apiBaseUrl != null) {
-        const res = await fetch(`${apiBaseUrl}/api/skills/install`, {
+        const res = await safeFetch(`${apiBaseUrl}/api/skills/install`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
@@ -826,7 +820,7 @@ export function SkillManager({
         if (data.error) throw new Error(data.error);
         installed = true;
         try {
-          await fetch(`${apiBaseUrl}/api/skills/reload`, {
+          await safeFetch(`${apiBaseUrl}/api/skills/reload`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
@@ -885,7 +879,7 @@ export function SkillManager({
             setError(null);
             if (serviceRunning) {
               try {
-                const res = await fetch(`${apiBaseUrl}/api/skills/reload`, {
+                const res = await safeFetch(`${apiBaseUrl}/api/skills/reload`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({}),

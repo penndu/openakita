@@ -28,6 +28,15 @@ from .base import ChannelAdapter
 from .group_response import GroupResponseMode, SmartModeThrottle
 from .types import OutgoingMessage, UnifiedMessage
 
+
+def _notify_im_event(event: str, data: dict | None = None) -> None:
+    """Fire-and-forget WS broadcast for IM events."""
+    try:
+        from openakita.api.routes.websocket import broadcast_event
+        asyncio.ensure_future(broadcast_event(event, data))
+    except Exception:
+        pass
+
 if TYPE_CHECKING:
     from ..core.brain import Brain
     from ..llm.stt_client import STTClient
@@ -1252,6 +1261,8 @@ class MessageGateway:
         self._started_adapters = started
         self._failed_adapters = failed
 
+        _notify_im_event("im:channel_status", {"started": started, "failed": failed})
+
         # 启动消息处理循环
         self._processing_task = asyncio.create_task(self._process_loop())
 
@@ -2076,6 +2087,7 @@ class MessageGateway:
                 channel_message_id=message.channel_message_id,
             )
             self.session_manager.mark_dirty()  # 触发保存
+            _notify_im_event("im:new_message", {"channel": message.channel, "role": "user"})
 
             # 6. 调用 Agent 处理（支持中断检查）
             response_text = await self._call_agent_with_typing(session, message)
@@ -2117,6 +2129,7 @@ class MessageGateway:
             session.add_message(role="assistant", content=response_text, **_msg_meta)
             self.session_manager.mark_dirty()
             self.session_manager.flush()
+            _notify_im_event("im:new_message", {"channel": message.channel, "role": "assistant"})
 
             # 9. 发送响应
             logger.info(

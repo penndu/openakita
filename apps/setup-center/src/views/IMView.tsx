@@ -7,6 +7,8 @@ import {
   IconBot, IconPlus, IconEdit, IconTrash,
   DotGreen, DotGray,
 } from "../icons";
+import { safeFetch } from "../providers";
+import { IS_WEB, onWsEvent } from "../platform";
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -148,24 +150,20 @@ export function IMView({
   const fetchChannels = useCallback(async () => {
     if (!serviceRunning) return;
     try {
-      const res = await fetch(`${api}/api/im/channels`);
-      if (res.ok) {
-        const data = await res.json();
-        setChannels(data.channels || []);
-      }
+      const res = await safeFetch(`${api}/api/im/channels`);
+      const data = await res.json();
+      setChannels(data.channels || []);
     } catch { /* ignore */ }
   }, [serviceRunning, api]);
 
   const fetchSessions = useCallback(async (channel: string): Promise<IMSession[]> => {
     if (!serviceRunning) return [];
     try {
-      const res = await fetch(`${api}/api/im/sessions?channel=${encodeURIComponent(channel)}`);
-      if (res.ok) {
-        const data = await res.json();
-        const list: IMSession[] = data.sessions || [];
-        setSessions(list);
-        return list;
-      }
+      const res = await safeFetch(`${api}/api/im/sessions?channel=${encodeURIComponent(channel)}`);
+      const data = await res.json();
+      const list: IMSession[] = data.sessions || [];
+      setSessions(list);
+      return list;
     } catch { /* ignore */ }
     return [];
   }, [serviceRunning, api]);
@@ -173,12 +171,10 @@ export function IMView({
   const fetchMessages = useCallback(async (sessionId: string, limit = 50, offset = 0) => {
     if (!serviceRunning) return;
     try {
-      const res = await fetch(`${api}/api/im/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}&offset=${offset}`);
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data.messages || []);
-        setTotalMessages(data.total || 0);
-      }
+      const res = await safeFetch(`${api}/api/im/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}&offset=${offset}`);
+      const data = await res.json();
+      setMessages(data.messages || []);
+      setTotalMessages(data.total || 0);
     } catch { /* ignore */ }
   }, [serviceRunning, api]);
 
@@ -191,7 +187,7 @@ export function IMView({
     const channelTimer = setInterval(() => {
       fetchChannels();
       if (selectedChannel) fetchSessions(selectedChannel);
-    }, 15000);
+    }, IS_WEB ? 60_000 : 15000);
     return () => clearInterval(channelTimer);
   }, [serviceRunning, selectedChannel, fetchChannels, fetchSessions]);
 
@@ -200,9 +196,20 @@ export function IMView({
     fetchMessages(selectedSessionId);
     const msgTimer = setInterval(() => {
       fetchMessages(selectedSessionId);
-    }, 8000);
+    }, IS_WEB ? 30_000 : 8000);
     return () => clearInterval(msgTimer);
   }, [serviceRunning, selectedSessionId, fetchMessages]);
+
+  useEffect(() => {
+    if (!IS_WEB) return;
+    return onWsEvent((event) => {
+      if (event === "im:channel_status") fetchChannels();
+      if (event === "im:new_message") {
+        if (selectedChannel) fetchSessions(selectedChannel);
+        if (selectedSessionId) fetchMessages(selectedSessionId);
+      }
+    });
+  }, [fetchChannels, fetchSessions, fetchMessages, selectedChannel, selectedSessionId]);
 
   const handleSelectChannel = useCallback(async (ch: string) => {
     setSelectedChannel(ch);
@@ -289,24 +296,20 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
   const fetchChannels = useCallback(async () => {
     if (!serviceRunning) return;
     try {
-      const res = await fetch(`${apiBase}/api/im/channels`);
-      if (res.ok) {
-        const data = await res.json();
-        setChannels(data.channels || []);
-      }
+      const res = await safeFetch(`${apiBase}/api/im/channels`);
+      const data = await res.json();
+      setChannels(data.channels || []);
     } catch { /* ignore */ }
   }, [serviceRunning, apiBase]);
 
   const fetchSessions = useCallback(async (channel: string): Promise<IMSession[]> => {
     if (!serviceRunning) return [];
     try {
-      const res = await fetch(`${apiBase}/api/im/sessions?channel=${encodeURIComponent(channel)}`);
-      if (res.ok) {
-        const data = await res.json();
-        const list: IMSession[] = data.sessions || [];
-        setSessions(list);
-        return list;
-      }
+      const res = await safeFetch(`${apiBase}/api/im/sessions?channel=${encodeURIComponent(channel)}`);
+      const data = await res.json();
+      const list: IMSession[] = data.sessions || [];
+      setSessions(list);
+      return list;
     } catch { /* ignore */ }
     return [];
   }, [serviceRunning, apiBase]);
@@ -314,12 +317,10 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
   const fetchMessages = useCallback(async (sessionId: string, limit = 50, offset = 0) => {
     if (!serviceRunning) return;
     try {
-      const res = await fetch(`${apiBase}/api/im/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}&offset=${offset}`);
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data.messages || []);
-        setTotalMessages(data.total || 0);
-      }
+      const res = await safeFetch(`${apiBase}/api/im/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}&offset=${offset}`);
+      const data = await res.json();
+      setMessages(data.messages || []);
+      setTotalMessages(data.total || 0);
     } catch { /* ignore */ }
   }, [serviceRunning, apiBase]);
 
@@ -330,16 +331,27 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     const channelTimer = setInterval(() => {
       fetchChannels();
       if (selectedChannel) fetchSessions(selectedChannel);
-    }, 15000);
+    }, IS_WEB ? 60_000 : 15000);
     return () => clearInterval(channelTimer);
   }, [serviceRunning, selectedChannel, fetchChannels, fetchSessions]);
 
   useEffect(() => {
     if (!serviceRunning || !selectedSessionId) return;
     fetchMessages(selectedSessionId);
-    const msgTimer = setInterval(() => { fetchMessages(selectedSessionId); }, 8000);
+    const msgTimer = setInterval(() => { fetchMessages(selectedSessionId); }, IS_WEB ? 30_000 : 8000);
     return () => clearInterval(msgTimer);
   }, [serviceRunning, selectedSessionId, fetchMessages]);
+
+  useEffect(() => {
+    if (!IS_WEB) return;
+    return onWsEvent((event) => {
+      if (event === "im:channel_status") fetchChannels();
+      if (event === "im:new_message") {
+        if (selectedChannel) fetchSessions(selectedChannel);
+        if (selectedSessionId) fetchMessages(selectedSessionId);
+      }
+    });
+  }, [fetchChannels, fetchSessions, fetchMessages, selectedChannel, selectedSessionId]);
 
   const handleSelectChannel = useCallback(async (ch: string) => {
     setSelectedChannel(ch);
@@ -468,22 +480,18 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
   const fetchBots = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiBase}/api/agents/bots`);
-      if (res.ok) {
-        const data = await res.json();
-        setBots(data.bots || []);
-      }
+      const res = await safeFetch(`${apiBase}/api/agents/bots`);
+      const data = await res.json();
+      setBots(data.bots || []);
     } catch (e) { console.warn("Failed to fetch bots:", e); }
     setLoading(false);
   }, [apiBase]);
 
   const fetchProfiles = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBase}/api/agents/profiles`);
-      if (res.ok) {
-        const data = await res.json();
-        setProfiles(data.profiles || []);
-      }
+      const res = await safeFetch(`${apiBase}/api/agents/profiles`);
+      const data = await res.json();
+      setProfiles(data.profiles || []);
     } catch { /* ignore */ }
   }, [apiBase]);
 
@@ -536,21 +544,14 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
             credentials: editingBot.credentials,
           };
 
-      const res = await fetch(url, {
+      await safeFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
-      if (res.ok) {
-        closeEditor();
-        fetchBots();
-        showToast(t("im.botSaveSuccess"), "ok");
-      } else {
-        const data = await res.json().catch(() => ({}));
-        const detail = typeof data.detail === "string" ? data.detail : t("im.botSaveFailed");
-        showToast(detail, "err");
-      }
+      closeEditor();
+      fetchBots();
+      showToast(t("im.botSaveSuccess"), "ok");
     } catch (e) {
       showToast(String(e) || t("im.botSaveFailed"), "err");
     }
@@ -559,15 +560,10 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
 
   const handleDelete = async (botId: string) => {
     try {
-      const res = await fetch(`${apiBase}/api/agents/bots/${botId}`, { method: "DELETE" });
-      if (res.ok) {
-        setConfirmDeleteId(null);
-        fetchBots();
-        showToast(t("im.botDeleteSuccess"), "ok");
-      } else {
-        const data = await res.json().catch(() => ({}));
-        showToast(typeof data.detail === "string" ? data.detail : t("im.botDeleteFailed"), "err");
-      }
+      await safeFetch(`${apiBase}/api/agents/bots/${botId}`, { method: "DELETE" });
+      setConfirmDeleteId(null);
+      fetchBots();
+      showToast(t("im.botDeleteSuccess"), "ok");
     } catch (e) {
       showToast(String(e) || t("im.botDeleteFailed"), "err");
     }
@@ -575,15 +571,13 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
 
   const handleToggle = async (bot: IMBot) => {
     try {
-      const res = await fetch(`${apiBase}/api/agents/bots/${bot.id}/toggle`, {
+      await safeFetch(`${apiBase}/api/agents/bots/${bot.id}/toggle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !bot.enabled }),
       });
-      if (res.ok) {
-        fetchBots();
-        showToast(t("im.botToggleSuccess"), "ok");
-      }
+      fetchBots();
+      showToast(t("im.botToggleSuccess"), "ok");
     } catch { /* ignore */ }
   };
 

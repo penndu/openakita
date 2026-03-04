@@ -12,6 +12,7 @@ Provides HTTP API for the frontend to manage scheduled tasks:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Request
@@ -20,6 +21,15 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _notify_scheduler_change(action: str = "update") -> None:
+    """Fire-and-forget WS broadcast for scheduler state changes."""
+    try:
+        from openakita.api.routes.websocket import broadcast_event
+        asyncio.ensure_future(broadcast_event("scheduler:task_update", {"action": action}))
+    except Exception:
+        pass
 
 
 def _get_scheduler(request: Request):
@@ -120,6 +130,7 @@ async def create_task(request: Request, body: TaskCreateRequest):
     task.enabled = body.enabled
 
     task_id = await scheduler.add_task(task)
+    _notify_scheduler_change("create")
     return {"status": "ok", "task_id": task_id, "task": task.to_dict()}
 
 
@@ -184,6 +195,7 @@ async def update_task(request: Request, task_id: str, body: TaskUpdateRequest):
             await scheduler.disable_task(task_id)
 
     updated = scheduler.get_task(task_id)
+    _notify_scheduler_change("update")
     return {"status": "ok", "task": updated.to_dict() if updated else None}
 
 
@@ -205,6 +217,7 @@ async def delete_task(request: Request, task_id: str):
     if not success:
         return {"error": "Delete failed"}
 
+    _notify_scheduler_change("delete")
     return {"status": "ok", "task_id": task_id}
 
 
@@ -225,6 +238,7 @@ async def toggle_task(request: Request, task_id: str):
         await scheduler.enable_task(task_id)
 
     updated = scheduler.get_task(task_id)
+    _notify_scheduler_change("toggle")
     return {"status": "ok", "task": updated.to_dict() if updated else None}
 
 
@@ -239,6 +253,7 @@ async def trigger_task(request: Request, task_id: str):
     if execution is None:
         return {"error": "Task not found or trigger failed"}
 
+    _notify_scheduler_change("trigger")
     return {"status": "ok", "execution": execution.to_dict()}
 
 

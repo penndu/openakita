@@ -5,6 +5,8 @@ import {
   IconPlay, IconClock, IconCalendar, IconSearch,
   DotGreen, DotGray, DotYellow, DotRed,
 } from "../icons";
+import { safeFetch } from "../providers";
+import { IS_WEB, onWsEvent } from "../platform";
 
 type ScheduledTask = {
   id: string;
@@ -268,11 +270,9 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
     if (!serviceRunning) return;
     if (showLoading) setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/scheduler/tasks`);
-      if (res.ok) {
-        const data = await res.json();
-        setTasks(data.tasks || []);
-      }
+      const res = await safeFetch(`${API_BASE}/api/scheduler/tasks`);
+      const data = await res.json();
+      setTasks(data.tasks || []);
     } catch { /* ignore */ }
     if (showLoading) setLoading(false);
   }, [serviceRunning]);
@@ -280,11 +280,9 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   const fetchChannels = useCallback(async () => {
     if (!serviceRunning) return;
     try {
-      const res = await fetch(`${API_BASE}/api/scheduler/channels`);
-      if (res.ok) {
-        const data = await res.json();
-        setChannels(data.channels || []);
-      }
+      const res = await safeFetch(`${API_BASE}/api/scheduler/channels`);
+      const data = await res.json();
+      setChannels(data.channels || []);
     } catch { /* ignore */ }
   }, [serviceRunning]);
 
@@ -292,9 +290,16 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
 
   useEffect(() => {
     if (!serviceRunning) return;
-    const interval = setInterval(() => fetchTasks(false), 10_000);
+    const interval = setInterval(() => fetchTasks(false), IS_WEB ? 60_000 : 10_000);
     return () => clearInterval(interval);
   }, [serviceRunning, fetchTasks]);
+
+  useEffect(() => {
+    if (!IS_WEB) return;
+    return onWsEvent((event) => {
+      if (event === "scheduler:task_update") fetchTasks(false);
+    });
+  }, [fetchTasks]);
 
   const showMsg = (text: string, ok: boolean) => {
     setMessage({ text, ok });
@@ -353,13 +358,13 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
 
       let res: Response;
       if (editingId) {
-        res = await fetch(`${API_BASE}/api/scheduler/tasks/${editingId}`, {
+        res = await safeFetch(`${API_BASE}/api/scheduler/tasks/${editingId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
       } else {
-        res = await fetch(`${API_BASE}/api/scheduler/tasks`, {
+        res = await safeFetch(`${API_BASE}/api/scheduler/tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -384,7 +389,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
     if (!confirm(t("scheduler.confirmDelete", { name: task.name }))) return;
     setBusy(true);
     try {
-      const res = await fetch(`${API_BASE}/api/scheduler/tasks/${task.id}`, { method: "DELETE" });
+      const res = await safeFetch(`${API_BASE}/api/scheduler/tasks/${task.id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.error) {
         showMsg(data.error, false);
@@ -398,7 +403,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
 
   const toggleTask = async (task: ScheduledTask) => {
     try {
-      const res = await fetch(`${API_BASE}/api/scheduler/tasks/${task.id}/toggle`, { method: "POST" });
+      const res = await safeFetch(`${API_BASE}/api/scheduler/tasks/${task.id}/toggle`, { method: "POST" });
       const data = await res.json();
       if (!data.error) await fetchTasks();
     } catch { /* ignore */ }
@@ -406,7 +411,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
 
   const triggerTask = async (task: ScheduledTask) => {
     try {
-      const res = await fetch(`${API_BASE}/api/scheduler/tasks/${task.id}/trigger`, { method: "POST" });
+      const res = await safeFetch(`${API_BASE}/api/scheduler/tasks/${task.id}/trigger`, { method: "POST" });
       const data = await res.json();
       if (data.error) {
         showMsg(data.error, false);
