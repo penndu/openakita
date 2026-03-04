@@ -118,9 +118,16 @@ class SkillStoreClient:
         except Exception as e:
             logger.debug(f"Failed to write origin tracking: {e}")
 
-    async def install_skill(self, install_url: str, target_dir: Path | None = None) -> Path:
+    async def install_skill(
+        self,
+        install_url: str,
+        target_dir: Path | None = None,
+        *,
+        skill_id: str | None = None,
+    ) -> Path:
         """安装 Skill 到本地
 
+        优先从平台缓存下载 ZIP，失败时 fallback 到 git clone。
         install_url 格式: owner/repo@skill_name 或完整 git URL
         """
         if target_dir is None:
@@ -141,33 +148,84 @@ class SkillStoreClient:
             logger.info(f"Skill {skill_name} already exists, updating...")
             shutil.rmtree(skill_dir)
 
+        # Strategy 1: Download cached ZIP from platform
+        if skill_id:
+            try:
+                installed = await self._install_from_platform_cache(skill_id, skill_name, skill_dir)
+                if installed:
+                    self._write_origin(skill_dir, install_url)
+                    logger.info(f"Installed skill from platform cache: {skill_name} -> {skill_dir}")
+                    return skill_dir
+            except Exception as e:
+                logger.debug(f"Platform cache download failed for {skill_id}: {e}")
+                if skill_dir.exists():
+                    shutil.rmtree(skill_dir, ignore_errors=True)
+
+        # Strategy 2: git clone fallback
         try:
-            git_exe = shutil.which("git")
-            if git_exe is None:
-                raise FileNotFoundError("git not found in PATH")
-
-            result = subprocess.run(
-                [git_exe, "clone", "--depth=1", repo_part, str(skill_dir)],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(f"git clone failed: {result.stderr}")
-
-            git_dir = skill_dir / ".git"
-            if git_dir.exists():
-                shutil.rmtree(git_dir)
-
-            self._write_origin(skill_dir, install_url)
-
-            logger.info(f"Installed skill: {skill_name} -> {skill_dir}")
-            return skill_dir
-
+            installed = await self._install_via_git(repo_part, skill_name, skill_dir)
+            if installed:
+                self._write_origin(skill_dir, install_url)
+                logger.info(f"Installed skill via git: {skill_name} -> {skill_dir}")
+                return skill_dir
         except Exception as e:
+            logger.debug(f"git clone failed for {skill_name}: {e}")
             if skill_dir.exists():
                 shutil.rmtree(skill_dir, ignore_errors=True)
-            raise RuntimeError(f"Failed to install skill '{skill_name}': {e}") from e
+
+        raise RuntimeError(
+            f"Failed to install skill '{skill_name}': "
+            "neither platform cache nor git clone succeeded"
+        )
+
+    async def _install_from_platform_cache(
+        self, skill_id: str, skill_name: str, skill_dir: Path
+    ) -> bool:
+        """Download cached ZIP from platform and extract."""
+        import io
+        import zipfile
+
+        client = await self._get_client()
+        resp = await client.get(
+            f"/skills/{skill_id}/download",
+            follow_redirects=True,
+            timeout=60.0,
+        )
+        if resp.status_code != 200:
+            return False
+
+        data = resp.content
+        if len(data) < 22:  # minimum ZIP size
+            return False
+
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            zf.extractall(skill_dir)
+
+        skill_md = skill_dir / "SKILL.md"
+        return skill_md.exists()
+
+    @staticmethod
+    async def _install_via_git(repo_url: str, skill_name: str, skill_dir: Path) -> bool:
+        """Clone from git (original strategy)."""
+        git_exe = shutil.which("git")
+        if git_exe is None:
+            raise FileNotFoundError("git not found in PATH")
+
+        result = subprocess.run(
+            [git_exe, "clone", "--depth=1", repo_url, str(skill_dir)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"git clone failed: {result.stderr}")
+
+        git_dir = skill_dir / ".git"
+        if git_dir.exists():
+            shutil.rmtree(git_dir)
+
+        return True
 
     async def rate(self, skill_id: str, score: int, comment: str = "", token: str = "") -> dict[str, Any]:
         client = await self._get_client()

@@ -215,7 +215,8 @@ export async function onDragDrop(
 export type UpdateInfo = {
   version: string;
   downloadAndInstall: (
-    onProgress?: (event: { event: string; data: any }) => void,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onProgress?: (progress: { event: string; data?: any }) => void,
   ) => Promise<void>;
 };
 

@@ -942,6 +942,42 @@ _GITHUB_ZIP_MIRRORS: list[str] = [
 ]
 
 
+def _try_platform_skill_download(skill_id: str, dest_dir: Path) -> bool:
+    """Try downloading a cached skill ZIP from the OpenAkita platform.
+
+    Returns True if successful, False otherwise.
+    """
+    import io
+    import urllib.request
+    import zipfile
+
+    from openakita.config import settings
+
+    hub_url = (getattr(settings, "hub_api_url", "") or "").rstrip("/")
+    if not hub_url:
+        return False
+
+    url = f"{hub_url}/skills/{skill_id}/download"
+    headers = {"User-Agent": "OpenAkita-SetupCenter"}
+    api_key = getattr(settings, "hub_api_key", "") or ""
+    if api_key:
+        headers["X-Akita-Key"] = api_key
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        if len(data) < 22:
+            return False
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            zf.extractall(dest_dir)
+        skill_md = dest_dir / "SKILL.md"
+        return skill_md.exists()
+    except Exception:
+        return False
+
+
 def _download_github_zip(repo_owner: str, repo_name: str, dest_dir: Path) -> None:
     """通过 GitHub Archive API 下载仓库 ZIP 并解压到 dest_dir（不依赖 git）。
 
@@ -1118,7 +1154,6 @@ def install_skill(workspace_dir: str, url: str) -> None:
             repo_part, requested_skill = url.split("@", 1)
             requested_skill = requested_skill.strip().replace("\\", "/").strip("/")
             if not requested_skill:
-                # "owner/repo@" → 使用仓库名作为技能名
                 requested_skill = repo_part.split("/")[-1]
         else:
             repo_part = url
@@ -1131,7 +1166,18 @@ def install_skill(workspace_dir: str, url: str) -> None:
         if target.exists():
             raise ValueError(f"技能目录已存在: {target}")
 
-        # 克隆/下载到临时目录，然后提取目标技能子目录
+        # Strategy 1: Try platform cache first
+        platform_skill_id = f"{owner}-{repo}-{skill_name}".lower().replace("/", "-")
+        if _try_platform_skill_download(platform_skill_id, target):
+            try:
+                origin_file = target / ".openakita-source"
+                origin_file.write_text(url, encoding="utf-8")
+            except Exception:
+                pass
+            _json_print({"status": "ok", "skill_dir": str(target), "source": "platform-cache"})
+            return
+
+        # Strategy 2: git clone / ZIP download
         tmp_parent = Path(tempfile.mkdtemp(prefix="openakita_skill_"))
         tmp_dir = tmp_parent / "repo"
         try:
