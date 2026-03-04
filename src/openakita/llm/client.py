@@ -176,8 +176,19 @@ class LLMClient:
         Returns:
             True 表示成功重载，False 表示配置文件不可用。
         """
-        if not self._config_path or not self._config_path.exists():
-            logger.warning("reload() called but no config_path available")
+        # 后端可能在配置文件尚不存在时启动（如自动启动），此时 _config_path 为 None。
+        # 用户随后通过 Setup Center 创建了配置文件并触发 reload，
+        # 这里需要重新检测默认路径，否则 reload 会永久失效。
+        if not self._config_path:
+            default = get_default_config_path()
+            if default.exists():
+                self._config_path = default
+                logger.info(f"reload(): discovered config at {default}")
+            else:
+                logger.warning("reload() called but no config_path available")
+                return False
+        if not self._config_path.exists():
+            logger.warning("reload() called but config file not found: %s", self._config_path)
             return False
         try:
             # Re-read .env so newly written API keys are available in os.environ

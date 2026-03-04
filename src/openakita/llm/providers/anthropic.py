@@ -54,6 +54,13 @@ class AnthropicProvider(LLMProvider):
         b = self.base_url
         return f"{b}/messages" if b.endswith("/v1") else f"{b}/v1/messages"
 
+    def _is_local_endpoint(self) -> bool:
+        """检查是否为本地端点"""
+        url = self.base_url.lower()
+        return any(host in url for host in (
+            "localhost", "127.0.0.1", "0.0.0.0", "[::1]",
+        ))
+
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端
 
@@ -87,14 +94,19 @@ class AnthropicProvider(LLMProvider):
             proxy = get_proxy_config()
             transport = get_httpx_transport()  # IPv4-only 支持
 
+            is_local = self._is_local_endpoint()
+
             client_kwargs = {
                 "timeout": build_httpx_timeout(self.config.timeout, default=60.0),
                 "follow_redirects": True,
             }
 
-            if proxy:
+            if proxy and not is_local:
                 client_kwargs["proxy"] = proxy
                 logger.debug(f"[Anthropic] Using proxy: {proxy}")
+
+            if is_local:
+                client_kwargs["trust_env"] = False
 
             if transport:
                 client_kwargs["transport"] = transport

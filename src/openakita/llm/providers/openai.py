@@ -92,12 +92,13 @@ class OpenAIProvider(LLMProvider):
             # 获取代理和网络配置
             proxy = get_proxy_config()
             transport = get_httpx_transport()  # IPv4-only 支持
+            is_local = self._is_local_endpoint()
 
             # 本地端点（Ollama 等）自动放大 read timeout
             # 本地推理受 CPU/GPU 资源限制，推理时间远大于云端 API
             # 默认 read timeout 可能导致频繁超时被误判为故障
             timeout_value = self.config.timeout
-            if self._is_local_endpoint():
+            if is_local:
                 base_timeout = build_httpx_timeout(timeout_value, default=60.0)
                 current_read = (
                     base_timeout.read if isinstance(base_timeout, httpx.Timeout) else 60.0
@@ -114,9 +115,16 @@ class OpenAIProvider(LLMProvider):
                 "follow_redirects": True,
             }
 
-            if proxy:
+            if proxy and not is_local:
                 client_kwargs["proxy"] = proxy
                 logger.debug(f"[OpenAI] Using proxy: {proxy}")
+
+            if is_local:
+                # Windows 注册表中可能残留代理设置（Clash / V2Ray 等工具修改
+                # IE 代理后关闭，不一定清除注册表）。httpx 默认 trust_env=True
+                # 会通过 getproxies() 读取这些设置，导致 localhost 请求被路由到
+                # 不存在的代理端口而失败。本地端点必须禁用此行为。
+                client_kwargs["trust_env"] = False
 
             if transport:
                 client_kwargs["transport"] = transport
