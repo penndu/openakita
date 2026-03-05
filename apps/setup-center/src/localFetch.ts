@@ -10,14 +10,9 @@
  * 仅拦截 localhost 请求，其他请求仍走浏览器原生 fetch。
  * 在非 Tauri 环境（如 `npm run dev` 的浏览器）下不做任何拦截。
  */
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
-
 const LOCAL_RE = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(?:\/|$)/;
 
 export function installLocalFetchOverride(): void {
-  // Only intercept in Tauri desktop runtime.
-  // In browser dev server (`npm run dev`), Tauri IPC bridge doesn't exist
-  // and the plugin would throw — skip entirely so native fetch works as-is.
   if (
     typeof window === "undefined" ||
     !("__TAURI_INTERNALS__" in window)
@@ -26,6 +21,11 @@ export function installLocalFetchOverride(): void {
   }
 
   const nativeFetch = window.fetch.bind(window);
+
+  let tauriFetchFn: typeof fetch | null = null;
+  import("@tauri-apps/plugin-http").then((mod) => {
+    tauriFetchFn = mod.fetch as typeof fetch;
+  });
 
   window.fetch = async function (
     input: RequestInfo | URL,
@@ -41,10 +41,10 @@ export function installLocalFetchOverride(): void {
       return nativeFetch(input, init);
     }
 
-    // Route through Tauri HTTP plugin (Rust reqwest + NO_PROXY env).
-    // No fallback to native fetch: on macOS with proxy software, native fetch
-    // also goes through WebKit system proxy and would fail the same way.
-    // Errors (connection refused, timeout, etc.) propagate to the caller.
-    return tauriFetch(input, init);
+    if (!tauriFetchFn) {
+      const mod = await import("@tauri-apps/plugin-http");
+      tauriFetchFn = mod.fetch as typeof fetch;
+    }
+    return tauriFetchFn(input, init);
   };
 }
