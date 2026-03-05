@@ -202,6 +202,7 @@ jobs:
         if: steps.ios_signing.outputs.has_signing == 'true'
         env:
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          PP_NAME: ${{ steps.pp.outputs.name }}
         run: |
           cat > $RUNNER_TEMP/ExportOptions.plist << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -209,9 +210,16 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key>
-            <string>app-store</string>
+            <string>app-store-connect</string>
             <key>teamID</key>
             <string>${IOS_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.openakita.mobile</key>
+              <string>${PP_NAME}</string>
+            </dict>
           </dict>
           </plist>
           PLIST
