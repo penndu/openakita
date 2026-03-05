@@ -41,7 +41,8 @@ jobs:
       - name: Verify extras install correctly
         run: |
           python -m venv /tmp/test-all
-          /tmp/test-all/bin/pip install "dist/openakita-*.whl[all]"
+          WHL=$(ls dist/*.whl)
+          /tmp/test-all/bin/pip install "${WHL}[all]"
           /tmp/test-all/bin/openakita --help
 
       - name: Upload wheel artifact
