@@ -556,9 +556,8 @@ Function PageLeaveEnvCheck
  ; venv
  StrCpy $R8 "$R0\venv"
  ${If} ${FileExists} "$R8\*.*"
-  ExecWait 'cmd /c attrib -R /S /D "$R8"' $0
   System::Call 'kernel32::SetEnvironmentVariable(t "NSIS_DEL_PATH", t R8)'
-  ExecWait 'powershell -NoProfile -WindowStyle Hidden -Command "try { Remove-Item -LiteralPath $env:NSIS_DEL_PATH -Recurse -Force -ErrorAction Stop } catch { exit 1 }"' $0
+  ExecWait 'powershell -NoProfile -WindowStyle Hidden -Command "try { Get-ChildItem -Path $env:NSIS_DEL_PATH -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object { $$_.IsReadOnly = $$false }; Remove-Item -LiteralPath $env:NSIS_DEL_PATH -Recurse -Force -ErrorAction Stop } catch { exit 1 }"' $0
   ${If} $0 != 0
    ExecWait 'cmd /c rd /s /q "$R8"'
   ${EndIf}
@@ -567,9 +566,8 @@ Function PageLeaveEnvCheck
  ; runtime
  StrCpy $R8 "$R0\runtime"
  ${If} ${FileExists} "$R8\*.*"
-  ExecWait 'cmd /c attrib -R /S /D "$R8"' $0
   System::Call 'kernel32::SetEnvironmentVariable(t "NSIS_DEL_PATH", t R8)'
-  ExecWait 'powershell -NoProfile -WindowStyle Hidden -Command "try { Remove-Item -LiteralPath $env:NSIS_DEL_PATH -Recurse -Force -ErrorAction Stop } catch { exit 1 }"' $0
+  ExecWait 'powershell -NoProfile -WindowStyle Hidden -Command "try { Get-ChildItem -Path $env:NSIS_DEL_PATH -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object { $$_.IsReadOnly = $$false }; Remove-Item -LiteralPath $env:NSIS_DEL_PATH -Recurse -Force -ErrorAction Stop } catch { exit 1 }"' $0
   ${If} $0 != 0
    ExecWait 'cmd /c rd /s /q "$R8"'
   ${EndIf}
