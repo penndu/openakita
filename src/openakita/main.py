@@ -84,7 +84,11 @@ def get_agent() -> Agent:
 
 
 async def _init_orchestrator():
-    """Initialize the orchestrator if multi-agent mode is enabled."""
+    """Initialize the orchestrator (idempotent).
+
+    Safe to call multiple times — skips if already created.
+    Binds to ``_message_gateway`` when available; deploys presets.
+    """
     global _orchestrator
     if _orchestrator is not None:
         return
@@ -92,7 +96,12 @@ async def _init_orchestrator():
     _orchestrator = AgentOrchestrator()
     if _message_gateway:
         _orchestrator.set_gateway(_message_gateway)
-    logger.info("[MultiAgent] AgentOrchestrator initialized (runtime)")
+    logger.info("[MultiAgent] AgentOrchestrator initialized")
+    try:
+        from openakita.agents.presets import ensure_presets_on_mode_enable
+        ensure_presets_on_mode_enable(settings.data_dir / "agents")
+    except Exception as e:
+        logger.warning(f"[Main] Failed to deploy presets on orchestrator init: {e}")
 
 
 # ==================== IM 通道依赖自动安装 ====================
@@ -605,18 +614,8 @@ async def start_im_channels(agent_or_master):
     )
 
     # 初始化 AgentOrchestrator (多 Agent 模式)
-    global _orchestrator
     if settings.multi_agent_enabled:
-        from openakita.agents.orchestrator import AgentOrchestrator
-        _orchestrator = AgentOrchestrator()
-        _orchestrator.set_gateway(_message_gateway)
-        logger.info("[MultiAgent] AgentOrchestrator initialized")
-        # Deploy system presets on orchestrator initialization
-        try:
-            from openakita.agents.presets import ensure_presets_on_mode_enable
-            ensure_presets_on_mode_enable(settings.data_dir / "agents")
-        except Exception as e:
-            logger.warning(f"[Main] Failed to deploy presets: {e}")
+        await _init_orchestrator()
 
     # Desktop Chat per-session Agent pool (always initialized for concurrent streaming)
     global _desktop_pool
@@ -1563,6 +1562,12 @@ def serve(
 
         if im_channels:
             console.print(f"[green]✓[/green] IM 通道已启动: {', '.join(im_channels)}")
+
+        # 确保多 Agent 模式下 Orchestrator 已初始化
+        # （即使 start_im_channels 因无 IM 通道启用而提前返回，Orchestrator 仍需可用）
+        if settings.multi_agent_enabled and _orchestrator is None:
+            await _init_orchestrator()
+            logger.info("[Main] Orchestrator created as fallback (no IM channels path)")
 
         # 注入 shutdown_event 到网关（供终极重启指令使用）
         if _message_gateway is not None:

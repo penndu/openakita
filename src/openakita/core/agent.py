@@ -344,6 +344,10 @@ class Agent:
         self.bu_runner = None
         self._builtin_mcp_count = 0
 
+        # 恢复运行时状态（必须在工具目录构建之前，否则 multi_agent_enabled 等可能还是旧值）
+        from ..config import runtime_state
+        runtime_state.load()
+
         # 系统工具目录（渐进式披露）
         _all_tools = list(BASE_TOOLS)
         if _DESKTOP_AVAILABLE:
@@ -374,13 +378,10 @@ class Agent:
         self.profile_manager = get_profile_manager()
 
         # ==================== 人格系统 + 活人感 + 表情包 ====================
-        # 恢复上次用户设置的运行时状态（角色、活人感开关等）
-        from ..config import runtime_state
         from ..tools.sticker import StickerEngine
         from .persona import PersonaManager
         from .proactive import ProactiveConfig, ProactiveEngine
         from .trait_miner import TraitMiner
-        runtime_state.load()
 
         # 人格管理器
         self.persona_manager = PersonaManager(
