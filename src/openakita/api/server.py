@@ -205,7 +205,13 @@ def create_app(
         allow_headers=["*"],
     )
     if cors_origins:
-        cors_kwargs["allow_origins"] = [o.strip() for o in cors_origins.split(",") if o.strip()]
+        origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
+        # Always include Capacitor mobile origins so mobile apps work
+        # regardless of what the user configured in CORS_ORIGINS.
+        for cap_origin in ("http://localhost", "capacitor://localhost"):
+            if cap_origin not in origins:
+                origins.append(cap_origin)
+        cors_kwargs["allow_origins"] = origins
     else:
         cors_kwargs["allow_origin_regex"] = r".*"
     app.add_middleware(CORSMiddleware, **cors_kwargs)
