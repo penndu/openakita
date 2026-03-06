@@ -173,24 +173,15 @@ export async function login(
   apiBase = "",
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    let fetchOpts: RequestInit;
-    if (IS_CAPACITOR) {
-      // Capacitor cross-origin: use form-urlencoded to avoid CORS preflight.
-      // JSON + POST triggers OPTIONS preflight which Android/iOS WebView may reject.
-      fetchOpts = {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ password }),
-        signal: AbortSignal.timeout(10_000),
-      };
-    } else {
-      fetchOpts = {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
-        credentials: "include",
-        signal: AbortSignal.timeout(10_000),
-      };
+    const fetchOpts: RequestInit = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+      signal: AbortSignal.timeout(10_000),
+    };
+    // Web mode: use credentials for httpOnly refresh cookie
+    if (!IS_CAPACITOR) {
+      fetchOpts.credentials = "include";
     }
     const res = await fetch(`${apiBase}/api/auth/login`, fetchOpts);
     if (!res.ok) {
