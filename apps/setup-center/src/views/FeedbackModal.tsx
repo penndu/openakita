@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
+import { downloadFile, showInFolder } from "../platform";
 import { IconX, IconInfo } from "../icons";
 import { safeFetch } from "../providers";
 
@@ -453,11 +453,9 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
                     setDownloading(true);
                     try {
                       const ts = Math.floor(Date.now() / 1000);
-                      const dest = await invoke<string>("download_file", {
-                        url: submitResult.downloadUrl,
-                        filename: `openakita-feedback-${ts}.zip`,
-                      });
-                      await invoke("show_item_in_folder", { path: dest });
+                      const filename = `openakita-feedback-${ts}.zip`;
+                      const dest = await downloadFile(submitResult.downloadUrl, filename);
+                      await showInFolder(dest);
                     } catch (err: any) {
                       setSubmitResult((prev) => prev ? {
                         ...prev,

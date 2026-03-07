@@ -113,6 +113,28 @@ type QueuedMessage = {
   convId: string;
 };
 
+/**
+ * 将消息数组安全写入 localStorage。
+ * 策略：先尝试完整保存；若配额溢出则剥离 thinkingChain 后重试
+ * （thinkingChain 可由后端 chain_summary 重建）。
+ */
+function saveMessagesToStorage(key: string, msgs: ChatMessage[]): boolean {
+  const base = msgs.map(({ streaming, ...rest }) => rest);
+  try {
+    localStorage.setItem(key, JSON.stringify(base));
+    return true;
+  } catch {
+    // 配额溢出 → 剥离最大数据块后重试
+    const slim = msgs.map(({ streaming, thinkingChain, ...rest }) => rest);
+    try {
+      localStorage.setItem(key, JSON.stringify(slim));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 // ─── 从后端 chain_summary 重建前端 ChainGroup ───
 function buildChainFromSummary(summary: ChainSummaryItem[]): ChainGroup[] {
   return summary.map((s) => {
@@ -205,7 +227,7 @@ function patchMessagesWithBackend(
 
     const patches: Partial<ChatMessage> = {};
 
-    if (!m.content && backend.content && !m.askUser) {
+    if (backend.content && !m.askUser && (!m.content || m.content.length < backend.content.length)) {
       patches.content = backend.content;
     }
 
@@ -1922,12 +1944,7 @@ export function ChatView({
   const flushCurrentConversationToStorage = useCallback(() => {
     const convId = latestActiveConvIdRef.current;
     if (!convId) return;
-    try {
-      const toSave = latestMessagesRef.current.map(({ streaming, ...rest }) => rest);
-      localStorage.setItem(STORAGE_KEY_MSGS_PREFIX + convId, JSON.stringify(toSave));
-    } catch {
-      // ignore sync flush failures
-    }
+    saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + convId, latestMessagesRef.current);
   }, [STORAGE_KEY_MSGS_PREFIX]);
 
   useEffect(() => {
@@ -1935,16 +1952,14 @@ export function ChatView({
     if (streamContexts.current.get(activeConvId)?.isStreaming) return;
     if (saveMessagesTimerRef.current) clearTimeout(saveMessagesTimerRef.current);
     saveMessagesTimerRef.current = setTimeout(() => {
-      try {
-        const toSave = messages.map(({ streaming, ...rest }) => rest);
-        localStorage.setItem(STORAGE_KEY_MSGS_PREFIX + activeConvId, JSON.stringify(toSave));
-      } catch {
+      if (!saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + activeConvId, messages)) {
         try {
           const convs: ChatConversation[] = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || "[]");
           if (convs.length > 1) {
             const oldest = convs[convs.length - 1];
             localStorage.removeItem(STORAGE_KEY_MSGS_PREFIX + oldest.id);
           }
+          saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + activeConvId, messages);
         } catch { /* give up */ }
       }
     }, 300);
@@ -2034,12 +2049,7 @@ export function ChatView({
       if (seq === hydrateSeqRef.current) setMessages(chosen);
 
       if (backendMsgs.length >= localCount) {
-        try {
-          const toSave = backendMsgs.map(({ streaming, ...rest }) => rest);
-          localStorage.setItem(STORAGE_KEY_MSGS_PREFIX + convId, JSON.stringify(toSave));
-        } catch {
-          // ignore localStorage write failures
-        }
+        saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + convId, backendMsgs);
       }
     } catch {
       if (seq === hydrateSeqRef.current) setMessages(localMsgs);
@@ -2284,14 +2294,6 @@ export function ChatView({
     if (!serviceRunning || !activeConvId || isCurrentConvStreaming) return;
     if (patchedConvsRef.current.has(activeConvId)) return;
 
-    const hasIncomplete = messages.some(
-      (m) => m.role === "assistant" && !m.askUser && (
-        !m.content ||
-        m.thinkingChain?.some((g) => !g.entries.length && !g.durationMs)
-      ),
-    );
-    if (!hasIncomplete) return;
-
     patchedConvsRef.current.add(activeConvId);
     const convId = activeConvId;
 
@@ -2488,10 +2490,7 @@ export function ChatView({
   const newConversation = useCallback(() => {
     const id = genId();
     if (activeConvId && messages.length > 0) {
-      try {
-        const toSave = messages.map(({ streaming, ...rest }) => rest);
-        localStorage.setItem(STORAGE_KEY_MSGS_PREFIX + activeConvId, JSON.stringify(toSave));
-      } catch {}
+      saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + activeConvId, messages);
     }
     setActiveConvId(id);
     setMessages([]);
@@ -3352,10 +3351,7 @@ export function ChatView({
         try { ctx.reader?.cancel().catch(() => {}); } catch {}
         ctx.reader = null;
         if (ctx.pollingTimer) { clearInterval(ctx.pollingTimer); ctx.pollingTimer = null; }
-        try {
-          const toSave = ctx.messages.map(({ streaming, ...rest }) => rest);
-          localStorage.setItem(STORAGE_KEY_MSGS_PREFIX + thisConvId, JSON.stringify(toSave));
-        } catch {}
+        saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + thisConvId, ctx.messages);
         if (activeConvIdRef.current === thisConvId) {
           setMessages(ctx.messages);
           setDisplayActiveSubAgents([]);
