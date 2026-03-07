@@ -1695,9 +1695,9 @@ export function App() {
           rpm_limit: Number.isFinite(Number(e?.rpm_limit)) ? Number(e?.rpm_limit) : 0,
           note: e?.note ? String(e.note) : null,
           pricing_tiers: Array.isArray(e?.pricing_tiers) ? e.pricing_tiers.map((t: any) => ({
-            max_input: Number(t?.max_input ?? 0),
-            input_price: Number(t?.input_price ?? 0),
-            output_price: Number(t?.output_price ?? 0),
+            max_input: Number.isFinite(Number(t?.max_input)) ? Number(t.max_input) : 0,
+            input_price: Number.isFinite(Number(t?.input_price)) ? Number(t.input_price) : 0,
+            output_price: Number.isFinite(Number(t?.output_price)) ? Number(t.output_price) : 0,
           })) : undefined,
         }))
         .filter((e: any) => e.name);
@@ -2465,9 +2465,9 @@ export function App() {
       timeout: typeof ep.timeout === "number" ? ep.timeout : 180,
       rpmLimit: typeof ep.rpm_limit === "number" ? ep.rpm_limit : 0,
       pricingTiers: Array.isArray(ep.pricing_tiers) ? ep.pricing_tiers.map((t: any) => ({
-        max_input: Number(t.max_input ?? 0),
-        input_price: Number(t.input_price ?? 0),
-        output_price: Number(t.output_price ?? 0),
+        max_input: Number.isFinite(Number(t?.max_input)) ? Number(t.max_input) : 0,
+        input_price: Number.isFinite(Number(t?.input_price)) ? Number(t.input_price) : 0,
+        output_price: Number.isFinite(Number(t?.output_price)) ? Number(t.output_price) : 0,
       })) : [],
     });
     setEditModalOpen(true);

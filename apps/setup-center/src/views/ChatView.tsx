@@ -1955,11 +1955,11 @@ export function ChatView({
       if (!saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + activeConvId, messages)) {
         try {
           const convs: ChatConversation[] = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || "[]");
-          if (convs.length > 1) {
-            const oldest = convs[convs.length - 1];
-            localStorage.removeItem(STORAGE_KEY_MSGS_PREFIX + oldest.id);
+          const toEvict = [...convs].reverse().find(c => c.id !== activeConvId);
+          if (toEvict) {
+            localStorage.removeItem(STORAGE_KEY_MSGS_PREFIX + toEvict.id);
+            saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + activeConvId, messages);
           }
-          saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + activeConvId, messages);
         } catch { /* give up */ }
       }
     }, 300);

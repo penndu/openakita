@@ -536,6 +536,7 @@ export function SkillManager({
   const [detailEditContent, setDetailEditContent] = useState("");
   const [detailSaving, setDetailSaving] = useState(false);
   const marketRequestId = useRef(0);
+  const detailRequestNameRef = useRef<string | null>(null);
   const { t } = useTranslation();
 
   // ── 加载已安装技能（返回 true 表示成功，false 表示出错） ──
@@ -847,6 +848,8 @@ export function SkillManager({
 
   // ── 打开技能详情弹窗 ──
   const handleViewDetail = useCallback(async (skill: SkillInfo) => {
+    const requestName = skill.name;
+    detailRequestNameRef.current = requestName;
     setDetailSkill(skill);
     setDetailEditing(false);
     setDetailEditContent("");
@@ -865,17 +868,22 @@ export function SkillManager({
       const res = await safeFetch(`${apiBaseUrl}/api/skills/${encodeURIComponent(skill.name)}/content`, {
         signal: AbortSignal.timeout(10_000),
       });
+      if (detailRequestNameRef.current !== requestName) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      if (detailRequestNameRef.current !== requestName) return;
       if (data.error) {
         setDetailContentError(data.error);
       } else {
         setDetailContent(data.content || "");
       }
     } catch (e) {
+      if (detailRequestNameRef.current !== requestName) return;
       setDetailContentError(String(e));
     } finally {
-      setDetailContentLoading(false);
+      if (detailRequestNameRef.current === requestName) {
+        setDetailContentLoading(false);
+      }
     }
   }, [serviceRunning, apiBaseUrl, t]);
 

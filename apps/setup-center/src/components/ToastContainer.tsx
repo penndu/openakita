@@ -25,8 +25,10 @@ export function ToastContainer({
   const handleErrorClick = async () => {
     if (!error) return;
     const ok = await copyToClipboard(error);
-    if (ok) onCopySuccess?.();
-    onDismissError();
+    if (ok) {
+      onCopySuccess?.();
+      onDismissError();
+    }
   };
   return (
     <div className="toastContainer">

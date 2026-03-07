@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +425,10 @@ async def update_skill_content(skill_name: str, request: Request):
     from openakita.core.agent import Agent
     from openakita.skills.parser import skill_parser
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
     new_content = body.get("content", "")
     if not new_content.strip():
         return {"error": "content is required"}
