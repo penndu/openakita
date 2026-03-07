@@ -2857,6 +2857,14 @@ export function App() {
       setError("请填写编译模型名称");
       return false;
     }
+    if (!compilerBaseUrl.trim()) {
+      setError("请填写编译端点的 Base URL");
+      return false;
+    }
+    if (!/^https?:\/\//i.test(compilerBaseUrl.trim())) {
+      setError("编译端点 Base URL 必须以 http:// 或 https:// 开头");
+      return false;
+    }
     const compilerSelectedProvider = providers.find((p) => p.slug === compilerProviderSlug) || null;
     const isCompilerLocal = isLocalProvider(compilerSelectedProvider);
     // apiKeyEnv 兜底：即使用户没有手动编辑也能生成合理的环境变量名
@@ -2918,7 +2926,7 @@ export function App() {
         name,
         provider: compilerProviderSlug || "custom",
         api_type: compilerApiType,
-        base_url: compilerBaseUrl,
+        base_url: compilerBaseUrl.trim(),
         api_key_env: effectiveCompApiKeyEnv,
         model: compilerModel.trim(),
         priority: base.compiler_endpoints.length + 1,
@@ -2987,6 +2995,14 @@ export function App() {
       setError("请填写 STT 模型名称");
       return false;
     }
+    if (!sttBaseUrl.trim()) {
+      setError("请填写 STT 端点的 Base URL");
+      return false;
+    }
+    if (!/^https?:\/\//i.test(sttBaseUrl.trim())) {
+      setError("STT 端点 Base URL 必须以 http:// 或 https:// 开头");
+      return false;
+    }
     const sttSelectedProvider = providers.find((p) => p.slug === sttProviderSlug) || null;
     const isSttLocal = isLocalProvider(sttSelectedProvider);
     const effectiveSttApiKeyEnv = sttApiKeyEnv.trim()
@@ -3045,7 +3061,7 @@ export function App() {
         name,
         provider: sttProviderSlug || "custom",
         api_type: sttApiType,
-        base_url: sttBaseUrl,
+        base_url: sttBaseUrl.trim(),
         api_key_env: effectiveSttApiKeyEnv,
         model: sttModel.trim(),
         priority: base.stt_endpoints.length + 1,
@@ -3251,6 +3267,14 @@ export function App() {
       setError("API Key 环境变量名不能为空");
       return;
     }
+    if (!editDraft.baseUrl.trim()) {
+      setError("请填写 Base URL");
+      return;
+    }
+    if (!/^https?:\/\//i.test(editDraft.baseUrl.trim())) {
+      setError("Base URL 必须以 http:// 或 https:// 开头");
+      return;
+    }
     setBusy("保存修改...");
     setError(null);
     try {
@@ -3346,6 +3370,14 @@ export function App() {
       setError("请先选择模型");
       return false;
     }
+    if (!baseUrl.trim()) {
+      setError("请填写 Base URL");
+      return false;
+    }
+    if (!/^https?:\/\//i.test(baseUrl.trim())) {
+      setError("Base URL 必须以 http:// 或 https:// 开头");
+      return false;
+    }
     const isLocal = isLocalProvider(selectedProvider);
     // 本地服务商允许空 API Key（自动填入 placeholder）
     const effectiveApiKeyValue = apiKeyValue.trim() || (isLocal ? localProviderPlaceholderKey(selectedProvider) : "");
@@ -3423,7 +3455,7 @@ export function App() {
           name,
           provider: providerSlug || (selectedProvider?.slug ?? "custom"),
           api_type: apiType,
-          base_url: baseUrl,
+          base_url: baseUrl.trim(),
           api_key_env: effectiveApiKeyEnv,
           model: selectedModelId,
           priority: normalizePriority(endpointPriority, 1),
@@ -4950,7 +4982,7 @@ export function App() {
               <div className="statusCardLabel">{t("llm.compiler")}</div>
               <div className="cardHint" style={{ fontSize: 11 }}>{t("llm.compilerHint")}</div>
             </div>
-            <button className="btnSmall btnSmallPrimary" onClick={() => { doLoadProviders(); setAddCompDialogOpen(true); }} disabled={!!busy}>
+            <button className="btnSmall btnSmallPrimary" onClick={() => { doLoadProviders(); setCompilerProviderSlug(""); setCompilerApiType("openai"); setCompilerBaseUrl(""); setCompilerApiKeyEnv(""); setCompilerApiKeyValue(""); setCompilerModel(""); setCompilerEndpointName(""); setCompilerCodingPlan(false); setCompilerModels([]); setAddCompDialogOpen(true); }} disabled={!!busy}>
               + {t("llm.addEndpoint")}
             </button>
           </div>
