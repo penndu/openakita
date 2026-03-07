@@ -4895,8 +4895,11 @@ async fn download_file(url: String, filename: String) -> Result<String, String> 
         counter += 1;
     }
 
-    // Download
-    let client = reqwest::Client::new();
+    // Download (timeout 30s to avoid hanging if backend is unreachable, e.g. on macOS)
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
     let resp = client
         .get(&url)
         .send()

@@ -79,7 +79,13 @@ export async function openExternalUrl(url: string): Promise<void> {
 // File operations (download / open / show-in-folder)
 // ---------------------------------------------------------------------------
 
-/** Download a URL to local disk (Tauri) or trigger a browser download (Web). */
+/**
+ * Download a URL to a file.
+ * - Tauri (Win/Mac/Linux): Native HTTP GET → save to user Downloads → returns path.
+ * - Web: Programmatic <a download> click; backend must send Content-Disposition: attachment
+ *   so the browser triggers download (works same-origin or cross-origin).
+ * Returns: saved path (Tauri) or filename (Web).
+ */
 export async function downloadFile(
   url: string,
   filename: string,
@@ -92,6 +98,7 @@ export async function downloadFile(
   a.href = url;
   a.download = filename;
   a.target = "_blank";
+  a.rel = "noopener noreferrer";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

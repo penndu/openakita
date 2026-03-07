@@ -447,20 +447,22 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
               <div style={{ whiteSpace: "pre-wrap" }}>{submitResult.msg}</div>
               {submitResult.downloadUrl && (
                 <button
+                  type="button"
                   disabled={downloading}
                   onClick={async () => {
                     if (!submitResult.downloadUrl) return;
                     setDownloading(true);
+                    const url = submitResult.downloadUrl;
+                    const ts = Math.floor(Date.now() / 1000);
+                    const filename = `openakita-feedback-${ts}.zip`;
                     try {
-                      const ts = Math.floor(Date.now() / 1000);
-                      const filename = `openakita-feedback-${ts}.zip`;
-                      const dest = await downloadFile(submitResult.downloadUrl, filename);
+                      const dest = await downloadFile(url, filename);
                       await showInFolder(dest);
-                    } catch (err: any) {
-                      setSubmitResult((prev) => prev ? {
-                        ...prev,
-                        msg: prev.msg + "\n" + t("feedback.downloadFailed", { error: err?.message || String(err) }),
-                      } : prev);
+                    } catch (err: unknown) {
+                      const msg = t("feedback.downloadFailed", {
+                        error: err instanceof Error ? err.message : String(err),
+                      });
+                      setSubmitResult((prev) => (prev ? { ...prev, msg: prev.msg + "\n" + msg } : prev));
                     } finally {
                       setDownloading(false);
                     }
