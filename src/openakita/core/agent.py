@@ -6113,7 +6113,6 @@ NEXT: 建议的下一步（如有）"""
                     f"storing as pending cancel"
                 )
                 self._pending_cancels[session_id] = reason
-                self.agent_state.cancel_task(reason)
         elif has_state:
             has_task = self.agent_state.current_task is not None
             task_status = self.agent_state.current_task.status.value if has_task else "N/A"
