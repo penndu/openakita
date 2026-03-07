@@ -34,6 +34,9 @@ static MANAGED_CHILD: Lazy<Mutex<Option<ManagedProcess>>> = Lazy::new(|| Mutex::
 /// 前端可查询该标记以显示"正在自动启动服务"并禁用启动/重启按钮。
 static AUTO_START_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
+static ROOT_CONFIG_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static STATE_FILE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PlatformInfo {
@@ -98,10 +101,78 @@ struct WorkspaceMeta {
     name: String,
 }
 
-fn openakita_root_dir() -> PathBuf {
+fn default_root_dir() -> PathBuf {
     home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".openakita")
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct RootConfig {
+    #[serde(default)]
+    custom_root: Option<String>,
+}
+
+fn root_config_path() -> PathBuf {
+    default_root_dir().join("root_config.json")
+}
+
+fn read_root_config() -> RootConfig {
+    let p = root_config_path();
+    let Ok(content) = fs::read_to_string(&p) else {
+        return RootConfig::default();
+    };
+    match serde_json::from_str(&content) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("warning: failed to parse {}: {e}, using defaults", p.display());
+            RootConfig::default()
+        }
+    }
+}
+
+fn write_root_config(config: &RootConfig) -> Result<(), String> {
+    let default_dir = default_root_dir();
+    fs::create_dir_all(&default_dir).map_err(|e| format!("create default root dir failed: {e}"))?;
+
+    let p = root_config_path();
+    let data = serde_json::to_string_pretty(config).map_err(|e| format!("serialize root config failed: {e}"))?;
+    fs::write(&p, data).map_err(|e| format!("write root_config.json failed: {e}"))?;
+
+    // 同步写入纯文本文件，供 NSIS 安装脚本简单读取（无需解析 JSON）
+    let txt_path = default_dir.join("custom_root.txt");
+    match &config.custom_root {
+        Some(path) if !path.is_empty() => {
+            fs::write(&txt_path, path.trim()).map_err(|e| format!("write custom_root.txt failed: {e}"))?;
+        }
+        _ => {
+            let _ = fs::remove_file(&txt_path);
+        }
+    }
+    Ok(())
+}
+
+fn openakita_root_dir() -> PathBuf {
+    if let Ok(val) = std::env::var("OPENAKITA_ROOT") {
+        if !val.is_empty() {
+            return PathBuf::from(val);
+        }
+    }
+    let config = read_root_config();
+    if let Some(ref custom) = config.custom_root {
+        if !custom.is_empty() {
+            let p = PathBuf::from(custom);
+            // 如果自定义路径所在的父目录都不可访问（如磁盘断开），回退到默认路径
+            if p.exists() || p.parent().map(|parent| parent.exists()).unwrap_or(false) {
+                return p;
+            }
+            eprintln!(
+                "WARNING: custom root dir '{}' is not accessible, falling back to default",
+                custom
+            );
+        }
+    }
+    default_root_dir()
 }
 
 fn run_dir() -> PathBuf {
@@ -173,6 +244,78 @@ fn append_onboarding_log_lines(log_path: String, lines: Vec<String>) -> Result<(
     }
     f.flush().map_err(|e| format!("flush failed: {e}"))?;
     Ok(())
+}
+
+// ── 前端日志持久化 ──
+
+const FRONTEND_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024; // 5 MB
+const FRONTEND_LOG_TRUNCATE_TO: u64 = 2 * 1024 * 1024; // 截断后保留最后 2 MB
+
+fn frontend_log_path() -> PathBuf {
+    setup_logs_dir().join("frontend.log")
+}
+
+/// 自动轮转：当文件超过 FRONTEND_LOG_MAX_BYTES 时，只保留尾部 FRONTEND_LOG_TRUNCATE_TO 字节。
+fn maybe_rotate_frontend_log(path: &Path) {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    if meta.len() <= FRONTEND_LOG_MAX_BYTES {
+        return;
+    }
+    // Read tail
+    let mut f = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let start = meta.len().saturating_sub(FRONTEND_LOG_TRUNCATE_TO);
+    if f.seek(SeekFrom::Start(start)).is_err() {
+        return;
+    }
+    let mut tail = Vec::new();
+    if f.read_to_end(&mut tail).is_err() {
+        return;
+    }
+    drop(f);
+    // Skip to next newline to avoid partial line
+    let offset = tail.iter().position(|&b| b == b'\n').map(|i| i + 1).unwrap_or(0);
+    let _ = fs::write(path, &tail[offset..]);
+}
+
+/// 前端 JS 日志批量追加到 ~/.openakita/logs/frontend.log。
+#[tauri::command]
+fn append_frontend_log(lines: Vec<String>) -> Result<(), String> {
+    if lines.is_empty() {
+        return Ok(());
+    }
+    let log_dir = setup_logs_dir();
+    fs::create_dir_all(&log_dir).map_err(|e| format!("create logs dir failed: {e}"))?;
+    let path = frontend_log_path();
+    maybe_rotate_frontend_log(&path);
+    let mut f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("open frontend log failed: {e}"))?;
+    for line in &lines {
+        writeln!(f, "{}", line).map_err(|e| format!("write line failed: {e}"))?;
+    }
+    f.flush().map_err(|e| format!("flush failed: {e}"))?;
+    Ok(())
+}
+
+/// 导出日志到用户下载目录，返回保存路径。
+#[tauri::command]
+fn save_log_export(filename: String, content: String) -> Result<String, String> {
+    let downloads = dirs_next::download_dir()
+        .or_else(dirs_next::desktop_dir)
+        .unwrap_or_else(|| openakita_root_dir().join("logs"));
+    fs::create_dir_all(&downloads).ok();
+    let path = downloads.join(&filename);
+    fs::write(&path, content.as_bytes())
+        .map_err(|e| format!("save log export failed: {e}"))?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 fn modules_dir() -> PathBuf {
@@ -323,10 +466,111 @@ fn module_definitions() -> Vec<(&'static str, &'static str, &'static str, &'stat
     vec![
         ("vector-memory", "向量记忆增强", "让 Akita 拥有长期记忆，能根据语义搜索历史对话。体积较大（约 2.5GB，含 PyTorch），安装耗时较长", &["sentence-transformers", "chromadb", "regex>=2023.6.3"], 2500, "core"),
         ("whisper", "语音识别", "支持语音消息自动转文字，无需联网即可识别。体积较大（约 2.5GB，含 PyTorch），安装耗时较长", &["openai-whisper", "static-ffmpeg"], 2500, "core"),
-        ("orchestration", "多Agent协同", "多个 Akita 实例之间协同工作、分工合作。体积很小（约 10MB），秒装", &["pyzmq"], 10, "core"),
     ]
 }
 
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RootDirInfo {
+    default_root: String,
+    current_root: String,
+    custom_root: Option<String>,
+}
+
+#[tauri::command]
+fn get_root_dir_info() -> RootDirInfo {
+    RootDirInfo {
+        default_root: default_root_dir().to_string_lossy().to_string(),
+        current_root: openakita_root_dir().to_string_lossy().to_string(),
+        custom_root: read_root_config().custom_root,
+    }
+}
+
+#[tauri::command]
+fn set_custom_root_dir(path: Option<String>, migrate: bool) -> Result<RootDirInfo, String> {
+    let _lock = ROOT_CONFIG_LOCK.lock().map_err(|e| format!("lock failed: {e}"))?;
+    let clean_path = path.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from);
+
+    if let Some(ref p) = clean_path {
+        let target = PathBuf::from(p);
+        if !target.is_absolute() {
+            return Err("请使用绝对路径（如 D:\\MyData\\.openakita 或 /data/openakita）".into());
+        }
+        if target.exists() && !target.is_dir() {
+            return Err("指定的路径已存在但不是目录".into());
+        }
+        fs::create_dir_all(&target).map_err(|e| format!("无法创建目标目录: {e}"))?;
+        // 验证目录可写
+        let test_file = target.join(".openakita_write_test");
+        fs::write(&test_file, "test").map_err(|e| format!("目标目录无写入权限: {e}"))?;
+        let _ = fs::remove_file(&test_file);
+    }
+
+    if migrate {
+        if let Some(ref new_root) = clean_path {
+            let old_root = openakita_root_dir();
+            let new_root_path = PathBuf::from(new_root);
+            if old_root != new_root_path && old_root.exists() {
+                for entry_name in &["workspaces", "venv", "runtime", "run", "logs", "modules", "bin"] {
+                    let src = old_root.join(entry_name);
+                    let dst = new_root_path.join(entry_name);
+                    if src.exists() && src.is_dir() && !dst.exists() {
+                        if let Err(e) = copy_dir_recursive(&src, &dst) {
+                            eprintln!("migrate dir {}: {}", entry_name, e);
+                        }
+                    }
+                }
+                for file_name in &["state.json", "cli.json"] {
+                    let src = old_root.join(file_name);
+                    let dst = new_root_path.join(file_name);
+                    if src.exists() && src.is_file() && !dst.exists() {
+                        if let Err(e) = fs::copy(&src, &dst) {
+                            eprintln!("migrate file {}: {}", file_name, e);
+                        }
+                    }
+                }
+            }
+            if !new_root_path.exists() || !new_root_path.is_dir() {
+                return Err("迁移完成后目标目录不可访问，未更改配置。请检查磁盘连接后重试。".into());
+            }
+        }
+    }
+
+    let config = RootConfig { custom_root: clean_path };
+    write_root_config(&config)?;
+
+    Ok(RootDirInfo {
+        default_root: default_root_dir().to_string_lossy().to_string(),
+        current_root: openakita_root_dir().to_string_lossy().to_string(),
+        custom_root: config.custom_root,
+    })
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("create dir {}: {e}", dst.display()))?;
+    let entries = fs::read_dir(src).map_err(|e| format!("read dir {}: {e}", src.display()))?;
+    for entry in entries.flatten() {
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        // file_type() 不跟随符号链接（区别于 metadata()），能正确识别 symlink
+        let ft = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if ft.is_symlink() {
+            continue;
+        }
+        if ft.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else if ft.is_file() {
+            if let Err(e) = fs::copy(&src_path, &dst_path) {
+                eprintln!("copy file {} -> {}: {e}", src_path.display(), dst_path.display());
+            }
+        }
+    }
+    Ok(())
+}
 
 #[tauri::command]
 fn is_first_run() -> bool {
@@ -462,7 +706,15 @@ fn force_remove_dir(path: &std::path::Path) -> Result<(), String> {
             return Ok(());
         }
     }
-    // 最终检查
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("chmod").args(["-R", "u+w"]).arg(path).status();
+        let status = Command::new("rm").args(["-rf"]).arg(path).status()
+            .map_err(|e| format!("rm -rf failed: {e}"))?;
+        if status.success() || !path.exists() {
+            return Ok(());
+        }
+    }
     if path.exists() {
         Err(format!("无法删除目录: {}", path.display()))
     } else {
@@ -810,25 +1062,44 @@ fn get_process_create_time(pid: u32) -> Option<u64> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn get_process_create_time(pid: u32) -> Option<u64> {
-    // On Unix, read /proc/{pid}/stat field 22 (starttime in clock ticks)
-    // comm field (index 1) can contain spaces/parens, so we find the last ')' first
     let stat = fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
-    let after_comm = stat.rfind(')')? + 2; // skip ") "
+    let after_comm = stat.rfind(')')? + 2;
     if after_comm >= stat.len() {
         return None;
     }
-    // Fields after comm start at index 2; starttime is field 22 (index 20 after comm = 22-2)
     let fields: Vec<&str> = stat[after_comm..].split_whitespace().collect();
-    let starttime = fields.get(19)?.parse::<u64>().ok()?; // field 22 → index 19 after comm
-    let clk_tck: u64 = 100; // typical default
-    // Read uptime to compute boot time
+    let starttime = fields.get(19)?.parse::<u64>().ok()?;
+    let clk_tck: u64 = 100;
     let uptime_str = fs::read_to_string("/proc/uptime").ok()?;
     let uptime_secs: f64 = uptime_str.split_whitespace().next()?.parse().ok()?;
     let now = now_epoch_secs();
     let boot_time = now.saturating_sub(uptime_secs as u64);
     Some(boot_time + starttime / clk_tck)
+}
+
+#[cfg(target_os = "macos")]
+fn get_process_create_time(pid: u32) -> Option<u64> {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let lstart = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if lstart.is_empty() {
+        return None;
+    }
+    // lstart format: "Wed Jan  1 08:00:00 2025"
+    // Parse with chrono-less manual approach: use `date -jf` on macOS
+    let date_out = Command::new("date")
+        .args(["-jf", "%a %b %d %T %Y", &lstart, "+%s"])
+        .output()
+        .ok()?;
+    let epoch_str = String::from_utf8_lossy(&date_out.stdout).trim().to_string();
+    epoch_str.parse::<u64>().ok()
 }
 
 /// 验证 PID 文件中的 started_at 是否与实际进程创建时间匹配（允许 5 秒误差）
@@ -1062,13 +1333,22 @@ fn is_openakita_process(pid: u32) -> bool {
         }
         false
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
-        // Unix: 检查 /proc/{pid}/cmdline 或用 ps
         if let Ok(cmdline) = fs::read_to_string(format!("/proc/{}/cmdline", pid)) {
             return cmdline.to_lowercase().contains("openakita");
         }
-        // fallback: ps
+        let output = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "args="])
+            .output();
+        if let Ok(out) = output {
+            let s = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            return s.contains("openakita");
+        }
+        false
+    }
+    #[cfg(target_os = "macos")]
+    {
         let output = Command::new("ps")
             .args(["-p", &pid.to_string(), "-o", "args="])
             .output();
@@ -1444,26 +1724,25 @@ fn ensure_workspace_scaffold(dir: &Path) -> Result<(), String> {
         }
     }
 
-    // compiled 黄金文件：预编译的身份摘要，避免首次启动时必须等 LLM 编译
+    // runtime 黄金文件：手写的行为规范精简版，避免首次启动时等 LLM 编译
+    // SOUL.md 已改为全文注入，不再需要 soul.summary.md
     {
-        let compiled_dir = dir.join("identity").join("compiled");
-        fs::create_dir_all(&compiled_dir)
-            .map_err(|e| format!("create identity/compiled dir failed: {e}"))?;
+        let runtime_dir = dir.join("identity").join("runtime");
+        fs::create_dir_all(&runtime_dir)
+            .map_err(|e| format!("create identity/runtime dir failed: {e}"))?;
 
-        const SOUL_SUMMARY: &str = include_str!("../../../../identity/compiled/soul.summary.md");
-        const AGENT_CORE: &str = include_str!("../../../../identity/compiled/agent.core.md");
-        const AGENT_TOOLING: &str = include_str!("../../../../identity/compiled/agent.tooling.md");
+        const AGENT_CORE: &str = include_str!("../../../../identity/runtime/agent.core.md");
+        const AGENT_TOOLING: &str = include_str!("../../../../identity/runtime/agent.tooling.md");
 
         let golden_files: &[(&str, &str)] = &[
-            ("soul.summary.md", SOUL_SUMMARY),
             ("agent.core.md", AGENT_CORE),
             ("agent.tooling.md", AGENT_TOOLING),
         ];
         for (filename, content) in golden_files {
-            let path = compiled_dir.join(filename);
+            let path = runtime_dir.join(filename);
             if !path.exists() {
                 fs::write(&path, content)
-                    .map_err(|e| format!("write identity/compiled/{filename} failed: {e}"))?;
+                    .map_err(|e| format!("write identity/runtime/{filename} failed: {e}"))?;
             }
         }
     }
@@ -1502,17 +1781,41 @@ fn list_workspaces() -> Result<Vec<WorkspaceSummary>, String> {
     Ok(out)
 }
 
-#[tauri::command]
-fn create_workspace(id: String, name: String, set_current: bool) -> Result<WorkspaceSummary, String> {
-    if id.trim().is_empty() {
+fn validate_workspace_id(id: &str) -> Result<(), String> {
+    let id = id.trim();
+    if id.is_empty() {
         return Err("workspace id is empty".into());
     }
+    if id.len() > 64 {
+        return Err("workspace id too long (max 64 chars)".into());
+    }
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err("workspace id can only contain a-z, A-Z, 0-9, _ and -".into());
+    }
+    if !id.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return Err("workspace id must contain at least one letter or digit".into());
+    }
+    const RESERVED: &[&str] = &[
+        "con", "prn", "aux", "nul",
+        "com1","com2","com3","com4","com5","com6","com7","com8","com9",
+        "lpt1","lpt2","lpt3","lpt4","lpt5","lpt6","lpt7","lpt8","lpt9",
+    ];
+    if RESERVED.contains(&id.to_ascii_lowercase().as_str()) {
+        return Err("workspace id conflicts with a reserved system name".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn create_workspace(id: String, name: String, set_current: bool) -> Result<WorkspaceSummary, String> {
+    validate_workspace_id(&id)?;
     if name.trim().is_empty() {
         return Err("workspace name is empty".into());
     }
 
     fs::create_dir_all(workspaces_dir()).map_err(|e| format!("create workspaces dir failed: {e}"))?;
 
+    let _lock = STATE_FILE_LOCK.lock().map_err(|e| format!("state lock failed: {e}"))?;
     let mut state = read_state_file();
     if state.workspaces.iter().any(|w| w.id == id) {
         return Err("workspace id already exists".into());
@@ -1541,9 +1844,15 @@ fn create_workspace(id: String, name: String, set_current: bool) -> Result<Works
 
 #[tauri::command]
 fn set_current_workspace(id: String) -> Result<(), String> {
+    let _lock = STATE_FILE_LOCK.lock().map_err(|e| format!("state lock failed: {e}"))?;
     let mut state = read_state_file();
     if !state.workspaces.iter().any(|w| w.id == id) {
         return Err("workspace id not found".into());
+    }
+    let dir = workspace_dir(&id);
+    if !dir.exists() {
+        eprintln!("workspace dir missing, recreating scaffold: {}", dir.display());
+        ensure_workspace_scaffold(&dir)?;
     }
     state.current_workspace_id = Some(id);
     write_state_file(&state)?;
@@ -1838,8 +2147,9 @@ fn main() {
                 }
             }
 
-            // ── 自动拉起后端（所有启动模式都生效） ──
+            // ── 自动拉起后端（仅 release 模式生效） ──
             // 如果有已配置的工作区且后端未在运行，则自动启动后端。
+            // dev 模式（cargo tauri dev）跳过，避免与手动启动的开发后端冲突。
             // 前端通过 is_backend_auto_starting 查询此状态，
             // 在启动期间显示提示并禁用启动/重启按钮。
             //
@@ -1848,21 +2158,21 @@ fn main() {
             //   - RunningOk   → 后端在运行且版本可接受
             //   - Upgraded    → 旧版后端已被终止，需要启动新版
             let app_version = app.package_info().version.to_string();
-            let state = read_state_file();
-            if let Some(ref ws_id) = state.current_workspace_id {
-                let port = read_workspace_api_port(ws_id).unwrap_or(18900);
+                let state = read_state_file();
+                if let Some(ref ws_id) = state.current_workspace_id {
+                    let port = read_workspace_api_port(ws_id).unwrap_or(18900);
                 let need_start = !matches!(
                     startup_version_check(&app_version, port),
                     VersionCheckResult::RunningOk
                 );
                 if need_start {
                     AUTO_START_IN_PROGRESS.store(true, Ordering::SeqCst);
-                    let venv_dir = openakita_root_dir().join("venv").to_string_lossy().to_string();
-                    let ws_clone = ws_id.clone();
-                    std::thread::spawn(move || {
-                        let _ = openakita_service_start(venv_dir, ws_clone);
+                        let venv_dir = openakita_root_dir().join("venv").to_string_lossy().to_string();
+                        let ws_clone = ws_id.clone();
+                        std::thread::spawn(move || {
+                            let _ = openakita_service_start(venv_dir, ws_clone);
                         AUTO_START_IN_PROGRESS.store(false, Ordering::SeqCst);
-                    });
+                        });
                 }
             }
             Ok(())
@@ -1877,6 +2187,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_platform_info,
+            get_root_dir_info,
+            set_custom_root_dir,
             list_workspaces,
             create_workspace,
             set_current_workspace,
@@ -1884,6 +2196,8 @@ fn main() {
             workspace_read_file,
             workspace_write_file,
             workspace_update_env,
+            export_workspace_backup,
+            import_workspace_backup,
             detect_python,
             diagnose_python_env,
             export_python_diagnostic_report,
@@ -1934,6 +2248,8 @@ fn main() {
             start_onboarding_log,
             append_onboarding_log,
             append_onboarding_log_lines,
+            append_frontend_log,
+            save_log_export,
             register_cli,
             unregister_cli,
             get_cli_status
@@ -2436,6 +2752,7 @@ fn openakita_service_start(venv_dir: String, workspace_id: String) -> Result<Ser
         cmd.env(k, v);
     }
     cmd.env("LLM_ENDPOINTS_CONFIG", ws_dir.join("data").join("llm_endpoints.json"));
+    cmd.env("OPENAKITA_ROOT", openakita_root_dir().to_string_lossy().to_string());
 
     // 设置可选模块路径（已安装的可选模块 site-packages）
     // 重要：不能使用 PYTHONPATH！Python 启动时 PYTHONPATH 会被插入到 sys.path
@@ -2715,11 +3032,12 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     let open_status = MenuItem::with_id(app, "open_status", "打开状态面板", true, None::<&str>)?;
+    let open_web = MenuItem::with_id(app, "open_web", "打开网页版", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
     let hide = MenuItem::with_id(app, "hide", "隐藏窗口", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出（Quit）", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&open_status, &show, &hide, &quit])?;
+    let menu = Menu::with_items(app, &[&open_status, &open_web, &show, &hide, &quit])?;
 
     TrayIconBuilder::with_id("main_tray")
         .icon(app.default_window_icon().unwrap().clone())
@@ -2802,6 +3120,18 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
+            }
+            "open_web" => {
+                let state = read_state_file();
+                let ws_id = state.current_workspace_id.unwrap_or_else(|| "default".into());
+                let port = read_workspace_api_port(&ws_id).unwrap_or(18900);
+                let url = format!("http://127.0.0.1:{}/web", port);
+                #[cfg(target_os = "windows")]
+                { let _ = std::process::Command::new("cmd").args(["/c", "start", &url]).spawn(); }
+                #[cfg(target_os = "macos")]
+                { let _ = std::process::Command::new("open").arg(&url).spawn(); }
+                #[cfg(target_os = "linux")]
+                { let _ = std::process::Command::new("xdg-open").arg(&url).spawn(); }
             }
             "open_status" => {
                 if let Some(w) = app.get_webview_window("main") {
@@ -2973,6 +3303,314 @@ fn read_text_lossy(path: &Path) -> String {
                 .unwrap_or_default()
         }
     }
+}
+
+// ── Workspace backup commands ────────────────────────────────────────
+
+#[tauri::command]
+fn export_workspace_backup(
+    workspace_id: String,
+    output_dir: String,
+    include_userdata: bool,
+    include_media: bool,
+    api_port: u16,
+) -> Result<serde_json::Value, String> {
+    // Try the Python backend API first (preferred: consistent logic)
+    let url = format!(
+        "http://127.0.0.1:{}/api/workspace/export",
+        api_port
+    );
+    let body = serde_json::json!({
+        "output_dir": output_dir,
+        "include_userdata": include_userdata,
+        "include_media": include_media,
+    });
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("http client error: {e}"))?;
+    let resp = client.post(&url).json(&body).send();
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let val: serde_json::Value = r.json().map_err(|e| format!("parse response: {e}"))?;
+            Ok(val)
+        }
+        Ok(r) => {
+            let status = r.status();
+            let text = r.text().unwrap_or_default();
+            Err(format!("Backend returned {status}: {text}"))
+        }
+        Err(_) => {
+            // Fallback: create a basic zip using Rust zip crate
+            export_workspace_backup_native(&workspace_id, &output_dir, include_userdata, include_media)
+        }
+    }
+}
+
+fn export_workspace_backup_native(
+    workspace_id: &str,
+    output_dir: &str,
+    include_userdata: bool,
+    include_media: bool,
+) -> Result<serde_json::Value, String> {
+    use std::io::{Read as _, Write as _};
+
+    let ws = workspace_dir(workspace_id);
+    if !ws.exists() {
+        return Err("Workspace directory not found".into());
+    }
+    let out = PathBuf::from(output_dir);
+    fs::create_dir_all(&out).map_err(|e| format!("create output dir: {e}"))?;
+
+    let ts = chrono_like_timestamp();
+    let zip_name = format!("openakita-backup-{workspace_id}-{ts}.zip");
+    let zip_path = out.join(&zip_name);
+
+    let file = fs::File::create(&zip_path).map_err(|e| format!("create zip: {e}"))?;
+    let mut zw = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let always_dirs = ["identity", "data/agents", "data/sessions", "data/scheduler",
+                       "data/mcp", "data/telegram", "skills", "mcps"];
+    let always_files = [".env", "data/llm_endpoints.json", "data/skills.json",
+                        "data/disabled_views.json", "data/runtime_state.json",
+                        "data/proactive_feedback.json", "data/sub_agent_states.json"];
+    let userdata_dirs = ["data/memory", "data/retrospects", "data/plans",
+                         "data/docs", "data/reports", "data/research"];
+    let userdata_files = ["data/agent.db"];
+    let media_dirs = ["data/generated_images", "data/sticker", "data/media",
+                      "data/output", "data/screenshots"];
+    let exclude_dirs = ["logs", "data/llm_debug", "data/delegation_logs",
+                        "data/traces", "data/react_traces", "data/temp",
+                        "data/tool_overflow", "data/selfcheck", "data/openakita_docs",
+                        "identity/runtime", "node_modules", "Lib", "__pycache__"];
+
+    let mut file_count: u64 = 0;
+
+    for entry in walkdir(&ws) {
+        let full = entry.path();
+        if !full.is_file() { continue; }
+        let rel = match full.strip_prefix(&ws) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+
+        // Exclude
+        if exclude_dirs.iter().any(|d| rel == *d || rel.starts_with(&format!("{d}/"))) {
+            continue;
+        }
+        if rel == "data/backend.heartbeat" || rel == "package.json" || rel == "package-lock.json" {
+            continue;
+        }
+
+        let included =
+            always_files.contains(&rel.as_str()) ||
+            always_dirs.iter().any(|d| rel == *d || rel.starts_with(&format!("{d}/"))) ||
+            (include_userdata && (
+                userdata_files.contains(&rel.as_str()) ||
+                userdata_dirs.iter().any(|d| rel == *d || rel.starts_with(&format!("{d}/")))
+            )) ||
+            (include_media &&
+                media_dirs.iter().any(|d| rel == *d || rel.starts_with(&format!("{d}/"))));
+
+        if !included { continue; }
+
+        if let Ok(mut f) = fs::File::open(full) {
+            let _ = zw.start_file(&rel, options);
+            let mut buf = Vec::new();
+            if f.read_to_end(&mut buf).is_ok() {
+                let _ = zw.write_all(&buf);
+                file_count += 1;
+            }
+        }
+    }
+
+    // Write manifest
+    let manifest = serde_json::json!({
+        "format_version": 1,
+        "created_at": chrono_like_timestamp(),
+        "workspace_id": workspace_id,
+        "include_userdata": include_userdata,
+        "include_media": include_media,
+        "file_count": file_count,
+    });
+    let _ = zw.start_file("manifest.json", options);
+    let _ = zw.write_all(serde_json::to_string_pretty(&manifest).unwrap_or_default().as_bytes());
+    zw.finish().map_err(|e| format!("finalize zip: {e}"))?;
+
+    let size = fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+    Ok(serde_json::json!({
+        "status": "ok",
+        "path": zip_path.to_string_lossy(),
+        "filename": zip_name,
+        "size_bytes": size,
+    }))
+}
+
+#[tauri::command]
+fn import_workspace_backup(
+    workspace_id: String,
+    zip_path: String,
+    api_port: u16,
+) -> Result<serde_json::Value, String> {
+    let url = format!("http://127.0.0.1:{}/api/workspace/import", api_port);
+    let body = serde_json::json!({ "zip_path": zip_path });
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("http client error: {e}"))?;
+    let resp = client.post(&url).json(&body).send();
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let val: serde_json::Value = r.json().map_err(|e| format!("parse: {e}"))?;
+            Ok(val)
+        }
+        Ok(r) => {
+            let status = r.status();
+            let text = r.text().unwrap_or_default();
+            Err(format!("Backend returned {status}: {text}"))
+        }
+        Err(_) => {
+            // Fallback: native extraction
+            import_workspace_backup_native(&workspace_id, &zip_path)
+        }
+    }
+}
+
+fn import_workspace_backup_native(
+    workspace_id: &str,
+    zip_path: &str,
+) -> Result<serde_json::Value, String> {
+    use std::io::{Read as _, Write as _};
+
+    let zp = PathBuf::from(zip_path);
+    if !zp.exists() {
+        return Err("Backup file not found".into());
+    }
+    let ws = workspace_dir(workspace_id);
+    fs::create_dir_all(&ws).map_err(|e| format!("create workspace dir: {e}"))?;
+
+    let file = fs::File::open(&zp).map_err(|e| format!("open zip: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("read zip: {e}"))?;
+
+    let mut restored = 0u64;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("zip entry: {e}"))?;
+        let name = entry.name().to_string();
+        if name == "manifest.json" { continue; }
+
+        // Safety: reject path traversal
+        let norm = PathBuf::from(&name);
+        if norm.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            continue;
+        }
+
+        let target = ws.join(&name);
+        if entry.is_dir() {
+            let _ = fs::create_dir_all(&target);
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let mut buf = Vec::new();
+        if entry.read_to_end(&mut buf).is_ok() {
+            if fs::write(&target, &buf).is_ok() {
+                restored += 1;
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "status": "ok",
+        "restored_count": restored,
+    }))
+}
+
+/// Simple recursive file walker (no external crate dependency needed)
+fn walkdir(dir: &Path) -> Vec<walkdir_entry::Entry> {
+    let mut result = Vec::new();
+    walkdir_recurse(dir, &mut result);
+    result
+}
+
+fn walkdir_recurse(dir: &Path, out: &mut Vec<walkdir_entry::Entry>) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        out.push(walkdir_entry::Entry { path: path.clone() });
+        if path.is_dir() {
+            walkdir_recurse(&path, out);
+        }
+    }
+}
+
+mod walkdir_entry {
+    use std::path::{Path, PathBuf};
+    pub struct Entry { pub path: PathBuf }
+    impl Entry {
+        pub fn path(&self) -> &Path { &self.path }
+    }
+}
+
+fn chrono_like_timestamp() -> String {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    // Convert to a simple YYYYMMDD_HHMMSS using rough calculation
+    let secs = now.as_secs();
+    // Use a simple approach: format via the system's time
+    let dt = time_from_epoch(secs);
+    format!(
+        "{:04}{:02}{:02}_{:02}{:02}{:02}",
+        dt.0, dt.1, dt.2, dt.3, dt.4, dt.5
+    )
+}
+
+fn time_from_epoch(epoch_secs: u64) -> (u32, u32, u32, u32, u32, u32) {
+    // Simple epoch-to-datetime conversion (UTC-based, good enough for filenames)
+    const SECS_PER_DAY: u64 = 86400;
+    const DAYS_PER_YEAR: u64 = 365;
+
+    let total_days = epoch_secs / SECS_PER_DAY;
+    let time_of_day = epoch_secs % SECS_PER_DAY;
+    let hour = (time_of_day / 3600) as u32;
+    let minute = ((time_of_day % 3600) / 60) as u32;
+    let second = (time_of_day % 60) as u32;
+
+    // Calculate year/month/day from total_days since 1970-01-01
+    let mut year = 1970u32;
+    let mut remaining = total_days;
+    loop {
+        let days_in_year = if is_leap(year) { 366 } else { 365 };
+        if remaining < days_in_year {
+            break;
+        }
+        remaining -= days_in_year;
+        year += 1;
+    }
+    let days_in_months: [u64; 12] = if is_leap(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut month = 1u32;
+    for &dm in &days_in_months {
+        if remaining < dm {
+            break;
+        }
+        remaining -= dm;
+        month += 1;
+    }
+    let day = remaining as u32 + 1;
+
+    (year, month, day, hour, minute, second)
+}
+
+fn is_leap(y: u32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -3170,7 +3808,7 @@ fn diagnose_python_env(venv_dir: String) -> PythonDiagnostic {
     let bundled_dir = bundled_backend_dir();
     let bundled_exe = if cfg!(windows) {
         bundled_dir.join("openakita-server.exe")
-    } else {
+        } else {
         bundled_dir.join("openakita-server")
     };
     let internal_dir = bundled_dir.join("_internal");
@@ -4257,8 +4895,11 @@ async fn download_file(url: String, filename: String) -> Result<String, String> 
         counter += 1;
     }
 
-    // Download
-    let client = reqwest::Client::new();
+    // Download (timeout 30s to avoid hanging if backend is unreachable, e.g. on macOS)
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
     let resp = client
         .get(&url)
         .send()
@@ -4641,10 +5282,10 @@ fn windows_add_to_path(bin_dir: &Path) -> Result<(), String> {
     let bin_str = bin_dir.to_string_lossy().to_string();
     let bin_norm = bin_str.trim_end_matches('\\');
 
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+            let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu
-        .open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)
-        .map_err(|e| format!("无法打开用户环境变量注册表: {e}"))?;
+                .open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)
+                .map_err(|e| format!("无法打开用户环境变量注册表: {e}"))?;
 
     let current_path = read_path_value(&key)?;
 
@@ -4705,7 +5346,7 @@ fn windows_remove_from_path(bin_dir: &Path) -> Result<(), String> {
     }
 
     if modified {
-        windows_broadcast_env_change();
+    windows_broadcast_env_change();
     }
     Ok(())
 }
@@ -4725,11 +5366,11 @@ fn windows_is_in_path(bin_dir: &Path) -> bool {
         let hive = RegKey::predef(hive_predef);
         if let Ok(key) = hive.open_subkey_with_flags(subkey_path, KEY_READ) {
             if let Ok(current_path) = read_path_value(&key) {
-                if current_path
-                    .split(';')
+            if current_path
+                .split(';')
                     .any(|p| p.trim_end_matches('\\').eq_ignore_ascii_case(bin_norm))
-                {
-                    return true;
+            {
+                return true;
                 }
             }
         }

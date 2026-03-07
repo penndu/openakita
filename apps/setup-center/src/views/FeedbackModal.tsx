@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
+import { downloadFile, showInFolder } from "../platform";
 import { IconX, IconInfo } from "../icons";
+import { safeFetch } from "../providers";
 
 const TURNSTILE_SITE_KEY = "0x4AAAAAACgY6e8TLK4RVrQk";
 
@@ -67,7 +68,7 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
   // Fetch system info on open (only needed for bug mode, but pre-fetch)
   useEffect(() => {
     if (!open) return;
-    fetch(`${apiBase}/api/system-info`, { signal: AbortSignal.timeout(5000) })
+    safeFetch(`${apiBase}/api/system-info`, { signal: AbortSignal.timeout(5000) })
       .then((r) => r.json())
       .then(setSystemInfo)
       .catch(() => setSystemInfo(null));
@@ -157,19 +158,11 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
         form.append("contact_wechat", contactWechat.trim());
       }
 
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         method: "POST",
         body: form,
         signal: AbortSignal.timeout(60_000),
       });
-
-      if (!res.ok) {
-        const body = await res.text();
-        let detail = "";
-        try { detail = JSON.parse(body).detail || body; } catch { detail = body; }
-        setSubmitResult({ ok: false, msg: `${res.status}: ${detail}` });
-        return;
-      }
 
       const data = await res.json();
 
@@ -194,7 +187,7 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
       setImageFiles([]);
       setImagePreviews((old) => { old.forEach(URL.revokeObjectURL); return []; });
     } catch (err: any) {
-      setSubmitResult({ ok: false, msg: `${t("feedback.uploadFailedNetwork")}\n${err?.message || String(err)}` });
+      setSubmitResult({ ok: false, msg: err?.message || t("feedback.uploadFailedNetwork") });
     } finally {
       setSubmitting(false);
     }
@@ -400,6 +393,7 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
                   type="checkbox"
                   checked={uploadLogs}
                   onChange={(e) => setUploadLogs(e.target.checked)}
+                  style={{ width: 16, height: 16 }}
                 />
               </label>
               <label className="feedbackOptionRow">
@@ -409,6 +403,7 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
                   type="checkbox"
                   checked={uploadDebug}
                   onChange={(e) => setUploadDebug(e.target.checked)}
+                  style={{ width: 16, height: 16 }}
                 />
               </label>
               <div className="feedbackOptionHint">
@@ -452,22 +447,22 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
               <div style={{ whiteSpace: "pre-wrap" }}>{submitResult.msg}</div>
               {submitResult.downloadUrl && (
                 <button
+                  type="button"
                   disabled={downloading}
                   onClick={async () => {
                     if (!submitResult.downloadUrl) return;
                     setDownloading(true);
+                    const url = submitResult.downloadUrl;
+                    const ts = Math.floor(Date.now() / 1000);
+                    const filename = `openakita-feedback-${ts}.zip`;
                     try {
-                      const ts = Math.floor(Date.now() / 1000);
-                      const dest = await invoke<string>("download_file", {
-                        url: submitResult.downloadUrl,
-                        filename: `openakita-feedback-${ts}.zip`,
+                      const dest = await downloadFile(url, filename);
+                      await showInFolder(dest);
+                    } catch (err: unknown) {
+                      const msg = t("feedback.downloadFailed", {
+                        error: err instanceof Error ? err.message : String(err),
                       });
-                      await invoke("show_item_in_folder", { path: dest });
-                    } catch (err: any) {
-                      setSubmitResult((prev) => prev ? {
-                        ...prev,
-                        msg: prev.msg + "\n" + t("feedback.downloadFailed", { error: err?.message || String(err) }),
-                      } : prev);
+                      setSubmitResult((prev) => (prev ? { ...prev, msg: prev.msg + "\n" + msg } : prev));
                     } finally {
                       setDownloading(false);
                     }
