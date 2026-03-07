@@ -1829,6 +1829,8 @@ export function ChatView({
   const [selectedOrgNodeId, setSelectedOrgNodeId] = useState<string | null>(null);
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const orgMenuRef = useRef<HTMLDivElement | null>(null);
+  const [orgCommandPending, setOrgCommandPending] = useState(false);
+  const orgCommandPendingRef = useRef(false);
 
   useEffect(() => {
     if (!orgMenuOpen) return;
@@ -2635,6 +2637,7 @@ export function ChatView({
   const sendMessage = useCallback(async (overrideText?: string, targetConvId?: string, displayContent?: string) => {
     const text = (overrideText ?? inputText).trim();
     if (!text && pendingAttachments.length === 0) return;
+    if (orgCommandPendingRef.current) return;
 
     const resolvedConvId = targetConvId || activeConvId;
     const targetIsStreaming = resolvedConvId ? !!streamContexts.current.get(resolvedConvId)?.isStreaming : false;
@@ -2670,8 +2673,15 @@ export function ChatView({
       }
       if (targetOrgId) {
         const orgUserMsg: ChatMessage = { id: genId(), role: "user", content: text, timestamp: Date.now() };
-        setMessages((prev) => [...prev, orgUserMsg]);
+        const placeholderId = genId();
+        const orgOrgName = orgList.find(o => o.id === targetOrgId)?.name || targetOrgId;
+        setMessages((prev) => [...prev, orgUserMsg, {
+          id: placeholderId, role: "assistant" as const,
+          content: "", streaming: true, timestamp: Date.now(),
+        }]);
         setInputText("");
+        orgCommandPendingRef.current = true;
+        setOrgCommandPending(true);
         try {
           const res = await safeFetch(`${apiBaseUrl}/api/orgs/${targetOrgId}/command`, {
             method: "POST",
@@ -2680,18 +2690,20 @@ export function ChatView({
           });
           const data = await res.json();
           const resultText = data.result || data.error || JSON.stringify(data);
-          const orgOrgName = orgList.find(o => o.id === targetOrgId)?.name || targetOrgId;
-          setMessages((prev) => [...prev, {
-            id: genId(), role: "assistant",
-            content: `**[${orgOrgName}]** ${resultText}`,
-            timestamp: Date.now(),
-          }]);
+          setMessages((prev) => prev.map(m =>
+            m.id === placeholderId
+              ? { ...m, content: `**[${orgOrgName}]** ${resultText}`, streaming: false }
+              : m
+          ));
         } catch (e: any) {
-          setMessages((prev) => [...prev, {
-            id: genId(), role: "system",
-            content: `组织命令失败: ${e.message || e}`,
-            timestamp: Date.now(),
-          }]);
+          setMessages((prev) => prev.map(m =>
+            m.id === placeholderId
+              ? { ...m, content: `组织命令失败: ${e.message || e}`, streaming: false, role: "system" as const }
+              : m
+          ));
+        } finally {
+          orgCommandPendingRef.current = false;
+          setOrgCommandPending(false);
         }
         return;
       }
@@ -4371,7 +4383,7 @@ export function ChatView({
                   })}
                 </div>
               )}
-              {multiAgentEnabled && agentProfiles.length > 0 && (
+              {multiAgentEnabled && agentProfiles.length > 0 && !orgMode && (
                 <div ref={agentMenuRef} style={{ position: "relative", marginLeft: 8 }}>
                   <button
                     className="chatModelPickerBtn"
@@ -4464,6 +4476,19 @@ export function ChatView({
               )}
             </div>
 
+            {/* Org mode hint bar */}
+            {orgMode && selectedOrgId && (
+              <div style={{
+                fontSize: 11, color: "var(--primary)", padding: "4px 8px",
+                background: "rgba(14,165,233,0.08)", borderRadius: 6, marginBottom: 4,
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <IconBuilding size={12} />
+                正在与「{orgList.find(o => o.id === selectedOrgId)?.name}」对话
+                {orgCommandPending && <span style={{ opacity: 0.6 }}> — 处理中...</span>}
+              </div>
+            )}
+
             {/* Textarea */}
             <textarea
               ref={inputRef}
@@ -4471,7 +4496,7 @@ export function ChatView({
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
               onPaste={handlePaste}
-              placeholder={isCurrentConvStreaming ? t("chat.queueHint") : planMode ? `Plan ${t("chat.planMode")}` : t("chat.placeholder")}
+              placeholder={orgCommandPending ? "组织正在处理中..." : orgMode ? "输入指令发送给组织..." : isCurrentConvStreaming ? t("chat.queueHint") : planMode ? `Plan ${t("chat.planMode")}` : t("chat.placeholder")}
               rows={1}
               className="chatInputTextarea"
               onInput={(e) => {
@@ -4583,8 +4608,8 @@ export function ChatView({
                     </div>
                   );
                 })()}
-                {isCurrentConvStreaming ? (
-                  inputText.trim() ? (
+                {isCurrentConvStreaming || orgCommandPending ? (
+                  inputText.trim() && !orgCommandPending ? (
                     <button
                       onClick={handleQueueMessage}
                       className="chatInputSendBtn"
@@ -4593,8 +4618,14 @@ export function ChatView({
                       <IconSend size={14} />
                     </button>
                   ) : (
-                    <button onClick={handleCancelTask} className="chatInputSendBtn chatInputStopBtn" title={t("chat.stopGeneration")}>
-                      <IconStop size={14} />
+                    <button
+                      onClick={orgCommandPending ? undefined : handleCancelTask}
+                      className={`chatInputSendBtn ${orgCommandPending ? "" : "chatInputStopBtn"}`}
+                      title={orgCommandPending ? "组织处理中..." : t("chat.stopGeneration")}
+                      disabled={orgCommandPending}
+                      style={orgCommandPending ? { opacity: 0.5, cursor: "wait" } : undefined}
+                    >
+                      {orgCommandPending ? <IconSend size={14} /> : <IconStop size={14} />}
                     </button>
                   )
                 ) : (
