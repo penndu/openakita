@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { copyToClipboard } from "../utils/clipboard";
 
 export function TroubleshootPanel({ t }: { t: (k: string) => string }) {
   const [copied, setCopied] = useState<string | null>(null);
@@ -6,10 +7,12 @@ export function TroubleshootPanel({ t }: { t: (k: string) => string }) {
   const listCmd = isWin ? 'tasklist | findstr python' : 'ps aux | grep openakita';
   const killCmd = isWin ? 'taskkill /F /PID <PID>' : 'kill -9 <PID>';
 
-  const copyText = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 1500);
+  const copyText = async (text: string, id: string) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopied(id);
+      setTimeout(() => setCopied(null), 1500);
+    }
   };
 
   return (

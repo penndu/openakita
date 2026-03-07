@@ -3,6 +3,7 @@ import { FieldText, FieldBool, TelegramPairingCodeHint } from "../components/Env
 import { IconBook, IconClipboard, LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ } from "../icons";
 import type { EnvMap } from "../types";
 import { envGet, envSet } from "../utils";
+import { copyToClipboard } from "../utils/clipboard";
 
 type IMConfigViewProps = {
   envDraft: EnvMap;
@@ -148,7 +149,7 @@ export function IMConfigView(props: IMConfigViewProps) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="cardTitle">{t("config.imTitle")}</div>
           <button className="btnSmall" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
-            onClick={() => { navigator.clipboard.writeText("https://github.com/anthropic-lab/openakita/blob/main/docs/im-channels.md"); setNotice(t("config.imGuideDocCopied")); }}
+            onClick={async () => { const ok = await copyToClipboard("https://github.com/anthropic-lab/openakita/blob/main/docs/im-channels.md"); if (ok) setNotice(t("config.imGuideDocCopied")); }}
             title={t("config.imGuideDoc")}
           ><IconBook size={13} />{t("config.imGuideDoc")}</button>
         </div>
@@ -179,7 +180,7 @@ export function IMConfigView(props: IMConfigViewProps) {
                 <button className="btnSmall"
                   style={{ fontSize: 11, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: 3 }}
                   title={c.docUrl}
-                  onClick={() => { navigator.clipboard.writeText(c.docUrl); setNotice(t("config.imDocCopied")); }}
+                  onClick={async () => { const ok = await copyToClipboard(c.docUrl); if (ok) setNotice(t("config.imDocCopied")); }}
                 ><IconClipboard size={12} />{t("config.imDoc")}</button>
                 <span className="help" style={{ fontSize: 11, userSelect: "all", opacity: 0.6 }}>{c.docUrl}</span>
               </div>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { safeFetch } from "../providers";
+import { copyToClipboard } from "../utils/clipboard";
 
 export function WebPasswordManager({
   apiBase,
@@ -58,16 +59,14 @@ export function WebPasswordManager({
     for (let i = 0; i < 16; i++) pw += chars[Math.floor(Math.random() * chars.length)];
     await doChangePassword(pw);
     setGeneratedPw(pw);
-    try { await navigator.clipboard.writeText(pw); } catch { /* clipboard may not be available */ }
+    await copyToClipboard(pw);
     setNotice(t("adv.webPasswordReset", { password: pw }));
   };
 
   const copyGenerated = async () => {
     if (!generatedPw) return;
-    try {
-      await navigator.clipboard.writeText(generatedPw);
-      setNotice(t("adv.webPasswordCopied", { defaultValue: "密码已复制到剪贴板" }));
-    } catch { /* clipboard may not be available */ }
+    const ok = await copyToClipboard(generatedPw);
+    if (ok) setNotice(t("adv.webPasswordCopied", { defaultValue: "密码已复制到剪贴板" }));
   };
 
   return (

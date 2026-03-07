@@ -2,12 +2,13 @@
  * 跨平台复制到剪贴板（兼容 Win / Mac / Web / Desktop / 移动端）。
  * 优先使用 navigator.clipboard，不可用时回退到 document.execCommand('copy')。
  */
-export async function copyToClipboard(text: string): Promise<boolean> {
-  if (typeof text !== "string" || text.length === 0) return false;
+export async function copyToClipboard(text: string | null | undefined): Promise<boolean> {
+  const s = text == null ? "" : String(text);
+  if (s.length === 0) return false;
 
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(s);
       return true;
     }
   } catch {
@@ -17,7 +18,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   // 回退：execCommand('copy')，适用于旧版浏览器、部分移动端、非 HTTPS 页面
   try {
     const textarea = document.createElement("textarea");
-    textarea.value = text;
+    textarea.value = s;
     textarea.setAttribute("readonly", "");
     textarea.style.position = "fixed";
     textarea.style.left = "-9999px";

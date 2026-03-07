@@ -4,6 +4,7 @@
 // and cross-platform log export.
 
 import { IS_TAURI, IS_CAPACITOR } from "./detect";
+import { copyToClipboard } from "../utils/clipboard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -342,12 +343,9 @@ async function exportLogs(): Promise<ExportResult> {
         // Fall through to clipboard
       }
     }
-    try {
-      await navigator.clipboard.writeText(text);
-      return { ok: true, method: "clipboard" };
-    } catch (e) {
-      return { ok: false, error: String(e) };
-    }
+    const ok = await copyToClipboard(text);
+    if (ok) return { ok: true, method: "clipboard" };
+    return { ok: false, error: "clipboard failed" };
   }
 
   // --- Web: blob download ---

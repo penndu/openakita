@@ -8,6 +8,7 @@ import {
   IconLaptop, IconMoon, IconSun, IconGlobe, IconClipboard,
 } from "../icons";
 import { openExternalUrl } from "../platform";
+import { copyToClipboard } from "../utils/clipboard";
 
 export type TopbarProps = {
   wsDropdownOpen: boolean;
@@ -62,14 +63,18 @@ export function Topbar({
       const ip = data.local_ip || "127.0.0.1";
       const port = location.port || "18900";
       const url = `http://${ip}:${port}/web`;
-      await navigator.clipboard.writeText(url);
-      setRemoteCopied(true);
-      setTimeout(() => setRemoteCopied(false), 2000);
+      const ok = await copyToClipboard(url);
+      if (ok) {
+        setRemoteCopied(true);
+        setTimeout(() => setRemoteCopied(false), 2000);
+      }
     } catch {
       const url = `http://127.0.0.1:18900/web`;
-      await navigator.clipboard.writeText(url).catch(() => {});
-      setRemoteCopied(true);
-      setTimeout(() => setRemoteCopied(false), 2000);
+      const ok = await copyToClipboard(url);
+      if (ok) {
+        setRemoteCopied(true);
+        setTimeout(() => setRemoteCopied(false), 2000);
+      }
     }
   };
 

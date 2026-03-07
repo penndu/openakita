@@ -7956,9 +7956,7 @@ export function App() {
               {t("version.mismatchDetail", { backend: versionMismatch.backend, desktop: versionMismatch.desktop })}
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="btnSmall" style={{ fontSize: 11 }} onClick={() => {
-                navigator.clipboard.writeText(t("version.pipCommand")).then(() => setNotice(t("version.copied")));
-              }}>{t("version.updatePip")}</button>
+              <button className="btnSmall" style={{ fontSize: 11 }} onClick={async () => { const ok = await copyToClipboard(t("version.pipCommand")); if (ok) setNotice(t("version.copied")); }}>{t("version.updatePip")}</button>
               <code style={{ fontSize: 11, background: "var(--nav-hover)", padding: "2px 8px", borderRadius: 4, color: "var(--text)" }}>{t("version.pipCommand")}</code>
             </div>
           </div>

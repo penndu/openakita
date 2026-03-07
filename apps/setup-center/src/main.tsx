@@ -21,6 +21,7 @@ import "./styles.css";
 import { App } from "./App";
 import { initTheme } from "./theme";
 import { logger } from "./platform/logger";
+import { copyToClipboard } from "./utils/clipboard";
 
 // Initialize theme before rendering to catch OS changes
 initTheme();
@@ -117,10 +118,10 @@ class GlobalErrorBoundary extends React.Component<
             )}
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(errorText).catch(() => {});
+                onClick={async () => {
+                  const ok = await copyToClipboard(errorText);
                   const btn = document.getElementById("_eb_copy");
-                  if (btn) btn.textContent = "Copied!";
+                  if (btn) btn.textContent = ok ? "Copied!" : "Copy failed";
                 }}
                 id="_eb_copy"
                 style={{
@@ -198,7 +199,14 @@ setTimeout(() => hideBoot(true), 8000);
     if (isEditable) {
       items.push(
         { label: "剪切", action: () => document.execCommand("cut"), disabled: !hasSelection },
-        { label: "复制", action: () => document.execCommand("copy"), disabled: !hasSelection },
+        {
+          label: "复制",
+          action: async () => {
+            const text = window.getSelection()?.toString() ?? "";
+            if (text) await copyToClipboard(text);
+          },
+          disabled: !hasSelection,
+        },
         {
           label: "粘贴",
           action: () => {
@@ -233,7 +241,14 @@ setTimeout(() => hideBoot(true), 8000);
       );
     } else {
       items.push(
-        { label: "复制", action: () => document.execCommand("copy"), disabled: !hasSelection },
+        {
+          label: "复制",
+          action: async () => {
+            const text = window.getSelection()?.toString() ?? "";
+            if (text) await copyToClipboard(text);
+          },
+          disabled: !hasSelection,
+        },
         { label: "全选", action: () => document.execCommand("selectAll") },
       );
     }
