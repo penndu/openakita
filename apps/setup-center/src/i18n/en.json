@@ -54,7 +54,8 @@
     "themeLight": "Theme: Light",
     "webAccess": "Web Access",
     "remoteUrl": "Remote URL",
-    "copyRemoteUrl": "Copy remote access URL"
+    "copyRemoteUrl": "Copy remote access URL",
+    "ipNotFound": "Cannot detect LAN IP. Use ipconfig / ifconfig to check"
   },
   "tokenStats": {
     "serviceNotRunning": "Service not running, unable to view stats",

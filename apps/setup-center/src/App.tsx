@@ -7824,7 +7824,8 @@ export function App() {
             await logout(IS_CAPACITOR ? apiBaseUrl : "");
             setWebAuthed(false);
           } : undefined}
-          webAccessUrl={IS_TAURI && (serviceStatus?.running ?? false) ? `http://127.0.0.1:18900/web` : undefined}
+          webAccessUrl={IS_TAURI && (serviceStatus?.running ?? false) ? `${apiBaseUrl || "http://127.0.0.1:18900"}/web` : undefined}
+          apiBaseUrl={apiBaseUrl || "http://127.0.0.1:18900"}
           onToggleMobileSidebar={isMobile ? () => setMobileSidebarOpen((v) => !v) : undefined}
           serverName={IS_CAPACITOR ? (getActiveServer()?.name || undefined) : undefined}
           onServerManager={IS_CAPACITOR ? () => setShowServerManager(true) : undefined}

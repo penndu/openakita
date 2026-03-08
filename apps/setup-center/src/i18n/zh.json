@@ -54,7 +54,8 @@
     "themeLight": "主题: 亮色",
     "webAccess": "网页访问",
     "remoteUrl": "远程地址",
-    "copyRemoteUrl": "复制远程访问地址"
+    "copyRemoteUrl": "复制远程访问地址",
+    "ipNotFound": "无法获取外网 IP，请用 ipconfig 或 ifconfig 查看"
   },
   "tokenStats": {
     "serviceNotRunning": "服务未运行，无法查看统计",
