@@ -2,6 +2,13 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { safeFetch } from "../providers";
 import { IconX } from "../icons";
 
+function fmtShortDate(v: string | null | undefined): string {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 type InboxMsg = {
   id: string;
   org_id: string;
@@ -308,7 +315,7 @@ export function OrgInboxSidebar({
                 )}
                 <span style={{ flex: 1 }} />
                 <span style={{ fontSize: 10, color: "#9ca3af" }}>
-                  {(msg.created_at || "").slice(5, 16).replace("T", " ")}
+                  {fmtShortDate(msg.created_at)}
                 </span>
               </div>
 

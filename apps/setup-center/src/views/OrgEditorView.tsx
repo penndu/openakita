@@ -58,6 +58,29 @@ import { safeFetch } from "../providers";
 import { openPopupWindow, canOpenPopupWindow, IS_CAPACITOR } from "../platform";
 import { OrgInboxSidebar } from "../components/OrgInboxSidebar";
 
+// ── Time helpers (always show local timezone) ──
+
+function fmtTime(v: string | number | undefined | null): string {
+  if (!v) return "";
+  const d = new Date(typeof v === "number" ? v : v);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function fmtDateTime(v: string | number | undefined | null): string {
+  if (!v) return "";
+  const d = new Date(typeof v === "number" ? v : v);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function fmtShortDate(v: string | number | undefined | null): string {
+  if (!v) return "";
+  const d = new Date(typeof v === "number" ? v : v);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 // ── Types ──
 
 interface OrgNodeData {
@@ -1638,8 +1661,7 @@ export function OrgEditorView({
                 <div style={{ padding: 12, color: "var(--muted)", textAlign: "center" }}>等待活动...</div>
               ) : (
                 activityFeed.map((ev) => {
-                  const t = new Date(ev.time);
-                  const ts = `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}:${t.getSeconds().toString().padStart(2, "0")}`;
+                  const ts = fmtTime(ev.time);
                   const nodeLabel = (id: string) => {
                     const n = nodes.find((n) => n.id === id);
                     return (n?.data as any)?.role_title || id?.slice(0, 8) || "?";
@@ -1820,7 +1842,7 @@ export function OrgEditorView({
                         </div>
                         {s.last_run_at && (
                           <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
-                            上次: {s.last_run_at.slice(0, 19).replace("T", " ")}
+                            上次: {fmtDateTime(s.last_run_at)}
                           </div>
                         )}
                         {s.last_result_summary && (
@@ -1876,7 +1898,7 @@ export function OrgEditorView({
                               {evt.event_type?.replace(/_/g, " ")}
                             </span>
                             <span style={{ color: "#9ca3af", fontSize: 10, marginLeft: "auto" }}>
-                              {evt.timestamp?.slice(11, 19)}
+                              {fmtTime(evt.timestamp)}
                             </span>
                           </div>
                           {evt.data && Object.keys(evt.data).length > 0 && (
@@ -1911,7 +1933,7 @@ export function OrgEditorView({
                       {nodeThinking.slice(0, 30).map((item: any, i: number) => {
                         const isMsg = item.type === "message";
                         const isEvent = item.type === "event";
-                        const ts = item.timestamp || "";
+                        const tsLocal = fmtTime(item.timestamp);
                         const isExpanded = expandedThinkingIdx === i;
 
                         if (isMsg) {
@@ -1948,7 +1970,7 @@ export function OrgEditorView({
                                   </span>
                                 )}
                                 <span style={{ color: "#9ca3af", fontSize: 10, marginLeft: "auto" }}>
-                                  {ts.slice?.(11, 19) || ""}
+                                  {tsLocal}
                                 </span>
                               </div>
                               <div style={{
@@ -1999,7 +2021,7 @@ export function OrgEditorView({
                                   {isToolCall ? "🔧 " : ""}{evtType.replace(/_/g, " ")}
                                 </span>
                                 <span style={{ color: "#9ca3af", fontSize: 10, marginLeft: "auto" }}>
-                                  {ts.slice?.(11, 19) || ""}
+                                  {tsLocal}
                                 </span>
                               </div>
                               {item.data && Object.keys(item.data).length > 0 && (
@@ -2197,7 +2219,7 @@ export function OrgEditorView({
                             </span>
                             <span style={{ fontSize: 10, color: "#9ca3af" }}>{bb.source_node}</span>
                             <span style={{ fontSize: 10, color: "#d4d4d8", marginLeft: "auto" }}>
-                              {bb.timestamp?.slice?.(11, 19) || ""}
+                              {fmtTime(bb.timestamp)}
                             </span>
                           </div>
                           <div style={{ fontSize: 10, color: "#374151", marginTop: 2, lineHeight: 1.4 }}>
@@ -3269,7 +3291,7 @@ export function OrgEditorView({
                       )}
                       <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 3 }}>
                         {entry.source_node && <span>来自 {entry.source_node} · </span>}
-                        {entry.created_at ? new Date(entry.created_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
+                        {fmtShortDate(entry.created_at)}
                       </div>
                     </div>
                   );
