@@ -324,8 +324,9 @@ fn modules_dir() -> PathBuf {
 
 /// 获取内嵌 PyInstaller 打包后端的目录
 fn bundled_backend_dir() -> PathBuf {
-    let exe_dir = std::env::current_exe()
-        .ok()
+    let exe_path = std::env::current_exe().ok();
+    let exe_dir = exe_path
+        .as_ref()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
 
@@ -363,18 +364,40 @@ fn bundled_backend_dir() -> PathBuf {
     {
         let mut candidates: Vec<PathBuf> = vec![];
 
+        // Tauri 2.x deb 的二进制名称默认来自 Cargo.toml package.name（非 productName），
+        // lib 目录与二进制名称一致: /usr/lib/<binary-name>/resources/...
+        // 从 current_exe() 动态推导，避免硬编码过时名称。
+        let exe_name = exe_path
+            .as_ref()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
+
+        let static_names: &[&str] = &[
+            "openakita-setup-center", // Cargo.toml package name (Tauri 2.x default)
+            "openakita-desktop",      // legacy / mainBinaryName override
+            "open-akita-desktop",
+        ];
+
         // deb 常见布局: /usr/lib/<app-name>/resources/openakita-server/
-        // productName = "OpenAkita Desktop" → Tauri deb 使用 kebab-case
-        for app_name in &["openakita-desktop", "open-akita-desktop"] {
+        if let Some(ref name) = exe_name {
             candidates.push(PathBuf::from(format!(
-                "/usr/lib/{}/resources/openakita-server",
-                app_name
+                "/usr/lib/{}/resources/openakita-server", name
+            )));
+        }
+        for app_name in static_names {
+            candidates.push(PathBuf::from(format!(
+                "/usr/lib/{}/resources/openakita-server", app_name
             )));
         }
 
         // 若 exe 在 /usr/bin/，尝试同级 /usr/lib/<app>/
         if let Some(usr_dir) = exe_dir.parent() {
-            for app_name in &["openakita-desktop", "open-akita-desktop"] {
+            if let Some(ref name) = exe_name {
+                candidates.push(
+                    usr_dir.join("lib").join(name)
+                        .join("resources").join("openakita-server"),
+                );
+            }
+            for app_name in static_names {
                 candidates.push(
                     usr_dir
                         .join("lib")
@@ -388,7 +411,13 @@ fn bundled_backend_dir() -> PathBuf {
         // AppImage: 解压后 exe 在 <mount>/usr/bin/，resources 可能在 <mount>/usr/lib/<app>/
         // 也可能在 <mount>/resources/ (Tauri AppImage 平坦布局)
         if let Some(mount_root) = exe_dir.parent().and_then(|p| p.parent()) {
-            for app_name in &["openakita-desktop", "open-akita-desktop"] {
+            if let Some(ref name) = exe_name {
+                candidates.push(
+                    mount_root.join("lib").join(name)
+                        .join("resources").join("openakita-server"),
+                );
+            }
+            for app_name in static_names {
                 candidates.push(
                     mount_root
                         .join("lib")
@@ -408,8 +437,9 @@ fn bundled_backend_dir() -> PathBuf {
         }
 
         eprintln!(
-            "[bundled_backend_dir] not found. exe_dir={}, checked {} Linux fallback paths",
+            "[bundled_backend_dir] not found. exe_dir={}, exe_name={:?}, checked {} Linux fallback paths",
             exe_dir.display(),
+            exe_name,
             candidates.len()
         );
     }
