@@ -56,6 +56,7 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
   const captchaTokenRef = useRef("");
   const captchaContainerRef = useRef<HTMLDivElement>(null);
   const captchaInstanceRef = useRef<any>(null);
+  const handleSubmitRef = useRef<() => void>(() => {});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset mode when re-opened
@@ -106,7 +107,9 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
               captchaTokenRef.current = captchaVerifyParam;
               return { captchaResult: true, bizResult: true };
             },
-            onBizResultCallback: () => {},
+            onBizResultCallback: () => {
+              handleSubmitRef.current();
+            },
             getInstance: (inst: any) => { captchaInstanceRef.current = inst; },
             language: document.documentElement.lang?.startsWith("zh") ? "cn" : "en",
           });
@@ -165,6 +168,10 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
   const handleSubmit = useCallback(async () => {
     if (!title.trim() || !description.trim()) return;
 
+    // When CAPTCHA is configured, the first click is intercepted by the SDK.
+    // handleSubmit is called again from onBizResultCallback after verification.
+    if (captchaCfg && !captchaTokenRef.current) return;
+
     setSubmitting(true);
     setSubmitResult(null);
 
@@ -220,9 +227,13 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
     } catch (err: any) {
       setSubmitResult({ ok: false, msg: err?.message || t("feedback.uploadFailedNetwork") });
     } finally {
+      captchaTokenRef.current = "";
       setSubmitting(false);
     }
-  }, [mode, title, description, steps, uploadLogs, uploadDebug, contactEmail, contactWechat, imageFiles, apiBase, t]);
+  }, [captchaCfg, mode, title, description, steps, uploadLogs, uploadDebug, contactEmail, contactWechat, imageFiles, apiBase, t]);
+
+  // Keep ref in sync so the CAPTCHA callback always calls the latest version
+  handleSubmitRef.current = handleSubmit;
 
   const handleClose = useCallback(() => { setSubmitResult(null); onClose(); }, [onClose]);
 
