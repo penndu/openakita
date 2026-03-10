@@ -2,25 +2,24 @@
 """
 Generate release manifests for the download page and Tauri updater.
 
-Produces four types of output:
-  1. Channel manifest  (release.json / pre-release.json / dev.json)
-     — latest version info for one channel, consumed by the website.
+Produces three types of output:
+  1. Channel manifest  (stable.json / pre-release.json / dev.json)
+     — latest version info for one channel, consumed by the website + Tauri updater.
   2. Per-version manifest  (releases/v{x}.json)
      — archived manifest for one specific version, consumed by the "history" UI.
   3. Version index  (versions.json)
      — lightweight index of all versions across all channels.
-  4. Tauri updater compat  (latest.json)
-     — flat format consumed by Tauri's built-in updater (only for "release" channel).
 
 Usage:
     # Basic: generate manifest for a single tag
     python scripts/generate_release_manifest.py \\
-        --tag v1.25.9 --channel release --output-dir ./out
+        --tag v1.25.9 --channel stable --output-dir ./out
 
     # With CDN rewriting + index update
     python scripts/generate_release_manifest.py \\
-        --tag v1.25.9 --channel release --output-dir ./out \\
+        --tag v1.25.9 --channel stable --output-dir ./out \\
         --cdn-base-url https://dl-cn.openakita.ai \\
+        --cdn-fallback-url https://dl.openakita.ai \\
         --existing-index ./existing-versions.json
 """
 
@@ -209,12 +208,14 @@ def rewrite_url(github_url: str, cdn_base: str, tag: str) -> str:
     return f"{cdn_base.rstrip('/')}/{tag}/{filename}"
 
 
-def make_download_url(asset: dict, cdn_base: str, tag: str) -> dict:
+def make_download_url(asset: dict, cdn_base: str, cdn_fallback: str, tag: str) -> dict:
     github_url = asset["browser_download_url"]
     url = rewrite_url(github_url, cdn_base, tag) if cdn_base else github_url
     entry: dict = {"url": url}
     if cdn_base:
         entry["github_url"] = github_url
+    if cdn_fallback:
+        entry["fallback_url"] = rewrite_url(github_url, cdn_fallback, tag)
     return entry
 
 
@@ -237,7 +238,7 @@ def parse_semver(v: str) -> tuple:
 # ---------------------------------------------------------------------------
 
 def build_updater_platforms(
-    assets: list[dict], cdn_base: str, tag: str
+    assets: list[dict], cdn_base: str, cdn_fallback: str, tag: str
 ) -> dict:
     platforms = {}
     for platform_key, config in UPDATER_PATTERNS.items():
@@ -253,14 +254,14 @@ def build_updater_platforms(
         if not sig:
             print(f"  updater.{platform_key}: {asset['name']} — no .sig, skipping")
             continue
-        urls = make_download_url(asset, cdn_base, tag)
+        urls = make_download_url(asset, cdn_base, cdn_fallback, tag)
         platforms[platform_key] = {"signature": sig, **urls}
         print(f"  updater.{platform_key}: {asset['name']} ✓")
     return platforms
 
 
 def build_grouped_downloads(
-    assets: list[dict], cdn_base: str, tag: str
+    assets: list[dict], cdn_base: str, cdn_fallback: str, tag: str
 ) -> dict[str, list[dict]]:
     downloads: dict[str, list[dict]] = {}
     for platform, patterns in PLATFORM_DOWNLOADS.items():
@@ -269,7 +270,7 @@ def build_grouped_downloads(
             asset = find_asset(assets, pat)
             if not asset:
                 continue
-            urls = make_download_url(asset, cdn_base, tag)
+            urls = make_download_url(asset, cdn_base, cdn_fallback, tag)
             items.append({
                 "key": pat["key"],
                 "nickname": pat["nickname"],
@@ -288,6 +289,7 @@ def generate_manifest(
     tag: str,
     channel: str,
     cdn_base: str,
+    cdn_fallback: str,
 ) -> dict:
     version = tag.lstrip("v")
     assets = release.get("assets", [])
@@ -296,8 +298,8 @@ def generate_manifest(
 
     print(f"Release {tag}: {len(assets)} assets")
 
-    updater = build_updater_platforms(assets, cdn_base, tag)
-    downloads = build_grouped_downloads(assets, cdn_base, tag)
+    updater = build_updater_platforms(assets, cdn_base, cdn_fallback, tag)
+    downloads = build_grouped_downloads(assets, cdn_base, cdn_fallback, tag)
 
     return {
         "version": version,
@@ -318,7 +320,7 @@ def update_version_index(
     available_platforms: list[str],
 ) -> dict:
     if existing is None:
-        existing = {"generated_at": "", "release": [], "pre_release": [], "dev": []}
+        existing = {"generated_at": "", "stable": [], "pre_release": [], "dev": []}
 
     channel_key = channel.replace("-", "_")  # "pre-release" → "pre_release"
     if channel_key not in existing:
@@ -368,7 +370,7 @@ def main():
     )
     parser.add_argument("--tag", required=True, help="Release tag (e.g. v1.25.9)")
     parser.add_argument(
-        "--channel", required=True, choices=["release", "pre-release", "dev"],
+        "--channel", required=True, choices=["stable", "pre-release", "dev"],
         help="Release channel"
     )
     parser.add_argument(
@@ -377,17 +379,19 @@ def main():
     )
     parser.add_argument("--repo", default=DEFAULT_REPO)
     parser.add_argument("--cdn-base-url", default=os.environ.get("CDN_BASE_URL", ""))
+    parser.add_argument("--cdn-fallback-url", default=os.environ.get("CDN_FALLBACK_URL", ""))
     parser.add_argument(
         "--existing-index", default="",
         help="Path to existing versions.json to merge into (downloaded from OSS)"
     )
     parser.add_argument(
         "--compat-release-json", action="store_true",
-        help="Also output latest.json in flat format (Tauri updater compat)"
+        help="Also output release.json in old flat format (Tauri updater backward compat)"
     )
     args = parser.parse_args()
 
     cdn_base = args.cdn_base_url.strip()
+    cdn_fallback = args.cdn_fallback_url.strip()
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     tag = args.tag
     channel = args.channel
@@ -402,11 +406,11 @@ def main():
         print(f"Error fetching release: {e}", file=sys.stderr)
         sys.exit(1)
 
-    manifest = generate_manifest(release, tag, channel, cdn_base)
+    manifest = generate_manifest(release, tag, channel, cdn_base, cdn_fallback)
     version = manifest["version"]
     available_platforms = list(manifest["downloads"].keys())
 
-    # 1) Channel manifest  (e.g. release.json)
+    # 1) Channel manifest  (e.g. stable.json)
     out_dir.mkdir(parents=True, exist_ok=True)
     channel_file = out_dir / f"{channel}.json"
     with open(channel_file, "w", encoding="utf-8") as f:
@@ -421,8 +425,8 @@ def main():
         json.dump(manifest, f, indent=2, ensure_ascii=False)
     print(f"Written per-version manifest: {version_file}")
 
-    # 3) Tauri updater compat (latest.json — matches tauri.conf.json endpoint)
-    if args.compat_release_json or channel == "release":
+    # 3) Backward-compatible release.json (old flat format + updater platforms)
+    if args.compat_release_json or channel == "stable":
         compat = {
             "version": version,
             "notes": manifest["notes"],
@@ -430,10 +434,10 @@ def main():
             "platforms": manifest["platforms"],
             "downloads": flatten_downloads(manifest["downloads"]),
         }
-        compat_file = out_dir / "latest.json"
+        compat_file = out_dir / "release.json"
         with open(compat_file, "w", encoding="utf-8") as f:
             json.dump(compat, f, indent=2, ensure_ascii=False)
-        print(f"Written Tauri updater compat: {compat_file}")
+        print(f"Written compat manifest: {compat_file}")
 
     # 4) Update version index
     existing_index = None

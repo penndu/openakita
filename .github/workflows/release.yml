@@ -20,62 +20,40 @@ env:
   CHECKOUT_REF: ${{ (github.event_name == 'workflow_dispatch' && inputs.ref != '' && inputs.ref) || (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
 
 jobs:
-  # ── Job 1: 创建 / 更新 Draft Release ──
+  # ── Job 1: 确保 Draft Release 存在（仅首次创建，重新打包时跳过） ──
   create_release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
       release_id: ${{ steps.gh_release.outputs.id }}
-      is_stable: ${{ steps.detect_channel.outputs.is_stable }}
-      channel: ${{ steps.detect_channel.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.CHECKOUT_REF }}
           fetch-depth: 0
 
-      # ── 判断发布渠道（基于 .github/release-channels.json 配置） ──
-      - name: Detect release channel
-        id: detect_channel
+      - name: Check if release already exists
+        id: check_release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ env.RELEASE_TAG }}"
-          MINOR=$(echo "$TAG" | sed 's/^v//' | cut -d. -f1,2)
-          CONFIG=".github/release-channels.json"
-          echo "Tag: $TAG, Minor: $MINOR"
-
-          CHANNEL="dev"
-          if [ -f "$CONFIG" ]; then
-            RELEASE_LINE=$(jq -r '.release // ""' "$CONFIG")
-            PREVIEW_LINE=$(jq -r '."pre-release" // ""' "$CONFIG")
-            echo "Config: release=$RELEASE_LINE, pre-release=$PREVIEW_LINE"
-
-            if [ "$MINOR" = "$RELEASE_LINE" ]; then
-              CHANNEL="release"
-            elif [ "$MINOR" = "$PREVIEW_LINE" ]; then
-              CHANNEL="pre-release"
-            fi
+          if gh release view "${{ env.RELEASE_TAG }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Release ${{ env.RELEASE_TAG }} already exists — will upload new artifacts to it"
           else
-            echo "⚠️ No release-channels.json found, defaulting to dev"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "📦 Release ${{ env.RELEASE_TAG }} does not exist — will create draft"
           fi
 
-          IS_STABLE="false"
-          if [ "$CHANNEL" = "release" ]; then
-            IS_STABLE="true"
-          fi
-
-          echo "is_stable=${IS_STABLE}" >> "$GITHUB_OUTPUT"
-          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
-          echo "✅ Channel: ${CHANNEL} (is_stable=${IS_STABLE})"
-
-      - name: Create or update draft release
+      - name: Create draft release
+        if: steps.check_release.outputs.exists != 'true'
         id: gh_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
           generate_release_notes: true
-          prerelease: ${{ steps.detect_channel.outputs.is_stable != 'true' }}
 
   # ── Job 2a: Python 包发布 ──
   python_release:
@@ -125,12 +103,9 @@ jobs:
         run: python -m build --wheel
       
       - name: Upload Python artifacts to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          files: dist/*
-          draft: true
-          overwrite_files: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ env.RELEASE_TAG }}" dist/* --clobber
       
       - name: Publish to PyPI (Trusted Publishing / OIDC)
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') && env.PYPI_API_TOKEN == '' }}
@@ -863,5 +838,3 @@ jobs:
           if-no-files-found: ignore
           retention-days: 5
 
-  # ── NOTE: manifest 生成、OSS 上传、发布 Release 均由 publish-release.yml 处理 ──
-  # ── 构建完成后，Release 保持 draft 状态，需手动触发 publish-release.yml 发布 ──
