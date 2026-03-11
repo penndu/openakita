@@ -25,8 +25,7 @@ export function ProviderSearchSelect({
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const allOptions = useMemo(() => {
-    const base = options.slice();
-    if (extraOptions) base.push(...extraOptions);
+    const base = extraOptions ? [...extraOptions, ...options] : options.slice();
     return base;
   }, [options, extraOptions]);
 

@@ -4324,6 +4324,7 @@ export function App() {
                   value={providerSlug}
                   onChange={(v) => setProviderSlug(v)}
                   options={providers.map((p) => ({ value: p.slug, label: p.name }))}
+                  extraOptions={[{ value: "__custom__", label: t("llm.customProvider") }]}
                   placeholder={providers.length === 0 ? t("common.loading") : undefined}
                   disabled={providers.length === 0}
                 />
