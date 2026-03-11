@@ -1,7 +1,7 @@
 /**
  * Reusable chat panel — organization or node level.
  * Renders a scrollable message list, input box, and real-time WS progress.
- * Messages are persisted to localStorage per orgId (+ optional nodeId).
+ * Messages are persisted to backend session API (same as main ChatView).
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { safeFetch } from "../providers";
@@ -25,44 +25,21 @@ export interface OrgChatPanelProps {
   onClose?: () => void;
 }
 
-const MAX_PERSISTED = 50;
-const SAVE_DEBOUNCE_MS = 800;
-
-function storageKey(orgId: string, nodeId?: string | null): string {
-  return nodeId ? `orgchat_${orgId}_${nodeId}` : `orgchat_${orgId}`;
-}
-
-function loadMessages(orgId: string, nodeId?: string | null): ChatMsg[] {
-  try {
-    const raw = localStorage.getItem(storageKey(orgId, nodeId));
-    if (!raw) return [];
-    const msgs: ChatMsg[] = JSON.parse(raw);
-    return msgs.filter(m => !m.streaming);
-  } catch {
-    return [];
-  }
-}
-
-function saveMessages(orgId: string, nodeId: string | null | undefined, msgs: ChatMsg[]): void {
-  try {
-    const toSave = msgs
-      .filter(m => !m.streaming)
-      .slice(-MAX_PERSISTED)
-      .map(({ streaming, ...rest }) => rest);
-    localStorage.setItem(storageKey(orgId, nodeId), JSON.stringify(toSave));
-  } catch { /* quota exceeded */ }
+function sessionId(orgId: string, nodeId?: string | null): string {
+  return nodeId ? `org_${orgId}_node_${nodeId}` : `org_${orgId}`;
 }
 
 let _seq = 0;
 function genId() { return `orgchat-${Date.now()}-${++_seq}`; }
 
 export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, title, onClose }: OrgChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMsg[]>(() => loadMessages(orgId, nodeId));
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const convId = sessionId(orgId, nodeId);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -72,31 +49,52 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
 
   useEffect(scrollToBottom, [messages, scrollToBottom]);
 
+  // Load history from backend session on mount / org+node change
   useEffect(() => {
-    setMessages(loadMessages(orgId, nodeId));
-  }, [orgId, nodeId]);
+    let cancelled = false;
+    setLoaded(false);
+    (async () => {
+      try {
+        const res = await safeFetch(
+          `${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`
+        );
+        const data = await res.json();
+        if (cancelled) return;
+        const msgs: ChatMsg[] = (data.messages || []).map((m: any) => ({
+          id: m.id || genId(),
+          role: m.role || "assistant",
+          content: m.content || "",
+          timestamp: m.timestamp || Date.now(),
+        }));
+        setMessages(msgs);
+      } catch {
+        if (!cancelled) setMessages([]);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [convId, apiBaseUrl]);
 
-  useEffect(() => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      saveMessages(orgId, nodeId, messages);
-    }, SAVE_DEBOUNCE_MS);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [messages, orgId, nodeId]);
+  // Push messages to backend session
+  const persistMessages = useCallback(async (msgs: { role: string; content: string }[]) => {
+    try {
+      await safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: msgs }),
+      });
+    } catch { /* backend unavailable, messages still shown in UI */ }
+  }, [apiBaseUrl, convId]);
 
-  useEffect(() => {
-    const flush = () => saveMessages(orgId, nodeId, messages);
-    window.addEventListener("beforeunload", flush);
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") flush();
-    });
-    return () => window.removeEventListener("beforeunload", flush);
-  }, [orgId, nodeId, messages]);
-
-  const handleClear = useCallback(() => {
+  const handleClear = useCallback(async () => {
     setMessages([]);
-    try { localStorage.removeItem(storageKey(orgId, nodeId)); } catch {}
-  }, [orgId, nodeId]);
+    try {
+      await safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}`, {
+        method: "DELETE",
+      });
+    } catch {}
+  }, [apiBaseUrl, convId]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -139,6 +137,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       }
     });
 
+    let finalContent = "";
     try {
       const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/command`, {
         method: "POST",
@@ -149,9 +148,9 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       const commandId = data.command_id as string | undefined;
 
       if (!commandId) {
-        const resultText = data.result || data.error || JSON.stringify(data);
+        finalContent = data.result || data.error || JSON.stringify(data);
         setMessages(prev => prev.map(m =>
-          m.id === placeholderId ? { ...m, content: resultText, streaming: false } : m
+          m.id === placeholderId ? { ...m, content: finalContent, streaming: false } : m
         ));
       } else {
         let resolved = false;
@@ -165,8 +164,9 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           const progressSummary = progressLines.length > 0
             ? progressLines.map(l => `> ${l}`).join("\n") + "\n\n---\n\n"
             : "";
+          finalContent = progressSummary + resultText;
           setMessages(prev => prev.map(m =>
-            m.id === placeholderId ? { ...m, content: progressSummary + resultText, streaming: false } : m
+            m.id === placeholderId ? { ...m, content: finalContent, streaming: false } : m
           ));
         });
 
@@ -184,8 +184,9 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
                 const progressSummary = progressLines.length > 0
                   ? progressLines.map(l => `> ${l}`).join("\n") + "\n\n---\n\n"
                   : "";
+                finalContent = progressSummary + resultText;
                 setMessages(prev => prev.map(m =>
-                  m.id === placeholderId ? { ...m, content: progressSummary + resultText, streaming: false } : m
+                  m.id === placeholderId ? { ...m, content: finalContent, streaming: false } : m
                 ));
               }
             }
@@ -198,14 +199,22 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         unsubDone();
       }
     } catch (e: any) {
+      finalContent = `发送失败: ${e.message || e}`;
       setMessages(prev => prev.map(m =>
-        m.id === placeholderId ? { ...m, content: `发送失败: ${e.message || e}`, streaming: false, role: "system" } : m
+        m.id === placeholderId ? { ...m, content: finalContent, streaming: false, role: "system" } : m
       ));
     } finally {
       unsubProgress();
       setSending(false);
+      // Persist user + assistant messages to backend session
+      if (finalContent) {
+        persistMessages([
+          { role: "user", content: text },
+          { role: "assistant", content: finalContent },
+        ]);
+      }
     }
-  }, [input, sending, orgId, nodeId, apiBaseUrl]);
+  }, [input, sending, orgId, nodeId, apiBaseUrl, persistMessages]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -242,7 +251,12 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       )}
 
       <div ref={listRef} className="ocp-messages">
-        {messages.length === 0 && (
+        {!loaded && (
+          <div className="ocp-empty">
+            <span className="ocp-send-spinner" style={{ width: 20, height: 20 }} />
+          </div>
+        )}
+        {loaded && messages.length === 0 && (
           <div className="ocp-empty">
             <div className="ocp-empty-icon">
               {nodeId ? (

@@ -62,6 +62,7 @@ import { openPopupWindow, canOpenPopupWindow, IS_CAPACITOR, saveFileDialog, IS_T
 import { OrgInboxSidebar } from "../components/OrgInboxSidebar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { OrgAvatar, AVATAR_PRESETS, AVATAR_MAP } from "../components/OrgAvatars";
+import { OrgChatPanel } from "../components/OrgChatPanel";
 import { OrgDashboard } from "../components/OrgDashboard";
 import { OrgProjectBoard } from "../components/OrgProjectBoard";
 
@@ -574,11 +575,9 @@ const nodeTypes: NodeTypes = {
 export function OrgEditorView({
   apiBaseUrl = "http://127.0.0.1:18900",
   visible = true,
-  onOpenOrgChat,
 }: {
   apiBaseUrl?: string;
   visible?: boolean;
-  onOpenOrgChat?: (orgId: string, nodeId?: string | null) => void;
 }) {
   useTranslation();
 
@@ -619,6 +618,8 @@ export function OrgEditorView({
   const [showActivityFeed, setShowActivityFeed] = useState(true);
   const [bottomTab, setBottomTab] = useState<"activity" | "chat">("activity");
   const [viewMode, setViewMode] = useState<"canvas" | "dashboard" | "projects">("canvas");
+  const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  const [chatPanelNode, setChatPanelNode] = useState<string | null>(null);
   const activityFeedRef = useRef<HTMLDivElement>(null);
   const [edgeAnimations, setEdgeAnimations] = useState<Record<string, { color: string; ts: number }>>({});
   const [edgeFlowCounts, setEdgeFlowCounts] = useState<Record<string, number>>({});
@@ -1989,29 +1990,10 @@ export function OrgEditorView({
               </div>
               )}
 
-              {/* Chat tab — shortcut to main ChatView with org pre-selected */}
+              {/* Chat tab */}
               {bottomTab === "chat" && selectedOrgId && (
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 16 }}>
-                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--muted, #64748b)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  <span style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", maxWidth: 200 }}>
-                    在主聊天中与组织对话，拥有完整的会话记录和上下文
-                  </span>
-                  <button
-                    onClick={() => onOpenOrgChat?.(selectedOrgId)}
-                    style={{
-                      padding: "8px 20px", fontSize: 13, fontWeight: 600,
-                      background: "linear-gradient(135deg, #3b82f6, #6366f1)",
-                      color: "#fff", border: "none", borderRadius: 8, cursor: "pointer",
-                      display: "flex", alignItems: "center", gap: 6,
-                    }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                    </svg>
-                    打开组织聊天
-                  </button>
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <OrgChatPanel orgId={selectedOrgId} apiBaseUrl={apiBaseUrl} compact />
                 </div>
               )}
               {bottomTab === "chat" && !selectedOrgId && (
@@ -2022,18 +2004,37 @@ export function OrgEditorView({
             </div>
           )}
 
-          {/* ═══ Floating Chat FAB — navigates to main ChatView with org pre-selected ═══ */}
-          {liveMode && selectedOrgId && (
+          {/* ═══ Floating Chat FAB ═══ */}
+          {liveMode && selectedOrgId && !chatPanelOpen && (
             <button
-              onClick={() => onOpenOrgChat?.(selectedOrgId)}
+              onClick={() => { setChatPanelNode(null); setChatPanelOpen(true); }}
               className="org-chat-fab"
-              title="打开组织聊天"
+              title="打开组织指挥台"
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
-              <span className="org-chat-fab-label">组织聊天</span>
+              <span className="org-chat-fab-label">指挥台</span>
             </button>
+          )}
+
+          {/* ═══ Slide-out Chat Panel ═══ */}
+          {chatPanelOpen && selectedOrgId && (
+            <>
+              <div className="org-chat-overlay" onClick={() => setChatPanelOpen(false)} />
+              <div className="org-chat-slide">
+                <OrgChatPanel
+                  orgId={selectedOrgId}
+                  nodeId={chatPanelNode}
+                  apiBaseUrl={apiBaseUrl}
+                  showHeader
+                  title={chatPanelNode
+                    ? `对话 · ${(nodes.find(n => n.id === chatPanelNode)?.data as any)?.role_title || chatPanelNode}`
+                    : `${currentOrg?.name || "组织"} · 指挥台`}
+                  onClose={() => setChatPanelOpen(false)}
+                />
+              </div>
+            </>
           )}
 
           <style>{`
@@ -2058,6 +2059,23 @@ export function OrgEditorView({
             .org-chat-fab:active { transform: scale(0.97); }
             .org-chat-fab-label { letter-spacing: 0.5px; }
 
+            .org-chat-overlay {
+              position: absolute; inset: 0; z-index: 80;
+              background: rgba(0,0,0,0.3);
+              backdrop-filter: blur(2px);
+              animation: org-overlay-in 0.2s ease;
+            }
+            @keyframes org-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+
+            .org-chat-slide {
+              position: absolute; top: 0; right: 0; bottom: 0; z-index: 90;
+              width: min(420px, 85%);
+              background: var(--bg-app, #0f172a);
+              border-left: 1px solid var(--line, rgba(51,65,85,0.5));
+              box-shadow: -8px 0 30px rgba(0,0,0,0.3);
+              animation: org-slide-in 0.3s cubic-bezier(0.4,0,0.2,1);
+            }
+            @keyframes org-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
           `}</style>
           </>
         ) : (
@@ -2110,7 +2128,7 @@ export function OrgEditorView({
               {liveMode && selectedOrgId && (
                 <button
                   className="btnSmall"
-                  onClick={() => onOpenOrgChat?.(selectedOrgId, selectedNodeId)}
+                  onClick={() => { setChatPanelNode(selectedNodeId); setChatPanelOpen(true); }}
                   style={{
                     minWidth: 36, minHeight: 36, fontSize: 12,
                     background: "linear-gradient(135deg, #3b82f6, #6366f1)",
@@ -3411,27 +3429,13 @@ export function OrgEditorView({
             )}
 
             {propsTab === "chat" && liveMode && selectedOrgId && (
-              <div style={{ height: 360, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 16 }}>
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--muted, #64748b)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                </svg>
-                <span style={{ fontSize: 12, color: "var(--muted)", textAlign: "center" }}>
-                  在主聊天中对话，拥有完整上下文和历史
-                </span>
-                <button
-                  onClick={() => onOpenOrgChat?.(selectedOrgId, selectedNodeId)}
-                  style={{
-                    padding: "6px 16px", fontSize: 12, fontWeight: 600,
-                    background: "linear-gradient(135deg, #3b82f6, #6366f1)",
-                    color: "#fff", border: "none", borderRadius: 8, cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 5,
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  与 {(nodes.find(n => n.id === selectedNodeId)?.data as any)?.role_title || "节点"} 对话
-                </button>
+              <div style={{ height: 360 }}>
+                <OrgChatPanel
+                  orgId={selectedOrgId}
+                  nodeId={selectedNodeId}
+                  apiBaseUrl={apiBaseUrl}
+                  compact
+                />
               </div>
             )}
           </div>

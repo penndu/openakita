@@ -7730,12 +7730,6 @@ export function App() {
         <OrgEditorView
           apiBaseUrl={apiBaseUrl}
           visible={view === "org_editor"}
-          onOpenOrgChat={(orgId, nodeId) => {
-            setView("chat");
-            window.dispatchEvent(new CustomEvent("openakita_activate_org", {
-              detail: { orgId, nodeId },
-            }));
-          }}
         />
       );
     }
