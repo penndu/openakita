@@ -856,6 +856,7 @@
     "delete": "Delete",
     "search": "Search",
     "noData": "No data",
+    "noResults": "No results",
     "optional": "optional",
     "missingFields": "Missing",
     "confirmDeleteMsg": "Are you sure you want to delete",

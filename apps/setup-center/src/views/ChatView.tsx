@@ -1781,6 +1781,9 @@ export function ChatView({
   const [planMode, setPlanMode] = useState(false);
   const [streamingTick, setStreamingTick] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== "undefined" && window.innerWidth > 768);
+  const [sidebarPinned, setSidebarPinned] = useState(() => {
+    try { return localStorage.getItem("openakita_convSidebarPinned") === "true"; } catch { return false; }
+  });
   const [convSearchQuery, setConvSearchQuery] = useState("");
   const [orbitTip, setOrbitTip] = useState<{ x: number; y: number; name: string; title: string } | null>(null);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -4216,7 +4219,7 @@ export function ChatView({
       )}
 
       {/* 主聊天区 */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }} onMouseDown={() => { if (sidebarOpen) setSidebarOpen(false); }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }} onMouseDown={() => { if (sidebarOpen && !sidebarPinned) setSidebarOpen(false); }}>
         {/* Chat top bar */}
         <div className="chatTopBar">
           <button onClick={newConversation} className="chatTopBarBtn">
@@ -4778,19 +4781,33 @@ export function ChatView({
         )}
         <div className={`convSidebar${typeof window !== "undefined" && window.innerWidth <= 768 ? " convSidebarMobileOpen" : ""}`}>
           <div className="convSidebarHeader">
-            <div className="convSearchBox">
-              <IconSearch size={13} style={{ opacity: 0.4, flexShrink: 0 }} />
-              <input
-                className="convSearchInput"
-                placeholder={t("chat.searchConversations") || "搜索会话..."}
-                value={convSearchQuery}
-                onChange={(e) => setConvSearchQuery(e.target.value)}
-              />
-              {convSearchQuery && (
-                <button className="convSearchClear" onClick={() => setConvSearchQuery("")}>
-                  <IconX size={11} />
-                </button>
-              )}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div className="convSearchBox" style={{ flex: 1 }}>
+                <IconSearch size={13} style={{ opacity: 0.4, flexShrink: 0 }} />
+                <input
+                  className="convSearchInput"
+                  placeholder={t("chat.searchConversations") || "搜索会话..."}
+                  value={convSearchQuery}
+                  onChange={(e) => setConvSearchQuery(e.target.value)}
+                />
+                {convSearchQuery && (
+                  <button className="convSearchClear" onClick={() => setConvSearchQuery("")}>
+                    <IconX size={11} />
+                  </button>
+                )}
+              </div>
+              <button
+                className="convPinBtn"
+                onClick={() => {
+                  const next = !sidebarPinned;
+                  setSidebarPinned(next);
+                  try { localStorage.setItem("openakita_convSidebarPinned", String(next)); } catch {}
+                }}
+                title={sidebarPinned ? (t("chat.unpinSidebar") || "取消固定") : (t("chat.pinSidebar") || "固定会话列表")}
+                style={{ color: sidebarPinned ? "var(--brand, #0ea5e9)" : "var(--muted2, #999)" }}
+              >
+                <IconPin size={14} />
+              </button>
             </div>
             <button className="convNewBtn" onClick={newConversation}>
               {t("chat.newConversation")}

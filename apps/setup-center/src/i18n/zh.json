@@ -856,6 +856,7 @@
     "delete": "删除",
     "search": "搜索",
     "noData": "暂无数据",
+    "noResults": "无匹配结果",
     "optional": "可选",
     "missingFields": "缺少",
     "confirmDeleteMsg": "确定要删除",
