@@ -286,6 +286,43 @@ async def install_skill(request: Request):
         logger.error("Skill install failed: %s", e, exc_info=True)
         return {"error": str(e)}
 
+    # 验证安装的技能是否能被 SkillLoader 正确解析
+    install_warning = None
+    try:
+        from openakita.setup_center.bridge import _resolve_skills_dir
+
+        skills_dir = _resolve_skills_dir(workspace_dir)
+        # 找到刚安装的技能目录（最新修改的含 SKILL.md 的子目录）
+        candidates = sorted(
+            (d for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()),
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            from openakita.skills.parser import SkillParser
+
+            parser = SkillParser()
+            try:
+                parser.parse_directory(candidates[0])
+            except Exception as parse_err:
+                import shutil
+
+                skill_dir_name = candidates[0].name
+                logger.error(
+                    "Installed skill %s has invalid SKILL.md, removing: %s",
+                    skill_dir_name, parse_err,
+                )
+                shutil.rmtree(str(candidates[0]), ignore_errors=True)
+                return {
+                    "error": (
+                        f"技能文件已下载，但 SKILL.md 格式无效，无法加载：{parse_err}。"
+                        "该技能可能不兼容 OpenAkita 格式，已自动清理。"
+                    )
+                }
+    except Exception as ve:
+        install_warning = str(ve)
+        logger.warning("Post-install validation skipped: %s", ve)
+
     # 安装成功后：重新加载技能到 agent 运行时，并应用 allowlist
     try:
         agent = getattr(request.app.state, "agent", None)
@@ -306,7 +343,10 @@ async def install_skill(request: Request):
         logger.warning(f"Post-install reload failed (skill was installed): {e}")
 
     _notify_skills_changed("install")
-    return {"status": "ok", "url": url}
+    result: dict = {"status": "ok", "url": url}
+    if install_warning:
+        result["warning"] = install_warning
+    return result
 
 
 @router.post("/api/skills/reload")

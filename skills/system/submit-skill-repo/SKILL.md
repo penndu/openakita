@@ -1,3 +1,12 @@
+---
+name: submit-skill-repo
+description: Submit a GitHub repository to be indexed by the OpenAkita Skill Store. Use when user wants to share their skills repo with the community.
+system: true
+handler: skill_store
+tool-name: submit_skill_repo
+category: Skill Store
+---
+
 # submit-skill-repo
 
 Submit a GitHub repository to be indexed by the OpenAkita Skill Store.
