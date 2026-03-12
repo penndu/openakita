@@ -1304,116 +1304,125 @@ export function SkillManager({
 
       {/* 已安装技能 */}
       {tab === "installed" && (
-        <div style={{ display: "grid", gap: 10 }}>
-          {/* 搜索 + AI 整理 */}
-          {skillsWithConfig.length > 0 && (
-            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-              <div style={{ flex: 1, position: "relative" }}>
-                <IconSearch size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }} />
-                <input
-                  value={installedSearch}
-                  onChange={(e) => setInstalledSearch(e.target.value)}
-                  placeholder={t("skills.filterPlaceholder")}
-                  style={{ width: "100%", fontSize: 13, paddingLeft: 32 }}
-                />
+        <>
+          <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
+            {/* 搜索 + AI 整理 */}
+            {skillsWithConfig.length > 0 && (
+              <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                <div style={{ flex: 1, position: "relative" }}>
+                  <IconSearch size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }} />
+                  <input
+                    value={installedSearch}
+                    onChange={(e) => setInstalledSearch(e.target.value)}
+                    placeholder={t("skills.filterPlaceholder")}
+                    style={{ width: "100%", fontSize: 13, paddingLeft: 32 }}
+                  />
+                </div>
+                {dataMode !== "remote" && (
+                  <button
+                    onClick={handleImportLocal}
+                    disabled={localImporting}
+                    style={{ fontSize: 12, padding: "0 14px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}
+                    title={t("skills.importLocalTitle")}
+                  >
+                    <IconFolderOpen size={13} />
+                    {localImporting ? t("skills.importLocalImporting") : t("skills.importLocal")}
+                  </button>
+                )}
+                {serviceRunning && (
+                  <button
+                    onClick={handleAiOrganize}
+                    disabled={aiOrganizing}
+                    style={{ fontSize: 12, padding: "0 14px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap" }}
+                    title={t("skills.aiOrganizeHint")}
+                  >
+                    {aiOrganizing ? t("common.loading") : t("skills.aiOrganize")}
+                  </button>
+                )}
               </div>
-              {dataMode !== "remote" && (
-                <button
-                  onClick={handleImportLocal}
-                  disabled={localImporting}
-                  style={{ fontSize: 12, padding: "0 14px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}
-                  title={t("skills.importLocalTitle")}
-                >
-                  <IconFolderOpen size={13} />
-                  {localImporting ? t("skills.importLocalImporting") : t("skills.importLocal")}
-                </button>
-              )}
-              {serviceRunning && (
-                <button
-                  onClick={handleAiOrganize}
-                  disabled={aiOrganizing}
-                  style={{ fontSize: 12, padding: "0 14px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap" }}
-                  title={t("skills.aiOrganizeHint")}
-                >
-                  {aiOrganizing ? t("common.loading") : t("skills.aiOrganize")}
-                </button>
-              )}
-            </div>
-          )}
+            )}
 
-          {loading && skillsWithConfig.length === 0 && <div className="cardHint">{t("skills.loading")}</div>}
-          {!loading && skillsWithConfig.length === 0 && (
-            <div className="card" style={{ textAlign: "center", padding: "30px 20px" }}>
-              <div style={{ marginBottom: 8, display: "flex", justifyContent: "center" }}><IconZap size={36} /></div>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>{t("skills.noSkills")}</div>
-              <div className="help">{t("skills.noSkillsHint")}</div>
-              {dataMode !== "remote" && (
-                <button
-                  onClick={handleImportLocal}
-                  disabled={localImporting}
-                  style={{ marginTop: 12, fontSize: 12, padding: "6px 16px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
-                >
-                  <IconFolderOpen size={13} />
-                  {localImporting ? t("skills.importLocalImporting") : t("skills.importLocal")}
-                </button>
-              )}
-            </div>
-          )}
-          {installedSearch && filteredSkills.length === 0 && skillsWithConfig.length > 0 && (
-            <div className="cardHint" style={{ textAlign: "center", padding: 16 }}>
-              {t("skills.noResults")}
-            </div>
-          )}
-          {filteredSkills.map((skill) => (
-            <SkillCard
-              key={skill.skillId}
-              skill={skill}
-              expanded={expandedSkill === skill.skillId}
-              onToggleExpand={() => setExpandedSkill(expandedSkill === skill.skillId ? null : skill.skillId)}
-              onToggleEnabled={() => handleToggleEnabled(skill)}
-              onViewDetail={() => handleViewDetail(skill)}
-              onUninstall={!skill.system ? () => requestUninstall(skill) : undefined}
-              uninstalling={uninstallingSet.has(skill.skillId)}
-              envDraft={envDraft}
-              onEnvChange={onEnvChange}
-              onSaveConfig={() => handleSaveConfig(skill)}
-              saving={saving}
-            />
-          ))}
+            {loading && skillsWithConfig.length === 0 && <div className="cardHint">{t("skills.loading")}</div>}
+            {!loading && skillsWithConfig.length === 0 && (
+              <div className="card" style={{ textAlign: "center", padding: "30px 20px" }}>
+                <div style={{ marginBottom: 8, display: "flex", justifyContent: "center" }}><IconZap size={36} /></div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>{t("skills.noSkills")}</div>
+                <div className="help">{t("skills.noSkillsHint")}</div>
+                {dataMode !== "remote" && (
+                  <button
+                    onClick={handleImportLocal}
+                    disabled={localImporting}
+                    style={{ marginTop: 12, fontSize: 12, padding: "6px 16px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                  >
+                    <IconFolderOpen size={13} />
+                    {localImporting ? t("skills.importLocalImporting") : t("skills.importLocal")}
+                  </button>
+                )}
+              </div>
+            )}
+            {installedSearch && filteredSkills.length === 0 && skillsWithConfig.length > 0 && (
+              <div className="cardHint" style={{ textAlign: "center", padding: 16 }}>
+                {t("skills.noResults")}
+              </div>
+            )}
+            {filteredSkills.map((skill) => (
+              <SkillCard
+                key={skill.skillId}
+                skill={skill}
+                expanded={expandedSkill === skill.skillId}
+                onToggleExpand={() => setExpandedSkill(expandedSkill === skill.skillId ? null : skill.skillId)}
+                onToggleEnabled={() => handleToggleEnabled(skill)}
+                onViewDetail={() => handleViewDetail(skill)}
+                onUninstall={!skill.system ? () => requestUninstall(skill) : undefined}
+                uninstalling={uninstallingSet.has(skill.skillId)}
+                envDraft={envDraft}
+                onEnvChange={onEnvChange}
+                onSaveConfig={() => handleSaveConfig(skill)}
+                saving={saving}
+              />
+            ))}
+          </div>
 
-          {/* 保存启用/禁用状态 */}
-          {enabledDirty && (
-            <div style={{
-              position: "sticky",
-              bottom: 0,
-              padding: "12px 0",
-              background: "var(--bg)",
-              borderTop: "1px solid var(--line)",
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              zIndex: 10,
-            }}>
-              <span style={{ fontSize: 12, opacity: 0.6, flex: 1 }}>
-                {t("skills.unsavedChanges")}
-              </span>
-              <button
-                onClick={() => { loadSkills(); }}
-                disabled={savingEnabled}
-                style={{ fontSize: 12, padding: "6px 16px", borderRadius: 8, border: "1px solid var(--line)", cursor: "pointer" }}
-              >
-                {t("skills.discardChanges")}
-              </button>
-              <button
-                className="btnPrimary"
-                onClick={handleSaveEnabledState}
-                disabled={savingEnabled}
-                style={{ fontSize: 13, padding: "6px 20px" }}
-              >
-                {savingEnabled ? t("skills.saving") : t("skills.saveEnabledState")}
-              </button>
-            </div>
-          )}
+        </>
+      )}
+
+      {/* 保存启用/禁用状态 — fixed 定位浮动栏，不依赖父容器布局 */}
+      {enabledDirty && (
+        <div style={{
+          position: "fixed",
+          bottom: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: "min(560px, 90vw)",
+          padding: "12px 20px",
+          background: "var(--panel)",
+          border: "1px solid var(--line)",
+          borderRadius: 14,
+          boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          zIndex: 1000,
+          boxSizing: "border-box",
+        }}>
+          <span style={{ fontSize: 13, opacity: 0.7, flex: 1, minWidth: 0 }}>
+            {t("skills.unsavedChanges")}
+          </span>
+          <button
+            onClick={() => { loadSkills(); }}
+            disabled={savingEnabled}
+            style={{ fontSize: 12, padding: "6px 16px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+          >
+            {t("skills.discardChanges")}
+          </button>
+          <button
+            className="btnPrimary"
+            onClick={handleSaveEnabledState}
+            disabled={savingEnabled}
+            style={{ fontSize: 13, padding: "6px 20px", whiteSpace: "nowrap", flexShrink: 0 }}
+          >
+            {savingEnabled ? t("skills.saving") : t("skills.saveEnabledState")}
+          </button>
         </div>
       )}
 
