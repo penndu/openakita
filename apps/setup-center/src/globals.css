@@ -10,11 +10,12 @@
  */
 
 :root {
+  --accent: var(--brand, #0ea5e9);
   --primary-foreground: #ffffff;
   --secondary: #f1f5f9;
   --secondary-foreground: rgba(17, 24, 39, 0.95);
-  --accent: #f1f5f9;
-  --accent-foreground: rgba(17, 24, 39, 0.95);
+  --ui-accent: #f1f5f9;
+  --ui-accent-fg: rgba(17, 24, 39, 0.95);
   --destructive-foreground: #ffffff;
   --popover: #ffffff;
   --popover-foreground: rgba(17, 24, 39, 0.95);
@@ -29,11 +30,12 @@
 }
 
 [data-theme="dark"] {
+  --accent: var(--brand, #38bdf8);
   --primary-foreground: #ffffff;
   --secondary: rgba(255, 255, 255, 0.08);
   --secondary-foreground: rgba(255, 255, 255, 0.92);
-  --accent: rgba(255, 255, 255, 0.10);
-  --accent-foreground: rgba(255, 255, 255, 0.92);
+  --ui-accent: rgba(255, 255, 255, 0.10);
+  --ui-accent-fg: rgba(255, 255, 255, 0.92);
   --destructive-foreground: #ffffff;
   --popover: rgba(39, 39, 42, 0.95);
   --popover-foreground: rgba(255, 255, 255, 0.92);
@@ -60,8 +62,8 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--bg-subtle);
   --color-muted-foreground: var(--text-secondary);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--ui-accent);
+  --color-accent-foreground: var(--ui-accent-fg);
   --color-destructive: var(--danger);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);

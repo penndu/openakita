@@ -29,10 +29,17 @@ import type {
 import {
   IconRefresh, IconCheck, IconCheckCircle, IconX, IconXCircle,
   IconChevronDown, IconChevronRight, IconChevronUp, IconGlobe,
-  IconEdit, IconTrash, IconEye, IconEyeOff, IconInfo, IconClipboard, IconPower,
+  IconEdit, IconTrash, IconEye, IconEyeOff, IconInfo, IconClipboard, IconPower, IconCircle,
   DotGreen, DotGray, DotYellow, DotRed,
   LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ,
 } from "./icons";
+import { ChevronDownIcon, XIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import logoUrl from "./assets/logo.png";
 import "highlight.js/styles/github.css";
 import { getThemePref, setThemePref, THEME_CHANGE_EVENT, type Theme } from "./theme";
@@ -4207,9 +4214,9 @@ export function App() {
               <div className="cardTitle" style={{ marginBottom: 2 }}>{t("llm.title")}</div>
               <div className="cardHint">{t("llm.subtitle")}</div>
             </div>
-            <button className="btnPrimary" style={{ whiteSpace: "nowrap" }} onClick={openAddEpDialog} disabled={!!busy}>
+            <Button size="sm" onClick={openAddEpDialog} disabled={!!busy}>
               + {t("llm.addEndpoint")}
-            </button>
+            </Button>
           </div>
 
           {savedEndpoints.length === 0 ? (
@@ -4234,10 +4241,10 @@ export function App() {
                   <span>{(envDraft[e.api_key_env] || "").trim() ? <DotGreen /> : <DotGray />}</span>
                   <span style={{ fontSize: 12 }}>{e.priority}</span>
                   <span style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                    <button className={`btnIcon${e.enabled === false ? "" : " btnIconActive"}`} onClick={() => doToggleEndpointEnabled(e.name)} disabled={!!busy} title={e.enabled === false ? t("llm.enable") : t("llm.disable")}><IconPower size={14} /></button>
-                    <button className="btnIcon" style={savedEndpoints[0]?.name === e.name ? { visibility: "hidden" } : undefined} onClick={() => doSetPrimaryEndpoint(e.name)} disabled={!!busy} title={t("llm.setPrimary")}><IconChevronUp size={14} /></button>
-                    <button className="btnIcon" onClick={() => doStartEditEndpoint(e.name)} disabled={!!busy} title={t("llm.edit")}><IconEdit size={14} /></button>
-                    <button className="btnIcon btnIconDanger" onClick={() => askConfirm(`${t("common.confirmDeleteMsg")} "${e.name}"?`, () => doDeleteEndpoint(e.name))} disabled={!!busy} title={t("common.delete")}><IconTrash size={14} /></button>
+                    <Button variant="ghost" size="icon-sm" className={e.enabled !== false ? "text-primary" : "text-muted-foreground"} onClick={() => doToggleEndpointEnabled(e.name)} disabled={!!busy} title={e.enabled === false ? t("llm.enable") : t("llm.disable")}>{e.enabled !== false ? <IconPower size={14} /> : <IconCircle size={14} />}</Button>
+                    <Button variant="ghost" size="icon-sm" style={savedEndpoints[0]?.name === e.name ? { visibility: "hidden" } : undefined} onClick={() => doSetPrimaryEndpoint(e.name)} disabled={!!busy} title={t("llm.setPrimary")}><IconChevronUp size={14} /></Button>
+                    <Button variant="ghost" size="icon-sm" onClick={() => doStartEditEndpoint(e.name)} disabled={!!busy} title={t("llm.edit")}><IconEdit size={14} /></Button>
+                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => askConfirm(`${t("common.confirmDeleteMsg")} "${e.name}"?`, () => doDeleteEndpoint(e.name))} disabled={!!busy} title={t("common.delete")}><IconTrash size={14} /></Button>
                   </span>
                 </div>
               ))}
@@ -4252,9 +4259,9 @@ export function App() {
               <div className="statusCardLabel">{t("llm.compiler")}</div>
               <div className="cardHint" style={{ fontSize: 11 }}>{t("llm.compilerHint")}</div>
             </div>
-            <button className="btnSmall btnSmallPrimary" onClick={() => { doLoadProviders(); setCompilerProviderSlug(""); setCompilerApiType("openai"); setCompilerBaseUrl(""); setCompilerApiKeyEnv(""); setCompilerApiKeyValue(""); setCompilerModel(""); setCompilerEndpointName(""); setCompilerCodingPlan(false); setCompilerModels([]); setAddCompDialogOpen(true); }} disabled={!!busy}>
+            <Button variant="outline" size="sm" className="border-primary/50 text-primary hover:bg-primary/10 hover:text-primary" onClick={() => { doLoadProviders(); setCompilerProviderSlug(""); setCompilerApiType("openai"); setCompilerBaseUrl(""); setCompilerApiKeyEnv(""); setCompilerApiKeyValue(""); setCompilerModel(""); setCompilerEndpointName(""); setCompilerCodingPlan(false); setCompilerModels([]); setAddCompDialogOpen(true); }} disabled={!!busy}>
               + {t("llm.addEndpoint")}
-            </button>
+            </Button>
           </div>
           {savedCompilerEndpoints.length === 0 ? (
             <div className="cardHint">{t("llm.noCompiler")}</div>
@@ -4268,8 +4275,8 @@ export function App() {
                     {e.enabled === false && <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 10, fontWeight: 700 }}>{t("llm.disabled")}</span>}
                   </div>
                   <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                    <button className={`btnIcon${e.enabled === false ? "" : " btnIconActive"}`} onClick={() => doToggleEndpointEnabled(e.name, "compiler_endpoints")} disabled={!!busy} title={e.enabled === false ? t("llm.enable") : t("llm.disable")}><IconPower size={14} /></button>
-                    <button className="btnIcon btnIconDanger" onClick={() => askConfirm(`${t("common.confirmDeleteMsg")} "${e.name}"?`, () => doDeleteCompilerEndpoint(e.name))} disabled={!!busy} title={t("common.delete")}><IconTrash size={14} /></button>
+                    <Button variant="ghost" size="icon-sm" className={e.enabled !== false ? "text-primary" : "text-muted-foreground"} onClick={() => doToggleEndpointEnabled(e.name, "compiler_endpoints")} disabled={!!busy} title={e.enabled === false ? t("llm.enable") : t("llm.disable")}>{e.enabled !== false ? <IconPower size={14} /> : <IconCircle size={14} />}</Button>
+                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => askConfirm(`${t("common.confirmDeleteMsg")} "${e.name}"?`, () => doDeleteCompilerEndpoint(e.name))} disabled={!!busy} title={t("common.delete")}><IconTrash size={14} /></Button>
                   </span>
                 </div>
               ))}
@@ -4284,9 +4291,9 @@ export function App() {
               <div className="statusCardLabel">{t("llm.stt")}</div>
               <div className="cardHint" style={{ fontSize: 11 }}>{t("llm.sttHint")}</div>
             </div>
-            <button className="btnSmall btnSmallPrimary" onClick={() => { doLoadProviders(); setSttProviderSlug(""); setSttApiType("openai"); setSttBaseUrl(""); setSttApiKeyEnv(""); setSttApiKeyValue(""); setSttModel(""); setSttEndpointName(""); setSttModels([]); setAddSttDialogOpen(true); }} disabled={!!busy}>
+            <Button variant="outline" size="sm" className="border-primary/50 text-primary hover:bg-primary/10 hover:text-primary" onClick={() => { doLoadProviders(); setSttProviderSlug(""); setSttApiType("openai"); setSttBaseUrl(""); setSttApiKeyEnv(""); setSttApiKeyValue(""); setSttModel(""); setSttEndpointName(""); setSttModels([]); setAddSttDialogOpen(true); }} disabled={!!busy}>
               + {t("llm.addStt")}
-            </button>
+            </Button>
           </div>
           {savedSttEndpoints.length === 0 ? (
             <div className="cardHint">{t("llm.noStt")}</div>
@@ -4300,8 +4307,8 @@ export function App() {
                     {e.enabled === false && <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 10, fontWeight: 700 }}>{t("llm.disabled")}</span>}
                   </div>
                   <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                    <button className={`btnIcon${e.enabled === false ? "" : " btnIconActive"}`} onClick={() => doToggleEndpointEnabled(e.name, "stt_endpoints")} disabled={!!busy} title={e.enabled === false ? t("llm.enable") : t("llm.disable")}><IconPower size={14} /></button>
-                    <button className="btnIcon btnIconDanger" onClick={() => askConfirm(`${t("common.confirmDeleteMsg")} "${e.name}"?`, () => doDeleteSttEndpoint(e.name))} disabled={!!busy} title={t("common.delete")}><IconTrash size={14} /></button>
+                    <Button variant="ghost" size="icon-sm" className={e.enabled !== false ? "text-primary" : "text-muted-foreground"} onClick={() => doToggleEndpointEnabled(e.name, "stt_endpoints")} disabled={!!busy} title={e.enabled === false ? t("llm.enable") : t("llm.disable")}>{e.enabled !== false ? <IconPower size={14} /> : <IconCircle size={14} />}</Button>
+                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => askConfirm(`${t("common.confirmDeleteMsg")} "${e.name}"?`, () => doDeleteSttEndpoint(e.name))} disabled={!!busy} title={t("common.delete")}><IconTrash size={14} /></Button>
                   </span>
                 </div>
               ))}
@@ -4538,45 +4545,42 @@ export function App() {
           </ModalOverlay>
         )}
 
-        {/* ── Edit endpoint modal (aligned with add dialog) ── */}
-        {editModalOpen && editDraft && (
-          <ModalOverlay onClose={() => resetEndpointEditor()}>
-            <div className="modalContent">
-              <div className="dialogHeader">
-                <div className="cardTitle">{t("llm.editEndpoint")}: {editDraft.name}</div>
-                <button className="dialogCloseBtn" onClick={() => resetEndpointEditor()}><IconX size={14} /></button>
-              </div>
-              <div className="dialogBody">
+        {/* ── Edit endpoint modal ── */}
+        <Dialog open={editModalOpen && !!editDraft} onOpenChange={(open) => { if (!open) { resetEndpointEditor(); setConnTestResult(null); } }}>
+          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()}>
+            <DialogHeader className="px-6 pt-5 pb-3 shrink-0">
+              <DialogTitle>{t("llm.editEndpoint")}: {editDraft?.name}</DialogTitle>
+              <DialogDescription className="sr-only">{t("llm.editEndpoint")}</DialogDescription>
+            </DialogHeader>
 
+            {editDraft && <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
               {/* Provider (read-only) */}
-              <div className="dialogSection">
-                <div className="dialogLabel">{t("llm.provider")}</div>
-                <input value={(() => { const p = providers.find((x) => x.slug === editDraft.providerSlug); return p ? p.name : (editDraft.providerSlug || "custom"); })()} disabled style={{ opacity: 0.7, cursor: "not-allowed" }} />
-                <div className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("llm.editProviderHint") || "服务商在创建时确定，不可更改"}</div>
+              <div className="space-y-1.5">
+                <Label>{t("llm.provider")} <span className="text-[11px] font-normal text-muted-foreground/70">服务商在创建时确定，不可更改</span></Label>
+                <Input value={(() => { const p = providers.find((x) => x.slug === editDraft.providerSlug); return p ? p.name : (editDraft.providerSlug || "custom"); })()} disabled className="opacity-70" />
               </div>
 
               {/* Base URL */}
-              <div className="dialogSection">
-                <div className="dialogLabel">{t("llm.baseUrl")}</div>
-                <input value={editDraft.baseUrl || ""} onChange={(e) => setEditDraft({ ...editDraft, baseUrl: e.target.value })} />
-                <div className="help" style={{ marginTop: 4, paddingLeft: 2 }}>{t("llm.baseUrlHint")}</div>
+              <div className="space-y-1.5">
+                <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
+                <Input value={editDraft.baseUrl || ""} onChange={(e) => setEditDraft({ ...editDraft, baseUrl: e.target.value })} placeholder="请输入" />
               </div>
 
               {/* API Key */}
-              <div className="dialogSection">
-                <div className="dialogLabel">API Key {isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && <span style={{ color: "var(--muted)", fontSize: 11, fontWeight: 400 }}>({t("llm.localNoKey")})</span>}</div>
-                <div style={{ position: "relative" }}>
-                  <input value={envDraft[editDraft.apiKeyEnv || ""] || ""} onChange={(e) => { const k = editDraft.apiKeyEnv || ""; const v = e.target.value; setEnvDraft((m) => ({ ...m, [k]: v })); setEditDraft((d) => d ? { ...d, apiKeyValue: v } : d); }} type={(secretShown.__EDIT_EP_KEY && !IS_WEB) ? "text" : "password"} style={{ paddingRight: 44, width: "100%" }} placeholder={isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) ? t("llm.localKeyPlaceholder") : "sk-..."} />
-                  {!IS_WEB && <button type="button" className="btnEye" onClick={() => setSecretShown((m) => ({ ...m, __EDIT_EP_KEY: !m.__EDIT_EP_KEY }))} title={secretShown.__EDIT_EP_KEY ? "隐藏" : "显示"}>
-                    {secretShown.__EDIT_EP_KEY ? <IconEyeOff size={16} /> : <IconEye size={16} />}
-                  </button>}
+              <div className="space-y-1.5">
+                <Label>API Key {isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}</Label>
+                <div className="relative">
+                  <Input value={envDraft[editDraft.apiKeyEnv || ""] || ""} onChange={(e) => { const k = editDraft.apiKeyEnv || ""; const v = e.target.value; setEnvDraft((m) => ({ ...m, [k]: v })); setEditDraft((d) => d ? { ...d, apiKeyValue: v } : d); }} type={(secretShown.__EDIT_EP_KEY && !IS_WEB) ? "text" : "password"} className="pr-11" placeholder={isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) ? t("llm.localKeyPlaceholder") : "sk-..."} />
+                  {!IS_WEB && <Button type="button" variant="ghost" size="icon-xs" className="absolute right-1.5 top-1/2 -translate-y-1/2" onClick={() => setSecretShown((m) => ({ ...m, __EDIT_EP_KEY: !m.__EDIT_EP_KEY }))} title={secretShown.__EDIT_EP_KEY ? "隐藏" : "显示"}>
+                    {secretShown.__EDIT_EP_KEY ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+                  </Button>}
                 </div>
-                {isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && <div className="help" style={{ marginTop: 4, paddingLeft: 2, color: "var(--brand)" }}>{t("llm.localHint")}</div>}
+                {isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && <p className="text-xs text-primary">{t("llm.localHint")}</p>}
               </div>
 
               {/* Model */}
-              <div className="dialogSection">
-                <div className="dialogLabel">{t("status.model")}</div>
+              <div className="space-y-1.5">
+                <Label>{t("status.model")} <span className="text-[11px] font-normal text-muted-foreground/70">自行输入或<Button variant="link" size="xs" data-slot="label-link" className="h-auto p-0 text-[11px] text-primary hover:text-primary/80" onClick={doFetchEditModels} disabled={(!isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && !(envDraft[editDraft.apiKeyEnv || ""] || "").trim()) || !(editDraft.baseUrl || "").trim() || !!busy}>拉取模型列表</Button>并选择{editModels.length > 0 && <span className="text-muted-foreground/50">（已拉取 {editModels.length} 个）</span>}</span></Label>
                 <SearchSelect
                   value={editDraft.modelId || ""}
                   onChange={(v) => setEditDraft({ ...editDraft, modelId: v })}
@@ -4584,24 +4588,17 @@ export function App() {
                   placeholder={editModels.length > 0 ? t("llm.searchModel") : (editDraft.modelId || t("llm.modelPlaceholder"))}
                   disabled={!!busy}
                 />
-                <div className="help" style={{ marginTop: 4, paddingLeft: 2, display: "flex", alignItems: "center", gap: 6 }}>
-                  <button onClick={doFetchEditModels} className="btnSmall" disabled={(!isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && !(envDraft[editDraft.apiKeyEnv || ""] || "").trim()) || !(editDraft.baseUrl || "").trim() || !!busy}
-                    style={{ fontSize: 11, padding: "2px 10px", borderRadius: 6 }}>
-                    {t("llm.fetchModels")}
-                  </button>
-                  {editModels.length > 0 && <span style={{ opacity: 0.6 }}>{t("llm.modelFetched", { count: editModels.length })}</span>}
-                </div>
                 {error && (
-                  <div style={{ marginTop: 6, padding: "6px 10px", background: "rgba(229,57,53,0.12)", border: "1px solid rgba(229,57,53,0.3)", borderRadius: 6, fontSize: 12, color: "#e53935", wordBreak: "break-all" }}>
+                  <div className="mt-1 px-2.5 py-1.5 rounded-md text-xs text-destructive bg-destructive/10 border border-destructive/30 break-all">
                     ⚠ {error}
                   </div>
                 )}
               </div>
 
-              {/* Capabilities as chips */}
-              <div className="dialogSection">
-                <div className="dialogLabel">{t("llm.capabilities")}</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {/* Capabilities */}
+              <div className="space-y-1.5">
+                <Label>{t("llm.capabilities")}</Label>
+                <div className="flex flex-wrap gap-2">
                   {[
                     { k: "text", name: t("llm.capText") },
                     { k: "thinking", name: t("llm.capThinking") },
@@ -4611,7 +4608,13 @@ export function App() {
                   ].map((c) => {
                     const on = (editDraft.caps || []).includes(c.k);
                     return (
-                      <span key={c.k} className={`capChip ${on ? "capChipActive" : ""}`}
+                      <button key={c.k} data-slot="cap-chip" type="button"
+                        className={cn(
+                          "inline-flex items-center justify-center h-8 px-3.5 rounded-md border text-sm font-medium cursor-pointer transition-colors",
+                          on
+                            ? "border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+                            : "border-input bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                        )}
                         onClick={() => setEditDraft((d) => {
                           if (!d) return d;
                           const set = new Set(d.caps || []);
@@ -4619,140 +4622,135 @@ export function App() {
                           const out = Array.from(set);
                           return { ...d, caps: out.length ? out : ["text"] };
                         })}
-                      >{on ? "\u2713 " : ""}{c.name}</span>
+                      >{c.name}</button>
                     );
                   })}
                 </div>
               </div>
 
               {/* Advanced (collapsed) */}
-              <details style={{ margin: "8px 0 4px 0" }}>
-                <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 500, color: "var(--fg-secondary, #888)", userSelect: "none", padding: "4px 0" }}>
-                  ⚙ {t("llm.advancedParams") || t("llm.advanced") || "高级参数"}
+              <details className="group rounded-lg border border-border">
+                <summary className="cursor-pointer flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-muted-foreground select-none list-none [&::-webkit-details-marker]:hidden hover:text-foreground transition-colors">
+                  <ChevronDownIcon className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+                  {t("llm.advancedParams") || t("llm.advanced") || "高级参数"}
                 </summary>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "8px 0 4px 0" }}>
-                  <div className="dialogSection" style={{ margin: 0 }}>
-                    <div className="dialogLabel" style={{ fontSize: 12 }}>{t("llm.advApiType")}</div>
-                    <select value={editDraft.apiType} onChange={(e) => setEditDraft({ ...editDraft, apiType: e.target.value as any })} style={{ width: 180, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13 }}>
-                      <option value="openai">openai</option>
-                      <option value="anthropic">anthropic</option>
-                    </select>
+                <div className="border-t border-border px-4 py-3 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label>{t("llm.advApiType")}</Label>
+                      <Select value={editDraft.apiType} onValueChange={(v) => setEditDraft({ ...editDraft, apiType: v as any })}>
+                        <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="openai">openai</SelectItem>
+                          <SelectItem value="anthropic">anthropic</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>{t("llm.advPriority")}</Label>
+                      <Input type="number" value={editDraft.priority} onChange={(e) => setEditDraft({ ...editDraft, priority: Number(e.target.value) || 1 })} />
+                    </div>
                   </div>
-                  <div className="dialogSection" style={{ margin: 0 }}>
-                    <div className="dialogLabel" style={{ fontSize: 12 }}>{t("llm.advKeyEnv")}</div>
-                    <input value={editDraft.apiKeyEnv} onChange={(e) => setEditDraft({ ...editDraft, apiKeyEnv: e.target.value })} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13 }} />
+                  <div className="space-y-1.5">
+                    <Label>{t("llm.advKeyEnv")}</Label>
+                    <Input value={editDraft.apiKeyEnv} onChange={(e) => setEditDraft({ ...editDraft, apiKeyEnv: e.target.value })} />
                   </div>
-                  <div className="dialogSection" style={{ margin: 0 }}>
-                    <div className="dialogLabel" style={{ fontSize: 12 }}>{t("llm.advPriority")}</div>
-                    <input type="number" value={editDraft.priority} onChange={(e) => setEditDraft({ ...editDraft, priority: Number(e.target.value) || 1 })} style={{ width: 100, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13 }} />
+                  <div className="space-y-1.5">
+                    <Label>{t("llm.advMaxTokens")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.advMaxTokensHint")}</span></Label>
+                    <Input type="number" min={0} value={editDraft.maxTokens} onChange={(e) => setEditDraft({ ...editDraft, maxTokens: Math.max(0, parseInt(e.target.value) || 0) })} />
                   </div>
-                  <div className="dialogSection" style={{ margin: 0 }}>
-                    <div className="dialogLabel" style={{ fontSize: 12 }}>{t("llm.advMaxTokens")}</div>
-                    <input type="number" min={0} value={editDraft.maxTokens} onChange={(e) => setEditDraft({ ...editDraft, maxTokens: Math.max(0, parseInt(e.target.value) || 0) })} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13 }} />
-                    <div className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("llm.advMaxTokensHint")}</div>
+                  <div className="space-y-1.5">
+                    <Label>{t("llm.advContextWindow")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.advContextWindowHint")}</span></Label>
+                    <Input type="number" min={1024} value={editDraft.contextWindow} onChange={(e) => setEditDraft({ ...editDraft, contextWindow: Math.max(1024, parseInt(e.target.value) || 200000) })} />
                   </div>
-                  <div className="dialogSection" style={{ margin: 0 }}>
-                    <div className="dialogLabel" style={{ fontSize: 12 }}>{t("llm.advContextWindow")}</div>
-                    <input type="number" min={1024} value={editDraft.contextWindow} onChange={(e) => setEditDraft({ ...editDraft, contextWindow: Math.max(1024, parseInt(e.target.value) || 200000) })} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13 }} />
-                    <div className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("llm.advContextWindowHint")}</div>
+                  <div className="space-y-1.5">
+                    <Label>{t("llm.advTimeout")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.advTimeoutHint")}</span></Label>
+                    <Input type="number" min={10} value={editDraft.timeout} onChange={(e) => setEditDraft({ ...editDraft, timeout: Math.max(10, parseInt(e.target.value) || 180) })} />
                   </div>
-                  <div className="dialogSection" style={{ margin: 0 }}>
-                    <div className="dialogLabel" style={{ fontSize: 12 }}>{t("llm.advTimeout")}</div>
-                    <input type="number" min={10} value={editDraft.timeout} onChange={(e) => setEditDraft({ ...editDraft, timeout: Math.max(10, parseInt(e.target.value) || 180) })} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13 }} />
-                    <div className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("llm.advTimeoutHint")}</div>
-                  </div>
-                  <div className="dialogSection" style={{ margin: 0 }}>
-                    <div className="dialogLabel" style={{ fontSize: 12 }}>{t("llm.advRpmLimit")}</div>
-                    <input type="number" min={0} value={editDraft.rpmLimit} onChange={(e) => setEditDraft({ ...editDraft, rpmLimit: Math.max(0, parseInt(e.target.value) || 0) })} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13 }} />
-                    <div className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("llm.advRpmLimitHint")}</div>
+                  <div className="space-y-1.5">
+                    <Label>{t("llm.advRpmLimit")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.advRpmLimitHint")}</span></Label>
+                    <Input type="number" min={0} value={editDraft.rpmLimit} onChange={(e) => setEditDraft({ ...editDraft, rpmLimit: Math.max(0, parseInt(e.target.value) || 0) })} />
                   </div>
                 </div>
               </details>
-              </div>
 
               {/* 阶梯定价配置 */}
-              <div style={{ marginTop: 12 }}>
-              <details>
-                <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
-                  定价配置（可选，用于费用估算）
+              <details className="group rounded-lg border border-border">
+                <summary className="cursor-pointer flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-muted-foreground select-none list-none [&::-webkit-details-marker]:hidden hover:text-foreground transition-colors">
+                  <ChevronDownIcon className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+                  定价配置 <span className="text-[11px] font-normal text-muted-foreground/70">（可选，用于费用估算）</span>
                 </summary>
-                <div style={{ padding: "8px 0" }}>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 8 }}>
-                    阶梯定价：按每次请求的 input_tokens 匹配档位，价格单位为每百万 token（CNY）
-                  </div>
+                <div className="border-t border-border px-4 py-3 space-y-2.5">
+                  {(editDraft.pricingTiers || []).length > 0 && (
+                    <div className="grid grid-cols-[1fr_1fr_1fr_28px] gap-1.5 text-[11px] text-muted-foreground">
+                      <span>最大输入 tokens</span>
+                      <span>输入价格/M</span>
+                      <span>输出价格/M</span>
+                      <span />
+                    </div>
+                  )}
                   {(editDraft.pricingTiers || []).map((tier, idx) => (
-                    <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 32px", gap: 6, marginBottom: 6, alignItems: "center" }}>
-                      <div>
-                        {idx === 0 && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 2 }}>最大输入 tokens</div>}
-                        <input type="number" min={0} placeholder="128000" value={tier.max_input || ""} onChange={(e) => {
-                          const tiers = [...(editDraft.pricingTiers || [])];
-                          tiers[idx] = { ...tiers[idx], max_input: parseInt(e.target.value) || 0 };
-                          setEditDraft({ ...editDraft, pricingTiers: tiers });
-                        }} style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid var(--line)", fontSize: 12 }} />
-                      </div>
-                      <div>
-                        {idx === 0 && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 2 }}>输入价格/M</div>}
-                        <input type="number" min={0} step={0.01} placeholder="1.2" value={tier.input_price || ""} onChange={(e) => {
-                          const tiers = [...(editDraft.pricingTiers || [])];
-                          tiers[idx] = { ...tiers[idx], input_price: parseFloat(e.target.value) || 0 };
-                          setEditDraft({ ...editDraft, pricingTiers: tiers });
-                        }} style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid var(--line)", fontSize: 12 }} />
-                      </div>
-                      <div>
-                        {idx === 0 && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 2 }}>输出价格/M</div>}
-                        <input type="number" min={0} step={0.01} placeholder="7.2" value={tier.output_price || ""} onChange={(e) => {
-                          const tiers = [...(editDraft.pricingTiers || [])];
-                          tiers[idx] = { ...tiers[idx], output_price: parseFloat(e.target.value) || 0 };
-                          setEditDraft({ ...editDraft, pricingTiers: tiers });
-                        }} style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid var(--line)", fontSize: 12 }} />
-                      </div>
-                      <button onClick={() => {
+                    <div key={idx} className="grid grid-cols-[1fr_1fr_1fr_28px] gap-1.5 items-center">
+                      <Input type="number" min={0} placeholder="128000" value={tier.max_input || ""} onChange={(e) => {
+                        const tiers = [...(editDraft.pricingTiers || [])];
+                        tiers[idx] = { ...tiers[idx], max_input: parseInt(e.target.value) || 0 };
+                        setEditDraft({ ...editDraft, pricingTiers: tiers });
+                      }} className="h-8 text-xs" />
+                      <Input type="number" min={0} step={0.01} placeholder="1.2" value={tier.input_price || ""} onChange={(e) => {
+                        const tiers = [...(editDraft.pricingTiers || [])];
+                        tiers[idx] = { ...tiers[idx], input_price: parseFloat(e.target.value) || 0 };
+                        setEditDraft({ ...editDraft, pricingTiers: tiers });
+                      }} className="h-8 text-xs" />
+                      <Input type="number" min={0} step={0.01} placeholder="7.2" value={tier.output_price || ""} onChange={(e) => {
+                        const tiers = [...(editDraft.pricingTiers || [])];
+                        tiers[idx] = { ...tiers[idx], output_price: parseFloat(e.target.value) || 0 };
+                        setEditDraft({ ...editDraft, pricingTiers: tiers });
+                      }} className="h-8 text-xs" />
+                      <Button data-slot="pricing-btn" variant="ghost" size="icon-xs" className="text-muted-foreground/50 hover:text-destructive" onClick={() => {
                         const tiers = (editDraft.pricingTiers || []).filter((_, i) => i !== idx);
                         setEditDraft({ ...editDraft, pricingTiers: tiers });
-                      }} style={{ padding: "4px 6px", borderRadius: 4, border: "1px solid var(--line)", background: "var(--bg)", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)", marginTop: idx === 0 ? 16 : 0 }}>✕</button>
+                      }}><XIcon className="size-3.5" /></Button>
                     </div>
                   ))}
-                  <button onClick={() => {
+                  <Button data-slot="pricing-btn" variant="outline" size="sm" className="w-full border-dashed text-muted-foreground text-xs" onClick={() => {
                     const tiers = [...(editDraft.pricingTiers || []), { max_input: 0, input_price: 0, output_price: 0 }];
                     setEditDraft({ ...editDraft, pricingTiers: tiers });
-                  }} style={{ padding: "4px 12px", borderRadius: 6, border: "1px dashed var(--line)", background: "var(--bg)", cursor: "pointer", fontSize: 11, color: "var(--text-secondary)" }}>
+                  }}>
                     + 添加档位
-                  </button>
+                  </Button>
                 </div>
               </details>
-              </div>
+            </div>}
 
-              {/* 连接测试结果 */}
-              {connTestResult && (
-                <div className={`connTestResult ${connTestResult.ok ? "connTestOk" : "connTestFail"}`}>
-                  {connTestResult.ok
-                    ? `${t("llm.testSuccess")} · ${connTestResult.latencyMs}ms · ${t("llm.testModelCount", { count: connTestResult.modelCount ?? 0 })}`
-                    : `${t("llm.testFailed")}：${connTestResult.error} (${connTestResult.latencyMs}ms)`}
-                </div>
-              )}
-
-              <div className="dialogFooter">
-                <button className="btnSmall" style={{ padding: "8px 18px" }} onClick={() => { resetEndpointEditor(); setConnTestResult(null); }}>{t("common.cancel")}</button>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button
-                    className="btnSmall"
-                    style={{ padding: "8px 18px" }}
-                    disabled={(!isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && !(envDraft[editDraft.apiKeyEnv || ""] || "").trim()) || !(editDraft.baseUrl || "").trim() || connTesting}
-                    onClick={() => { const _ep = providers.find((p) => p.slug === editDraft.providerSlug); doTestConnection({
-                      testApiType: editDraft.apiType || "openai",
-                      testBaseUrl: editDraft.baseUrl || "",
-                      testApiKey: (envDraft[editDraft.apiKeyEnv || ""] || "").trim() || (isLocalProvider(_ep) ? localProviderPlaceholderKey(_ep) : ""),
-                      testProviderSlug: editDraft.providerSlug,
-                    }); }}
-                  >
-                    {connTesting ? t("llm.testTesting") : t("llm.testConnection")}
-                  </button>
-                  <button className="btnPrimary" style={{ padding: "8px 18px" }} onClick={async () => { await doSaveEditedEndpoint(); setConnTestResult(null); }} disabled={!!busy}>{t("common.save")}</button>
-                </div>
+            {connTestResult && (
+              <div className={cn("mx-6 px-3 py-2 rounded-lg text-xs leading-relaxed shrink-0",
+                connTestResult.ok ? "bg-emerald-500/8 border border-emerald-500/25 text-emerald-600" : "bg-red-500/6 border border-red-500/20 text-red-600"
+              )}>
+                {connTestResult.ok
+                  ? `${t("llm.testSuccess")} · ${connTestResult.latencyMs}ms · ${t("llm.testModelCount", { count: connTestResult.modelCount ?? 0 })}`
+                  : `${t("llm.testFailed")}：${connTestResult.error} (${connTestResult.latencyMs}ms)`}
               </div>
-            </div>
-          </ModalOverlay>
-        )}
+            )}
+
+            <DialogFooter className="px-6 py-2.5 shrink-0 flex-row justify-between sm:justify-between">
+              <Button variant="ghost" onClick={() => { resetEndpointEditor(); setConnTestResult(null); }}>{t("common.cancel")}</Button>
+              <div className="flex gap-2 items-center">
+                <Button variant="secondary"
+                  disabled={(!isLocalProvider(providers.find((p) => p.slug === editDraft?.providerSlug)) && !(envDraft[editDraft?.apiKeyEnv || ""] || "").trim()) || !(editDraft?.baseUrl || "").trim() || connTesting}
+                  onClick={() => { const _ep = providers.find((p) => p.slug === editDraft?.providerSlug); doTestConnection({
+                    testApiType: editDraft?.apiType || "openai",
+                    testBaseUrl: editDraft?.baseUrl || "",
+                    testApiKey: (envDraft[editDraft?.apiKeyEnv || ""] || "").trim() || (isLocalProvider(_ep) ? localProviderPlaceholderKey(_ep) : ""),
+                    testProviderSlug: editDraft?.providerSlug,
+                  }); }}
+                >
+                  {connTesting ? t("llm.testTesting") : t("llm.testConnection")}
+                </Button>
+                <Button onClick={async () => { await doSaveEditedEndpoint(); setConnTestResult(null); }} disabled={!!busy}>{t("common.save")}</Button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* ── Add compiler dialog ── */}
         {addCompDialogOpen && (
@@ -8413,17 +8411,17 @@ export function App() {
           return saveConfig ? (
             <div className="footer" style={{ gridRow: 4, justifyContent: "flex-end" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button className="btnPrimary"
+                <Button variant="secondary"
                   onClick={() => renderIntegrationsSave(saveConfig.keys, saveConfig.savedMsg)}
                   disabled={!currentWorkspaceId || !!busy}>
                   {t("config.saveEnv")}
-                </button>
-                <button className="btnApplyRestart"
+                </Button>
+                <Button
                   onClick={() => applyAndRestart(saveConfig.keys)}
                   disabled={!currentWorkspaceId || !!busy || !!restartOverlay}
                   title={t("config.applyRestartHint")}>
                   {t("config.applyRestart")}
-                </button>
+                </Button>
               </div>
             </div>
           ) : null;
