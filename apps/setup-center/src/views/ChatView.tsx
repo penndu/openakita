@@ -4230,6 +4230,7 @@ export function ChatView({
                         </span>
                         <div className="queuedItemActions">
                           <button
+                            data-slot="queued"
                             className="queuedItemBtn queuedItemSendBtn"
                             onClick={() => handleSendQueuedNow(qm.id)}
                             title={t("chat.sendNow")}
@@ -4237,6 +4238,7 @@ export function ChatView({
                             <IconSend size={12} />
                           </button>
                           <button
+                            data-slot="queued"
                             className="queuedItemBtn"
                             onClick={() => handleEditQueued(qm.id)}
                             title={t("chat.editMessage")}
@@ -4377,16 +4379,16 @@ export function ChatView({
             {/* Bottom toolbar */}
             <div className="chatInputToolbar">
               <div className="chatInputToolbarLeft">
-                <button onClick={() => fileInputRef.current?.click()} className="chatInputIconBtn" title={t("chat.attach")}>
+                <button data-slot="toolbar" onClick={() => fileInputRef.current?.click()} className="chatInputIconBtn" title={t("chat.attach")}>
                   <IconPaperclip size={16} />
                 </button>
                 <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,audio/*,.pdf,.txt,.md,.py,.js,.ts,.json,.csv" style={{ display: "none" }} onChange={handleFileSelect} />
 
-                <button onClick={toggleRecording} className={`chatInputIconBtn ${isRecording ? "chatInputIconBtnDanger" : ""}`} title={isRecording ? t("chat.stopRecording") : t("chat.voice")}>
+                <button data-slot="toolbar" onClick={toggleRecording} className={`chatInputIconBtn ${isRecording ? "chatInputIconBtnDanger" : ""}`} title={isRecording ? t("chat.stopRecording") : t("chat.voice")}>
                   {isRecording ? <IconStopCircle size={16} /> : <IconMic size={16} />}
                 </button>
 
-                <button onClick={() => setPlanMode((v) => !v)} className={`chatInputIconBtn ${planMode ? "chatInputIconBtnActive" : ""}`} title={t("chat.planMode")}>
+                <button data-slot="toolbar" onClick={() => setPlanMode((v) => !v)} className={`chatInputIconBtn ${planMode ? "chatInputIconBtnActive" : ""}`} title={t("chat.planMode")}>
                   <IconPlan size={16} />
                   <span style={{ fontSize: 11, marginLeft: 2 }}>Plan</span>
                 </button>
@@ -4394,6 +4396,7 @@ export function ChatView({
                 {/* 深度思考按钮 + 下拉菜单 */}
                 <div ref={thinkingMenuRef} style={{ position: "relative", display: "inline-flex" }}>
                   <button
+                    data-slot="toolbar"
                     onClick={() => {
                       if (thinkingMode === "auto") {
                         setThinkingMode("on");
@@ -4479,6 +4482,7 @@ export function ChatView({
                 {isCurrentConvStreaming ? (
                   hasInputText ? (
                     <button
+                      data-slot="queue"
                       onClick={handleQueueMessage}
                       className="chatInputSendBtn"
                       title={t("chat.queueHint")}
@@ -4486,12 +4490,13 @@ export function ChatView({
                       <IconSend size={14} />
                     </button>
                   ) : (
-                    <button onClick={handleCancelTask} className="chatInputSendBtn chatInputStopBtn" title={t("chat.stopGeneration")}>
+                    <button data-slot="stop" onClick={handleCancelTask} className="chatInputSendBtn chatInputStopBtn" title={t("chat.stopGeneration")}>
                       <IconStop size={14} />
                     </button>
                   )
                 ) : (
                   <button
+                    data-slot="send"
                     onClick={() => sendMessage()}
                     className="chatInputSendBtn"
                     disabled={!hasInputText && pendingAttachments.length === 0}
@@ -4518,18 +4523,20 @@ export function ChatView({
               <div className="convSearchBox" style={{ flex: 1 }}>
                 <IconSearch size={13} style={{ opacity: 0.4, flexShrink: 0 }} />
                 <input
+                  data-slot="search"
                   className="convSearchInput"
                   placeholder={t("chat.searchConversations") || "搜索会话..."}
                   value={convSearchQuery}
                   onChange={(e) => setConvSearchQuery(e.target.value)}
                 />
                 {convSearchQuery && (
-                  <button className="convSearchClear" onClick={() => setConvSearchQuery("")}>
+                  <button data-slot="clear" className="convSearchClear" onClick={() => setConvSearchQuery("")}>
                     <IconX size={11} />
                   </button>
                 )}
               </div>
               <button
+                data-slot="pin"
                 className="convPinBtn"
                 onClick={() => {
                   const next = !sidebarPinned;
@@ -4542,7 +4549,7 @@ export function ChatView({
                 <IconPin size={14} />
               </button>
             </div>
-            <button className="convNewBtn" onClick={newConversation}>
+            <button data-slot="new-chat" className="convNewBtn" onClick={newConversation}>
               {t("chat.newConversation")}
             </button>
           </div>

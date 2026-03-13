@@ -84,7 +84,7 @@ export function FieldBool({
             onEnvChange((m) => envSet(m, k, String(!!checked)))
           }
         />
-        <span className={cn("text-sm", v ? "text-foreground" : "text-muted-foreground")}>
+        <span className={cn("text-sm w-8", v ? "text-foreground" : "text-muted-foreground")}>
           {v ? "ON" : "OFF"}
         </span>
       </label>
