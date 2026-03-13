@@ -2698,7 +2698,7 @@ export function App() {
       endpoints.sort((a: any, b: any) => (Number(a?.priority) || 999) - (Number(b?.priority) || 999));
       await writeEndpointsJson(endpoints, settings);
       setNotice("端点已更新");
-      resetEndpointEditor();
+      setEditModalOpen(false);
       await loadSavedEndpoints();
     } catch (e) {
       setError(String(e));
@@ -4201,7 +4201,26 @@ export function App() {
   function openAddEpDialog() {
     resetEndpointEditor();
     setConnTestResult(null);
-    doLoadProviders();
+    setProviderSlug(providers[0]?.slug ?? "");
+    setApiType("openai");
+    setBaseUrl("");
+    setBaseUrlTouched(false);
+    setApiKeyEnv("");
+    setApiKeyEnvTouched(false);
+    setApiKeyValue("");
+    setModels([]);
+    setSelectedModelId("");
+    setEndpointName("");
+    setEndpointNameTouched(false);
+    setCapSelected([]);
+    setCapTouched(false);
+    setEndpointPriority(1);
+    setCodingPlanMode(false);
+    setAddEpMaxTokens(0);
+    setAddEpContextWindow(200000);
+    setAddEpTimeout(180);
+    setAddEpRpmLimit(0);
+    if (providers.length === 0) doLoadProviders();
     setAddEpDialogOpen(true);
   }
 
@@ -4266,7 +4285,7 @@ export function App() {
               <div className="statusCardLabel">{t("llm.compiler")}</div>
               <div className="cardHint" style={{ fontSize: 11 }}>{t("llm.compilerHint")}</div>
             </div>
-            <Button variant="outline" size="sm" className="border-primary/50 text-primary hover:bg-primary/10 hover:text-primary" onClick={() => { doLoadProviders(); setCompilerProviderSlug(""); setCompilerApiType("openai"); setCompilerBaseUrl(""); setCompilerApiKeyEnv(""); setCompilerApiKeyValue(""); setCompilerModel(""); setCompilerEndpointName(""); setCompilerCodingPlan(false); setCompilerModels([]); setAddCompDialogOpen(true); }} disabled={!!busy}>
+            <Button variant="outline" size="sm" className="border-primary/50 text-primary hover:bg-primary/10 hover:text-primary" onClick={() => { if (providers.length === 0) doLoadProviders(); setCompilerProviderSlug(""); setCompilerApiType("openai"); setCompilerBaseUrl(""); setCompilerApiKeyEnv(""); setCompilerApiKeyValue(""); setCompilerModel(""); setCompilerEndpointName(""); setCompilerCodingPlan(false); setCompilerModels([]); setAddCompDialogOpen(true); }} disabled={!!busy}>
               + {t("llm.addEndpoint")}
             </Button>
           </div>
@@ -4298,7 +4317,7 @@ export function App() {
               <div className="statusCardLabel">{t("llm.stt")}</div>
               <div className="cardHint" style={{ fontSize: 11 }}>{t("llm.sttHint")}</div>
             </div>
-            <Button variant="outline" size="sm" className="border-primary/50 text-primary hover:bg-primary/10 hover:text-primary" onClick={() => { doLoadProviders(); setSttProviderSlug(""); setSttApiType("openai"); setSttBaseUrl(""); setSttApiKeyEnv(""); setSttApiKeyValue(""); setSttModel(""); setSttEndpointName(""); setSttModels([]); setAddSttDialogOpen(true); }} disabled={!!busy}>
+            <Button variant="outline" size="sm" className="border-primary/50 text-primary hover:bg-primary/10 hover:text-primary" onClick={() => { if (providers.length === 0) doLoadProviders(); setSttProviderSlug(""); setSttApiType("openai"); setSttBaseUrl(""); setSttApiKeyEnv(""); setSttApiKeyValue(""); setSttModel(""); setSttEndpointName(""); setSttModels([]); setAddSttDialogOpen(true); }} disabled={!!busy}>
               + {t("llm.addStt")}
             </Button>
           </div>
@@ -4324,14 +4343,14 @@ export function App() {
         </div>
 
         {/* ── Add endpoint dialog ── */}
-        <Dialog open={addEpDialogOpen} onOpenChange={(open) => { if (!open) { setAddEpDialogOpen(false); resetEndpointEditor(); setConnTestResult(null); } }}>
-          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <Dialog open={addEpDialogOpen} onOpenChange={(open) => { if (!open) setAddEpDialogOpen(false); }}>
+          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()} onCloseAnimationEnd={() => { resetEndpointEditor(); setConnTestResult(null); }}>
             <DialogHeader className="px-6 pt-5 pb-3 shrink-0">
               <DialogTitle>{isEditingEndpoint ? t("llm.editEndpoint") : t("llm.addEndpoint")}</DialogTitle>
               <DialogDescription className="sr-only">{t("llm.addEndpoint")}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+            <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4" style={{ scrollbarGutter: "stable" }}>
               {/* Provider */}
               <div className="space-y-1.5">
                 <Label>{t("llm.provider")}</Label>
@@ -4479,7 +4498,7 @@ export function App() {
 
             <DialogFooter className="px-6 py-2.5 shrink-0 flex-col sm:flex-col gap-1.5">
               <div className="flex items-center justify-between w-full">
-                <Button variant="ghost" onClick={() => { setAddEpDialogOpen(false); resetEndpointEditor(); setConnTestResult(null); }}>{t("common.cancel")}</Button>
+                <Button variant="ghost" onClick={() => setAddEpDialogOpen(false)}>{t("common.cancel")}</Button>
                 <div className="flex gap-2 items-center">
                   <Button variant="secondary"
                     disabled={(!apiKeyValue.trim() && !isLocalProvider(selectedProvider)) || !baseUrl.trim() || connTesting}
@@ -4510,23 +4529,24 @@ export function App() {
                 if (!_isLocal && !apiKeyValue.trim()) missing.push("API Key");
                 if (!selectedModelId.trim()) missing.push(t("status.model"));
                 if (!currentWorkspaceId && dataMode !== "remote") missing.push(t("workspace.title") || "工作区");
-                return missing.length > 0 && !busy ? (
-                  <div className="text-[10px] text-muted-foreground text-right w-full">{t("common.missingFields") || "缺少"}: {missing.join(", ")}</div>
-                ) : null;
+                const show = missing.length > 0 && !busy;
+                return (
+                  <div className={cn("text-[10px] text-muted-foreground text-right w-full", !show && "invisible")}>{t("common.missingFields") || "缺少"}: {missing.join(", ") || "—"}</div>
+                );
               })()}
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* ── Edit endpoint modal ── */}
-        <Dialog open={editModalOpen && !!editDraft} onOpenChange={(open) => { if (!open) { resetEndpointEditor(); setConnTestResult(null); } }}>
-          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <Dialog open={editModalOpen && !!editDraft} onOpenChange={(open) => { if (!open) setEditModalOpen(false); }}>
+          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()} onCloseAnimationEnd={() => { resetEndpointEditor(); setConnTestResult(null); }}>
             <DialogHeader className="px-6 pt-5 pb-3 shrink-0">
               <DialogTitle>{t("llm.editEndpoint")}: {editDraft?.name}</DialogTitle>
               <DialogDescription className="sr-only">{t("llm.editEndpoint")}</DialogDescription>
             </DialogHeader>
 
-            {editDraft && <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+            {editDraft && <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4" style={{ scrollbarGutter: "stable" }}>
               {/* Provider (read-only) */}
               <div className="space-y-1.5">
                 <Label>{t("llm.provider")} <span className="text-[11px] font-normal text-muted-foreground/70">服务商在创建时确定，不可更改</span></Label>
@@ -4706,7 +4726,7 @@ export function App() {
             )}
 
             <DialogFooter className="px-6 py-2.5 shrink-0 flex-row justify-between sm:justify-between">
-              <Button variant="ghost" onClick={() => { resetEndpointEditor(); setConnTestResult(null); }}>{t("common.cancel")}</Button>
+              <Button variant="ghost" onClick={() => setEditModalOpen(false)}>{t("common.cancel")}</Button>
               <div className="flex gap-2 items-center">
                 <Button variant="secondary"
                   disabled={(!isLocalProvider(providers.find((p) => p.slug === editDraft?.providerSlug)) && !(envDraft[editDraft?.apiKeyEnv || ""] || "").trim()) || !(editDraft?.baseUrl || "").trim() || connTesting}
@@ -4719,21 +4739,21 @@ export function App() {
                 >
                   {connTesting ? t("llm.testTesting") : t("llm.testConnection")}
                 </Button>
-                <Button onClick={async () => { await doSaveEditedEndpoint(); setConnTestResult(null); }} disabled={!!busy}>{t("common.save")}</Button>
+                <Button onClick={async () => { await doSaveEditedEndpoint(); }} disabled={!!busy}>{t("common.save")}</Button>
               </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* ── Add compiler dialog ── */}
-        <Dialog open={addCompDialogOpen} onOpenChange={(open) => { if (!open) { setAddCompDialogOpen(false); setConnTestResult(null); } }}>
-          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <Dialog open={addCompDialogOpen} onOpenChange={(open) => { if (!open) setAddCompDialogOpen(false); }}>
+          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()} onCloseAnimationEnd={() => { setConnTestResult(null); }}>
             <DialogHeader className="px-6 pt-5 pb-3 shrink-0">
               <DialogTitle>{t("llm.addCompiler")}</DialogTitle>
               <DialogDescription className="sr-only">{t("llm.addCompiler")}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+            <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4" style={{ scrollbarGutter: "stable" }}>
               {/* Provider */}
               <div className="space-y-1.5">
                 <Label>{t("llm.provider")}</Label>
@@ -4841,7 +4861,7 @@ export function App() {
 
             <DialogFooter className="px-6 py-2.5 shrink-0 flex-col sm:flex-col gap-1.5">
               <div className="flex items-center justify-between w-full">
-                <Button variant="ghost" onClick={() => { setAddCompDialogOpen(false); setConnTestResult(null); }}>{t("common.cancel")}</Button>
+                <Button variant="ghost" onClick={() => setAddCompDialogOpen(false)}>{t("common.cancel")}</Button>
                 <div className="flex gap-2 items-center">
                   <Button variant="secondary"
                     disabled={(!compilerApiKeyValue.trim() && !isLocalProvider(providers.find((p) => p.slug === compilerProviderSlug))) || !compilerBaseUrl.trim() || connTesting}
@@ -4877,23 +4897,24 @@ export function App() {
                 if (!_isCompLocal && !compilerApiKeyEnv.trim()) cMissing.push("Key Env Name");
                 if (!_isCompLocal && !compilerApiKeyValue.trim()) cMissing.push("API Key");
                 if (!currentWorkspaceId && dataMode !== "remote") cMissing.push(t("workspace.title") || "工作区");
-                return cMissing.length > 0 && !busy ? (
-                  <div className="text-[10px] text-muted-foreground text-right w-full">{t("common.missingFields") || "缺少"}: {cMissing.join(", ")}</div>
-                ) : null;
+                const cShow = cMissing.length > 0 && !busy;
+                return (
+                  <div className={cn("text-[10px] text-muted-foreground text-right w-full", !cShow && "invisible")}>{t("common.missingFields") || "缺少"}: {cMissing.join(", ") || "—"}</div>
+                );
               })()}
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* ── Add STT dialog ── */}
-        <Dialog open={addSttDialogOpen} onOpenChange={(open) => { if (!open) { setAddSttDialogOpen(false); setConnTestResult(null); } }}>
-          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <Dialog open={addSttDialogOpen} onOpenChange={(open) => { if (!open) setAddSttDialogOpen(false); }}>
+          <DialogContent className="sm:max-w-[480px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()} onCloseAnimationEnd={() => { setConnTestResult(null); }}>
             <DialogHeader className="px-6 pt-5 pb-3 shrink-0">
               <DialogTitle>{t("llm.addStt")}</DialogTitle>
               <DialogDescription className="sr-only">{t("llm.addStt")}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+            <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4" style={{ scrollbarGutter: "stable" }}>
               {/* Provider */}
               <div className="space-y-1.5">
                 <Label>{t("llm.provider")}</Label>
@@ -4996,7 +5017,7 @@ export function App() {
 
             <DialogFooter className="px-6 py-2.5 shrink-0 flex-col sm:flex-col gap-1.5">
               <div className="flex items-center justify-between w-full">
-                <Button variant="ghost" onClick={() => { setAddSttDialogOpen(false); setConnTestResult(null); }}>{t("common.cancel")}</Button>
+                <Button variant="ghost" onClick={() => setAddSttDialogOpen(false)}>{t("common.cancel")}</Button>
                 <div className="flex gap-2 items-center">
                   <Button variant="secondary"
                     disabled={(!sttApiKeyValue.trim() && !isLocalProvider(providers.find((p) => p.slug === sttProviderSlug))) || !sttBaseUrl.trim() || connTesting}
@@ -5030,9 +5051,10 @@ export function App() {
                 if (!sttModel.trim()) sMissing.push(t("status.model"));
                 if (!_isSttLocal && !sttApiKeyValue.trim()) sMissing.push("API Key");
                 if (!currentWorkspaceId && dataMode !== "remote") sMissing.push(t("workspace.title") || "工作区");
-                return sMissing.length > 0 && !busy ? (
-                  <div className="text-[10px] text-muted-foreground text-right w-full">{t("common.missingFields") || "缺少"}: {sMissing.join(", ")}</div>
-                ) : null;
+                const sShow = sMissing.length > 0 && !busy;
+                return (
+                  <div className={cn("text-[10px] text-muted-foreground text-right w-full", !sShow && "invisible")}>{t("common.missingFields") || "缺少"}: {sMissing.join(", ") || "—"}</div>
+                );
               })()}
             </DialogFooter>
           </DialogContent>
