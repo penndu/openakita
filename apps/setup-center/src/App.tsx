@@ -5314,8 +5314,9 @@ export function App() {
                 <span>{disabledViews.includes("mcp") ? t("config.toolsSkillsDisabled") : t("config.toolsSkillsEnabled")}</span>
                 <div
                   onClick={() => {
+                    const willDisable = !disabledViews.includes("mcp");
                     toggleViewDisabled("mcp");
-                    setEnvDraft((p) => ({ ...p, MCP_ENABLED: disabledViews.includes("mcp") ? "true" : "false" }));
+                    setEnvDraft((p) => ({ ...p, MCP_ENABLED: willDisable ? "false" : "true" }));
                   }}
                   className="relative shrink-0 transition-colors duration-200 rounded-full"
                   style={{

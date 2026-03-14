@@ -517,9 +517,10 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   // ── Not running ──
   if (!serviceRunning) {
     return (
-      <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
-        <IconClock size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-        <p>{t("scheduler.serviceNotRunning")}</p>
+      <div className="imViewEmpty">
+        <IconClock size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>计划任务</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }

@@ -16,20 +16,20 @@ export function TroubleshootPanel({ t }: { t: (k: string) => string }) {
   };
 
   return (
-    <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--panel2)", borderRadius: 6, fontSize: 12, color: "var(--text)", border: "1px solid var(--line)" }}>
+    <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text)", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }}>
       <div style={{ fontWeight: 600, marginBottom: 6 }}>{t("status.troubleshootTitle")}</div>
-      <div style={{ marginBottom: 4, color: "var(--muted)" }}>{t("status.troubleshootTip")}</div>
+      <div style={{ marginBottom: 6, color: "var(--muted)" }}>{t("status.troubleshootTip")}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ color: "var(--muted)", minWidth: 60 }}>{t("status.troubleshootListProcess")}:</span>
-          <code style={{ background: "var(--nav-hover)", border: "1px solid var(--line)", padding: "1px 6px", borderRadius: 3, fontSize: 11, flex: 1, color: "var(--text)" }}>{listCmd}</code>
+          <span style={{ color: "var(--muted)", minWidth: 60, flexShrink: 0 }}>{t("status.troubleshootListProcess")}:</span>
+          <code style={{ background: "var(--nav-hover)", padding: "2px 8px", borderRadius: 4, fontSize: 11, flex: 1, color: "var(--text)" }}>{listCmd}</code>
           <button className="btnSmall" style={{ fontSize: 10, padding: "1px 6px" }} onClick={() => copyText(listCmd, "list")}>
             {copied === "list" ? t("status.troubleshootCopied") : t("status.troubleshootCopy")}
           </button>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ color: "var(--muted)", minWidth: 60 }}>{t("status.troubleshootKillProcess")}:</span>
-          <code style={{ background: "var(--nav-hover)", border: "1px solid var(--line)", padding: "1px 6px", borderRadius: 3, fontSize: 11, flex: 1, color: "var(--text)" }}>{killCmd}</code>
+          <span style={{ color: "var(--muted)", minWidth: 60, flexShrink: 0 }}>{t("status.troubleshootKillProcess")}:</span>
+          <code style={{ background: "var(--nav-hover)", padding: "2px 8px", borderRadius: 4, fontSize: 11, flex: 1, color: "var(--text)" }}>{killCmd}</code>
           <button className="btnSmall" style={{ fontSize: 10, padding: "1px 6px" }} onClick={() => copyText(killCmd, "kill")}>
             {copied === "kill" ? t("status.troubleshootCopied") : t("status.troubleshootCopy")}
           </button>

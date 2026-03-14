@@ -3872,12 +3872,10 @@ export function ChatView({
   // ── 未启动服务提示 ──
   if (!serviceRunning) {
     return (
-      <div className="card" style={{ textAlign: "center", padding: "60px 40px" }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}><IconMessageCircle size={48} /></div>
-        <div className="cardTitle">{t("chat.title")}</div>
-        <div className="cardHint" style={{ marginTop: 8, marginBottom: 20 }}>
-          {t("chat.serviceHint")}
-        </div>
+      <div className="imViewEmpty">
+        <IconMessageCircle size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>{t("chat.title")}</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }

@@ -95,6 +95,7 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
   const { t } = useTranslation();
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState(true);
+
   const [loading, setLoading] = useState(false);
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [instructions, setInstructions] = useState<Record<string, string>>({});
@@ -110,7 +111,7 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
       const res = await safeFetch(`${apiBaseUrl}/api/mcp/servers`);
       const data = await res.json();
       setServers(data.servers || []);
-      setMcpEnabled(data.mcp_enabled !== false);
+      if (typeof data.mcp_enabled === "boolean") setMcpEnabled(data.mcp_enabled);
     } catch { /* ignore */ }
     setLoading(false);
   }, [serviceRunning, apiBaseUrl]);
@@ -257,9 +258,10 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
 
   if (!serviceRunning) {
     return (
-      <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>
-        <IconLink size={32} style={{ marginBottom: 12, opacity: 0.5 }} />
-        <p style={{ fontSize: 15 }}>{t("mcp.serviceNotRunning")}</p>
+      <div className="imViewEmpty">
+        <IconLink size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>MCP</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }
@@ -273,10 +275,10 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
           <span style={{ fontSize: 16, fontWeight: 600 }}>{t("mcp.title")}</span>
           {!mcpEnabled && (
             <span style={{
-              background: "var(--warn-bg, #fef3c7)", color: "var(--warn, #d97706)",
-              fontSize: 12, padding: "2px 8px", borderRadius: 4,
+              fontSize: 11, fontWeight: 500, color: "#b45309",
+              background: "#fef3c7", padding: "2px 8px", borderRadius: 4,
             }}>
-              {t("mcp.disabled")}
+              {t("mcp.disabled") || "MCP 已禁用"}
             </span>
           )}
         </div>

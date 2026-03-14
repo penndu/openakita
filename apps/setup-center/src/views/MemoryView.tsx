@@ -249,9 +249,10 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
 
   if (!serviceRunning) {
     return (
-      <div className="card" style={{ textAlign: "center", padding: 60, color: "var(--muted)" }}>
-        <IconBrain size={32} />
-        <p style={{ marginTop: 12, fontSize: 15 }}>请先启动服务后使用记忆管理</p>
+      <div className="imViewEmpty">
+        <IconBrain size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>记忆管理</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }

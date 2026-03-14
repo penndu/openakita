@@ -1297,6 +1297,16 @@ export function SkillManager({
     }
   }, [manualUrl, loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, t]);
 
+  if (!serviceRunning) {
+    return (
+      <div className="imViewEmpty">
+        <IconZap size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>技能</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Tab 切换 */}
