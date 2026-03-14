@@ -2477,7 +2477,7 @@ export function ChatView({
     }},
     { id: "persona", label: "切换角色", description: "切换 Agent 的人格预设", action: (args) => {
       if (args) {
-        setMessages((prev) => [...prev, { id: genId(), role: "system", content: `角色切换请在「设置 → Agent 系统」中修改 PERSONA_NAME 为 "${args}"`, timestamp: Date.now() }]);
+        setMessages((prev) => [...prev, { id: genId(), role: "system", content: `角色切换请在「设置 → 灵魂与意志」中修改 PERSONA_NAME 为 "${args}"`, timestamp: Date.now() }]);
       } else {
         setMessages((prev) => [...prev, { id: genId(), role: "system", content: "可用角色: default, business, tech_expert, butler, girlfriend, boyfriend, family, jarvis\n用法: /persona <角色ID>", timestamp: Date.now() }]);
       }

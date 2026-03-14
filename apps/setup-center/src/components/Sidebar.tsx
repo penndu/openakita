@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import type { StepId, Step } from "../types";
 import {
@@ -153,26 +154,29 @@ export function Sidebar({
             {steps.map((s) => {
               const isActive = view === "wizard" && s.id === stepId;
               return (
-                <div
-                  key={s.id}
-                  className={`stepItem ${isActive ? "stepItemActive" : ""}`}
-                  onClick={() => { onViewChange("wizard"); onStepChange(s.id); }}
-                  role="button" tabIndex={0}
-                >
-                  <StepDot stepId={s.id} />
-                  <div className="stepMeta"><div className="stepTitle">{s.title}</div></div>
-                </div>
+                <Fragment key={s.id}>
+                  <div
+                    className={`stepItem ${isActive ? "stepItemActive" : ""}`}
+                    onClick={() => { onViewChange("wizard"); onStepChange(s.id); }}
+                    role="button" tabIndex={0}
+                  >
+                    <StepDot stepId={s.id} />
+                    <div className="stepMeta"><div className="stepTitle">{s.title}</div></div>
+                  </div>
+                  {s.id === "agent" && (
+                    <div
+                      className={`stepItem ${view === "identity" ? "stepItemActive" : ""}`}
+                      onClick={() => onViewChange("identity")}
+                      role="button" tabIndex={0}
+                      title={t("sidebar.identity")}
+                    >
+                      <div className="stepDot"><IconFingerprint size={14} /></div>
+                      <div className="stepMeta"><div className="stepTitle">{t("sidebar.identity")}</div></div>
+                    </div>
+                  )}
+                </Fragment>
               );
             })}
-            <div
-              className={`stepItem ${view === "identity" ? "stepItemActive" : ""}`}
-              onClick={() => onViewChange("identity")}
-              role="button" tabIndex={0}
-              title={t("sidebar.identity")}
-            >
-              <div className="stepDot"><IconFingerprint size={14} /></div>
-              <div className="stepMeta"><div className="stepTitle">{t("sidebar.identity")}</div></div>
-            </div>
           </div>
         )}
       </div>

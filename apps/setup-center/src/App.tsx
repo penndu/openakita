@@ -5248,6 +5248,7 @@ export function App() {
   const _configViewProps = {
     envDraft, setEnvDraft,
     currentWorkspaceId,
+    disabledViews, toggleViewDisabled,
   };
 
   function renderIM() {
@@ -5511,7 +5512,7 @@ export function App() {
   // CliManager -> ./components/CliManager.tsx
 
   function renderAgentSystem() {
-    return <AgentSystemView {..._configViewProps} />;
+    return <AgentSystemView {..._configViewProps} serviceRunning={!!serviceStatus?.running} apiBaseUrl={apiBaseUrl} />;
   }
 
   function renderAdvanced() {
@@ -6682,7 +6683,7 @@ export function App() {
 
           <div className="card">
             <div className="cardTitle" style={{ fontSize: 14, marginBottom: 6 }}>
-              Agent 与系统（核心配置）
+              灵魂与意志（核心配置）
             </div>
             <div className="cardHint">
               这些是系统内置能力的开关与参数。<b>内置项默认启用</b>（你随时可以关闭）。建议先用默认值跑通，再按需调优。
@@ -7823,31 +7824,21 @@ export function App() {
       );
     }
     if (view === "scheduler") {
-      return (
-        <div>
-          {_disableToggle("scheduler", t("scheduler.title"))}
-          {disabledViews.includes("scheduler") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-            <SchedulerView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
-          )}
+      return disabledViews.includes("scheduler") ? (
+        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+          <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「灵魂与意志」配置中启用</p>
         </div>
+      ) : (
+        <SchedulerView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "memory") {
-      return (
-        <div>
-          {_disableToggle("memory", t("sidebar.memory"))}
-          {disabledViews.includes("memory") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-            <MemoryView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
-          )}
+      return disabledViews.includes("memory") ? (
+        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+          <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「灵魂与意志」配置中启用</p>
         </div>
+      ) : (
+        <MemoryView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "identity") {
