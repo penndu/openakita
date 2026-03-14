@@ -38,17 +38,12 @@ class VisionAnalyzer:
 
     def __init__(
         self,
-        model: str | None = None,
         capture: ScreenCapture | None = None,
     ):
         """
         Args:
-            model: 视觉模型名称，None 使用配置
             capture: 截图实例，None 使用全局实例
         """
-        config = get_config().vision
-        self._model = model or config.model
-        self._fallback_model = config.fallback_model
         self._capture = capture or get_capture()
         self._llm_client = None
 
@@ -65,25 +60,21 @@ class VisionAnalyzer:
         self,
         prompt: str,
         image: Image.Image,
-        model: str | None = None,
     ) -> str:
         """
-        调用视觉模型
+        调用视觉模型（模型由 LLM 端点配置决定）
 
         Args:
             prompt: 提示词
             image: 图片
-            model: 模型名称
 
         Returns:
             模型响应文本
         """
         from openakita.llm.types import ImageBlock, ImageContent, Message, TextBlock
 
-        # 将图片转换为 base64
         b64_data = self._capture.to_base64(image, resize_for_api=True)
 
-        # 构建消息
         messages = [
             Message(
                 role="user",
@@ -94,34 +85,18 @@ class VisionAnalyzer:
             )
         ]
 
-        # 调用 LLM
-        _ = get_config().vision  # 触发加载/校验（显式保留，避免无用表达式）
-        use_model = model or self._model
+        response = await self.llm_client.chat(
+            messages=messages,
+            max_tokens=4096,
+            temperature=1.0,
+        )
 
-        try:
-            response = await self.llm_client.chat(
-                messages=messages,
-                max_tokens=4096,
-                temperature=1.0,  # 使用默认温度，避免某些模型限制
-            )
+        if response.content:
+            for block in response.content:
+                if hasattr(block, "text"):
+                    return block.text
 
-            # 提取文本响应
-            if response.content:
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        return block.text
-
-            return ""
-
-        except Exception as e:
-            logger.error(f"Vision model call failed: {e}")
-
-            # 尝试备用模型
-            if use_model != self._fallback_model:
-                logger.info(f"Trying fallback model: {self._fallback_model}")
-                return await self._call_vision_model(prompt, image, model=self._fallback_model)
-
-            raise
+        return ""
 
     def _parse_json_response(self, text: str) -> dict | None:
         """
@@ -456,11 +431,8 @@ class VisionAnalyzer:
 
         prompt = PromptTemplates.EXTRACT_TEXT
 
-        # 使用 OCR 专用模型
-        ocr_model = get_config().vision.ocr_model
-
         try:
-            response = await self._call_vision_model(prompt, image, model=ocr_model)
+            response = await self._call_vision_model(prompt, image)
             result = self._parse_json_response(response)
 
             if not result:

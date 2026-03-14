@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { safeFetch } from "../providers";
 import {
   IconRefresh, IconCheck, IconX, IconInfo,
-  IconChevronRight, IconLoader,
+  IconChevronRight, IconLoader, IconFingerprint,
 } from "../icons";
 import { ModalOverlay } from "../components/ModalOverlay";
 
@@ -234,8 +234,10 @@ export function IdentityView({ serviceRunning, apiBaseUrl }: Props) {
 
   if (!serviceRunning) {
     return (
-      <div className="card" style={{ textAlign: "center", padding: 40 }}>
-        <p style={{ color: "#94a3b8", fontSize: 15 }}>服务未运行，无法管理身份文件</p>
+      <div className="imViewEmpty">
+        <IconFingerprint size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>{t("identity.title")}</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }

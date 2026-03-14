@@ -85,15 +85,21 @@ export function Sidebar({
         <div className={`navItem ${view === "chat" ? "navItemActive" : ""}`} onClick={() => onViewChange("chat")} role="button" tabIndex={0} title={t("sidebar.chat")}>
           <IconChat size={16} /> {!collapsed && <span>{t("sidebar.chat")}</span>}
         </div>
-        <div className={`navItem ${view === "im" ? "navItemActive" : ""}`} onClick={() => onViewChange("im")} role="button" tabIndex={0} title={t("sidebar.im")} style={disabledViews.includes("im") ? { opacity: 0.4 } : undefined}>
-          <IconIM size={16} /> {!collapsed && <span>{t("sidebar.im")}</span>}
-        </div>
-        <div className={`navItem ${view === "skills" ? "navItemActive" : ""}`} onClick={() => onViewChange("skills")} role="button" tabIndex={0} title={t("sidebar.skills")} style={disabledViews.includes("skills") ? { opacity: 0.4 } : undefined}>
-          <IconSkills size={16} /> {!collapsed && <span>{t("sidebar.skills")}</span>}
-        </div>
-        <div className={`navItem ${view === "mcp" ? "navItemActive" : ""}`} onClick={() => onViewChange("mcp")} role="button" tabIndex={0} title="MCP" style={disabledViews.includes("mcp") ? { opacity: 0.4 } : undefined}>
-          <IconPlug size={16} /> {!collapsed && <span>MCP <sup style={{ fontSize: 9, color: "var(--primary, #3b82f6)", fontWeight: 600 }}>Beta</sup></span>}
-        </div>
+        {!disabledViews.includes("im") && (
+          <div className={`navItem ${view === "im" ? "navItemActive" : ""}`} onClick={() => onViewChange("im")} role="button" tabIndex={0} title={t("sidebar.im")}>
+            <IconIM size={16} /> {!collapsed && <span>{t("sidebar.im")}</span>}
+          </div>
+        )}
+        {!disabledViews.includes("skills") && (
+          <div className={`navItem ${view === "skills" ? "navItemActive" : ""}`} onClick={() => onViewChange("skills")} role="button" tabIndex={0} title={t("sidebar.skills")}>
+            <IconSkills size={16} /> {!collapsed && <span>{t("sidebar.skills")}</span>}
+          </div>
+        )}
+        {!disabledViews.includes("mcp") && (
+          <div className={`navItem ${view === "mcp" ? "navItemActive" : ""}`} onClick={() => onViewChange("mcp")} role="button" tabIndex={0} title="MCP">
+            <IconPlug size={16} /> {!collapsed && <span>MCP <sup style={{ fontSize: 9, color: "var(--primary, #3b82f6)", fontWeight: 600 }}>Beta</sup></span>}
+          </div>
+        )}
         <div className={`navItem ${view === "scheduler" ? "navItemActive" : ""}`} onClick={() => onViewChange("scheduler")} role="button" tabIndex={0} title={t("sidebar.scheduler")} style={disabledViews.includes("scheduler") ? { opacity: 0.4 } : undefined}>
           <IconCalendar size={16} /> {!collapsed && <span>{t("sidebar.scheduler")} <sup style={{ fontSize: 9, color: "var(--primary, #3b82f6)", fontWeight: 600 }}>Beta</sup></span>}
         </div>
@@ -247,9 +253,12 @@ export function Sidebar({
               <span
                 onClick={onBugReport}
                 title={t("feedback.trigger")}
-                style={{ cursor: "pointer", opacity: 1, color: "var(--accent, #5B8DEF)", display: "inline-flex", alignItems: "center" }}
+                style={{ cursor: "pointer", opacity: 1, color: "var(--accent, #5B8DEF)", display: "inline-flex", alignItems: "center", gap: 2 }}
+                onMouseEnter={(e) => { const s = e.currentTarget.querySelector<HTMLElement>(".feedbackText"); if (s) s.style.textDecoration = "underline"; }}
+                onMouseLeave={(e) => { const s = e.currentTarget.querySelector<HTMLElement>(".feedbackText"); if (s) s.style.textDecoration = "none"; }}
               >
                 <IconBug size={12} />
+                <span className="feedbackText" style={{ fontSize: 11 }}>反馈</span>
               </span>
             )}
             <a

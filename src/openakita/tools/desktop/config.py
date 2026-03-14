@@ -51,9 +51,6 @@ class VisionConfig:
     """视觉识别配置"""
 
     enabled: bool = True
-    model: str = "qwen3-vl-plus"
-    fallback_model: str = "qwen-vl-plus"
-    ocr_model: str = "qwen-vl-ocr"
     max_retries: int = 2
     timeout: float = 30.0
 
@@ -61,9 +58,6 @@ class VisionConfig:
     def from_env(cls) -> "VisionConfig":
         return cls(
             enabled=os.getenv("DESKTOP_VISION_ENABLED", "true").lower() == "true",
-            model=os.getenv("DESKTOP_VISION_MODEL", "qwen3-vl-plus"),
-            fallback_model=os.getenv("DESKTOP_VISION_FALLBACK_MODEL", "qwen-vl-plus"),
-            ocr_model=os.getenv("DESKTOP_VISION_OCR_MODEL", "qwen-vl-ocr"),
             max_retries=int(os.getenv("DESKTOP_VISION_MAX_RETRIES", "2")),
             timeout=float(os.getenv("DESKTOP_VISION_TIMEOUT", "30.0")),
         )
@@ -100,11 +94,6 @@ class DesktopConfig:
     vision: VisionConfig = field(default_factory=VisionConfig)
     actions: ActionConfig = field(default_factory=ActionConfig)
 
-    # 日志配置
-    log_actions: bool = True
-    log_screenshots: bool = False  # 是否保存截图到日志
-    log_dir: str | None = None
-
     @classmethod
     def from_env(cls) -> "DesktopConfig":
         """从环境变量加载配置"""
@@ -114,9 +103,6 @@ class DesktopConfig:
             uia=UIAConfig.from_env(),
             vision=VisionConfig.from_env(),
             actions=ActionConfig.from_env(),
-            log_actions=os.getenv("DESKTOP_LOG_ACTIONS", "true").lower() == "true",
-            log_screenshots=os.getenv("DESKTOP_LOG_SCREENSHOTS", "false").lower() == "true",
-            log_dir=os.getenv("DESKTOP_LOG_DIR"),
         )
 
     @classmethod

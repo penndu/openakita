@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { FieldText, FieldBool, TelegramPairingCodeHint } from "../components/EnvFields";
 import { IconBook, IconClipboard, LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ } from "../icons";
 import type { EnvMap } from "../types";
@@ -9,8 +10,7 @@ import { copyToClipboard } from "../utils/clipboard";
 type IMConfigViewProps = {
   envDraft: EnvMap;
   setEnvDraft: (updater: (prev: EnvMap) => EnvMap) => void;
-  setNotice: (v: string | null) => void;
-  busy: string | null;
+  busy?: string | null;
   currentWorkspaceId: string | null;
   apiBaseUrl?: string;
   onNavigateToBotConfig?: (presetType: string) => void;
@@ -19,7 +19,7 @@ type IMConfigViewProps = {
 };
 
 export function IMConfigView(props: IMConfigViewProps) {
-  const { envDraft, setEnvDraft, setNotice, busy, currentWorkspaceId } = props;
+  const { envDraft, setEnvDraft, busy = null, currentWorkspaceId } = props;
   const { t } = useTranslation();
 
   const _envBase = { envDraft, onEnvChange: setEnvDraft, busy };
@@ -213,7 +213,7 @@ export function IMConfigView(props: IMConfigViewProps) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="cardTitle">{t("config.imTitle")}</div>
           <button className="btnSmall" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
-            onClick={async () => { const ok = await copyToClipboard("https://github.com/anthropic-lab/openakita/blob/main/docs/im-channels.md"); if (ok) setNotice(t("config.imGuideDocCopied")); }}
+            onClick={async () => { const ok = await copyToClipboard("https://github.com/anthropic-lab/openakita/blob/main/docs/im-channels.md"); if (ok) toast.success(t("config.imGuideDocCopied")); }}
             title={t("config.imGuideDoc")}
           ><IconBook size={13} />{t("config.imGuideDoc")}</button>
         </div>
@@ -244,7 +244,7 @@ export function IMConfigView(props: IMConfigViewProps) {
                 <button className="btnSmall"
                   style={{ fontSize: 11, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: 3 }}
                   title={c.docUrl}
-                  onClick={async () => { const ok = await copyToClipboard(c.docUrl); if (ok) setNotice(t("config.imDocCopied")); }}
+                  onClick={async () => { const ok = await copyToClipboard(c.docUrl); if (ok) toast.success(t("config.imDocCopied")); }}
                 ><IconClipboard size={12} />{t("config.imDoc")}</button>
                 <span className="help" style={{ fontSize: 11, userSelect: "all", opacity: 0.6 }}>{c.docUrl}</span>
               </div>

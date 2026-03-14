@@ -6,8 +6,21 @@ import { invoke, IS_TAURI } from "../platform";
 import { useTranslation } from "react-i18next";
 import type { SkillInfo, SkillConfigField, MarketplaceSkill, EnvMap } from "../types";
 import { envGet, envSet } from "../utils";
-import { IconGear, IconZap, IconPackage, IconStar, IconCheck, IconX, IconDownload, IconSearch, IconConfig, IconFolderOpen, IconEdit, IconTrash } from "../icons";
+import { IconGear, IconZap, IconPackage, IconStar, IconCheck, IconX, IconDownload, IconSearch, IconConfig, IconFolderOpen, IconEdit, IconTrash, IconEye } from "../icons";
+import { Loader2 } from "lucide-react";
 import { safeFetch } from "../providers";
+import { toast } from "sonner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ModalOverlay } from "../components/ModalOverlay";
 
 // ─── i18n 辅助：按当前语言优先显示中文名/描述 ───
@@ -144,13 +157,14 @@ function SkillConfigForm({
                   style={{ flex: 1 }}
                 />
                 {isSecret && (
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() => setSecretShown((s) => ({ ...s, [field.key]: !s[field.key] }))}
-                    style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 12 }}
                   >
                     {shown ? t("skills.hide") : t("skills.show")}
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
@@ -208,7 +222,7 @@ function SkillCard({
   return (
     <div className="card" style={{ marginTop: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: skill.system ? "rgba(14,165,233,0.1)" : "rgba(124,58,237,0.1)", display: "grid", placeItems: "center", fontSize: 18, flexShrink: 0 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: skill.system ? "rgba(37,99,235,0.1)" : "rgba(124,58,237,0.1)", display: "grid", placeItems: "center", fontSize: 18, flexShrink: 0 }}>
           {skill.system ? <IconGear size={18} /> : <IconZap size={18} />}
         </div>
         <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={onViewDetail}>
@@ -234,39 +248,44 @@ function SkillCard({
             {displayDesc}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
-          <button
+        <div style={{ display: "flex", gap: 2, flexShrink: 0, alignItems: "center" }}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={onViewDetail}
-            style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+            title={t("skills.viewDetail")}
+            className="text-muted-foreground hover:text-foreground"
           >
-            {t("skills.viewDetail")}
-          </button>
+            <IconEye size={14} />
+          </Button>
           {!skill.system && onUninstall && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={onUninstall}
               disabled={uninstalling}
               title={t("skills.uninstall")}
-              style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.25)", background: "transparent", cursor: uninstalling ? "not-allowed" : "pointer", fontSize: 12, color: "#ef4444", opacity: uninstalling ? 0.5 : 1 }}
+              className="text-muted-foreground hover:text-destructive"
             >
-              {uninstalling ? t("skills.uninstalling") : <IconTrash size={13} />}
-            </button>
+              {uninstalling ? <Loader2 className="animate-spin" size={14} /> : <IconTrash size={14} />}
+            </Button>
           )}
-          <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-1.5 cursor-pointer text-xs font-normal ml-1">
+            <Checkbox
               checked={skill.enabled !== false}
-              onChange={onToggleEnabled}
-              style={{ width: 16, height: 16 }}
+              onCheckedChange={() => onToggleEnabled()}
             />
             {t("skills.enabled")}
-          </label>
+          </Label>
           {hasConfig && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onToggleExpand}
-              style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid var(--line)", background: expanded ? "rgba(14,165,233,0.08)" : "transparent", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+              className={expanded ? "bg-accent" : ""}
             >
               {expanded ? t("chat.collapse") : t("skills.configure")}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -274,14 +293,15 @@ function SkillCard({
       {expanded && hasConfig && skill.config && (
         <div style={{ marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
           <SkillConfigForm fields={skill.config} envDraft={envDraft} onEnvChange={onEnvChange} />
-          <button
-            className="btnPrimary"
+          <Button
             onClick={onSaveConfig}
             disabled={saving}
-            style={{ marginTop: 10, fontSize: 13, padding: "6px 20px" }}
+            size="sm"
+            className="mt-2.5"
           >
-            {saving ? t("skills.saving") : t("skills.saveConfig")}
-          </button>
+            {saving && <Loader2 className="animate-spin" />}
+            {t("skills.saveConfig")}
+          </Button>
         </div>
       )}
     </div>
@@ -351,20 +371,21 @@ function SkillDetailModal({
         {/* Header */}
         <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: isSystem ? "rgba(14,165,233,0.1)" : "rgba(124,58,237,0.1)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: isSystem ? "rgba(37,99,235,0.1)" : "rgba(124,58,237,0.1)", display: "grid", placeItems: "center", flexShrink: 0 }}>
               {isSystem ? <IconGear size={16} /> : <IconZap size={16} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 800, fontSize: 15 }}>{skill.name}</div>
               <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }}>{skill.description}</div>
             </div>
-            <button
+            <Button
+              variant="ghost"
+              size="icon-xs"
               onClick={onClose}
               disabled={savingContent}
-              style={{ background: "transparent", border: "none", cursor: savingContent ? "not-allowed" : "pointer", padding: 4, fontSize: 18, opacity: savingContent ? 0.3 : 0.5, lineHeight: 1 }}
             >
               <IconX size={18} />
-            </button>
+            </Button>
           </div>
 
           {/* Meta info */}
@@ -451,42 +472,31 @@ function SkillDetailModal({
           {!isSystem && serviceRunning && (
             <>
               {onUninstall && !isEditing && (
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={onUninstall}
                   disabled={uninstalling || savingContent}
-                  style={{ padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "transparent", cursor: uninstalling ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 700, color: "#ef4444", display: "inline-flex", alignItems: "center", gap: 4, opacity: uninstalling ? 0.5 : 1 }}
+                  className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                 >
-                  <IconTrash size={12} /> {uninstalling ? t("skills.uninstalling") : t("skills.uninstall")}
-                </button>
+                  {uninstalling ? <Loader2 className="animate-spin" size={12} /> : <IconTrash size={12} />} {t("skills.uninstall")}
+                </Button>
               )}
               <div style={{ flex: 1 }} />
               {isEditing ? (
                 <>
-                  <button
-                    className="btnSmall"
-                    onClick={onCancelEdit}
-                    disabled={savingContent}
-                    style={{ fontSize: 12, padding: "6px 16px" }}
-                  >
+                  <Button variant="outline" size="sm" onClick={onCancelEdit} disabled={savingContent}>
                     {t("skills.cancelEdit")}
-                  </button>
-                  <button
-                    className="btnPrimary"
-                    onClick={onSave}
-                    disabled={savingContent || editContent === content}
-                    style={{ fontSize: 12, padding: "6px 16px" }}
-                  >
-                    {savingContent ? t("skills.saving") : t("skills.saveAndReload")}
-                  </button>
+                  </Button>
+                  <Button size="sm" onClick={onSave} disabled={savingContent || editContent === content}>
+                    {savingContent && <Loader2 className="animate-spin" />}
+                    {t("skills.saveAndReload")}
+                  </Button>
                 </>
               ) : (
-                <button
-                  onClick={onStartEdit}
-                  disabled={contentLoading || !!contentError}
-                  style={{ padding: "6px 16px", borderRadius: 8, border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
-                >
+                <Button variant="outline" size="sm" onClick={onStartEdit} disabled={contentLoading || !!contentError}>
                   <IconEdit size={12} /> {t("skills.editContent")}
-                </button>
+                </Button>
               )}
             </>
           )}
@@ -534,21 +544,22 @@ function MarketplaceSkillCard({
           {skill.tags && skill.tags.length > 0 && (
             <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
               {skill.tags.map((tag) => (
-                <span key={tag} style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "rgba(14,165,233,0.08)", color: "var(--brand)" }}>
+                <span key={tag} style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "rgba(37,99,235,0.08)", color: "var(--brand)" }}>
                   {tag}
                 </span>
               ))}
             </div>
           )}
         </div>
-        <button
-          className={skill.installed ? "" : "btnPrimary"}
+        <Button
+          variant={skill.installed ? "outline" : "default"}
+          size="sm"
           onClick={onInstall}
           disabled={skill.installed || installing}
-          style={{ fontSize: 12, padding: "6px 14px", flexShrink: 0 }}
         >
-          {installing ? t("common.loading") : skill.installed ? t("skills.installed") : t("skills.install")}
-        </button>
+          {installing && <Loader2 className="animate-spin" />}
+          {skill.installed ? t("skills.installed") : t("skills.install")}
+        </Button>
       </div>
     </div>
   );
@@ -565,7 +576,6 @@ export function SkillManager({
   apiBaseUrl = "http://127.0.0.1:18900",
   serviceRunning = false,
   dataMode = "local",
-  onNotice,
 }: {
   venvDir: string;
   currentWorkspaceId: string | null;
@@ -575,7 +585,6 @@ export function SkillManager({
   apiBaseUrl?: string;
   serviceRunning?: boolean;
   dataMode?: "local" | "remote";
-  onNotice?: (msg: string) => void;
 }) {
   const [tab, setTab] = useState<"installed" | "marketplace">("installed");
   const [skills, setSkills] = useState<SkillInfo[]>([]);
@@ -593,7 +602,7 @@ export function SkillManager({
   const [enabledDirty, setEnabledDirty] = useState(false);
   const [savingEnabled, setSavingEnabled] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [discarding, setDiscarding] = useState(false);
+  
   const [installedSearch, setInstalledSearch] = useState("");
   const [aiOrganizing, setAiOrganizing] = useState(false);
   const [localImporting, setLocalImporting] = useState(false);
@@ -807,6 +816,8 @@ export function SkillManager({
     }
   }, [skills, enabledDraft, serviceRunning, apiBaseUrl, dataMode, currentWorkspaceId, loadSkills]);
 
+  const handleDiscard = useCallback(() => { loadSkills(); }, [loadSkills]);
+
   // ── AI 整理技能 ──
   const handleAiOrganize = useCallback(async () => {
     if (!serviceRunning || !apiBaseUrl) return;
@@ -910,19 +921,19 @@ export function SkillManager({
       }
 
       await loadSkills();
-      onNotice?.(t("skills.importLocalSuccess"));
+      toast.success(t("skills.importLocalSuccess"));
     } catch (e) {
       const msg = String(e);
       if (msg.includes("该技能已安装") || msg.toLowerCase().includes("already installed")) {
         await loadSkills();
-        onNotice?.(t("skills.alreadyInstalled"));
+        toast.success(t("skills.alreadyInstalled"));
       } else {
         setError(friendlyError(e, t, "install"));
       }
     } finally {
       setLocalImporting(false);
     }
-  }, [dataMode, serviceRunning, apiBaseUrl, currentWorkspaceId, venvDir, loadSkills, onNotice, t]);
+  }, [dataMode, serviceRunning, apiBaseUrl, currentWorkspaceId, venvDir, loadSkills, t]);
 
   // ── 打开技能详情弹窗 ──
   const handleViewDetail = useCallback(async (skill: SkillInfo) => {
@@ -990,7 +1001,7 @@ export function SkillManager({
       } else {
         setDetailContent(detailEditContent);
         setDetailEditing(false);
-        onNotice?.(t("skills.contentSaved"));
+        toast.success(t("skills.contentSaved"));
         await loadSkills();
       }
     } catch (e) {
@@ -998,7 +1009,7 @@ export function SkillManager({
     } finally {
       setDetailSaving(false);
     }
-  }, [detailSkill, detailEditContent, serviceRunning, apiBaseUrl, loadSkills, onNotice, t]);
+  }, [detailSkill, detailEditContent, serviceRunning, apiBaseUrl, loadSkills, t]);
 
   // ── 卸载技能（第一步：弹出确认） ──
   const requestUninstall = useCallback((skill: SkillInfo) => {
@@ -1038,16 +1049,16 @@ export function SkillManager({
         if (sid === key || s.url === skill.sourceUrl) return { ...s, installed: false };
         return s;
       }));
-      onNotice?.(t("skills.uninstallSuccess", { name: displayName }));
+      toast.success(t("skills.uninstallSuccess", { name: displayName }));
       await loadSkills();
     } catch (e) {
       const msg = friendlyError(e, t, "uninstall");
       setError(msg);
-      onNotice?.(msg);
+      toast.error(msg);
     } finally {
       setUninstallingSet(prev => { const next = new Set(prev); next.delete(key); return next; });
     }
-  }, [serviceRunning, apiBaseUrl, venvDir, currentWorkspaceId, detailSkill, loadSkills, onNotice, t]);
+  }, [serviceRunning, apiBaseUrl, venvDir, currentWorkspaceId, detailSkill, loadSkills, t]);
 
   // ── 搜索 skills.sh 市场技能 ──
   const parseMarketplaceResponse = useCallback((data: Record<string, unknown>) => {
@@ -1210,7 +1221,7 @@ export function SkillManager({
           setMarketplace((prev) => prev.map((s) =>
             s.url === skill.url ? { ...s, installed: true } : s
           ));
-          onNotice?.(t("skills.alreadyInstalled"));
+          toast.success(t("skills.alreadyInstalled"));
           setTab("installed");
         } else {
           setError(friendlyError(e, t, "install"));
@@ -1218,12 +1229,12 @@ export function SkillManager({
       } else {
         const friendly = friendlyError(e, t, "install");
         setError(friendly);
-        onNotice?.(friendly);
+        toast.error(friendly);
       }
     } finally {
       setInstallingSet(prev => { const next = new Set(prev); next.delete(uniqueKey); return next; });
     }
-  }, [loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, onNotice, t]);
+  }, [loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, t]);
 
   // ── 手动输入链接安装技能 ──
   const handleManualInstall = useCallback(async () => {
@@ -1274,38 +1285,64 @@ export function SkillManager({
       if (raw.includes("该技能已安装") || raw.toLowerCase().includes("already installed")) {
         setManualUrl("");
         await loadSkills();
-        onNotice?.(t("skills.alreadyInstalled"));
+        toast.success(t("skills.alreadyInstalled"));
         setTab("installed");
       } else {
         const friendly = friendlyError(e, t, "install");
         setError(friendly);
-        onNotice?.(friendly);
+        toast.error(friendly);
       }
     } finally {
       setManualInstalling(false);
     }
-  }, [manualUrl, loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, t, onNotice]);
+  }, [manualUrl, loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, t]);
+
+  if (!serviceRunning) {
+    return (
+      <div className="imViewEmpty">
+        <IconZap size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>技能</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
+      </div>
+    );
+  }
 
   return (
     <>
       {/* Tab 切换 */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button
-          className={tab === "installed" ? "btnPrimary" : ""}
-          onClick={() => setTab("installed")}
-          style={{ fontSize: 13, padding: "6px 20px" }}
+        <ToggleGroup
+          type="single"
+          value={tab}
+          onValueChange={(v) => { if (v) setTab(v as "installed" | "marketplace"); }}
+          variant="outline"
         >
-          {t("skills.installed")} ({skillsWithConfig.length})
-        </button>
-        <button
-          className={tab === "marketplace" ? "btnPrimary" : ""}
-          onClick={() => setTab("marketplace")}
-          style={{ fontSize: 13, padding: "6px 20px" }}
-        >
-          {t("skills.marketplace")}
-        </button>
+          <ToggleGroupItem
+            value="installed"
+            className="text-sm min-w-[5.5rem] data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
+          >
+            {t("skills.installed")}
+            <Badge
+              variant="secondary"
+              className={
+                tab === "installed"
+                  ? "ml-1.5 px-1.5 py-0 text-[11px] min-w-[1.25rem] justify-center rounded-full bg-white/25 text-primary-foreground"
+                  : "ml-1.5 px-1.5 py-0 text-[11px] min-w-[1.25rem] justify-center rounded-full bg-foreground/10 text-foreground/60"
+              }
+            >
+              {skillsWithConfig.length}
+            </Badge>
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="marketplace"
+            className="text-sm min-w-[5.5rem] data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
+          >
+            {t("skills.marketplace")}
+          </ToggleGroupItem>
+        </ToggleGroup>
         <div style={{ flex: 1 }} />
-        <button
+        <Button
+          variant="outline"
           onClick={async () => {
             if (refreshing || loading) return;
             setRefreshing(true);
@@ -1322,7 +1359,7 @@ export function SkillManager({
                 if (data.error) { setError(friendlyError(data.error, t, "reload")); return; }
               }
               const ok = await loadSkills();
-              if (ok) onNotice?.(t("skills.refreshed"));
+              if (ok) toast.success(t("skills.refreshed"));
             } catch (e) {
               setError(friendlyError(e, t, "reload"));
             } finally {
@@ -1330,11 +1367,11 @@ export function SkillManager({
             }
           }}
           disabled={refreshing || loading}
-          style={{ fontSize: 12, padding: "6px 14px", borderRadius: 8, border: "1px solid var(--line)", cursor: refreshing || loading ? "not-allowed" : "pointer", opacity: refreshing || loading ? 0.6 : 1 }}
           title={t("skills.reloadHint")}
         >
-          {refreshing || loading ? t("common.loading") : t("topbar.refresh")}
-        </button>
+          {(refreshing || loading) && <Loader2 className="animate-spin" />}
+          {t("topbar.refresh")}
+        </Button>
       </div>
 
       {error && <div className="errorBox" style={{ marginBottom: 12 }}>{error}</div>}
@@ -1345,36 +1382,37 @@ export function SkillManager({
           <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
             {/* 搜索 + AI 整理 */}
             {skillsWithConfig.length > 0 && (
-              <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div style={{ flex: 1, position: "relative" }}>
                   <IconSearch size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }} />
-                  <input
+                  <Input
                     value={installedSearch}
                     onChange={(e) => setInstalledSearch(e.target.value)}
                     placeholder={t("skills.filterPlaceholder")}
-                    style={{ width: "100%", fontSize: 13, paddingLeft: 32 }}
+                    className="pl-8"
                   />
                 </div>
                 {dataMode !== "remote" && (
-                  <button
+                  <Button
+                    variant="outline"
                     onClick={handleImportLocal}
                     disabled={localImporting}
-                    style={{ fontSize: 12, padding: "0 14px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}
                     title={t("skills.importLocalTitle")}
                   >
-                    <IconFolderOpen size={13} />
-                    {localImporting ? t("skills.importLocalImporting") : t("skills.importLocal")}
-                  </button>
+                    {localImporting ? <Loader2 className="animate-spin" size={14} /> : <IconFolderOpen size={14} />}
+                    {t("skills.importLocal")}
+                  </Button>
                 )}
                 {serviceRunning && (
-                  <button
+                  <Button
+                    variant="outline"
                     onClick={handleAiOrganize}
                     disabled={aiOrganizing}
-                    style={{ fontSize: 12, padding: "0 14px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", whiteSpace: "nowrap" }}
                     title={t("skills.aiOrganizeHint")}
                   >
-                    {aiOrganizing ? t("common.loading") : t("skills.aiOrganize")}
-                  </button>
+                    {aiOrganizing ? <Loader2 className="animate-spin" size={14} /> : <IconZap size={14} />}
+                    {t("skills.aiOrganize")}
+                  </Button>
                 )}
               </div>
             )}
@@ -1386,14 +1424,16 @@ export function SkillManager({
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>{t("skills.noSkills")}</div>
                 <div className="help">{t("skills.noSkillsHint")}</div>
                 {dataMode !== "remote" && (
-                  <button
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleImportLocal}
                     disabled={localImporting}
-                    style={{ marginTop: 12, fontSize: 12, padding: "6px 16px", borderRadius: 10, border: "1px solid var(--line)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                    className="mt-3"
                   >
-                    <IconFolderOpen size={13} />
-                    {localImporting ? t("skills.importLocalImporting") : t("skills.importLocal")}
-                  </button>
+                    {localImporting ? <Loader2 className="animate-spin" size={13} /> : <IconFolderOpen size={13} />}
+                    {t("skills.importLocal")}
+                  </Button>
                 )}
               </div>
             )}
@@ -1423,49 +1463,7 @@ export function SkillManager({
         </>
       )}
 
-      {/* 保存启用/禁用状态 — fixed 定位浮动栏，不依赖父容器布局 */}
-      {enabledDirty && (
-        <div style={{
-          position: "fixed",
-          bottom: 24,
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "min(560px, 90vw)",
-          padding: "12px 20px",
-          background: "var(--panel)",
-          border: "1px solid var(--line)",
-          borderRadius: 14,
-          boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          zIndex: 1000,
-          boxSizing: "border-box",
-        }}>
-          <span style={{ fontSize: 13, opacity: 0.7, flex: 1, minWidth: 0 }}>
-            {t("skills.unsavedChanges")}
-          </span>
-          <button
-            onClick={async () => {
-              if (discarding || savingEnabled) return;
-              setDiscarding(true);
-              try { await loadSkills(); } finally { setDiscarding(false); }
-            }}
-            disabled={savingEnabled || discarding}
-            style={{ fontSize: 12, padding: "6px 16px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)", cursor: savingEnabled || discarding ? "not-allowed" : "pointer", opacity: savingEnabled || discarding ? 0.6 : 1, whiteSpace: "nowrap", flexShrink: 0 }}
-          >
-            {discarding ? t("common.loading") : t("skills.discardChanges")}
-          </button>
-          <button
-            className="btnPrimary"
-            onClick={handleSaveEnabledState}
-            disabled={savingEnabled || discarding}
-            style={{ fontSize: 13, padding: "6px 20px", whiteSpace: "nowrap", flexShrink: 0, cursor: savingEnabled || discarding ? "not-allowed" : "pointer", opacity: savingEnabled || discarding ? 0.6 : 1 }}
-          >
-            {savingEnabled ? t("skills.saving") : t("skills.saveEnabledState")}
-          </button>
-        </div>
-      )}
+      
 
       {/* 技能市场 */}
       {tab === "marketplace" && (
@@ -1499,14 +1497,14 @@ export function SkillManager({
                 disabled={manualInstalling}
                 style={{ flex: 1, fontSize: 13 }}
               />
-              <button
-                className="btnPrimary"
+              <Button
+                size="sm"
                 onClick={handleManualInstall}
                 disabled={!manualUrl.trim() || manualInstalling}
-                style={{ fontSize: 12, padding: "6px 16px", flexShrink: 0 }}
               >
-                {manualInstalling ? t("common.loading") : t("skills.install")}
-              </button>
+                {manualInstalling && <Loader2 className="animate-spin" />}
+                {t("skills.install")}
+              </Button>
             </div>
             <div style={{ fontSize: 11, opacity: 0.4, marginTop: 6 }}>
               {t("skills.manualInstallHint")}
@@ -1573,38 +1571,50 @@ export function SkillManager({
       )}
 
       {/* 卸载确认弹窗 */}
-      {uninstallConfirm && (
-        <ModalOverlay onClose={() => setUninstallConfirm(null)}>
-          <div className="modalContent" style={{ maxWidth: 400, padding: "24px 28px", textAlign: "center" }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
-              {t("skills.uninstall")}
-            </div>
-            <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 20, lineHeight: 1.6 }}>
-              {t("skills.confirmUninstall", {
+      <AlertDialog open={!!uninstallConfirm} onOpenChange={(open) => { if (!open) setUninstallConfirm(null); }}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("skills.uninstall")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {uninstallConfirm && t("skills.confirmUninstall", {
                 name: uninstallConfirm.name_i18n?.zh || uninstallConfirm.name_i18n?.en || uninstallConfirm.name,
               })}
-            </div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button
-                onClick={() => setUninstallConfirm(null)}
-                style={{ padding: "8px 24px", borderRadius: 8, border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                onClick={() => {
-                  const skill = uninstallConfirm;
-                  setUninstallConfirm(null);
-                  executeUninstall(skill);
-                }}
-                style={{ padding: "8px 24px", borderRadius: 8, border: "none", background: "#ef4444", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
-              >
-                {t("skills.uninstall")}
-              </button>
-            </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                const skill = uninstallConfirm!;
+                setUninstallConfirm(null);
+                executeUninstall(skill);
+              }}
+            >
+              {t("skills.uninstall")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 未保存更改提示栏 */}
+      {enabledDirty && (
+        <div className="fixed bottom-6 left-1/2 z-[9999] -translate-x-1/2">
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-5 py-3 shadow-lg"
+            style={{ width: "min(560px, 90vw)" }}
+          >
+            <span className="text-sm text-foreground/70 flex-1 min-w-0">
+              {t("skills.unsavedChanges")}
+            </span>
+            <Button variant="outline" size="sm" onClick={handleDiscard}>
+              {t("skills.discardChanges")}
+            </Button>
+            <Button size="sm" disabled={savingEnabled} onClick={handleSaveEnabledState}>
+              {savingEnabled && <Loader2 className="animate-spin mr-1" size={14} />}
+              {t("skills.saveEnabledState")}
+            </Button>
           </div>
-        </ModalOverlay>
+        </div>
       )}
     </>
   );

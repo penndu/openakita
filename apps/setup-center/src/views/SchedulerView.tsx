@@ -1,13 +1,24 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  IconRefresh, IconPlus, IconTrash, IconEdit, IconCheck, IconX,
-  IconPlay, IconClock, IconCalendar, IconSearch,
+  IconClock,
   DotGreen, DotGray, DotYellow, DotRed,
 } from "../icons";
 import { safeFetch } from "../providers";
 import { IS_WEB, onWsEvent } from "../platform";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Loader2, RefreshCw, Plus, Trash2, Pencil, Power, PowerOff, Zap, Search, CalendarX2, SearchX, Info, AlertTriangle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { toast } from "sonner";
 
 type ScheduledTask = {
   id: string;
@@ -88,6 +99,24 @@ const defaultForm: TaskForm = {
 };
 
 function pad2(n: number): string { return n.toString().padStart(2, "0"); }
+
+const CHANNEL_LABELS: Record<string, string> = {
+  telegram: "Telegram",
+  wechat: "微信",
+  discord: "Discord",
+  slack: "Slack",
+  dingtalk: "钉钉",
+  feishu: "飞书",
+  whatsapp: "WhatsApp",
+  web: "Web",
+};
+
+function formatChannelLabel(channelId: string, chatId: string): string {
+  const platform = CHANNEL_LABELS[channelId.toLowerCase()] || channelId;
+  if (!chatId) return platform;
+  const shortChat = chatId.length > 16 ? chatId.slice(0, 8) + "…" + chatId.slice(-6) : chatId;
+  return `${platform} · ${shortChat}`;
+}
 
 function safeInt(s: string, fallback: number): number {
   const v = parseInt(s, 10);
@@ -234,19 +263,13 @@ function triggerDescription(
   return triggerType;
 }
 
-const selectStyle: React.CSSProperties = {
-  appearance: "none", WebkitAppearance: "none",
-  padding: "6px 10px", borderRadius: 6,
-  border: "1px solid var(--line, #d1d5db)",
-  background: "var(--panel, #fff)",
-  color: "var(--text)",
-  fontSize: 13,
-  cursor: "pointer",
-  minWidth: 0,
-};
 
 const hourOptions = Array.from({ length: 24 }, (_, i) => i);
 const minuteOptions = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+const currentYear = new Date().getFullYear();
+const yearOptions = Array.from({ length: 6 }, (_, i) => currentYear + i);
+const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1);
+const dayOptions = Array.from({ length: 31 }, (_, i) => i + 1);
 
 type TaskTab = "active" | "completed" | "all";
 
@@ -262,7 +285,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<TaskForm>({ ...defaultForm });
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  
   const [channels, setChannels] = useState<IMChannel[]>([]);
   const [activeTab, setActiveTab] = useState<TaskTab>("active");
   const [searchQuery, setSearchQuery] = useState("");
@@ -304,8 +327,8 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   }, [fetchTasks]);
 
   const showMsg = (text: string, ok: boolean) => {
-    setMessage({ text, ok });
-    setTimeout(() => setMessage(null), 4000);
+    if (ok) toast.success(text);
+    else toast.error(text);
   };
 
   const openCreate = () => {
@@ -494,9 +517,10 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   // ── Not running ──
   if (!serviceRunning) {
     return (
-      <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
-        <IconClock size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-        <p>{t("scheduler.serviceNotRunning")}</p>
+      <div className="imViewEmpty">
+        <IconClock size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>计划任务</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }
@@ -504,23 +528,17 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   const weekdays: string[] = (t("scheduler.weekdays", { returnObjects: true }) as any) || ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
   const renderTimePicker = () => (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <label className="label" style={{ marginBottom: 0, minWidth: "fit-content" }}>{t("scheduler.timeAt")}</label>
-      <select
-        style={{ ...selectStyle, width: 72 }}
-        value={form.timeHour}
-        onChange={e => setForm(f => ({ ...f, timeHour: parseInt(e.target.value) }))}
-      >
-        {hourOptions.map(h => <option key={h} value={h}>{pad2(h)}</option>)}
-      </select>
-      <span style={{ fontWeight: 600 }}>:</span>
-      <select
-        style={{ ...selectStyle, width: 72 }}
-        value={form.timeMinute}
-        onChange={e => setForm(f => ({ ...f, timeMinute: parseInt(e.target.value) }))}
-      >
-        {minuteOptions.map(m => <option key={m} value={m}>{pad2(m)}</option>)}
-      </select>
+    <div className="flex items-center gap-2">
+      <Label className="shrink-0 mb-0">{t("scheduler.timeAt")}</Label>
+      <Select value={String(form.timeHour)} onValueChange={v => setForm(f => ({ ...f, timeHour: parseInt(v) }))}>
+        <SelectTrigger className="w-[72px]"><SelectValue /></SelectTrigger>
+        <SelectContent>{hourOptions.map(h => <SelectItem key={h} value={String(h)}>{pad2(h)}</SelectItem>)}</SelectContent>
+      </Select>
+      <span className="font-semibold">:</span>
+      <Select value={String(form.timeMinute)} onValueChange={v => setForm(f => ({ ...f, timeMinute: parseInt(v) }))}>
+        <SelectTrigger className="w-[72px]"><SelectValue /></SelectTrigger>
+        <SelectContent>{minuteOptions.map(m => <SelectItem key={m} value={String(m)}>{pad2(m)}</SelectItem>)}</SelectContent>
+      </Select>
     </div>
   );
 
@@ -529,40 +547,47 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
     switch (form.scheduleMode) {
       case "once": {
         const [datePart = "", timePart = ""] = (form.runAt || "").split("T");
+        const [yStr = "", moStr = "", dStr = ""] = datePart.split("-");
+        const curY = yStr ? parseInt(yStr) : 0;
+        const curMo = moStr ? parseInt(moStr) : 0;
+        const curD = dStr ? parseInt(dStr) : 0;
         const curH = timePart ? parseInt(timePart.split(":")[0]) || 0 : new Date().getHours();
         const curM = timePart ? parseInt(timePart.split(":")[1]) || 0 : 0;
-        const updateRunAt = (d: string, h: number, m: number) => {
-          if (!d) { setForm(f => ({ ...f, runAt: "" })); return; }
-          setForm(f => ({ ...f, runAt: `${d}T${pad2(h)}:${pad2(m)}` }));
+        const now = new Date();
+        const defY = now.getFullYear();
+        const defMo = now.getMonth() + 1;
+        const defD = now.getDate();
+        const updateRunAt = (y: number, mo: number, d: number, h: number, m: number) => {
+          setForm(f => ({ ...f, runAt: `${y}-${pad2(mo)}-${pad2(d)}T${pad2(h)}:${pad2(m)}` }));
         };
         return (
-          <div className="field">
-            <label className="label">{t("scheduler.runAt")}</label>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input
-                type="date"
-                className="input"
-                value={datePart}
-                min={new Date().toISOString().slice(0, 10)}
-                max="2099-12-31"
-                onChange={e => updateRunAt(e.target.value, curH, curM)}
-                style={{ flex: 1 }}
-              />
-              <select
-                style={{ ...selectStyle, width: 72 }}
-                value={curH}
-                onChange={e => updateRunAt(datePart || new Date().toISOString().slice(0, 10), parseInt(e.target.value), curM)}
-              >
-                {hourOptions.map(h => <option key={h} value={h}>{pad2(h)}</option>)}
-              </select>
-              <span style={{ fontWeight: 600 }}>:</span>
-              <select
-                style={{ ...selectStyle, width: 72 }}
-                value={curM}
-                onChange={e => updateRunAt(datePart || new Date().toISOString().slice(0, 10), curH, parseInt(e.target.value))}
-              >
-                {minuteOptions.map(m => <option key={m} value={m}>{pad2(m)}</option>)}
-              </select>
+          <div className="space-y-1.5 mb-3">
+            <Label>{t("scheduler.runAt")}</Label>
+            <div className="flex items-center gap-1.5">
+              <Select value={curY ? String(curY) : ""} onValueChange={v => updateRunAt(parseInt(v), curMo || defMo, curD || defD, curH, curM)}>
+                <SelectTrigger className="w-[82px]"><SelectValue placeholder="年" /></SelectTrigger>
+                <SelectContent>{yearOptions.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">年</span>
+              <Select value={curMo ? String(curMo) : ""} onValueChange={v => updateRunAt(curY || defY, parseInt(v), curD || defD, curH, curM)}>
+                <SelectTrigger className="w-[68px]"><SelectValue placeholder="月" /></SelectTrigger>
+                <SelectContent>{monthOptions.map(m => <SelectItem key={m} value={String(m)}>{pad2(m)}</SelectItem>)}</SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">月</span>
+              <Select value={curD ? String(curD) : ""} onValueChange={v => updateRunAt(curY || defY, curMo || defMo, parseInt(v), curH, curM)}>
+                <SelectTrigger className="w-[68px]"><SelectValue placeholder="日" /></SelectTrigger>
+                <SelectContent>{dayOptions.map(d => <SelectItem key={d} value={String(d)}>{pad2(d)}</SelectItem>)}</SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground mr-1">日</span>
+              <Select value={String(curH)} onValueChange={v => updateRunAt(curY || defY, curMo || defMo, curD || defD, parseInt(v), curM)}>
+                <SelectTrigger className="w-[68px]"><SelectValue /></SelectTrigger>
+                <SelectContent>{hourOptions.map(h => <SelectItem key={h} value={String(h)}>{pad2(h)}</SelectItem>)}</SelectContent>
+              </Select>
+              <span className="font-semibold">:</span>
+              <Select value={String(curM)} onValueChange={v => updateRunAt(curY || defY, curMo || defMo, curD || defD, curH, parseInt(v))}>
+                <SelectTrigger className="w-[68px]"><SelectValue /></SelectTrigger>
+                <SelectContent>{minuteOptions.map(m => <SelectItem key={m} value={String(m)}>{pad2(m)}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
           </div>
         );
@@ -570,61 +595,48 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
 
       case "interval":
         return (
-          <div className="field">
-            <label className="label">{t("scheduler.intervalValue")}</label>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
+          <div className="space-y-1.5 mb-3">
+            <Label>{t("scheduler.intervalValue")}</Label>
+            <div className="flex gap-2">
+              <Input
                 type="number"
-                className="input"
                 min={1}
                 value={form.intervalValue}
                 onChange={e => setForm(f => ({ ...f, intervalValue: Math.max(1, parseInt(e.target.value) || 1) }))}
-                style={{ flex: 1 }}
+                className="flex-1"
               />
-              <select
-                style={{ ...selectStyle, width: "auto", minWidth: 80 }}
-                value={form.intervalUnit}
-                onChange={e => setForm(f => ({ ...f, intervalUnit: e.target.value as any }))}
-              >
-                <option value="seconds">{t("scheduler.intervalSeconds")}</option>
-                <option value="minutes">{t("scheduler.intervalMinutes")}</option>
-                <option value="hours">{t("scheduler.intervalHours")}</option>
-                <option value="days">{t("scheduler.intervalDays")}</option>
-              </select>
+              <Select value={form.intervalUnit} onValueChange={v => setForm(f => ({ ...f, intervalUnit: v as any }))}>
+                <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="seconds">{t("scheduler.intervalSeconds")}</SelectItem>
+                  <SelectItem value="minutes">{t("scheduler.intervalMinutes")}</SelectItem>
+                  <SelectItem value="hours">{t("scheduler.intervalHours")}</SelectItem>
+                  <SelectItem value="days">{t("scheduler.intervalDays")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         );
 
       case "daily":
         return (
-          <div className="field">
+          <div className="space-y-1.5 mb-3">
             {renderTimePicker()}
           </div>
         );
 
       case "weekly":
         return (
-          <div className="field" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <label className="label" style={{ marginBottom: 0, minWidth: "fit-content" }}>{t("scheduler.weekday")}</label>
-              <div style={{ display: "flex", gap: 4 }}>
+          <div className="space-y-3 mb-3">
+            <div className="flex items-center gap-2">
+              <Label className="shrink-0 mb-0">{t("scheduler.weekday")}</Label>
+              <ToggleGroup type="single" value={String(form.weekday)} onValueChange={v => { if (v) setForm(f => ({ ...f, weekday: parseInt(v) })); }}>
                 {weekdays.map((wd, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, weekday: i }))}
-                    style={{
-                      padding: "4px 10px", borderRadius: 6, fontSize: 12, cursor: "pointer",
-                      border: form.weekday === i ? "1.5px solid var(--brand, #0ea5e9)" : "1px solid var(--line, #d1d5db)",
-                      background: form.weekday === i ? "var(--brand-bg, #e0f2fe)" : "var(--panel, #fff)",
-                      color: form.weekday === i ? "var(--brand, #0ea5e9)" : "var(--text)",
-                      fontWeight: form.weekday === i ? 600 : 400,
-                    }}
-                  >
+                  <ToggleGroupItem key={i} value={String(i)} className="h-7 px-2.5 text-xs">
                     {wd}
-                  </button>
+                  </ToggleGroupItem>
                 ))}
-              </div>
+              </ToggleGroup>
             </div>
             {renderTimePicker()}
           </div>
@@ -632,18 +644,17 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
 
       case "monthly":
         return (
-          <div className="field" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <label className="label" style={{ marginBottom: 0, minWidth: "fit-content" }}>{t("scheduler.dayOfMonth")}</label>
-              <select
-                style={{ ...selectStyle, width: 80 }}
-                value={form.dayOfMonth}
-                onChange={e => setForm(f => ({ ...f, dayOfMonth: parseInt(e.target.value) }))}
-              >
-                {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+          <div className="space-y-3 mb-3">
+            <div className="flex items-center gap-2">
+              <Label className="shrink-0 mb-0">{t("scheduler.dayOfMonth")}</Label>
+              <Select value={String(form.dayOfMonth)} onValueChange={v => setForm(f => ({ ...f, dayOfMonth: parseInt(v) }))}>
+                <SelectTrigger className="w-[80px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
+                    <SelectItem key={d} value={String(d)}>{d}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {renderTimePicker()}
           </div>
@@ -651,11 +662,9 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
 
       case "custom":
         return (
-          <div className="field">
-            <label className="label">{t("scheduler.cronExpression")}</label>
-            <input
-              type="text"
-              className="input"
+          <div className="space-y-1.5 mb-3">
+            <Label>{t("scheduler.cronExpression")}</Label>
+            <Input
               placeholder="0 9 * * *"
               value={form.cronExpr}
               onChange={e => setForm(f => ({ ...f, cronExpr: e.target.value }))}
@@ -669,99 +678,72 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
     }
   };
 
-  const tabStyle = (tab: TaskTab): React.CSSProperties => ({
-    padding: "6px 16px",
-    fontSize: 13,
-    fontWeight: activeTab === tab ? 600 : 400,
-    color: activeTab === tab ? "var(--brand, #0ea5e9)" : "var(--muted, #6b7280)",
-    background: "none",
-    border: "none",
-    borderBottom: `2px solid ${activeTab === tab ? "var(--brand, #0ea5e9)" : "transparent"}`,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-    transition: "color 0.15s, border-color 0.15s",
-  });
+  
 
-  const countBadge = (count: number) => (
-    <span style={{
-      display: "inline-block", minWidth: 18, height: 18, lineHeight: "18px",
-      borderRadius: 9, fontSize: 11, textAlign: "center",
-      background: "var(--bg-elevated, rgba(0,0,0,0.06))", marginLeft: 4,
-    }}>
+  const countBadge = (count: number, tab: TaskTab) => (
+    <Badge
+      variant="secondary"
+      className={cn(
+        "ml-1.5 px-1.5 py-0 text-[11px] min-w-[1.25rem] justify-center rounded-full",
+        activeTab === tab
+          ? "bg-white/25 text-primary-foreground"
+          : "bg-foreground/10 text-foreground/60",
+      )}
+    >
       {count}
-    </span>
+    </Badge>
   );
 
   return (
     <div>
-      {/* Header */}
+      {/* Header: Tabs + Search + Actions */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-          <IconCalendar size={20} style={{ verticalAlign: -3, marginRight: 6 }} />
-          {t("scheduler.title")}
-        </h2>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btnSmall" onClick={() => fetchTasks()} disabled={loading}>
-            <IconRefresh size={14} /> {t("scheduler.refresh")}
-          </button>
-          <button className="btnSmall btnSmallPrimary" onClick={openCreate}>
-            <IconPlus size={14} /> {t("scheduler.addTask")}
-          </button>
-        </div>
-      </div>
-
-      {/* Tabs + Search */}
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 0", borderBottom: "1px solid var(--line, #e5e7eb)", marginBottom: 12 }}>
-        <div style={{ display: "flex", gap: 0, flex: "1 1 auto", minWidth: 0 }}>
-          <button style={tabStyle("active")} onClick={() => setActiveTab("active")}>
-            {t("scheduler.tabActive")}{countBadge(tabCounts.active)}
-          </button>
-          <button style={tabStyle("completed")} onClick={() => setActiveTab("completed")}>
-            {t("scheduler.tabCompleted")}{countBadge(tabCounts.completed)}
-          </button>
-          <button style={tabStyle("all")} onClick={() => setActiveTab("all")}>
-            {t("scheduler.tabAll")}{countBadge(tabCounts.all)}
-          </button>
-        </div>
-        <div style={{ position: "relative", marginBottom: -1, flexShrink: 0 }}>
-          <IconSearch size={14} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }} />
-          <input
-            type="text"
-            className="input"
-            placeholder={t("scheduler.searchPlaceholder")}
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            style={{ paddingLeft: 28, fontSize: 12, height: 30, width: 140, maxWidth: "40vw", borderRadius: 6 }}
-          />
-        </div>
-      </div>
-
-      {/* Message toast */}
-      {message && (
-        <div
-          style={{
-            padding: "8px 16px", borderRadius: 8, marginBottom: 12, fontSize: 13,
-            background: message.ok ? "var(--ok-bg, #dcfce7)" : "var(--err-bg, #fee2e2)",
-            color: message.ok ? "var(--ok-text, #166534)" : "var(--err-text, #991b1b)",
-          }}
+        <ToggleGroup
+          type="single"
+          value={activeTab}
+          onValueChange={(v) => { if (v) setActiveTab(v as TaskTab); }}
+          variant="outline"
         >
-          {message.ok ? <IconCheck size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> : <IconX size={14} style={{ verticalAlign: -2, marginRight: 4 }} />}
-          {message.text}
+          <ToggleGroupItem value="active" className="text-sm data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary">
+            {t("scheduler.tabActive")} {countBadge(tabCounts.active, "active")}
+          </ToggleGroupItem>
+          <ToggleGroupItem value="completed" className="text-sm data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary">
+            {t("scheduler.tabCompleted")} {countBadge(tabCounts.completed, "completed")}
+          </ToggleGroupItem>
+          <ToggleGroupItem value="all" className="text-sm data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary">
+            {t("scheduler.tabAll")} {countBadge(tabCounts.all, "all")}
+          </ToggleGroupItem>
+        </ToggleGroup>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder={t("scheduler.searchPlaceholder")}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="pl-8 h-8 w-44 text-xs"
+            />
+          </div>
+          <Button variant="outline" size="sm" onClick={() => fetchTasks()} disabled={loading}>
+            {loading ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
+            {t("scheduler.refresh")}
+          </Button>
+          <Button size="sm" onClick={openCreate}>
+            <Plus size={14} /> {t("scheduler.addTask")}
+          </Button>
         </div>
-      )}
+      </div>
 
       {/* Form dialog */}
       {showForm && (
-        <div className="card" style={{ marginBottom: 16, border: "1px solid var(--brand, #0ea5e9)", position: "relative" }}>
+        <div className="card" style={{ marginBottom: 16, border: "1px solid var(--brand, #2563eb)", position: "relative" }}>
           <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 600 }}>
             {editingId ? t("scheduler.editTask") : t("scheduler.addTask")}
           </h3>
 
-          <div className="field">
-            <label className="label">{t("scheduler.name")}</label>
-            <input
-              type="text"
-              className="input"
+          <div className="space-y-1.5 mb-3">
+            <Label>{t("scheduler.name")}</Label>
+            <Input
               placeholder={t("scheduler.namePlaceholder")}
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
@@ -769,130 +751,158 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t("scheduler.taskType")}</label>
-              <select
-                className="input"
-                value={form.task_type}
-                onChange={e => setForm(f => ({ ...f, task_type: e.target.value }))}
-              >
-                <option value="reminder">{t("scheduler.typeReminder")}</option>
-                <option value="task">{t("scheduler.typeTask")}</option>
-              </select>
+            <div className="space-y-1.5">
+              <Label>{t("scheduler.taskType")}</Label>
+              <Select value={form.task_type} onValueChange={v => setForm(f => ({ ...f, task_type: v }))}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="reminder">{t("scheduler.typeReminder")}</SelectItem>
+                  <SelectItem value="task">{t("scheduler.typeTask")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t("scheduler.triggerType")}</label>
-              <select
-                className="input"
-                value={form.scheduleMode}
-                onChange={e => setForm(f => ({ ...f, scheduleMode: e.target.value as ScheduleMode }))}
-              >
-                <option value="once">{t("scheduler.triggerOnce")}</option>
-                <option value="daily">{t("scheduler.triggerDaily")}</option>
-                <option value="weekly">{t("scheduler.triggerWeekly")}</option>
-                <option value="monthly">{t("scheduler.triggerMonthly")}</option>
-                <option value="interval">{t("scheduler.triggerInterval")}</option>
-                <option value="custom">{t("scheduler.triggerCron")}</option>
-              </select>
+            <div className="space-y-1.5">
+              <Label>{t("scheduler.triggerType")}</Label>
+              <Select value={form.scheduleMode} onValueChange={v => setForm(f => ({ ...f, scheduleMode: v as ScheduleMode }))}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="once">{t("scheduler.triggerOnce")}</SelectItem>
+                  <SelectItem value="daily">{t("scheduler.triggerDaily")}</SelectItem>
+                  <SelectItem value="weekly">{t("scheduler.triggerWeekly")}</SelectItem>
+                  <SelectItem value="monthly">{t("scheduler.triggerMonthly")}</SelectItem>
+                  <SelectItem value="interval">{t("scheduler.triggerInterval")}</SelectItem>
+                  <SelectItem value="custom">{t("scheduler.triggerCron")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           {renderTriggerFields()}
 
           {form.task_type === "reminder" ? (
-            <div className="field">
-              <label className="label">{t("scheduler.reminderMessage")}</label>
-              <textarea
-                className="input"
+            <div className="space-y-1.5 mb-3">
+              <Label>{t("scheduler.reminderMessage")}</Label>
+              <Textarea
                 rows={3}
                 placeholder={t("scheduler.reminderPlaceholder")}
                 value={form.reminder_message}
                 onChange={e => setForm(f => ({ ...f, reminder_message: e.target.value }))}
-                style={{ resize: "vertical", fontFamily: "inherit" }}
+                className="resize-y"
               />
             </div>
           ) : (
-            <div className="field">
-              <label className="label">{t("scheduler.prompt")}</label>
-              <textarea
-                className="input"
+            <div className="space-y-1.5 mb-3">
+              <Label>{t("scheduler.prompt")}</Label>
+              <Textarea
                 rows={3}
                 placeholder={t("scheduler.promptPlaceholder")}
                 value={form.prompt}
                 onChange={e => setForm(f => ({ ...f, prompt: e.target.value }))}
-                style={{ resize: "vertical", fontFamily: "inherit" }}
+                className="resize-y"
               />
             </div>
           )}
 
-          <div className="field">
-            <label className="label">{t("scheduler.channel")}</label>
-            {channels.length > 0 ? (
-              <select
-                className="input"
-                value={form.channel_id && form.chat_id ? `${form.channel_id}|${form.chat_id}` : ""}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (!v) {
-                    setForm(f => ({ ...f, channel_id: "", chat_id: "" }));
-                  } else {
-                    const [ch, ...rest] = v.split("|");
-                    setForm(f => ({ ...f, channel_id: ch, chat_id: rest.join("|") }));
-                  }
-                }}
-              >
-                <option value="">{t("scheduler.channelNone")}</option>
-                {channels.map(ch => (
-                  <option key={`${ch.channel_id}|${ch.chat_id}`} value={`${ch.channel_id}|${ch.chat_id}`}>
-                    {ch.channel_id} / {ch.chat_id}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type="text"
-                className="input"
-                placeholder={t("scheduler.channelPlaceholder")}
-                value={form.channel_id}
-                onChange={e => setForm(f => ({ ...f, channel_id: e.target.value }))}
-              />
-            )}
+          <div className="space-y-1.5 mb-3">
+            <div className="flex items-center gap-1.5">
+              <Label className="mb-0">{t("scheduler.channel")}</Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info size={14} className="text-muted-foreground cursor-help shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[260px]">
+                    {t("scheduler.channelTooltip", "选择一个已连接的 IM 通道，任务执行结果将自动推送到该通道")}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            {(() => {
+              const currentKey = form.channel_id && form.chat_id ? `${form.channel_id}|${form.chat_id}` : "";
+              const knownKeys = new Set(channels.map(ch => `${ch.channel_id}|${ch.chat_id}`));
+              const isStale = !!currentKey && !knownKeys.has(currentKey);
+
+              return (
+                <>
+                  <Select
+                    value={currentKey || "__none__"}
+                    onValueChange={v => {
+                      if (v === "__none__") {
+                        setForm(f => ({ ...f, channel_id: "", chat_id: "" }));
+                      } else {
+                        const [ch, ...rest] = v.split("|");
+                        setForm(f => ({ ...f, channel_id: ch, chat_id: rest.join("|") }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger className={cn("w-full", isStale && "border-amber-400 dark:border-amber-600")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">
+                        {t("scheduler.channelNone", "不推送通知")}
+                      </SelectItem>
+                      {channels.map(ch => (
+                        <SelectItem key={`${ch.channel_id}|${ch.chat_id}`} value={`${ch.channel_id}|${ch.chat_id}`}>
+                          {formatChannelLabel(ch.channel_id, ch.chat_id)}
+                        </SelectItem>
+                      ))}
+                      {isStale && (
+                        <SelectItem value={currentKey}>
+                          ⚠ {formatChannelLabel(form.channel_id, form.chat_id)}
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {isStale && (
+                    <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 mt-1">
+                      <AlertTriangle size={12} className="shrink-0" />
+                      {t("scheduler.channelStale", "该通道当前不在线或已被移除，任务执行时将无法推送通知")}
+                    </p>
+                  )}
+                  {channels.length === 0 && !currentKey && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t("scheduler.channelEmpty", "暂无可用通道，请先在「IM 通道」中连接至少一个消息平台")}
+                    </p>
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, marginBottom: 8 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
-              <input
-                type="checkbox"
-                checked={form.enabled}
-                onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))}
-                style={{ width: 16, height: 16, flexShrink: 0 }}
-              />
+            <Label className="flex items-center gap-2 cursor-pointer text-sm font-normal">
+              <Checkbox checked={form.enabled} onCheckedChange={(v) => setForm(f => ({ ...f, enabled: !!v }))} />
               {t("scheduler.enabled")}
-            </label>
+            </Label>
           </div>
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button className="btnSmall" onClick={closeForm}>{t("scheduler.cancel")}</button>
-            <button className="btnSmall btnSmallPrimary" onClick={saveTask} disabled={busy}>
-              {busy ? "..." : (editingId ? t("scheduler.save") : t("scheduler.addTask"))}
-            </button>
+            <Button variant="outline" size="sm" onClick={closeForm}>{t("scheduler.cancel")}</Button>
+            <Button size="sm" onClick={saveTask} disabled={busy}>
+              {busy && <Loader2 className="animate-spin" size={14} />}
+              {editingId ? t("scheduler.save") : t("scheduler.addTask")}
+            </Button>
           </div>
         </div>
       )}
 
       {/* Task list */}
       {loading && tasks.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>{t("scheduler.loading")}</div>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-muted-foreground">
+          <Loader2 className="animate-spin mb-3" size={28} />
+          <p className="text-sm">{t("scheduler.loading")}</p>
+        </div>
       ) : tasks.length === 0 ? (
-        <div className="card" style={{ textAlign: "center", padding: 40 }}>
-          <IconCalendar size={40} style={{ opacity: 0.2, marginBottom: 8 }} />
-          <p style={{ color: "var(--muted)", margin: "8px 0 4px" }}>{t("scheduler.noTasks")}</p>
-          <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>{t("scheduler.noTasksHint")}</p>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16">
+          <CalendarX2 size={40} className="text-muted-foreground/30 mb-3" />
+          <p className="text-sm text-muted-foreground">{t("scheduler.noTasks")}</p>
+          <p className="text-xs text-muted-foreground/60 mt-1">{t("scheduler.noTasksHint")}</p>
         </div>
       ) : filteredTasks.length === 0 ? (
-        <div className="card" style={{ textAlign: "center", padding: 32 }}>
-          <IconSearch size={32} style={{ opacity: 0.2, marginBottom: 8 }} />
-          <p style={{ color: "var(--muted)", margin: "8px 0 0", fontSize: 13 }}>{t("scheduler.noMatchingTasks")}</p>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-14">
+          <SearchX size={32} className="text-muted-foreground/30 mb-3" />
+          <p className="text-sm text-muted-foreground">{t("scheduler.noMatchingTasks")}</p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -905,50 +915,60 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
                     {task.name}
                   </span>
                   {!task.deletable && (
-                    <span className="pill" style={{ fontSize: 10, padding: "1px 6px", opacity: 0.7 }}>{t("scheduler.system")}</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{t("scheduler.system")}</Badge>
                   )}
-                  <span className="pill" style={{ fontSize: 10, padding: "1px 6px" }}>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                     {task.task_type === "reminder" ? t("scheduler.typeReminder") : t("scheduler.typeTask")}
-                  </span>
-                  <span className="pill" style={{ fontSize: 10, padding: "1px 6px" }}>
+                  </Badge>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                     {triggerBadgeLabel(task.trigger_type, task.trigger_config)}
-                  </span>
+                  </Badge>
                 </div>
                 <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                  <button
-                    className="btnSmall"
-                    style={{ padding: "2px 8px", fontSize: 12 }}
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => toggleTask(task)}
                     title={task.enabled ? t("scheduler.disable") : t("scheduler.enable")}
+                    className={cn(
+                      "h-7 text-xs px-2.5",
+                      task.enabled
+                        ? "bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 hover:text-amber-700 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800 dark:hover:bg-amber-900"
+                        : "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-900",
+                    )}
                   >
+                    {task.enabled ? <PowerOff size={12} /> : <Power size={12} />}
                     {task.enabled ? t("scheduler.disable") : t("scheduler.enable")}
-                  </button>
-                  <button
-                    className="btnSmall"
-                    style={{ padding: "2px 8px", fontSize: 12 }}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => triggerTask(task)}
                     title={t("scheduler.trigger")}
+                    className="text-muted-foreground hover:text-primary"
                   >
-                    <IconPlay size={11} />
-                  </button>
+                    <Zap size={13} />
+                  </Button>
                   {task.deletable && (
                     <>
-                      <button
-                        className="btnSmall"
-                        style={{ padding: "2px 8px", fontSize: 12 }}
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => openEdit(task)}
                         title={t("scheduler.editTask")}
+                        className="text-muted-foreground hover:text-foreground"
                       >
-                        <IconEdit size={11} />
-                      </button>
-                      <button
-                        className="btnSmall btnDanger"
-                        style={{ padding: "2px 8px", fontSize: 12 }}
+                        <Pencil size={13} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => deleteTask(task)}
                         title={t("scheduler.delete")}
+                        className="text-muted-foreground hover:text-destructive"
                       >
-                        <IconTrash size={11} />
-                      </button>
+                        <Trash2 size={13} />
+                      </Button>
                     </>
                   )}
                 </div>
@@ -975,7 +995,9 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
                 <div>
                   <span style={{ opacity: 0.7 }}>{t("scheduler.channel")}:</span>{" "}
                   <span style={{ color: "var(--text)" }}>
-                    {task.channel_id ? (task.chat_id ? `${task.channel_id}/${task.chat_id}` : task.channel_id) : "-"}
+                    {task.channel_id
+                      ? formatChannelLabel(task.channel_id, task.chat_id || "")
+                      : t("scheduler.channelNone", "不推送通知")}
                   </span>
                 </div>
                 <div>

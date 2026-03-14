@@ -27,6 +27,7 @@ export function ProviderSearchSelect({
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const allOptions = useMemo(() => {
     return extraOptions ? [...extraOptions, ...options] : options.slice();
@@ -48,6 +49,20 @@ export function ProviderSearchSelect({
   }, [allOptions, search]);
 
   const showDrop = open && !disabled;
+
+  const closeMenu = useCallback(() => {
+    setOpen(false);
+    setSearch("");
+    setIsFocused(false);
+  }, []);
+
+  // Close when window loses focus (e.g. click outside Tauri window)
+  useEffect(() => {
+    if (!showDrop) return;
+    const onBlur = () => closeMenu();
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, [showDrop, closeMenu]);
 
   useEffect(() => {
     if (hoverIdx >= filtered.length) setHoverIdx(0);
@@ -90,19 +105,18 @@ export function ProviderSearchSelect({
     return () => el.removeEventListener("wheel", onWheel);
   }, [showDrop, filtered]);
 
+  // Close on click outside
   useEffect(() => {
     if (!showDrop) return;
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
       if (rootRef.current?.contains(t)) return;
       if (dropRef.current?.parentElement?.contains(t)) return;
-      setOpen(false);
-      setSearch("");
-      setIsFocused(false);
+      closeMenu();
     };
     document.addEventListener("mousedown", handler, true);
     return () => document.removeEventListener("mousedown", handler, true);
-  }, [showDrop]);
+  }, [showDrop, closeMenu]);
 
   const selectItem = (opt: { value: string; label: string }) => {
     onChange(opt.value);
@@ -123,12 +137,12 @@ export function ProviderSearchSelect({
           }}
           placeholder={placeholder || "搜索服务商..."}
           onClick={() => {
-            if (!open) { setIsFocused(true); setSearch(""); setOpen(true); }
+            if (!open) { clearTimeout(blurTimerRef.current); setIsFocused(true); setSearch(""); setOpen(true); }
           }}
-          onFocus={() => { setIsFocused(true); setSearch(""); setOpen(true); }}
+          onFocus={() => { setIsFocused(true); setSearch(""); }}
           onBlur={() => {
             setIsFocused(false);
-            setTimeout(() => { setOpen(false); setSearch(""); }, 150);
+            blurTimerRef.current = setTimeout(() => { setOpen(false); setSearch(""); }, 150);
           }}
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") {
@@ -140,7 +154,7 @@ export function ProviderSearchSelect({
             } else if (e.key === "Enter") {
               if (open && filtered[hoverIdx]) { e.preventDefault(); selectItem(filtered[hoverIdx]); }
             } else if (e.key === "Escape") {
-              setSearch(""); setOpen(false); setIsFocused(false);
+              closeMenu();
             }
           }}
           disabled={disabled}
@@ -155,8 +169,7 @@ export function ProviderSearchSelect({
           )}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
-            if (!open) { setIsFocused(true); setSearch(""); }
-            setOpen((v) => !v);
+            if (!open) { clearTimeout(blurTimerRef.current); setIsFocused(true); setSearch(""); setOpen(true); } else { setOpen(false); }
             inputRef.current?.focus();
           }}
           disabled={disabled}

@@ -29,6 +29,11 @@ export function SearchSelect({
 
   const displayValue = hasOptions ? (search || value) : value;
 
+  const closeMenu = useCallback(() => {
+    setOpen(false);
+    setSearch("");
+  }, []);
+
   const filtered = useMemo(() => {
     if (!hasOptions) return [];
     const q = search.trim().toLowerCase();
@@ -78,6 +83,14 @@ export function SearchSelect({
     return () => el.removeEventListener("wheel", onWheel);
   }, [showDrop, filtered]);
 
+  // Close when window loses focus (e.g. click outside Tauri window)
+  useEffect(() => {
+    if (!showDrop) return;
+    const onBlur = () => closeMenu();
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, [showDrop, closeMenu]);
+
   // Close on click outside
   useEffect(() => {
     if (!showDrop) return;
@@ -85,12 +98,11 @@ export function SearchSelect({
       const t = e.target as Node;
       if (rootRef.current?.contains(t)) return;
       if (dropRef.current?.parentElement?.contains(t)) return;
-      setOpen(false);
-      setSearch("");
+      closeMenu();
     };
     document.addEventListener("mousedown", handler, true);
     return () => document.removeEventListener("mousedown", handler, true);
-  }, [showDrop]);
+  }, [showDrop, closeMenu]);
 
   const selectItem = (v: string) => {
     onChange(v);
@@ -111,7 +123,7 @@ export function SearchSelect({
             onChange(v);
           }}
           placeholder={placeholder}
-          onFocus={() => { if (hasOptions) setOpen(true); }}
+          onClick={() => { if (hasOptions && !open) setOpen(true); }}
           onKeyDown={(e) => {
             if (!hasOptions) return;
             if (e.key === "ArrowDown") {
@@ -123,7 +135,7 @@ export function SearchSelect({
             } else if (e.key === "Enter") {
               if (open && filtered[hoverIdx]) { e.preventDefault(); selectItem(filtered[hoverIdx]); }
               else if (hasOptions && search.trim()) { e.preventDefault(); selectItem(search.trim()); }
-            } else if (e.key === "Escape") { setSearch(""); setOpen(false); }
+            } else if (e.key === "Escape") { closeMenu(); }
           }}
           disabled={disabled}
           className={cn(hasOptions && "pr-16")}
@@ -141,7 +153,7 @@ export function SearchSelect({
             <button type="button" data-slot="search-select-btn"
               className={cn("inline-flex items-center justify-center size-6 rounded-sm text-muted-foreground/50 transition-colors cursor-pointer", !disabled && "hover:text-muted-foreground")}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { if (!open) setSearch(""); setOpen((v) => !v); inputRef.current?.focus(); }}
+              onClick={() => { if (!open) { setSearch(""); setOpen(true); } else { setOpen(false); } inputRef.current?.focus(); }}
               disabled={disabled}
             ><ChevronDownIcon className={cn("size-4 transition-transform", open && "rotate-180")} /></button>
           )}

@@ -1,12 +1,20 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  IconRefresh, IconLink, IconPlus, IconTrash, IconCheck, IconX,
+  IconLink,
   IconChevronDown, IconChevronRight, IconInfo,
   DotGreen, DotGray, DotYellow,
 } from "../icons";
 import { safeFetch } from "../providers";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, RefreshCw, Plus, Trash2, Plug, Unplug } from "lucide-react";
+import { toast } from "sonner";
 
 type MCPTool = {
   name: string;
@@ -87,13 +95,13 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
   const { t } = useTranslation();
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState(true);
+
   const [loading, setLoading] = useState(false);
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [instructions, setInstructions] = useState<Record<string, string>>({});
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState<AddServerForm>({ ...emptyForm });
   const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
 
   const fetchServers = useCallback(async () => {
@@ -103,7 +111,7 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
       const res = await safeFetch(`${apiBaseUrl}/api/mcp/servers`);
       const data = await res.json();
       setServers(data.servers || []);
-      setMcpEnabled(data.mcp_enabled !== false);
+      if (typeof data.mcp_enabled === "boolean") setMcpEnabled(data.mcp_enabled);
     } catch { /* ignore */ }
     setLoading(false);
   }, [serviceRunning, apiBaseUrl]);
@@ -111,8 +119,8 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
   useEffect(() => { fetchServers(); }, [fetchServers]);
 
   const showMsg = (text: string, ok: boolean) => {
-    setMessage({ text, ok });
-    setTimeout(() => setMessage(null), ok ? 4000 : 8000);
+    if (ok) toast.success(text);
+    else toast.error(text);
   };
 
   const connectServer = async (name: string) => {
@@ -250,9 +258,10 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
 
   if (!serviceRunning) {
     return (
-      <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>
-        <IconLink size={32} style={{ marginBottom: 12, opacity: 0.5 }} />
-        <p style={{ fontSize: 15 }}>{t("mcp.serviceNotRunning")}</p>
+      <div className="imViewEmpty">
+        <IconLink size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>MCP</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }
@@ -266,115 +275,98 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
           <span style={{ fontSize: 16, fontWeight: 600 }}>{t("mcp.title")}</span>
           {!mcpEnabled && (
             <span style={{
-              background: "var(--warn-bg, #fef3c7)", color: "var(--warn, #d97706)",
-              fontSize: 12, padding: "2px 8px", borderRadius: 4,
+              fontSize: 11, fontWeight: 500, color: "#b45309",
+              background: "#fef3c7", padding: "2px 8px", borderRadius: 4,
             }}>
-              {t("mcp.disabled")}
+              {t("mcp.disabled") || "MCP 已禁用"}
             </span>
           )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btnSecondary"
-            onClick={() => setShowAdd(!showAdd)}
-            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, padding: "4px 12px" }}
-          >
-            <IconPlus size={14} /> {t("mcp.addServer")}
-          </button>
-          <button
-            className="btnSecondary"
-            onClick={fetchServers}
-            disabled={loading}
-            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, padding: "4px 12px" }}
-          >
-            <IconRefresh size={14} /> {t("topbar.refresh")}
-          </button>
+          <Button variant="outline" size="sm" onClick={() => setShowAdd(!showAdd)}>
+            <Plus size={14} /> {t("mcp.addServer")}
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchServers} disabled={loading}>
+            {loading ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
+            {t("topbar.refresh")}
+          </Button>
         </div>
       </div>
-
-      {/* Message bar */}
-      {message && (
-        <div style={{
-          padding: "8px 14px", borderRadius: 6, marginBottom: 12, fontSize: 13,
-          background: message.ok ? "var(--ok-bg, #dcfce7)" : "var(--err-bg, #fee2e2)",
-          color: message.ok ? "var(--ok, #16a34a)" : "var(--err, #dc2626)",
-          display: "flex", alignItems: "flex-start", gap: 6, whiteSpace: "pre-line",
-        }}>
-          <span style={{ marginTop: 1, flexShrink: 0 }}>{message.ok ? <IconCheck size={14} /> : <IconX size={14} />}</span>
-          <span>{message.text}</span>
-        </div>
-      )}
 
       {/* Add server form */}
       {showAdd && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{t("mcp.addServerTitle")}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
-            <div>
-              <label className="label">{t("mcp.serverName")} *</label>
-              <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={t("mcp.serverNamePlaceholder")} />
+            <div className="space-y-1.5">
+              <Label>{t("mcp.serverName")} *</Label>
+              <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={t("mcp.serverNamePlaceholder")} />
             </div>
-            <div>
-              <label className="label">{t("mcp.description")}</label>
-              <input className="input" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder={t("mcp.descriptionPlaceholder")} />
+            <div className="space-y-1.5">
+              <Label>{t("mcp.description")}</Label>
+              <Input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder={t("mcp.descriptionPlaceholder")} />
             </div>
-            <div>
-              <label className="label">{t("mcp.transport")}</label>
-              <select className="input" value={form.transport} onChange={e => setForm({ ...form, transport: e.target.value as "stdio" | "streamable_http" | "sse" })}>
-                <option value="stdio">stdio ({t("mcp.stdioDesc")})</option>
-                <option value="streamable_http">Streamable HTTP</option>
-                <option value="sse">SSE (Server-Sent Events)</option>
-              </select>
+            <div className="space-y-1.5">
+              <Label>{t("mcp.transport")}</Label>
+              <Select value={form.transport} onValueChange={v => setForm({ ...form, transport: v as "stdio" | "streamable_http" | "sse" })}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="stdio">stdio ({t("mcp.stdioDesc")})</SelectItem>
+                  <SelectItem value="streamable_http">Streamable HTTP</SelectItem>
+                  <SelectItem value="sse">SSE (Server-Sent Events)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             {form.transport === "stdio" ? (
               <>
-                <div>
-                  <label className="label">{t("mcp.command")} *</label>
-                  <input className="input" value={form.command} onChange={e => setForm({ ...form, command: e.target.value })} placeholder={t("mcp.commandPlaceholder")} />
+                <div className="space-y-1.5">
+                  <Label>{t("mcp.command")} *</Label>
+                  <Input value={form.command} onChange={e => setForm({ ...form, command: e.target.value })} placeholder={t("mcp.commandPlaceholder")} />
                 </div>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <label className="label">{t("mcp.argsLabel")}</label>
-                  <textarea
-                    className="input"
+                <div className="space-y-1.5" style={{ gridColumn: "1 / -1" }}>
+                  <Label>{t("mcp.argsLabel")}</Label>
+                  <Textarea
                     value={form.args}
                     onChange={e => setForm({ ...form, args: e.target.value })}
                     placeholder={'如: -m openakita.mcp_servers.web_search\n或每行一个参数:\n-y\n@anthropic/mcp-server-filesystem\n"C:\\My Path\\dir"'}
                     rows={2}
-                    style={{ resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+                    className="resize-y font-mono text-xs"
                   />
                 </div>
               </>
             ) : (
-              <div>
-                <label className="label">URL *</label>
-                <input className="input" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })}
+              <div className="space-y-1.5">
+                <Label>URL *</Label>
+                <Input value={form.url} onChange={e => setForm({ ...form, url: e.target.value })}
                   placeholder={form.transport === "sse" ? "如: http://127.0.0.1:8080/sse" : "如: http://127.0.0.1:12306/mcp"} />
               </div>
             )}
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label className="label">{t("mcp.envLabel")}</label>
-              <textarea
-                className="input"
+            <div className="space-y-1.5" style={{ gridColumn: "1 / -1" }}>
+              <Label>{t("mcp.envLabel")}</Label>
+              <Textarea
                 value={form.env}
                 onChange={e => setForm({ ...form, env: e.target.value })}
                 placeholder={"API_KEY=sk-xxx\nMY_VAR=hello"}
                 rows={3}
-                style={{ resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+                className="resize-y font-mono text-xs"
               />
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "space-between", alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)", cursor: "pointer" }}>
-              <input type="checkbox" checked={form.auto_connect} onChange={e => setForm({ ...form, auto_connect: e.target.checked })} style={{ width: 16, height: 16, flexShrink: 0 }} />
+            <Label className="flex items-center gap-2 cursor-pointer text-sm font-normal text-muted-foreground">
+              <Checkbox checked={form.auto_connect} onCheckedChange={(v) => setForm({ ...form, auto_connect: !!v })} />
               {t("mcp.autoConnect")}
-            </label>
+            </Label>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btnSecondary" onClick={() => { setShowAdd(false); setForm({ ...emptyForm }); }} style={{ fontSize: 13, padding: "6px 16px" }}>
+              <Button variant="outline" size="sm" onClick={() => { setShowAdd(false); setForm({ ...emptyForm }); }}>
                 {t("common.cancel")}
-              </button>
-              <button className="btnPrimary" onClick={addServer} disabled={busy === "add"} style={{ fontSize: 13, padding: "6px 16px" }}>
-                {busy === "add" ? t("mcp.adding") : t("mcp.add")}
-              </button>
+              </Button>
+              <Button size="sm" onClick={addServer} disabled={busy === "add"}>
+                {busy === "add" && <Loader2 className="animate-spin" size={14} />}
+                {t("mcp.add")}
+              </Button>
             </div>
           </div>
         </div>
@@ -396,23 +388,19 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
             <div key={s.name} className="card" style={{ padding: 0 }}>
               {/* Server header */}
               <div
-                style={{ padding: "10px 14px", cursor: "pointer" }}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "12px 16px", cursor: "pointer",
+                }}
                 onClick={() => toggleExpand(s.name)}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   {expandedServer === s.name ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                   {s.connected ? <DotGreen /> : <DotGray />}
                   <span style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</span>
-                  <span style={{ fontSize: 11, color: "var(--muted)", background: "var(--bg-subtle, #f1f5f9)", padding: "1px 6px", borderRadius: 3 }}>
+                  <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--bg-subtle, #f1f5f9)", padding: "1px 6px", borderRadius: 3 }}>
                     {s.transport === "streamable_http" ? "HTTP" : s.transport === "sse" ? "SSE" : "stdio"}
                   </span>
-                </div>
-                {s.description && (
-                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6, marginLeft: 22 }}>
-                    {s.description}
-                  </div>
-                )}
-                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginLeft: 22 }} onClick={e => e.stopPropagation()}>
                   <span style={{
                     fontSize: 11, padding: "1px 6px", borderRadius: 3,
                     background: s.source === "workspace" ? "var(--ok-bg, #dcfce7)" : "var(--bg-subtle, #f1f5f9)",
@@ -420,39 +408,46 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
                   }}>
                     {s.source === "workspace" ? t("mcp.sourceWorkspace") : t("mcp.sourceBuiltin")}
                   </span>
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {s.description && (
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>— {s.description}</span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={e => e.stopPropagation()}>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
                     {s.connected ? t("mcp.toolCount", { count: s.tool_count }) : t("mcp.toolCountCatalog", { count: s.catalog_tool_count })}
                   </span>
-                  <div style={{ flex: 1 }} />
                   {s.connected ? (
-                    <button
-                      className="btnSecondary"
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => disconnectServer(s.name)}
                       disabled={busy === s.name}
-                      style={{ fontSize: 11, padding: "2px 8px", color: "var(--warn, #d97706)" }}
+                      className="text-amber-600 border-amber-300 hover:bg-amber-50 hover:text-amber-700 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950"
                     >
+                      {busy === s.name ? <Loader2 className="animate-spin" size={14} /> : <Unplug size={14} />}
                       {t("mcp.disconnect")}
-                    </button>
+                    </Button>
                   ) : (
-                    <button
-                      className="btnPrimary"
+                    <Button
+                      size="sm"
                       onClick={() => connectServer(s.name)}
                       disabled={busy === s.name}
-                      style={{ fontSize: 11, padding: "2px 8px" }}
                     >
-                      {busy === s.name ? t("mcp.connecting") : t("mcp.connect")}
-                    </button>
+                      {busy === s.name ? <Loader2 className="animate-spin" size={14} /> : <Plug size={14} />}
+                      {t("mcp.connect")}
+                    </Button>
                   )}
                   {s.removable && (
-                    <button
-                      className="btnSecondary"
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
                       onClick={() => removeServer(s.name)}
                       disabled={busy === s.name}
-                      style={{ fontSize: 11, padding: "2px 6px", color: "var(--err, #dc2626)" }}
                       title={t("mcp.deleteServer")}
+                      className="text-muted-foreground hover:text-destructive"
                     >
-                      <IconTrash size={13} />
-                    </button>
+                      <Trash2 size={14} />
+                    </Button>
                   )}
                 </div>
               </div>
@@ -502,8 +497,10 @@ export function MCPView({ serviceRunning, apiBaseUrl = "http://127.0.0.1:18900" 
                   {s.has_instructions && instructions[s.name] && (
                     <details style={{ marginTop: 12 }}>
                       <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--primary, #3b82f6)" }}>
-                        <IconInfo size={13} style={{ verticalAlign: "middle", marginRight: 4 }} />
-                        {t("mcp.instructions")}
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <IconInfo size={13} />
+                          {t("mcp.instructions")}
+                        </span>
                       </summary>
                       <pre style={{
                         marginTop: 8, padding: 12, background: "var(--bg-subtle, #f8fafc)",

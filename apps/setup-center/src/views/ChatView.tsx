@@ -377,7 +377,7 @@ function ToolCallDetail({ tc }: { tc: ChatToolCall }) {
     <div style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
       <div
         onClick={() => setOpen((v) => !v)}
-        style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "rgba(14,165,233,0.03)", userSelect: "none" }}
+        style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "rgba(37,99,235,0.03)", userSelect: "none" }}
       >
         <span style={{ color: statusColor, fontWeight: 800, display: "inline-flex", alignItems: "center" }}>{statusIcon}</span>
         <span style={{ fontWeight: 600, fontSize: 12 }}>{tc.tool}</span>
@@ -428,7 +428,7 @@ function ToolCallsGroup({ toolCalls }: { toolCalls: ChatToolCall[] }) {
     <div style={{ margin: "6px 0", border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
       <div
         onClick={() => setExpanded((v) => !v)}
-        style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(14,165,233,0.04)", userSelect: "none" }}
+        style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(37,99,235,0.04)", userSelect: "none" }}
       >
         <span style={{ color: summaryColor, fontWeight: 800, display: "inline-flex", alignItems: "center" }}>{summaryIcon}</span>
         <span style={{ fontWeight: 700, fontSize: 13 }}>
@@ -944,7 +944,7 @@ function AskUserBlock({ ask, onAnswer }: { ask: ChatAskUser; onAnswer: (answer: 
   if (ask.answered) {
     const displayAnswer = formatAskUserAnswer(ask.answer || "", ask);
     return (
-      <div style={{ margin: "8px 0", padding: "10px 14px", borderRadius: 10, background: "rgba(14,165,233,0.06)", border: "1px solid rgba(14,165,233,0.15)" }}>
+      <div style={{ margin: "8px 0", padding: "10px 14px", borderRadius: 10, background: "rgba(37,99,235,0.06)", border: "1px solid rgba(37,99,235,0.15)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{ask.question}</div>
         <div style={{ fontSize: 13, opacity: 0.7 }}>{t("chat.answered")}{displayAnswer}</div>
       </div>
@@ -1091,7 +1091,7 @@ function SlashCommandPanel({
             display: "flex",
             alignItems: "center",
             gap: 10,
-            background: idx === selectedIdx ? "rgba(14,165,233,0.14)" : "transparent",
+            background: idx === selectedIdx ? "rgba(37,99,235,0.14)" : "transparent",
             borderTop: idx === 0 ? "none" : "1px solid rgba(17,24,39,0.1)",
           }}
         >
@@ -1322,7 +1322,7 @@ const MessageBubble = memo(function MessageBubble({
                         }
                       })();
                     }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(14,165,233,0.08)"; }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(37,99,235,0.08)"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--panel)"; }}
                   >
                     <FileIcon size={28} />
@@ -1555,7 +1555,7 @@ const FlatMessageItem = memo(function FlatMessageItem({
                           }
                         })();
                       }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(14,165,233,0.08)"; }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(37,99,235,0.08)"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--panel)"; }}
                     >
                       <FileIcon size={28} />
@@ -4127,12 +4127,10 @@ export function ChatView({
   // ── 未启动服务提示 ──
   if (!serviceRunning) {
     return (
-      <div className="card" style={{ textAlign: "center", padding: "60px 40px" }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}><IconMessageCircle size={48} /></div>
-        <div className="cardTitle">{t("chat.title")}</div>
-        <div className="cardHint" style={{ marginTop: 8, marginBottom: 20 }}>
-          {t("chat.serviceHint")}
-        </div>
+      <div className="imViewEmpty">
+        <IconMessageCircle size={48} />
+        <div style={{ marginTop: 12, fontWeight: 600 }}>{t("chat.title")}</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }
@@ -4263,7 +4261,7 @@ export function ChatView({
                   color: item.danger ? "#ef4444" : "inherit",
                   transition: "background 0.1s",
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = item.danger ? "rgba(239,68,68,0.08)" : "rgba(14,165,233,0.08)"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = item.danger ? "rgba(239,68,68,0.08)" : "rgba(37,99,235,0.08)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               >
                 <span style={{ opacity: 0.6, display: "flex" }}>{item.icon}</span>
@@ -4364,7 +4362,7 @@ export function ChatView({
           <button
             onClick={() => setSidebarOpen((v) => !v)}
             className="chatTopBarBtn"
-            style={{ background: sidebarOpen ? "rgba(14,165,233,0.08)" : "transparent" }}
+            style={{ background: sidebarOpen ? "rgba(37,99,235,0.08)" : "transparent" }}
             title={t("chat.toggleHistory") || "会话列表"}
           >
             <IconMenu size={16} />
@@ -4881,7 +4879,7 @@ export function ChatView({
                   try { localStorage.setItem("openakita_convSidebarPinned", String(next)); } catch {}
                 }}
                 title={sidebarPinned ? (t("chat.unpinSidebar") || "取消固定") : (t("chat.pinSidebar") || "固定会话列表")}
-                style={{ color: sidebarPinned ? "var(--brand, #0ea5e9)" : "var(--muted2, #999)" }}
+                style={{ color: sidebarPinned ? "var(--brand, #2563eb)" : "var(--muted2, #999)" }}
               >
                 <IconPin size={14} />
               </button>

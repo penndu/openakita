@@ -249,7 +249,7 @@ export function IMView({
       <div className="imViewEmpty">
         <IconIM size={48} />
         <div style={{ marginTop: 12, fontWeight: 600 }}>{t("im.channels")}</div>
-        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>{t("topbar.stopped")}</div>
+        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }

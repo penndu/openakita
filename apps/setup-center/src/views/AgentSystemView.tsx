@@ -8,11 +8,11 @@ import { envGet, envSet } from "../utils";
 type AgentSystemViewProps = {
   envDraft: EnvMap;
   setEnvDraft: (updater: (prev: EnvMap) => EnvMap) => void;
-  busy: string | null;
+  busy?: string | null;
 };
 
 export function AgentSystemView(props: AgentSystemViewProps) {
-  const { envDraft, setEnvDraft, busy } = props;
+  const { envDraft, setEnvDraft, busy = null } = props;
   const { t } = useTranslation();
 
   const _envBase = { envDraft, onEnvChange: setEnvDraft, busy };
@@ -69,9 +69,8 @@ export function AgentSystemView(props: AgentSystemViewProps) {
             <Input
               className="mt-2 max-w-[300px]"
               placeholder={t("config.agentCustomId")}
-              value={envGet(envDraft, "PERSONA_CUSTOM_ID", "")}
+              value={envGet(envDraft, "PERSONA_NAME", "custom")}
               onChange={(e) => {
-                setEnvDraft((m) => envSet(m, "PERSONA_CUSTOM_ID", e.target.value));
                 setEnvDraft((m) => envSet(m, "PERSONA_NAME", e.target.value || "custom"));
               }}
             />
@@ -89,9 +88,7 @@ export function AgentSystemView(props: AgentSystemViewProps) {
             { value: "never", label: "never (从不思考)" },
           ] })}
         </div>
-        <div style={{ marginTop: 8 }}>
-          {FB({ k: "AUTO_CONFIRM", label: t("config.agentAutoConfirm"), help: t("config.agentAutoConfirmHelp") })}
-        </div>
+        
 
         <div className="divider" />
 
@@ -123,9 +120,7 @@ export function AgentSystemView(props: AgentSystemViewProps) {
         {/* Scheduler */}
         <div className="label">{t("config.agentScheduler")}</div>
         <div className="grid3" style={{ marginTop: 4 }}>
-          {FB({ k: "SCHEDULER_ENABLED", label: t("config.agentSchedulerEnable"), help: t("config.agentSchedulerEnableHelp"), defaultValue: true })}
           {FT({ k: "SCHEDULER_TIMEZONE", label: t("config.agentTimezone"), placeholder: "Asia/Shanghai" })}
-          {FT({ k: "SCHEDULER_MAX_CONCURRENT", label: t("config.agentMaxConcurrent"), placeholder: "5", help: t("config.agentMaxConcurrentHelp") })}
         </div>
 
         <div className="divider" />
@@ -153,24 +148,6 @@ export function AgentSystemView(props: AgentSystemViewProps) {
             <div className="grid2">
               {FB({ k: "LOG_TO_CONSOLE", label: t("config.agentLogConsole") })}
               {FB({ k: "LOG_TO_FILE", label: t("config.agentLogFile") })}
-            </div>
-
-            <div className="divider" />
-            <div className="label" style={{ fontSize: 13, opacity: 0.7 }}>{t("config.agentMemorySection")}</div>
-            <div className="grid3">
-              {FT({ k: "EMBEDDING_MODEL", label: t("config.agentEmbedModel"), placeholder: "shibing624/text2vec-base-chinese" })}
-              {FT({ k: "EMBEDDING_DEVICE", label: t("config.agentEmbedDevice"), placeholder: "cpu" })}
-              {FS({ k: "MODEL_DOWNLOAD_SOURCE", label: t("config.agentDownloadSource"), options: [
-                { value: "auto", label: "Auto (自动选择)" },
-                { value: "hf-mirror", label: "hf-mirror (国内镜像)" },
-                { value: "modelscope", label: "ModelScope (魔搭)" },
-                { value: "huggingface", label: "HuggingFace (官方)" },
-              ] })}
-            </div>
-            <div className="grid3">
-              {FT({ k: "MEMORY_HISTORY_DAYS", label: t("config.agentMemDays"), placeholder: "30" })}
-              {FT({ k: "MEMORY_MAX_HISTORY_FILES", label: t("config.agentMemFiles"), placeholder: "1000" })}
-              {FT({ k: "MEMORY_MAX_HISTORY_SIZE_MB", label: t("config.agentMemSize"), placeholder: "500" })}
             </div>
 
             <div className="divider" />

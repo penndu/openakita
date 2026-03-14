@@ -35,7 +35,6 @@ class Settings(BaseSettings):
     # Agent 配置
     agent_name: str = Field(default="OpenAkita", description="Agent 名称")
     max_iterations: int = Field(default=300, description="Ralph 循环最大迭代次数")
-    auto_confirm: bool = Field(default=False, description="是否自动确认危险操作")
 
     # 自检配置
     selfcheck_autofix: bool = Field(
@@ -243,9 +242,7 @@ class Settings(BaseSettings):
     )
 
     # === 调度器配置 ===
-    scheduler_enabled: bool = Field(default=True, description="是否启用定时任务调度器")
     scheduler_timezone: str = Field(default="Asia/Shanghai", description="调度器时区")
-    scheduler_max_concurrent: int = Field(default=5, description="最大并发任务数")
     scheduler_task_timeout: int = Field(
         default=600, description="定时任务执行超时时间（秒），默认 600 秒（10分钟）"
     )

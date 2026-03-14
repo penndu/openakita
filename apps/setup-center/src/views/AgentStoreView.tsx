@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { safeFetch } from "../providers";
 
 interface Agent {
@@ -36,7 +37,6 @@ export function AgentStoreView({ apiBaseUrl, visible }: AgentStoreViewProps) {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [installingSet, setInstallingSet] = useState<Set<string>>(new Set());
-  const [notice, setNotice] = useState("");
   const [confirmAgent, setConfirmAgent] = useState<Agent | null>(null);
 
   const fetchAgents = useCallback(async () => {
@@ -68,18 +68,16 @@ export function AgentStoreView({ apiBaseUrl, visible }: AgentStoreViewProps) {
     try {
       const resp = await safeFetch(`${apiBaseUrl}/api/hub/agents/${agent.id}/install`, { method: "POST" });
       const data = await resp.json();
-      setNotice(t("agentStore.installSuccess", { name: data.profile?.name || agent.name }));
+      toast.success(t("agentStore.installSuccess", { name: data.profile?.name || agent.name }));
       safeFetch(`${apiBaseUrl}/api/skills/reload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
     } catch (e: any) {
-      setNotice(t("agentStore.installFail", { msg: e.message }));
+      toast.error(t("agentStore.installFail", { msg: e.message }));
     } finally {
       setInstallingSet(prev => { const next = new Set(prev); next.delete(key); return next; });
     }
   };
 
   if (!visible) return null;
-
-  const isSuccess = !notice.includes("❌") && !notice.toLowerCase().includes("fail");
 
   return (
     <div>
@@ -117,17 +115,6 @@ export function AgentStoreView({ apiBaseUrl, visible }: AgentStoreViewProps) {
             {loading ? t("agentStore.searching") : t("common.search")}
           </button>
         </div>
-
-        {notice && (
-          <div style={{
-            padding: "8px 12px", marginTop: 10, borderRadius: 6,
-            background: isSuccess ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)",
-            color: isSuccess ? "var(--success, #16a34a)" : "var(--error, #dc2626)",
-            fontSize: 13,
-          }}>
-            {notice}
-          </div>
-        )}
       </div>
 
       {error && (

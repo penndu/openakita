@@ -1,25 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { safeFetch } from "../providers";
 import { copyToClipboard } from "../utils/clipboard";
 
-export function WebPasswordManager({
-  apiBase,
-  busy,
-  setBusy,
-  setNotice,
-  setError,
-}: {
-  apiBase: string;
-  busy: string | null;
-  setBusy: (v: string | null) => void;
-  setNotice: (v: string | null) => void;
-  setError: (v: string | null) => void;
-}) {
+export function WebPasswordManager({ apiBase }: { apiBase: string }) {
   const { t } = useTranslation();
   const [hint, setHint] = useState<string | null>(null);
   const [newPw, setNewPw] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
 
   const loadHint = useCallback(async () => {
     try {
@@ -34,20 +24,22 @@ export function WebPasswordManager({
   useEffect(() => { loadHint(); }, [loadHint]);
 
   const doChangePassword = async (password: string) => {
-    setBusy(t("common.loading"));
+    const loadingId = toast.loading(t("common.loading"));
+    setIsBusy(true);
     try {
       await safeFetch(`${apiBase}/api/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ new_password: password }),
       });
-      setNotice(t("adv.webPasswordChanged"));
+      toast.success(t("adv.webPasswordChanged"));
       setNewPw("");
       await loadHint();
     } catch (e) {
-      setError(String(e));
+      toast.error(String(e));
     } finally {
-      setBusy(null);
+      toast.dismiss(loadingId);
+      setIsBusy(false);
     }
   };
 
@@ -60,13 +52,13 @@ export function WebPasswordManager({
     await doChangePassword(pw);
     setGeneratedPw(pw);
     await copyToClipboard(pw);
-    setNotice(t("adv.webPasswordReset", { password: pw }));
+    toast.success(t("adv.webPasswordReset", { password: pw }));
   };
 
   const copyGenerated = async () => {
     if (!generatedPw) return;
     const ok = await copyToClipboard(generatedPw);
-    if (ok) setNotice(t("adv.webPasswordCopied", { defaultValue: "密码已复制到剪贴板" }));
+    if (ok) toast.success(t("adv.webPasswordCopied", { defaultValue: "密码已复制到剪贴板" }));
   };
 
   return (
@@ -100,11 +92,11 @@ export function WebPasswordManager({
         <button
           className="btnSmall btnSmallPrimary"
           onClick={() => { if (newPw.trim()) doChangePassword(newPw.trim()); }}
-          disabled={!newPw.trim() || !!busy}
+          disabled={!newPw.trim() || isBusy}
         >
           {t("adv.webPasswordSet")}
         </button>
-        <button className="btnSmall" onClick={doRandomize} disabled={!!busy}>
+        <button className="btnSmall" onClick={doRandomize} disabled={isBusy}>
           {t("adv.webPasswordRandomize")}
         </button>
       </div>

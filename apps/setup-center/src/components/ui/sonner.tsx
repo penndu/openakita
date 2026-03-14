@@ -1,5 +1,4 @@
-"use client"
-
+import { createPortal } from "react-dom"
 import {
   CircleCheckIcon,
   InfoIcon,
@@ -7,15 +6,19 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from "lucide-react"
-import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
-const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+function useDocTheme() {
+  const attr = document.documentElement.getAttribute("data-theme")
+  return (attr === "dark" ? "dark" : "light") as ToasterProps["theme"]
+}
 
-  return (
+const Toaster = ({ ...props }: ToasterProps) => {
+  const theme = useDocTheme()
+
+  const toaster = (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={theme}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
@@ -30,11 +33,14 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          zIndex: 99999,
         } as React.CSSProperties
       }
       {...props}
     />
   )
+
+  return createPortal(toaster, document.body)
 }
 
 export { Toaster }

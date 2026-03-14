@@ -3,7 +3,18 @@ import { useTranslation } from "react-i18next";
 import { downloadFile, showInFolder } from "../platform";
 import { IconX, IconInfo } from "../icons";
 import { safeFetch } from "../providers";
-import { ModalOverlay } from "../components/ModalOverlay";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "../components/ui/dialog";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
+import { Label } from "../components/ui/label";
+import { Checkbox } from "../components/ui/checkbox";
 
 type FeedbackMode = "bug" | "feature";
 
@@ -30,27 +41,22 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
 
   const [mode, setMode] = useState<FeedbackMode>(initialMode);
 
-  // Shared fields
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
 
-  // Bug report fields
   const [steps, setSteps] = useState("");
   const [uploadLogs, setUploadLogs] = useState(true);
   const [uploadDebug, setUploadDebug] = useState(true);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [sysInfoExpanded, setSysInfoExpanded] = useState(false);
 
-  // Feature request fields
   const [contactEmail, setContactEmail] = useState("");
   const [contactWechat, setContactWechat] = useState("");
 
-  // CAPTCHA config fetched from backend (no hardcoded keys in source)
   const [captchaCfg, setCaptchaCfg] = useState<{ scene_id: string; prefix: string } | null>(null);
 
-  // State
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<{ ok: boolean; msg: string; downloadUrl?: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -60,7 +66,6 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
   const handleSubmitRef = useRef<() => void>(() => {});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset mode when re-opened
   useEffect(() => {
     if (open) {
       setMode(initialMode);
@@ -69,7 +74,6 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
     }
   }, [open, initialMode]);
 
-  // Fetch system info + CAPTCHA config on open
   useEffect(() => {
     if (!open) return;
     safeFetch(`${apiBase}/api/system-info`, { signal: AbortSignal.timeout(5000) })
@@ -87,7 +91,6 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
       .catch(() => {});
   }, [open, apiBase]);
 
-  // Load Alibaba Cloud CAPTCHA 2.0 once config is available
   useEffect(() => {
     if (!open || !captchaCfg) return;
     let destroyed = false;
@@ -140,7 +143,6 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
     };
   }, [open, captchaCfg]);
 
-  // ─── Image handling ───
   const addImages = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files).filter(
       (f) => f.type.startsWith("image/") && f.size < 10 * 1024 * 1024,
@@ -165,12 +167,8 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
     if (e.dataTransfer.files.length) addImages(e.dataTransfer.files);
   }, [addImages]);
 
-  // ─── Submit ───
   const handleSubmit = useCallback(async () => {
     if (!title.trim() || !description.trim()) return;
-
-    // When CAPTCHA is configured, the first click is intercepted by the SDK.
-    // handleSubmit is called again from onBizResultCallback after verification.
     if (captchaCfg && !captchaTokenRef.current) return;
 
     setSubmitting(true);
@@ -233,165 +231,115 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
     }
   }, [captchaCfg, mode, title, description, steps, uploadLogs, uploadDebug, contactEmail, contactWechat, imageFiles, apiBase, t]);
 
-  // Keep ref in sync so the CAPTCHA callback always calls the latest version
   handleSubmitRef.current = handleSubmit;
 
   const handleClose = useCallback(() => { setSubmitResult(null); onClose(); }, [onClose]);
 
-  if (!open) return null;
-
   const isBug = mode === "bug";
 
   return (
-    <ModalOverlay onClose={handleClose}>
-      <div
-        className="modalContent"
-        style={{ width: 560, maxHeight: "85vh" }}
-      >
-        {/* Header */}
-        <div className="dialogHeader">
-          <div className="cardTitle" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {isBug ? t("bugReport.title") : t("featureRequest.title")}
-            <span style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-              padding: "1px 6px", borderRadius: 4,
-              background: "linear-gradient(135deg, #f59e0b, #f97316)",
-              color: "#fff", lineHeight: "16px", textTransform: "uppercase",
-            }}>
-              Beta
-            </span>
-          </div>
-          <button className="dialogCloseBtn" onClick={handleClose}>
-            <IconX size={14} />
-          </button>
-        </div>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
+      <DialogContent className="sm:max-w-[520px] p-0 gap-0 overflow-hidden" showCloseButton={true}>
+        <DialogHeader className="sr-only">
+          <DialogTitle>{isBug ? t("bugReport.title") : t("featureRequest.title")}</DialogTitle>
+          <DialogDescription>{isBug ? t("bugReport.title") : t("featureRequest.title")}</DialogDescription>
+        </DialogHeader>
 
-        {/* Tab switcher */}
-        <div style={{
-          display: "flex",
-          gap: 0,
-          padding: "0 24px",
-          borderBottom: "1px solid var(--line)",
-          flexShrink: 0,
-        }}>
+        {/* Tab navigation as header */}
+        <div className="flex items-end gap-0 border-b border-border px-5 pt-4 shrink-0">
           {(["bug", "feature"] as FeedbackMode[]).map((m) => (
-            <button
+            <span
               key={m}
               onClick={() => { setMode(m); setSubmitResult(null); }}
-              style={{
-                flex: 1,
-                padding: "10px 0",
-                fontSize: 13,
-                fontWeight: mode === m ? 600 : 400,
-                color: mode === m ? "var(--brand)" : "var(--text-dim)",
-                background: "transparent",
-                border: "none",
-                borderBottom: mode === m ? "2px solid var(--brand)" : "2px solid transparent",
-                cursor: "pointer",
-                transition: "all 0.15s",
-              }}
+              className={`relative mr-6 pb-2.5 text-[15px] cursor-pointer transition-colors select-none ${
+                mode === m
+                  ? "font-semibold text-primary"
+                  : "font-normal text-muted-foreground hover:text-foreground"
+              }`}
             >
               {m === "bug" ? t("bugReport.tabBug") : t("featureRequest.tabFeature")}
-            </button>
+              {mode === m && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-full" />
+              )}
+            </span>
           ))}
         </div>
 
-        {/* Body */}
-        <div className="dialogBody" style={{ padding: "16px 24px", overflowY: "auto", overflowX: "hidden" }}>
+        {/* Scrollable body */}
+        <div className="overflow-y-auto overflow-x-hidden px-5 py-4 space-y-3.5" style={{ maxHeight: "calc(85vh - 180px)" }}>
           {/* Title */}
-          <label className="dialogLabel" style={{ display: "block", marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, marginBottom: 4, display: "block" }}>
-              {isBug ? t("bugReport.titleLabel") : t("featureRequest.nameLabel")} <span style={{ color: "#ef4444" }}>*</span>
-            </span>
-            <input
-              className="dialogInput"
+          <div className="space-y-1">
+            <Label className="text-[13px]">
+              {isBug ? t("bugReport.titleLabel") : t("featureRequest.nameLabel")} <span className="text-destructive">*</span>
+            </Label>
+            <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder={isBug ? t("bugReport.titlePlaceholder") : t("featureRequest.namePlaceholder")}
               maxLength={200}
-              style={{ width: "100%" }}
             />
-          </label>
+          </div>
 
           {/* Description */}
-          <label className="dialogLabel" style={{ display: "block", marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, marginBottom: 4, display: "block" }}>
-              {isBug ? t("bugReport.descLabel") : t("featureRequest.descLabel")} <span style={{ color: "#ef4444" }}>*</span>
-            </span>
-            <textarea
-              className="dialogInput"
+          <div className="space-y-1">
+            <Label className="text-[13px]">
+              {isBug ? t("bugReport.descLabel") : t("featureRequest.descLabel")} <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={isBug ? t("bugReport.descPlaceholder") : t("featureRequest.descPlaceholder")}
-              rows={4}
-              style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+              rows={3}
+              className="resize-y"
             />
-          </label>
+          </div>
 
           {/* Bug: Repro steps */}
           {isBug && (
-            <label className="dialogLabel" style={{ display: "block", marginBottom: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, marginBottom: 4, display: "block" }}>
-                {t("bugReport.stepsLabel")}
-              </span>
-              <textarea
-                className="dialogInput"
+            <div className="space-y-1">
+              <Label className="text-[13px]">{t("bugReport.stepsLabel")}</Label>
+              <Textarea
                 value={steps}
                 onChange={(e) => setSteps(e.target.value)}
                 placeholder={t("bugReport.stepsPlaceholder")}
-                rows={3}
-                style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                rows={2}
+                className="resize-y"
               />
-            </label>
+            </div>
           )}
 
           {/* Feature: Contact info */}
           {!isBug && (
-            <div style={{ marginBottom: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, marginBottom: 6, display: "block" }}>
-                {t("featureRequest.contactLabel")}
-              </span>
-              <div style={{ display: "flex", gap: 10 }}>
-                <input
-                  className="dialogInput"
+            <div className="space-y-1">
+              <Label className="text-[13px]">{t("featureRequest.contactLabel")}</Label>
+              <div className="flex gap-2">
+                <Input
                   value={contactEmail}
                   onChange={(e) => setContactEmail(e.target.value)}
                   placeholder={t("featureRequest.emailPlaceholder")}
                   type="email"
-                  style={{ flex: 1 }}
+                  className="flex-1"
                 />
-                <input
-                  className="dialogInput"
+                <Input
                   value={contactWechat}
                   onChange={(e) => setContactWechat(e.target.value)}
                   placeholder={t("featureRequest.wechatPlaceholder")}
-                  style={{ flex: 1 }}
+                  className="flex-1"
                 />
               </div>
             </div>
           )}
 
-          {/* Image upload (shared) */}
-          <div style={{ marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, marginBottom: 6, display: "block" }}>
-              {isBug ? t("bugReport.images") : t("featureRequest.attachments")}
-            </span>
+          {/* Image upload */}
+          <div className="space-y-1">
+            <Label className="text-[13px]">{isBug ? t("bugReport.images") : t("featureRequest.attachments")}</Label>
             <div
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
               onClick={() => fileInputRef.current?.click()}
-              style={{
-                border: "2px dashed var(--line)",
-                borderRadius: 10,
-                padding: "14px 16px",
-                textAlign: "center",
-                cursor: "pointer",
-                fontSize: 13,
-                color: "var(--text-dim)",
-                transition: "border-color 0.15s",
-              }}
-              onDragEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--brand)"; }}
-              onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--line)"; }}
+              className="border-2 border-dashed border-border rounded-md py-3 text-center cursor-pointer text-[13px] text-muted-foreground transition-colors hover:border-primary/40"
+              onDragEnter={(e) => { e.currentTarget.classList.add("border-primary"); }}
+              onDragLeave={(e) => { e.currentTarget.classList.remove("border-primary"); }}
             >
               {t("bugReport.imageDropHint")}
             </div>
@@ -400,24 +348,19 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
               type="file"
               accept="image/*"
               multiple
-              style={{ display: "none" }}
+              className="hidden"
               onChange={(e) => { if (e.target.files) addImages(e.target.files); e.target.value = ""; }}
             />
             {imagePreviews.length > 0 && (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              <div className="flex gap-1.5 flex-wrap mt-1.5">
                 {imagePreviews.map((src, i) => (
-                  <div key={i} style={{ position: "relative", width: 64, height: 64, borderRadius: 8, overflow: "hidden", border: "1px solid var(--line)" }}>
-                    <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <div key={i} className="relative w-14 h-14 rounded-md overflow-hidden border border-border">
+                    <img src={src} alt="" className="w-full h-full object-cover" />
                     <button
                       onClick={(e) => { e.stopPropagation(); removeImage(i); }}
-                      style={{
-                        position: "absolute", top: 2, right: 2, width: 18, height: 18,
-                        borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)",
-                        color: "#fff", fontSize: 10, display: "flex", alignItems: "center",
-                        justifyContent: "center", cursor: "pointer", padding: 0,
-                      }}
+                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full border-0 bg-black/60 text-white text-[9px] flex items-center justify-center cursor-pointer p-0"
                     >
-                      <IconX size={10} />
+                      <IconX size={8} />
                     </button>
                   </div>
                 ))}
@@ -427,70 +370,63 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
 
           {/* Bug: Checkboxes */}
           {isBug && (
-            <div className="feedbackOptions">
-              <label className="feedbackOptionRow">
-                <span className="feedbackOptionText">{t("bugReport.uploadLogs")}</span>
-                <input
-                  className="feedbackOptionCheckbox"
-                  type="checkbox"
+            <div className="space-y-2 pt-0.5">
+              <label className="flex items-center gap-2 cursor-pointer" htmlFor="upload-logs">
+                <Checkbox
+                  id="upload-logs"
                   checked={uploadLogs}
-                  onChange={(e) => setUploadLogs(e.target.checked)}
-                  style={{ width: 16, height: 16 }}
+                  onCheckedChange={(v) => setUploadLogs(v === true)}
                 />
+                <span className="text-[13px]">{t("bugReport.uploadLogs")}</span>
               </label>
-              <label className="feedbackOptionRow">
-                <span className="feedbackOptionText">{t("bugReport.uploadDebug")}</span>
-                <input
-                  className="feedbackOptionCheckbox"
-                  type="checkbox"
+              <label className="flex items-center gap-2 cursor-pointer" htmlFor="upload-debug">
+                <Checkbox
+                  id="upload-debug"
                   checked={uploadDebug}
-                  onChange={(e) => setUploadDebug(e.target.checked)}
-                  style={{ width: 16, height: 16 }}
+                  onCheckedChange={(v) => setUploadDebug(v === true)}
                 />
+                <span className="text-[13px]">{t("bugReport.uploadDebug")}</span>
               </label>
-              <div className="feedbackOptionHint">
-                <IconInfo size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />
+              <p className="text-[11px] text-muted-foreground/70 leading-relaxed pl-6">
+                <IconInfo size={10} className="inline align-[-1px] mr-0.5" />
                 {t("bugReport.debugWarning")}
-              </div>
+              </p>
             </div>
           )}
 
           {/* Bug: System info */}
           {isBug && systemInfo && (
-            <div style={{ marginBottom: 8 }}>
-              <div
+            <div>
+              <button
+                type="button"
                 onClick={() => setSysInfoExpanded(!sysInfoExpanded)}
-                style={{ fontSize: 13, fontWeight: 500, cursor: "pointer", color: "var(--text-dim)", userSelect: "none" }}
+                className="text-[12px] cursor-pointer text-muted-foreground bg-transparent border-0 p-0 select-none hover:text-foreground transition-colors"
               >
                 {sysInfoExpanded ? "▾" : "▸"} {t("bugReport.systemInfo")}
-              </div>
+              </button>
               {sysInfoExpanded && (
-                <pre style={{
-                  fontSize: 11, background: "var(--bg1)", borderRadius: 8,
-                  padding: "10px 12px", marginTop: 6, overflowX: "auto",
-                  maxHeight: 160, whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: 1.5,
-                }}>
+                <pre className="text-[11px] bg-muted rounded-md p-2 mt-1 overflow-x-auto max-h-32 whitespace-pre-wrap break-all leading-relaxed">
                   {JSON.stringify(systemInfo, null, 2)}
                 </pre>
               )}
             </div>
           )}
 
-          {/* Alibaba Cloud CAPTCHA 2.0 */}
-          <div ref={captchaContainerRef} id="aliyun-captcha-element" style={{ marginBottom: 4 }} />
+          <div ref={captchaContainerRef} id="aliyun-captcha-element" />
 
           {/* Result */}
           {submitResult && (
-            <div style={{
-              padding: "10px 14px", borderRadius: 8, fontSize: 13, marginTop: 4,
-              background: submitResult.ok ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
-              color: submitResult.ok ? "#16a34a" : "#dc2626", lineHeight: 1.5,
-            }}>
-              <div style={{ whiteSpace: "pre-wrap" }}>{submitResult.msg}</div>
+            <div className={`rounded-md p-2.5 text-[13px] leading-relaxed ${
+              submitResult.ok
+                ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                : "bg-destructive/10 text-destructive"
+            }`}>
+              <div className="whitespace-pre-wrap">{submitResult.msg}</div>
               {submitResult.downloadUrl && (
-                <button
-                  type="button"
+                <Button
+                  size="sm"
                   disabled={downloading}
+                  className="mt-1.5 h-7 text-xs"
                   onClick={async () => {
                     if (!submitResult.downloadUrl) return;
                     setDownloading(true);
@@ -509,44 +445,32 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
                       setDownloading(false);
                     }
                   }}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 4,
-                    marginTop: 8, padding: "6px 14px", borderRadius: 6,
-                    background: downloading ? "var(--muted, #9ca3af)" : "var(--brand, #0ea5e9)",
-                    color: "#fff", border: "none", cursor: downloading ? "wait" : "pointer",
-                    fontSize: 13, fontWeight: 500,
-                  }}
                 >
                   {downloading ? t("feedback.downloading") : t("feedback.saveLocal")}
-                </button>
+                </Button>
               )}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="dialogFooter">
-          <button className="btnSmall" onClick={handleClose}>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
+          <Button variant="outline" size="sm" onClick={handleClose}>
             {t("common.cancel")}
-          </button>
-          <button
+          </Button>
+          <Button
             id="feedback-submit-btn"
-            className="btnSmall"
+            size="sm"
             disabled={submitting || !title.trim() || !description.trim()}
             onClick={handleSubmit}
-            style={{
-              background: submitting ? undefined : "var(--brand)",
-              color: submitting ? undefined : "#fff",
-              opacity: submitting || !title.trim() || !description.trim() ? 0.5 : 1,
-              minWidth: 120,
-            }}
+            className="min-w-[100px]"
           >
             {submitting
               ? t("bugReport.submitting")
               : isBug ? t("bugReport.submit") : t("featureRequest.submit")}
-          </button>
+          </Button>
         </div>
-      </div>
-    </ModalOverlay>
+      </DialogContent>
+    </Dialog>
   );
 }

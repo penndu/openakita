@@ -62,7 +62,7 @@ _SENSITIVE_PATTERN = re.compile(r"(api_key|secret|token|password)", re.IGNORECAS
 _CATEGORY_RULES: list[tuple[tuple[str, ...], str]] = [
     (("anthropic_", "default_model", "max_tokens"), "LLM"),
     (("kimi_", "dashscope_", "minimax_", "openrouter_"), "LLM/备用端点"),
-    (("agent_name", "max_iterations", "auto_confirm", "force_tool_call",
+    (("agent_name", "max_iterations", "force_tool_call",
       "tool_max_parallel", "allow_parallel", "selfcheck_"), "Agent"),
     (("thinking_",), "Agent/思考模式"),
     (("im_chain_push",), "IM/思维链推送"),

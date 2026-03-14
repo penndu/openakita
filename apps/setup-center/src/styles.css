@@ -11,23 +11,23 @@
   --muted2: rgba(17, 24, 39, 0.40);
   --danger: #ef4444;
   --ok: #10b981;
-  --brand: #0ea5e9;
-  --brand2: #0284c7;
+  --brand: #2563eb;
+  --brand2: #1d4ed8;
   --shadow: 0 8px 32px rgba(17, 24, 39, 0.08);
-  --glow-shadow: 0 4px 24px rgba(14, 165, 233, 0.15);
+  --glow-shadow: 0 4px 24px rgba(37, 99, 235, 0.15);
   --glass-blur: blur(16px);
   --radius: 12px;
   --radius-sm: 8px;
   --fg: var(--text);
   --matrix-dot: rgba(17, 24, 39, 0.06);
   --matrix-bg: var(--bg-app);
-  --nav-hover: rgba(14, 165, 233, 0.06);
-  --nav-active: rgba(14, 165, 233, 0.1);
-  --nav-active-border: rgba(14, 165, 233, 0.18);
+  --nav-hover: rgba(37, 99, 235, 0.06);
+  --nav-active: rgba(37, 99, 235, 0.1);
+  --nav-active-border: rgba(37, 99, 235, 0.18);
   --bg: #f4f5f7;
   --border: rgba(17, 24, 39, 0.12);
   --warning: #f59e0b;
-  --primary: #0ea5e9;
+  --primary: #2563eb;
   --success: #10b981;
   --error: #ef4444;
   --text-secondary: rgba(17, 24, 39, 0.55);
@@ -55,23 +55,23 @@
   --muted2: rgba(255, 255, 255, 0.35);
   --danger: #ef4444;
   --ok: #10b981;
-  --brand: #38bdf8;
-  --brand2: #7dd3fc;
+  --brand: #60a5fa;
+  --brand2: #93c5fd;
   --shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --glow-shadow: 0 4px 24px rgba(56, 189, 248, 0.2);
+  --glow-shadow: 0 4px 24px rgba(96, 165, 250, 0.2);
   --glass-blur: blur(16px);
   --radius: 12px;
   --radius-sm: 8px;
   --fg: var(--text);
   --matrix-dot: rgba(255, 255, 255, 0.06);
   --matrix-bg: var(--bg-app);
-  --nav-hover: rgba(56, 189, 248, 0.1);
-  --nav-active: rgba(56, 189, 248, 0.15);
-  --nav-active-border: rgba(56, 189, 248, 0.3);
+  --nav-hover: rgba(96, 165, 250, 0.1);
+  --nav-active: rgba(96, 165, 250, 0.15);
+  --nav-active-border: rgba(96, 165, 250, 0.3);
   --bg: #09090b;
   --border: rgba(255, 255, 255, 0.14);
   --warning: #fbbf24;
-  --primary: #38bdf8;
+  --primary: #60a5fa;
   --success: #34d399;
   --error: #f87171;
   --card-bg: #27272a;
@@ -231,7 +231,8 @@ a:hover {
   color: var(--text);
 }
 
-.navItemActive {
+.navItemActive,
+.navItemActive:hover {
   background: var(--nav-active);
   color: var(--brand);
   border-color: var(--nav-active-border);
@@ -258,13 +259,13 @@ a:hover {
 }
 
 .configHeader:hover {
-  background: rgba(14, 165, 233, 0.04);
+  background: rgba(37, 99, 235, 0.04);
 }
 
 .configProgress {
   font-size: 11px;
   color: var(--muted2);
-  background: rgba(14, 165, 233, 0.08);
+  background: rgba(37, 99, 235, 0.08);
   padding: 1px 6px;
   border-radius: 8px;
 }
@@ -319,13 +320,13 @@ a:hover {
   place-items: center;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.96);
-  background: linear-gradient(135deg, rgba(14, 165, 233, 1), rgba(124, 58, 237, 1));
+  background: linear-gradient(135deg, rgba(37, 99, 235, 1), rgba(124, 58, 237, 1));
   box-shadow: 0 4px 8px rgba(17, 24, 39, 0.1);
   flex: 0 0 auto;
 }
 
 .stepDotDone {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 1), rgba(14, 165, 233, 1));
+  background: linear-gradient(135deg, rgba(16, 185, 129, 1), rgba(37, 99, 235, 1));
 }
 
 .stepMeta {
@@ -380,7 +381,7 @@ a:hover {
   font-weight: 700;
   color: var(--text);
   padding: 2px 8px;
-  background: rgba(14, 165, 233, 0.06);
+  background: rgba(37, 99, 235, 0.06);
   border-radius: 6px;
 }
 
@@ -396,7 +397,7 @@ a:hover {
   border-radius: 6px;
   padding: 2px 8px;
   font-size: 11px;
-  color: var(--brand, #0ea5e9);
+  color: var(--brand, #2563eb);
   cursor: pointer;
   max-width: 120px;
   overflow: hidden;
@@ -420,7 +421,7 @@ a:hover {
 }
 
 .topbarRefreshBtn:hover {
-  background: rgba(14, 165, 233, 0.06) !important;
+  background: rgba(37, 99, 235, 0.06) !important;
 }
 
 .topbarConnectBtn {
@@ -439,7 +440,7 @@ a:hover {
   white-space: nowrap;
 }
 .topbarConnectBtn:hover {
-  background: rgba(14,165,233,0.06) !important;
+  background: rgba(37,99,235,0.06) !important;
 }
 .topbarConnectBtn:disabled {
   opacity: 0.5;
@@ -490,6 +491,7 @@ a:hover {
   padding: 18px;
   overflow: auto;
   min-width: 0;
+  scrollbar-gutter: stable;
 }
 
 .card {
@@ -1002,45 +1004,116 @@ button:not([data-slot]):disabled {
 }
 
 /* ─── Status page compact layout ─── */
-.statusGrid3 {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 10px;
-}
 .statusGrid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-}
-.statusCard {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel2);
-  padding: 12px 14px;
-}
-.statusCardHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
 }
 .statusCardLabel {
   font-weight: 700;
   font-size: 13px;
   color: var(--fg);
 }
-.statusCardValue {
-  font-size: 15px;
-  font-weight: 800;
-  margin-bottom: 2px;
+
+/* ─── Unified status panel ─── */
+.statusPanel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel2);
+  overflow: hidden;
 }
-.statusCardSub {
+.statusPanelRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.statusPanelRow:last-child {
+  border-bottom: none;
+}
+.statusPanelIcon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.statusPanelIcon svg {
+  display: block;
+}
+.statusPanelInfo {
+  flex: 1;
+  min-width: 0;
+}
+.statusPanelTitle {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--fg);
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+}
+.statusPanelDesc {
   font-size: 11px;
   color: var(--muted);
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.statusPanelActions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+}
+.statusPanelAlert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 12px;
+  color: var(--warning);
+}
+
+/* Status badges (inline, next to title) */
+.statusBadgeInline {
+  margin-left: 8px;
+  vertical-align: middle;
+  font-size: 11px !important;
+  padding: 1px 7px !important;
+  line-height: 1.4;
+}
+.statusBadgeOk {
+  background: rgba(16, 185, 129, 0.12) !important;
+  color: #10b981 !important;
+  border-color: rgba(16, 185, 129, 0.25) !important;
+}
+.statusBadgeWarn {
+  background: rgba(245, 158, 11, 0.12) !important;
+  color: #f59e0b !important;
+  border-color: rgba(245, 158, 11, 0.25) !important;
+}
+.statusBadgeOff {
+  background: transparent !important;
+  color: var(--muted) !important;
+  border-color: var(--line) !important;
+}
+/* Compact status buttons */
+.statusBtn {
+  height: 28px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+  gap: 4px;
+}
+
 .btnIconInline {
   flex-shrink: 0;
   display: inline-flex;
@@ -1060,11 +1133,6 @@ button:not([data-slot]):disabled {
   color: var(--accent);
   background: var(--hover);
   border-color: var(--accent);
-}
-.statusCardActions {
-  margin-top: 6px;
-  display: flex;
-  gap: 6px;
 }
 /* ─── Small buttons ─── */
 .btnSmall {
@@ -1174,16 +1242,191 @@ button:not([data-slot]):disabled {
 
 /* Log display */
 .logPre {
-  white-space: pre-wrap;
-  word-break: break-word;
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace;
   font-size: 11px;
-  padding: 10px;
+  line-height: 1.6;
+  padding: 10px 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--bg-app);
-  max-height: 200px;
+  background: #0d1117;
+  color: #c9d1d9;
+  height: 240px;
   overflow: auto;
   margin: 0;
+}
+[data-theme="light"] .logPre,
+:root:not([data-theme="dark"]) .logPre {
+  background: #f6f8fa;
+  color: #24292f;
+}
+.logLine {
+  padding: 1px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 3px solid transparent;
+  transition: background 0.1s;
+}
+.logLine:hover {
+  background: rgba(255,255,255,0.03);
+}
+[data-theme="light"] .logLine:hover,
+:root:not([data-theme="dark"]) .logLine:hover {
+  background: rgba(0,0,0,0.03);
+}
+.logLineError {
+  border-left-color: #f85149;
+  background: rgba(248, 81, 73, 0.08);
+}
+[data-theme="light"] .logLineError,
+:root:not([data-theme="dark"]) .logLineError {
+  background: rgba(248, 81, 73, 0.06);
+}
+.logLineWarn {
+  border-left-color: #d29922;
+  background: rgba(210, 153, 34, 0.06);
+}
+[data-theme="light"] .logLineWarn,
+:root:not([data-theme="dark"]) .logLineWarn {
+  background: rgba(210, 153, 34, 0.04);
+}
+.logLineDebug {
+  opacity: 0.55;
+}
+.logLineInfo {
+  border-left-color: transparent;
+}
+.logTimestamp {
+  color: #6e7681;
+}
+[data-theme="light"] .logTimestamp,
+:root:not([data-theme="dark"]) .logTimestamp {
+  color: #8b949e;
+}
+.logLevel {
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+.logLevel--INFO {
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.12);
+}
+.logLevel--ERROR, .logLevel--CRITICAL, .logLevel--FATAL {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.15);
+}
+.logLevel--WARNING, .logLevel--WARN {
+  color: #d29922;
+  background: rgba(210, 153, 34, 0.12);
+}
+.logLevel--DEBUG {
+  color: #8b949e;
+  background: rgba(139, 148, 158, 0.1);
+}
+.logModule {
+  color: #d2a8ff;
+}
+[data-theme="light"] .logModule,
+:root:not([data-theme="dark"]) .logModule {
+  color: #8250df;
+}
+.logTag {
+  color: #7ee787;
+}
+[data-theme="light"] .logTag,
+:root:not([data-theme="dark"]) .logTag {
+  color: #1a7f37;
+}
+.logMuted {
+  padding: 12px;
+  opacity: 0.4;
+  display: block;
+}
+
+/* Log scroll-to-bottom button */
+.logScrollBtn {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(13,17,23,0.85);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: rgba(255,255,255,0.6);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.logScrollBtn:hover {
+  background: rgba(13,17,23,0.95);
+  color: rgba(255,255,255,0.9);
+}
+[data-theme="light"] .logScrollBtn,
+:root:not([data-theme="dark"]) .logScrollBtn {
+  border-color: rgba(0,0,0,0.1);
+  background: rgba(255,255,255,0.85);
+  color: rgba(0,0,0,0.5);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+[data-theme="light"] .logScrollBtn:hover,
+:root:not([data-theme="dark"]) .logScrollBtn:hover {
+  background: rgba(255,255,255,0.95);
+  color: rgba(0,0,0,0.8);
+}
+
+/* Log level filter badges */
+.logFilterBadge {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  line-height: 1.6;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+  background: transparent;
+  color: rgba(255,255,255,0.18);
+}
+[data-theme="light"] .logFilterBadge,
+:root:not([data-theme="dark"]) .logFilterBadge {
+  color: rgba(0,0,0,0.16);
+}
+.logFilterBadge:hover { opacity: 0.75; }
+.logFilterBadge--active.logFilterBadge--ERROR,
+[data-theme="light"] .logFilterBadge--active.logFilterBadge--ERROR,
+:root:not([data-theme="dark"]) .logFilterBadge--active.logFilterBadge--ERROR {
+  background: rgba(248,81,73,0.12);
+  color: #f85149;
+}
+.logFilterBadge--active.logFilterBadge--WARN,
+[data-theme="light"] .logFilterBadge--active.logFilterBadge--WARN,
+:root:not([data-theme="dark"]) .logFilterBadge--active.logFilterBadge--WARN {
+  background: rgba(210,153,34,0.12);
+  color: #d29922;
+}
+.logFilterBadge--active.logFilterBadge--INFO,
+[data-theme="light"] .logFilterBadge--active.logFilterBadge--INFO,
+:root:not([data-theme="dark"]) .logFilterBadge--active.logFilterBadge--INFO {
+  background: rgba(88,166,255,0.12);
+  color: #58a6ff;
+}
+.logFilterBadge--active.logFilterBadge--DEBUG,
+[data-theme="light"] .logFilterBadge--active.logFilterBadge--DEBUG,
+:root:not([data-theme="dark"]) .logFilterBadge--active.logFilterBadge--DEBUG {
+  background: rgba(0,0,0,0.05);
+  color: #57606a;
 }
 
 /* ─── Modal & Dialog ─── */
@@ -1550,7 +1793,7 @@ button:not([data-slot]):disabled {
 }
 
 .chatTopBarBtn:hover {
-  background: rgba(14, 165, 233, 0.06) !important;
+  background: rgba(37, 99, 235, 0.06) !important;
   color: var(--text);
 }
 
@@ -1618,7 +1861,7 @@ button:not([data-slot]):disabled {
 
 .floatingPlanProgressBar {
   height: 3px;
-  background: rgba(14, 165, 233, 0.1);
+  background: rgba(37, 99, 235, 0.1);
   overflow: hidden;
 }
 
@@ -1710,8 +1953,8 @@ button:not([data-slot]):disabled {
 }
 
 .chatInputBox:focus-within {
-  border-color: rgba(14, 165, 233, 0.35);
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.08);
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
 }
 
 .chatInputBoxPlan {
@@ -1790,7 +2033,7 @@ button:not([data-slot]):disabled {
 }
 .chatModelMenuItem:hover { background: var(--panel); }
 .chatModelMenuItemActive {
-  background: rgba(14, 165, 233, 0.2);
+  background: rgba(37, 99, 235, 0.2);
   color: var(--brand);
   font-weight: 600;
 }
@@ -1845,7 +2088,7 @@ button:not([data-slot]):disabled {
 }
 
 .chatInputIconBtn:hover {
-  background: rgba(14, 165, 233, 0.08) !important;
+  background: rgba(37, 99, 235, 0.08) !important;
   color: var(--text) !important;
 }
 
@@ -2013,7 +2256,7 @@ button:not([data-slot]):disabled {
 }
 
 .queuedItemSendBtn:hover {
-  color: var(--brand, #0ea5e9) !important;
+  color: var(--brand, #2563eb) !important;
 }
 
 .queuedItemDeleteBtn:hover {
@@ -2091,7 +2334,7 @@ button:not([data-slot]):disabled {
 }
 
 .imRefreshBtn:hover {
-  background: rgba(14, 165, 233, 0.08) !important;
+  background: rgba(37, 99, 235, 0.08) !important;
   color: var(--text);
 }
 
@@ -2216,8 +2459,8 @@ button:not([data-slot]):disabled {
 }
 
 .imMsgUser .imMsgContent {
-  background: rgba(14, 165, 233, 0.04);
-  border-color: rgba(14, 165, 233, 0.12);
+  background: rgba(37, 99, 235, 0.04);
+  border-color: rgba(37, 99, 235, 0.12);
 }
 
 .imMediaCard {
@@ -2234,49 +2477,6 @@ button:not([data-slot]):disabled {
 }
 
 /* ── Toast Notifications ── */
-.toastContainer {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 420px;
-  pointer-events: none;
-}
-.toast {
-  pointer-events: auto;
-  padding: 10px 16px;
-  border-radius: 10px;
-  font-size: 13px;
-  line-height: 1.4;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  animation: toastSlideIn 0.3s ease;
-  cursor: pointer;
-  word-break: break-word;
-}
-.toastInfo {
-  background: rgba(14, 165, 233, 0.22);
-  border: 1px solid rgba(14, 165, 233, 0.35);
-  color: var(--brand);
-}
-.toastOk {
-  background: rgba(16, 185, 129, 0.28);
-  border: 1px solid rgba(16, 185, 129, 0.45);
-  color: var(--ok);
-}
-.toastError {
-  background: rgba(239, 68, 68, 0.28);
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  color: var(--danger);
-}
-@keyframes toastSlideIn {
-  from { opacity: 0; transform: translateX(40px); }
-  to { opacity: 1; transform: translateX(0); }
-}
 
 /* ── Icon Buttons (for table rows) ── */
 .btnIcon {
@@ -2800,7 +3000,7 @@ button:not([data-slot]):disabled {
   gap: 6px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--brand, #0ea5e9);
+  color: var(--brand, #2563eb);
   padding: 2px 0;
   animation: chainFadeIn 0.18s ease;
 }
@@ -2851,7 +3051,7 @@ button:not([data-slot]):disabled {
 
 .chainToolResultToggle {
   font-size: 11px;
-  color: var(--brand, #0ea5e9);
+  color: var(--brand, #2563eb);
   cursor: pointer;
   opacity: 0.7;
   display: inline-flex;
@@ -2888,7 +3088,7 @@ button:not([data-slot]):disabled {
 .chainNarrCursor {
   width: 6px;
   height: 14px;
-  background: var(--brand, #0ea5e9);
+  background: var(--brand, #2563eb);
   opacity: 0.5;
   border-radius: 1px;
   animation: chainBlink 0.8s step-end infinite;
@@ -3040,7 +3240,7 @@ button:not([data-slot]):disabled {
 }
 
 .chatThinkingMenuItem:hover {
-  background: rgba(14, 165, 233, 0.12);
+  background: rgba(37, 99, 235, 0.12);
 }
 
 .chatThinkingMenuItemActive {
@@ -3148,7 +3348,7 @@ button:not([data-slot]):disabled {
   transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
 }
-.convPinBtn:hover { background: rgba(14, 165, 233, 0.08); }
+.convPinBtn:hover { background: rgba(37, 99, 235, 0.08); }
 
 .convNewBtn {
   width: 100%;
@@ -3165,7 +3365,7 @@ button:not([data-slot]):disabled {
   transition: background 0.12s, border-color 0.12s;
 }
 .convNewBtn:hover {
-  background: rgba(14, 165, 233, 0.06);
+  background: rgba(37, 99, 235, 0.06);
   border-color: var(--brand);
 }
 
@@ -3206,10 +3406,10 @@ button:not([data-slot]):disabled {
   position: relative;
 }
 .convItem:hover {
-  background: rgba(14, 165, 233, 0.05);
+  background: rgba(37, 99, 235, 0.05);
 }
 .convItemActive {
-  background: rgba(14, 165, 233, 0.09) !important;
+  background: rgba(37, 99, 235, 0.09) !important;
 }
 
 .convItemIcon {
@@ -3226,7 +3426,7 @@ button:not([data-slot]):disabled {
   margin-top: 1px;
 }
 .convItemActive .convItemIcon {
-  border-color: rgba(14, 165, 233, 0.3);
+  border-color: rgba(37, 99, 235, 0.3);
 }
 
 .convItemBody {
@@ -3377,13 +3577,13 @@ button:not([data-slot]):disabled {
 .agentOrbitNode:hover {
   transform: scale(1.2);
   border-color: var(--brand);
-  box-shadow: 0 0 12px rgba(14, 165, 233, 0.35);
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.35);
   z-index: 2;
 }
 
 .agentOrbitActive {
   border-color: var(--brand);
-  box-shadow: 0 0 8px rgba(14, 165, 233, 0.25);
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.25);
 }
 
 .agentOrbitRunning {
@@ -3447,8 +3647,8 @@ button:not([data-slot]):disabled {
 }
 
 @keyframes orbitGlow {
-  0%, 100% { box-shadow: 0 0 4px rgba(14, 165, 233, 0.2); }
-  50% { box-shadow: 0 0 14px rgba(14, 165, 233, 0.5); }
+  0%, 100% { box-shadow: 0 0 4px rgba(37, 99, 235, 0.2); }
+  50% { box-shadow: 0 0 14px rgba(37, 99, 235, 0.5); }
 }
 
 @keyframes orbitPulseRing {
@@ -3965,11 +4165,6 @@ button:not([data-slot]):disabled {
   .card { border-radius: 8px !important; }
   .modalContent { width: 95vw !important; max-width: 95vw !important; margin: 8px !important; }
 
-  /* toast: account for status bar */
-  .toastContainer {
-    top: max(16px, env(safe-area-inset-top)) !important;
-    right: max(8px, env(safe-area-inset-right)) !important;
-  }
 
   /* hide elements that don't work well on small screens */
   .topbarConnectBtn span { display: none !important; }
@@ -4085,3 +4280,4 @@ button:not([data-slot]):disabled {
     animation-iteration-count: 1 !important;
   }
 }
+

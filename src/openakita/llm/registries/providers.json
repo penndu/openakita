@@ -1,40 +1,6 @@
 [
   {
-    "name": "自定义服务商",
-    "slug": "custom",
-    "api_type": "openai",
-    "default_base_url": "",
-    "api_key_env_suggestion": "CUSTOM_API_KEY",
-    "supports_model_list": true,
-    "supports_capability_api": false,
-    "registry_class": "OpenAIRegistry"
-  },
-  {
-    "name": "Ollama (本地)",
-    "slug": "ollama",
-    "api_type": "openai",
-    "default_base_url": "http://localhost:11434/v1",
-    "api_key_env_suggestion": "OLLAMA_API_KEY",
-    "supports_model_list": true,
-    "supports_capability_api": false,
-    "registry_class": "OpenAIRegistry",
-    "requires_api_key": false,
-    "is_local": true
-  },
-  {
-    "name": "LM Studio (本地)",
-    "slug": "lmstudio",
-    "api_type": "openai",
-    "default_base_url": "http://localhost:1234/v1",
-    "api_key_env_suggestion": "LMSTUDIO_API_KEY",
-    "supports_model_list": true,
-    "supports_capability_api": false,
-    "registry_class": "OpenAIRegistry",
-    "requires_api_key": false,
-    "is_local": true
-  },
-  {
-    "name": "Anthropic (Official / Compatible)",
+    "name": "Anthropic",
     "slug": "anthropic",
     "api_type": "anthropic",
     "default_base_url": "https://api.anthropic.com",
@@ -44,7 +10,7 @@
     "registry_class": "AnthropicRegistry"
   },
   {
-    "name": "OpenAI (Official / Compatible)",
+    "name": "OpenAI",
     "slug": "openai",
     "api_type": "openai",
     "default_base_url": "https://api.openai.com/v1",
@@ -340,6 +306,40 @@
     "api_type": "openai",
     "default_base_url": "https://apis.iflow.cn/v1",
     "api_key_env_suggestion": "IFLOW_API_KEY",
+    "supports_model_list": true,
+    "supports_capability_api": false,
+    "registry_class": "OpenAIRegistry"
+  },
+  {
+    "name": "Ollama (本地)",
+    "slug": "ollama",
+    "api_type": "openai",
+    "default_base_url": "http://localhost:11434/v1",
+    "api_key_env_suggestion": "OLLAMA_API_KEY",
+    "supports_model_list": true,
+    "supports_capability_api": false,
+    "registry_class": "OpenAIRegistry",
+    "requires_api_key": false,
+    "is_local": true
+  },
+  {
+    "name": "LM Studio (本地)",
+    "slug": "lmstudio",
+    "api_type": "openai",
+    "default_base_url": "http://localhost:1234/v1",
+    "api_key_env_suggestion": "LMSTUDIO_API_KEY",
+    "supports_model_list": true,
+    "supports_capability_api": false,
+    "registry_class": "OpenAIRegistry",
+    "requires_api_key": false,
+    "is_local": true
+  },
+  {
+    "name": "自定义服务商",
+    "slug": "custom",
+    "api_type": "openai",
+    "default_base_url": "",
+    "api_key_env_suggestion": "CUSTOM_API_KEY",
     "supports_model_list": true,
     "supports_capability_api": false,
     "registry_class": "OpenAIRegistry"
