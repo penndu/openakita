@@ -81,6 +81,7 @@ import { WebPasswordManager } from "./components/WebPasswordManager";
 import { FieldText, FieldBool, FieldSelect, FieldCombo, TelegramPairingCodeHint } from "./components/EnvFields";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ModalOverlay } from "./components/ModalOverlay";
+import { Section } from "./components/Section";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { useNotifications } from "./hooks/useNotifications";
@@ -3000,17 +3001,20 @@ export function App() {
           "AGENT_NAME", "MAX_ITERATIONS", "SELFCHECK_AUTOFIX",
           "THINKING_MODE",
           "PROGRESS_TIMEOUT_SECONDS", "HARD_TIMEOUT_SECONDS",
-          "DATABASE_PATH", "LOG_LEVEL",
-          "LOG_DIR", "LOG_FILE_PREFIX", "LOG_MAX_SIZE_MB", "LOG_BACKUP_COUNT",
-          "LOG_RETENTION_DAYS", "LOG_FORMAT", "LOG_TO_CONSOLE", "LOG_TO_FILE",
           "EMBEDDING_MODEL", "EMBEDDING_DEVICE", "MODEL_DOWNLOAD_SOURCE",
           "MEMORY_HISTORY_DAYS", "MEMORY_MAX_HISTORY_FILES", "MEMORY_MAX_HISTORY_SIZE_MB",
           "PERSONA_NAME",
           "PROACTIVE_ENABLED", "PROACTIVE_MAX_DAILY_MESSAGES", "PROACTIVE_MIN_INTERVAL_MINUTES",
           "PROACTIVE_QUIET_HOURS_START", "PROACTIVE_QUIET_HOURS_END", "PROACTIVE_IDLE_THRESHOLD_HOURS",
           "STICKER_ENABLED", "STICKER_DATA_DIR",
-          "DESKTOP_NOTIFY_ENABLED", "DESKTOP_NOTIFY_SOUND",
           "SCHEDULER_TIMEZONE", "SCHEDULER_TASK_TIMEOUT",
+        ];
+      case "advanced":
+        return [
+          "DATABASE_PATH", "LOG_LEVEL",
+          "LOG_DIR", "LOG_FILE_PREFIX", "LOG_MAX_SIZE_MB", "LOG_BACKUP_COUNT",
+          "LOG_RETENTION_DAYS", "LOG_FORMAT", "LOG_TO_CONSOLE", "LOG_TO_FILE",
+          "DESKTOP_NOTIFY_ENABLED", "DESKTOP_NOTIFY_SOUND",
           "SESSION_TIMEOUT_MINUTES", "SESSION_MAX_HISTORY", "SESSION_STORAGE_PATH",
         ];
       default:
@@ -3035,6 +3039,8 @@ export function App() {
         return { keys: getAutoSaveKeysForStep("tools"), savedMsg: t("config.toolsSaved") };
       case "agent":
         return { keys: getAutoSaveKeysForStep("agent"), savedMsg: t("config.agentSaved") };
+      case "advanced":
+        return { keys: getAutoSaveKeysForStep("advanced"), savedMsg: t("config.advancedSaved") };
       default:
         return null;
     }
@@ -5825,8 +5831,50 @@ export function App() {
 
     return (
       <>
+        {/* ── 系统配置（桌面通知 / 会话 / 日志） ── */}
+        <div className="card">
+          <h3 style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{t("config.agentAdvanced")}</h3>
+
+          <Section title={t("config.agentDesktopNotify")}>
+            <div className="grid2">
+              {FB({ k: "DESKTOP_NOTIFY_ENABLED", label: t("config.agentDesktopNotifyEnable"), help: t("config.agentDesktopNotifyEnableHelp") })}
+              {FB({ k: "DESKTOP_NOTIFY_SOUND", label: t("config.agentDesktopNotifySound"), help: t("config.agentDesktopNotifySoundHelp") })}
+            </div>
+          </Section>
+
+          <Section title={t("config.agentSessionSection")} className="mt-2">
+            <div className="grid3">
+              {FT({ k: "SESSION_TIMEOUT_MINUTES", label: t("config.agentSessionTimeout"), placeholder: "30" })}
+              {FT({ k: "SESSION_MAX_HISTORY", label: t("config.agentSessionMax"), placeholder: "50" })}
+              {FT({ k: "SESSION_STORAGE_PATH", label: t("config.agentSessionPath"), placeholder: "data/sessions" })}
+            </div>
+          </Section>
+
+          <Section title={t("config.agentLogSection")} className="mt-2">
+            <div className="grid3">
+              {FS({ k: "LOG_LEVEL", label: t("config.agentLogLevel"), options: [
+                { value: "DEBUG", label: "DEBUG" },
+                { value: "INFO", label: "INFO" },
+                { value: "WARNING", label: "WARNING" },
+                { value: "ERROR", label: "ERROR" },
+              ] })}
+              {FT({ k: "LOG_DIR", label: t("config.agentLogDir"), placeholder: "logs" })}
+              {FT({ k: "DATABASE_PATH", label: t("config.agentDbPath"), placeholder: "data/agent.db" })}
+            </div>
+            <div className="grid3">
+              {FT({ k: "LOG_MAX_SIZE_MB", label: t("config.agentLogMaxMB"), placeholder: "10" })}
+              {FT({ k: "LOG_BACKUP_COUNT", label: t("config.agentLogBackup"), placeholder: "30" })}
+              {FT({ k: "LOG_RETENTION_DAYS", label: t("config.agentLogRetention"), placeholder: "30" })}
+            </div>
+            <div className="grid2">
+              {FB({ k: "LOG_TO_CONSOLE", label: t("config.agentLogConsole") })}
+              {FB({ k: "LOG_TO_FILE", label: t("config.agentLogFile") })}
+            </div>
+          </Section>
+        </div>
+
         {/* ── Python 环境诊断 (desktop only) ── */}
-        <div className="card" style={IS_WEB ? { display: "none" } : undefined}>
+        <div className="card" style={IS_WEB ? { display: "none", marginTop: 12 } : { marginTop: 12 }}>
           {sectionHeader("python", t("adv.pythonTitle"))}
             <div style={{ paddingLeft: 22 }}>
               {pyDiag ? (

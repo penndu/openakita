@@ -9,7 +9,8 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ChevronDown, Brain, Loader2 } from "lucide-react";
+import { Brain, Loader2 } from "lucide-react";
+import { Section } from "../components/Section";
 import { toast } from "sonner";
 import { safeFetch } from "../providers";
 import type { EnvMap } from "../types";
@@ -26,36 +27,6 @@ type AgentSystemViewProps = {
   serviceRunning?: boolean;
   apiBaseUrl?: string;
 };
-
-// ─── Reusable: collapsible section ──────────────────────────────────────
-
-function Section({ title, children, toggle, className }: {
-  title: string;
-  children?: React.ReactNode;
-  toggle?: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <details className={`group rounded-lg border border-border ${className ?? ""}`}>
-      <summary className="cursor-pointer flex items-center justify-between px-4 py-2.5 text-sm font-medium select-none list-none [&::-webkit-details-marker]:hidden hover:bg-accent/50 transition-colors">
-        <span className="flex items-center gap-1.5">
-          {children ? (
-            <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180 text-muted-foreground" />
-          ) : (
-            <span className="size-4 shrink-0" />
-          )}
-          {title}
-        </span>
-        {toggle}
-      </summary>
-      {children && (
-        <div className="flex flex-col gap-2.5 px-4 py-3 border-t border-border">
-          {children}
-        </div>
-      )}
-    </details>
-  );
-}
 
 // ─── Reusable: toggle pill (iOS-style switch in summary) ────────────────
 
@@ -150,10 +121,10 @@ export function AgentSystemView(props: AgentSystemViewProps) {
 
   return (
     <>
-      {/* ═══════ Card 1: Agent 配置 ═══════ */}
+      {/* ═══════ 灵魂 Soul ═══════ */}
       <div className="card">
-        <h3 className="text-base font-bold tracking-tight">{t("config.agentTitle")}</h3>
-        <p className="text-sm text-muted-foreground mt-1 mb-3">{t("config.agentHint")}</p>
+        <h3 className="text-base font-bold tracking-tight">{t("config.soulTitle")}</h3>
+        <p className="text-sm text-muted-foreground mt-1 mb-3 italic">{t("config.soulSubtitle")}</p>
 
         {/* ── 角色选择 ── */}
         <Section title={t("config.agentPersona")}>
@@ -202,56 +173,6 @@ export function AgentSystemView(props: AgentSystemViewProps) {
           </div>
         </Section>
 
-        {/* ── 活人感模式 ── */}
-        <Section
-          title={t("config.agentProactive")}
-          className="mt-2"
-          toggle={
-            <TogglePill
-              enabled={proactiveEnabled}
-              label={enabledLabel}
-              onToggle={() => setEnvDraft((p) => ({ ...p, PROACTIVE_ENABLED: proactiveEnabled ? "false" : "true" }))}
-            />
-          }
-        >
-          <div className="grid3">
-            {FT({ k: "PROACTIVE_MAX_DAILY_MESSAGES", label: t("config.agentMaxDaily"), placeholder: "3", help: t("config.agentMaxDailyHelp") })}
-            {FT({ k: "PROACTIVE_MIN_INTERVAL_MINUTES", label: t("config.agentMinInterval"), placeholder: "120", help: t("config.agentMinIntervalHelp") })}
-            {FT({ k: "PROACTIVE_IDLE_THRESHOLD_HOURS", label: t("config.agentIdleThreshold"), placeholder: "24", help: t("config.agentIdleThresholdHelp") })}
-          </div>
-          <div className="grid3">
-            {FT({ k: "PROACTIVE_QUIET_HOURS_START", label: t("config.agentQuietStart"), placeholder: "23", help: t("config.agentQuietStartHelp") })}
-            {FT({ k: "PROACTIVE_QUIET_HOURS_END", label: t("config.agentQuietEnd"), placeholder: "7" })}
-            <div />
-          </div>
-          <div className="grid3">
-            {FB({ k: "STICKER_ENABLED", label: t("config.agentSticker"), help: t("config.agentStickerHelp") })}
-            {FT({ k: "STICKER_DATA_DIR", label: t("config.agentStickerDir"), placeholder: "data/sticker" })}
-            <div />
-          </div>
-        </Section>
-      </div>
-
-      {/* ═══════ Card 2: 计划与记忆 ═══════ */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3 className="text-base font-bold tracking-tight mb-3">{t("config.agentPlanAndMemory")}</h3>
-
-        {/* ── 计划任务 ── */}
-        <Section
-          title={t("config.agentScheduler")}
-          toggle={
-            <TogglePill
-              enabled={!disabledViews.includes("scheduler")}
-              label={enabledLabel}
-              onToggle={() => toggleViewDisabled("scheduler")}
-            />
-          }
-        >
-          <div className="grid3">
-            {FT({ k: "SCHEDULER_TIMEZONE", label: t("config.agentTimezone"), placeholder: "Asia/Shanghai", help: t("config.agentTimezoneHelp") })}
-          </div>
-        </Section>
-
         {/* ── 记忆管理 ── */}
         <Section
           title={t("sidebar.memory")}
@@ -294,47 +215,53 @@ export function AgentSystemView(props: AgentSystemViewProps) {
         </AlertDialog>
       </div>
 
-      {/* ═══════ Card 3: 系统配置 ═══════ */}
+      {/* ═══════ 意志 Will ═══════ */}
       <div className="card" style={{ marginTop: 16 }}>
-        <h3 className="text-base font-bold tracking-tight mb-3">{t("config.agentAdvanced")}</h3>
+        <h3 className="text-base font-bold tracking-tight">{t("config.willTitle")}</h3>
+        <p className="text-sm text-muted-foreground mt-1 mb-3 italic">{t("config.willSubtitle")}</p>
 
-        {/* ── 桌面通知 ── */}
-        <Section title={t("config.agentDesktopNotify")}>
-          <div className="grid2">
-            {FB({ k: "DESKTOP_NOTIFY_ENABLED", label: t("config.agentDesktopNotifyEnable"), help: t("config.agentDesktopNotifyEnableHelp") })}
-            {FB({ k: "DESKTOP_NOTIFY_SOUND", label: t("config.agentDesktopNotifySound"), help: t("config.agentDesktopNotifySoundHelp") })}
+        {/* ── 活人感模式 ── */}
+        <Section
+          title={t("config.agentProactive")}
+          toggle={
+            <TogglePill
+              enabled={proactiveEnabled}
+              label={enabledLabel}
+              onToggle={() => setEnvDraft((p) => ({ ...p, PROACTIVE_ENABLED: proactiveEnabled ? "false" : "true" }))}
+            />
+          }
+        >
+          <div className="grid3">
+            {FT({ k: "PROACTIVE_MAX_DAILY_MESSAGES", label: t("config.agentMaxDaily"), placeholder: "3", help: t("config.agentMaxDailyHelp") })}
+            {FT({ k: "PROACTIVE_MIN_INTERVAL_MINUTES", label: t("config.agentMinInterval"), placeholder: "120", help: t("config.agentMinIntervalHelp") })}
+            {FT({ k: "PROACTIVE_IDLE_THRESHOLD_HOURS", label: t("config.agentIdleThreshold"), placeholder: "24", help: t("config.agentIdleThresholdHelp") })}
+          </div>
+          <div className="grid3">
+            {FT({ k: "PROACTIVE_QUIET_HOURS_START", label: t("config.agentQuietStart"), placeholder: "23", help: t("config.agentQuietStartHelp") })}
+            {FT({ k: "PROACTIVE_QUIET_HOURS_END", label: t("config.agentQuietEnd"), placeholder: "7" })}
+            <div />
+          </div>
+          <div className="grid3">
+            {FB({ k: "STICKER_ENABLED", label: t("config.agentSticker"), help: t("config.agentStickerHelp") })}
+            {FT({ k: "STICKER_DATA_DIR", label: t("config.agentStickerDir"), placeholder: "data/sticker" })}
+            <div />
           </div>
         </Section>
 
-        {/* ── 会话配置 ── */}
-        <Section title={t("config.agentSessionSection")} className="mt-2">
+        {/* ── 计划任务 ── */}
+        <Section
+          title={t("config.agentScheduler")}
+          className="mt-2"
+          toggle={
+            <TogglePill
+              enabled={!disabledViews.includes("scheduler")}
+              label={enabledLabel}
+              onToggle={() => toggleViewDisabled("scheduler")}
+            />
+          }
+        >
           <div className="grid3">
-            {FT({ k: "SESSION_TIMEOUT_MINUTES", label: t("config.agentSessionTimeout"), placeholder: "30" })}
-            {FT({ k: "SESSION_MAX_HISTORY", label: t("config.agentSessionMax"), placeholder: "50" })}
-            {FT({ k: "SESSION_STORAGE_PATH", label: t("config.agentSessionPath"), placeholder: "data/sessions" })}
-          </div>
-        </Section>
-
-        {/* ── 日志配置 ── */}
-        <Section title={t("config.agentLogSection")} className="mt-2">
-          <div className="grid3">
-            {FS({ k: "LOG_LEVEL", label: t("config.agentLogLevel"), options: [
-              { value: "DEBUG", label: "DEBUG" },
-              { value: "INFO", label: "INFO" },
-              { value: "WARNING", label: "WARNING" },
-              { value: "ERROR", label: "ERROR" },
-            ] })}
-            {FT({ k: "LOG_DIR", label: t("config.agentLogDir"), placeholder: "logs" })}
-            {FT({ k: "DATABASE_PATH", label: t("config.agentDbPath"), placeholder: "data/agent.db" })}
-          </div>
-          <div className="grid3">
-            {FT({ k: "LOG_MAX_SIZE_MB", label: t("config.agentLogMaxMB"), placeholder: "10" })}
-            {FT({ k: "LOG_BACKUP_COUNT", label: t("config.agentLogBackup"), placeholder: "30" })}
-            {FT({ k: "LOG_RETENTION_DAYS", label: t("config.agentLogRetention"), placeholder: "30" })}
-          </div>
-          <div className="grid2">
-            {FB({ k: "LOG_TO_CONSOLE", label: t("config.agentLogConsole") })}
-            {FB({ k: "LOG_TO_FILE", label: t("config.agentLogFile") })}
+            {FT({ k: "SCHEDULER_TIMEZONE", label: t("config.agentTimezone"), placeholder: "Asia/Shanghai", help: t("config.agentTimezoneHelp") })}
           </div>
         </Section>
       </div>
