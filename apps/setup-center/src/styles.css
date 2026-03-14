@@ -1250,7 +1250,7 @@ button:not([data-slot]):disabled {
   border-radius: 8px;
   background: #0d1117;
   color: #c9d1d9;
-  max-height: 240px;
+  height: 240px;
   overflow: auto;
   margin: 0;
 }
@@ -1343,6 +1343,90 @@ button:not([data-slot]):disabled {
   padding: 12px;
   opacity: 0.4;
   display: block;
+}
+
+/* Log scroll-to-bottom button */
+.logScrollBtn {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(13,17,23,0.85);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: rgba(255,255,255,0.6);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.logScrollBtn:hover {
+  background: rgba(13,17,23,0.95);
+  color: rgba(255,255,255,0.9);
+}
+[data-theme="light"] .logScrollBtn,
+:root:not([data-theme="dark"]) .logScrollBtn {
+  border-color: rgba(0,0,0,0.1);
+  background: rgba(255,255,255,0.85);
+  color: rgba(0,0,0,0.5);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+[data-theme="light"] .logScrollBtn:hover,
+:root:not([data-theme="dark"]) .logScrollBtn:hover {
+  background: rgba(255,255,255,0.95);
+  color: rgba(0,0,0,0.8);
+}
+
+/* Log level filter badges */
+.logFilterBadge {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  line-height: 1.6;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+  background: transparent;
+  color: rgba(255,255,255,0.18);
+}
+[data-theme="light"] .logFilterBadge,
+:root:not([data-theme="dark"]) .logFilterBadge {
+  color: rgba(0,0,0,0.16);
+}
+.logFilterBadge:hover { opacity: 0.75; }
+.logFilterBadge--active.logFilterBadge--ERROR,
+[data-theme="light"] .logFilterBadge--active.logFilterBadge--ERROR,
+:root:not([data-theme="dark"]) .logFilterBadge--active.logFilterBadge--ERROR {
+  background: rgba(248,81,73,0.12);
+  color: #f85149;
+}
+.logFilterBadge--active.logFilterBadge--WARN,
+[data-theme="light"] .logFilterBadge--active.logFilterBadge--WARN,
+:root:not([data-theme="dark"]) .logFilterBadge--active.logFilterBadge--WARN {
+  background: rgba(210,153,34,0.12);
+  color: #d29922;
+}
+.logFilterBadge--active.logFilterBadge--INFO,
+[data-theme="light"] .logFilterBadge--active.logFilterBadge--INFO,
+:root:not([data-theme="dark"]) .logFilterBadge--active.logFilterBadge--INFO {
+  background: rgba(88,166,255,0.12);
+  color: #58a6ff;
+}
+.logFilterBadge--active.logFilterBadge--DEBUG,
+[data-theme="light"] .logFilterBadge--active.logFilterBadge--DEBUG,
+:root:not([data-theme="dark"]) .logFilterBadge--active.logFilterBadge--DEBUG {
+  background: rgba(0,0,0,0.05);
+  color: #57606a;
 }
 
 /* ─── Modal & Dialog ─── */

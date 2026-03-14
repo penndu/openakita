@@ -1,6 +1,6 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke, listen, IS_TAURI, IS_WEB, IS_CAPACITOR, getAppVersion, onWsEvent, reconnectWsNow, logger } from "./platform";
+import { invoke, listen, IS_TAURI, IS_WEB, IS_CAPACITOR, getAppVersion, onWsEvent, reconnectWsNow, logger, openExternalUrl } from "./platform";
 import { getActiveServer, getActiveServerId } from "./platform/servers";
 import { checkAuth, installFetchInterceptor, AUTH_EXPIRED_EVENT, isPasswordUserSet, logout, clearAccessToken, setTauriRemoteMode, isTauriRemoteMode } from "./platform/auth";
 import { LoginView } from "./views/LoginView";
@@ -508,6 +508,10 @@ export function App() {
   const [endpointNameTouched, setEndpointNameTouched] = useState(false);
   const [baseUrlTouched, setBaseUrlTouched] = useState(false);
   const [llmAdvancedOpen, setLlmAdvancedOpen] = useState(false);
+  const [baseUrlExpanded, setBaseUrlExpanded] = useState(false);
+  const [editBaseUrlExpanded, setEditBaseUrlExpanded] = useState(false);
+  const [compBaseUrlExpanded, setCompBaseUrlExpanded] = useState(false);
+  const [sttBaseUrlExpanded, setSttBaseUrlExpanded] = useState(false);
   const [addEpMaxTokens, setAddEpMaxTokens] = useState(0);
   const [addEpContextWindow, setAddEpContextWindow] = useState(200000);
   const [addEpTimeout, setAddEpTimeout] = useState(180);
@@ -589,6 +593,9 @@ export function App() {
   const [serviceLog, setServiceLog] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
   const [serviceLogError, setServiceLogError] = useState<string | null>(null);
   const serviceLogRef = useRef<HTMLPreElement>(null);
+  const [logLevelFilter, setLogLevelFilter] = useState<Set<string>>(new Set(["INFO", "WARN", "ERROR", "DEBUG"]));
+  const logAtBottomRef = useRef(true);
+  const [logAtBottom, setLogAtBottom] = useState(true);
   const [appVersion, setAppVersion] = useState<string>("");
   const [openakitaVersion, setOpenakitaVersion] = useState<string>("");
 
@@ -2921,32 +2928,39 @@ export function App() {
     }
   }
 
-  const providerApplyUrl = useMemo(() => {
-    const slug = (selectedProvider?.slug || "").toLowerCase();
-    const map: Record<string, string> = {
-      openai: "https://platform.openai.com/api-keys",
-      anthropic: "https://console.anthropic.com/settings/keys",
-      moonshot: "https://platform.moonshot.cn/console",
-      kimi: "https://platform.moonshot.cn/console",
-      "kimi-cn": "https://platform.moonshot.cn/console",
-      "kimi-int": "https://platform.moonshot.ai/console/api-keys",
-      dashscope: "https://dashscope.console.aliyun.com/",
-      minimax: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-      "minimax-cn": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-      "minimax-int": "https://platform.minimax.io/user-center/basic-information/interface-key",
-      deepseek: "https://platform.deepseek.com/",
-      openrouter: "https://openrouter.ai/",
-      siliconflow: "https://siliconflow.cn/",
-      volcengine: "https://console.volcengine.com/ark/",
-      zhipu: "https://open.bigmodel.cn/",
-      "zhipu-cn": "https://open.bigmodel.cn/usercenter/apikeys",
-      "zhipu-int": "https://z.ai/manage-apikey/apikey-list",
-      yunwu: "https://yunwu.zeabur.app/",
-      ollama: "https://ollama.com/library",
-      lmstudio: "https://lmstudio.ai/",
-    };
-    return map[slug] || "";
-  }, [selectedProvider?.slug]);
+  const PROVIDER_APPLY_URLS: Record<string, string> = {
+    openai: "https://platform.openai.com/api-keys",
+    anthropic: "https://console.anthropic.com/settings/keys",
+    moonshot: "https://platform.moonshot.cn/console",
+    kimi: "https://platform.moonshot.cn/console",
+    "kimi-cn": "https://platform.moonshot.cn/console",
+    "kimi-int": "https://platform.moonshot.ai/console/api-keys",
+    dashscope: "https://dashscope.console.aliyun.com/",
+    minimax: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+    "minimax-cn": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+    "minimax-int": "https://platform.minimax.io/user-center/basic-information/interface-key",
+    deepseek: "https://platform.deepseek.com/",
+    openrouter: "https://openrouter.ai/",
+    siliconflow: "https://siliconflow.cn/",
+    volcengine: "https://console.volcengine.com/ark/",
+    zhipu: "https://open.bigmodel.cn/",
+    "zhipu-cn": "https://open.bigmodel.cn/usercenter/apikeys",
+    "zhipu-int": "https://z.ai/manage-apikey/apikey-list",
+    yunwu: "https://yunwu.zeabur.app/",
+    ollama: "https://ollama.com/library",
+    lmstudio: "https://lmstudio.ai/",
+  };
+  function getProviderApplyUrl(slug: string): string {
+    return PROVIDER_APPLY_URLS[slug.toLowerCase()] || "";
+  }
+  async function openApplyUrl(url: string) {
+    try { await openExternalUrl(url); } catch {
+      const ok = await copyToClipboard(url);
+      if (ok) notifySuccess("链接已复制到剪贴板：" + url);
+      else notifyError("无法打开链接，请手动访问：" + url);
+    }
+  }
+  const providerApplyUrl = useMemo(() => getProviderApplyUrl(selectedProvider?.slug || ""), [selectedProvider?.slug]);
 
   const step = steps[currentStepIdx] || steps[0];
 
@@ -3701,7 +3715,7 @@ export function App() {
 
   useEffect(() => {
     const el = serviceLogRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && logAtBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [serviceLog?.content]);
 
   // Skills selection default sync (only when user hasn't changed it)
@@ -4226,24 +4240,57 @@ export function App() {
           <div className="card" style={{ marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span className="statusCardLabel">{t("status.log")}</span>
-              <Button size="sm" variant="outline" onClick={() => { const wsId = effectiveWsId || (dataMode === "remote" ? "__remote__" : null); if (wsId) refreshServiceLog(wsId); }}><RefreshCw size={14} className="mr-1" />{t("topbar.refresh")}</Button>
+              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                {(["ERROR", "WARN", "INFO", "DEBUG"] as const).map((level) => {
+                  const active = logLevelFilter.has(level);
+                  return (
+                    <span
+                      key={level}
+                      className={`logFilterBadge logFilterBadge--${level}${active ? " logFilterBadge--active" : ""}`}
+                      onClick={() => setLogLevelFilter((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(level)) next.delete(level); else next.add(level);
+                        return next;
+                      })}
+                    >{level}</span>
+                  );
+                })}
+              </div>
             </div>
-            <div ref={serviceLogRef as any} className="logPre">{(() => {
-              const raw = (serviceLog?.content || "").trim();
-              if (!raw) return <span className="logMuted">{t("status.noLog")}</span>;
-              return raw.split("\n").map((line, i) => {
-                const isError = /\b(ERROR|CRITICAL|FATAL)\b/.test(line);
-                const isWarn = /\bWARN(ING)?\b/.test(line);
-                const isDebug = /\bDEBUG\b/.test(line);
-                const cls = isError ? "logLineError" : isWarn ? "logLineWarn" : isDebug ? "logLineDebug" : "logLineInfo";
-                const highlighted = line
-                  .replace(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[,.]\d+)/, '<span class="logTimestamp">$1</span>')
-                  .replace(/\b(INFO|ERROR|WARN(?:ING)?|DEBUG|CRITICAL|FATAL)\b/, '<span class="logLevel logLevel--$1">$1</span>')
-                  .replace(/([\w.]+(?:\.[\w]+)+)\s+-\s+/, '<span class="logModule">$1</span> - ')
-                  .replace(/\[([^\]]+)\]/, '[<span class="logTag">$1</span>]');
-                return <div key={i} className={`logLine ${cls}`} dangerouslySetInnerHTML={{ __html: highlighted }} />;
-              });
-            })()}</div>
+            <div style={{ position: "relative" }}>
+              <div ref={serviceLogRef as any} className="logPre" onScroll={(e) => {
+                const el = e.currentTarget;
+                const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+                logAtBottomRef.current = atBottom;
+                setLogAtBottom(atBottom);
+              }}>{(() => {
+                const raw = (serviceLog?.content || "").trim();
+                if (!raw) return <span className="logMuted">{t("status.noLog")}</span>;
+                return raw.split("\n").filter((line) => {
+                  if (/\b(ERROR|CRITICAL|FATAL)\b/.test(line)) return logLevelFilter.has("ERROR");
+                  if (/\bWARN(ING)?\b/.test(line)) return logLevelFilter.has("WARN");
+                  if (/\bDEBUG\b/.test(line)) return logLevelFilter.has("DEBUG");
+                  return logLevelFilter.has("INFO");
+                }).map((line, i) => {
+                  const isError = /\b(ERROR|CRITICAL|FATAL)\b/.test(line);
+                  const isWarn = /\bWARN(ING)?\b/.test(line);
+                  const isDebug = /\bDEBUG\b/.test(line);
+                  const cls = isError ? "logLineError" : isWarn ? "logLineWarn" : isDebug ? "logLineDebug" : "logLineInfo";
+                  const highlighted = line
+                    .replace(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[,.]\d+)/, '<span class="logTimestamp">$1</span>')
+                    .replace(/\b(INFO|ERROR|WARN(?:ING)?|DEBUG|CRITICAL|FATAL)\b/, '<span class="logLevel logLevel--$1">$1</span>')
+                    .replace(/([\w.]+(?:\.[\w]+)+)\s+-\s+/, '<span class="logModule">$1</span> - ')
+                    .replace(/\[([^\]]+)\]/, '[<span class="logTag">$1</span>]');
+                  return <div key={i} className={`logLine ${cls}`} dangerouslySetInnerHTML={{ __html: highlighted }} />;
+                });
+              })()}</div>
+              {!logAtBottom && (
+                <button className="logScrollBtn" onClick={() => {
+                  const el = serviceLogRef.current;
+                  if (el) { el.scrollTop = el.scrollHeight; logAtBottomRef.current = true; setLogAtBottom(true); }
+                }}>↓</button>
+              )}
+            </div>
           </div>
         )}
       </>
@@ -4441,15 +4488,14 @@ export function App() {
             <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4" style={{ scrollbarGutter: "stable" }}>
               {/* Provider */}
               <div className="space-y-1.5">
-                <Label>{t("llm.provider")}</Label>
+                <Label>{t("llm.provider")} {!["custom", "ollama", "lmstudio"].includes(providerSlug) && <span className="text-[11px] font-normal text-muted-foreground/70">API 地址：{baseUrl || selectedProvider?.default_base_url || "—"} <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => setBaseUrlExpanded(v => !v)}>{baseUrlExpanded ? "收起" : "配置"}</Button></span>}</Label>
                 <ProviderSearchSelect
                   value={providerSlug}
-                  onChange={(v) => setProviderSlug(v)}
+                  onChange={(v) => { setProviderSlug(v); setBaseUrlExpanded(false); }}
                   options={providers.map((p) => ({ value: p.slug, label: p.name }))}
                   placeholder={providers.length === 0 ? t("common.loading") : undefined}
                   disabled={providers.length === 0}
                 />
-                {providerApplyUrl && <p className="text-xs text-muted-foreground">Key: <a href={providerApplyUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">{providerApplyUrl}</a></p>}
               </div>
 
               {/* Coding Plan toggle */}
@@ -4464,14 +4510,26 @@ export function App() {
               )}
 
               {/* Base URL */}
+              {["custom", "ollama", "lmstudio"].includes(providerSlug) ? (
               <div className="space-y-1.5">
                 <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
                 <Input value={baseUrl} onChange={(e) => { setBaseUrl(e.target.value); setBaseUrlTouched(true); }} placeholder={selectedProvider?.default_base_url || "https://api.example.com/v1"} />
               </div>
+              ) : baseUrlExpanded ? (
+              <div className="space-y-1.5">
+                <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
+                <Input value={baseUrl} onChange={(e) => { setBaseUrl(e.target.value); setBaseUrlTouched(true); }} placeholder={selectedProvider?.default_base_url || "https://api.example.com/v1"} />
+              </div>
+              ) : null}
 
               {/* API Key */}
               <div className="space-y-1.5">
-                <Label>API Key {isLocalProvider(selectedProvider) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}</Label>
+                <Label className="inline-flex items-center gap-2">
+                  API Key {isLocalProvider(selectedProvider) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}
+                  {providerApplyUrl && !isLocalProvider(selectedProvider) && (
+                    <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => openApplyUrl(providerApplyUrl)}>获取 API Key</Button>
+                  )}
+                </Label>
                 <Input value={apiKeyValue} onChange={(e) => setApiKeyValue(e.target.value)} placeholder={isLocalProvider(selectedProvider) ? t("llm.localKeyPlaceholder") : "sk-..."} type={(secretShown.__LLM_API_KEY && !IS_WEB) ? "text" : "password"} />
                 {isLocalProvider(selectedProvider) && <p className="text-xs text-primary">{t("llm.localHint")}</p>}
               </div>
@@ -4631,19 +4689,29 @@ export function App() {
             {editDraft && <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4" style={{ scrollbarGutter: "stable" }}>
               {/* Provider (read-only) */}
               <div className="space-y-1.5">
-                <Label>{t("llm.provider")} <span className="text-[11px] font-normal text-muted-foreground/70">服务商在创建时确定，不可更改</span></Label>
+                <Label>{t("llm.provider")} <span className="text-[11px] font-normal text-muted-foreground/70">服务商在创建时确定，不可更改</span> {!["custom", "ollama", "lmstudio"].includes(editDraft.providerSlug) && <span className="text-[11px] font-normal text-muted-foreground/70">API 地址：{editDraft.baseUrl || "—"} <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => setEditBaseUrlExpanded(v => !v)}>{editBaseUrlExpanded ? "收起" : "配置"}</Button></span>}</Label>
                 <Input value={(() => { const p = providers.find((x) => x.slug === editDraft.providerSlug); return p ? p.name : (editDraft.providerSlug || "custom"); })()} disabled className="opacity-70" />
               </div>
 
               {/* Base URL */}
+              {["custom", "ollama", "lmstudio"].includes(editDraft.providerSlug) ? (
               <div className="space-y-1.5">
                 <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
                 <Input value={editDraft.baseUrl || ""} onChange={(e) => setEditDraft({ ...editDraft, baseUrl: e.target.value })} placeholder="请输入" />
               </div>
+              ) : editBaseUrlExpanded ? (
+              <div className="space-y-1.5">
+                <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
+                <Input value={editDraft.baseUrl || ""} onChange={(e) => setEditDraft({ ...editDraft, baseUrl: e.target.value })} placeholder="请输入" />
+              </div>
+              ) : null}
 
               {/* API Key */}
               <div className="space-y-1.5">
-                <Label>API Key {isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}</Label>
+                <Label className="inline-flex items-center gap-2">
+                  API Key {isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}
+                  {(() => { const url = getProviderApplyUrl(editDraft.providerSlug); const ep = providers.find((p) => p.slug === editDraft.providerSlug); return url && !isLocalProvider(ep) ? <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => openApplyUrl(url)}>获取 API Key</Button> : null; })()}
+                </Label>
                 <div className="relative">
                   <Input value={envDraft[editDraft.apiKeyEnv || ""] || ""} onChange={(e) => { const k = editDraft.apiKeyEnv || ""; const v = e.target.value; setEnvDraft((m) => ({ ...m, [k]: v })); setEditDraft((d) => d ? { ...d, apiKeyValue: v } : d); }} type={(secretShown.__EDIT_EP_KEY && !IS_WEB) ? "text" : "password"} className="pr-11" placeholder={isLocalProvider(providers.find((p) => p.slug === editDraft.providerSlug)) ? t("llm.localKeyPlaceholder") : "sk-..."} />
                   {!IS_WEB && <Button type="button" variant="ghost" size="icon-xs" className="absolute right-1.5 top-1/2 -translate-y-1/2" onClick={() => setSecretShown((m) => ({ ...m, __EDIT_EP_KEY: !m.__EDIT_EP_KEY }))} title={secretShown.__EDIT_EP_KEY ? "隐藏" : "显示"}>
@@ -4838,6 +4906,7 @@ export function App() {
                   value={compilerProviderSlug}
                   onChange={(slug) => {
                     setCompilerProviderSlug(slug);
+                    setCompBaseUrlExpanded(false);
                     setCompilerCodingPlan(false);
                     if (slug === "custom") {
                       setCompilerApiType("openai");
@@ -4888,10 +4957,22 @@ export function App() {
               ) : null; })()}
 
               {/* Base URL */}
+              {["custom", "ollama", "lmstudio"].includes(compilerProviderSlug) ? (
               <div className="space-y-1.5">
                 <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
                 <Input value={compilerBaseUrl} onChange={(e) => setCompilerBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
               </div>
+              ) : (
+              <>
+                <div className="text-[11px] font-normal text-muted-foreground/70">API 地址：{compilerBaseUrl || "—"} <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => setCompBaseUrlExpanded(v => !v)}>{compBaseUrlExpanded ? "收起" : "配置"}</Button></div>
+                {compBaseUrlExpanded && (
+                <div className="space-y-1.5">
+                  <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
+                  <Input value={compilerBaseUrl} onChange={(e) => setCompilerBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
+                </div>
+                )}
+              </>
+              )}
 
               {/* API Key Env */}
               <div className="space-y-1.5">
@@ -4901,7 +4982,10 @@ export function App() {
 
               {/* API Key */}
               <div className="space-y-1.5">
-                <Label>API Key {isLocalProvider(providers.find((p) => p.slug === compilerProviderSlug)) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}</Label>
+                <Label className="inline-flex items-center gap-2">
+                  API Key {isLocalProvider(providers.find((p) => p.slug === compilerProviderSlug)) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}
+                  {(() => { const url = getProviderApplyUrl(compilerProviderSlug); const cp = providers.find((p) => p.slug === compilerProviderSlug); return url && !isLocalProvider(cp) ? <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => openApplyUrl(url)}>获取 API Key</Button> : null; })()}
+                </Label>
                 <Input value={compilerApiKeyValue} onChange={(e) => setCompilerApiKeyValue(e.target.value)} placeholder={isLocalProvider(providers.find((p) => p.slug === compilerProviderSlug)) ? t("llm.localKeyPlaceholder") : "sk-..."} type="password" />
                 {isLocalProvider(providers.find((p) => p.slug === compilerProviderSlug)) && <p className="text-xs text-primary">{t("llm.localHint")}</p>}
               </div>
@@ -4991,6 +5075,7 @@ export function App() {
                 <ProviderSearchSelect
                   value={sttProviderSlug}
                   onChange={(slug) => {
+                    setSttBaseUrlExpanded(false);
                     setSttProviderSlug(slug);
                     if (slug === "custom") {
                       setSttApiType("openai");
@@ -5029,10 +5114,22 @@ export function App() {
               </div>
 
               {/* Base URL */}
+              {["custom", "ollama", "lmstudio"].includes(sttProviderSlug) ? (
               <div className="space-y-1.5">
                 <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
                 <Input value={sttBaseUrl} onChange={(e) => setSttBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
               </div>
+              ) : (
+              <>
+                <div className="text-[11px] font-normal text-muted-foreground/70">API 地址：{sttBaseUrl || "—"} <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => setSttBaseUrlExpanded(v => !v)}>{sttBaseUrlExpanded ? "收起" : "配置"}</Button></div>
+                {sttBaseUrlExpanded && (
+                <div className="space-y-1.5">
+                  <Label>{t("llm.baseUrl")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.baseUrlHint")}</span></Label>
+                  <Input value={sttBaseUrl} onChange={(e) => setSttBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
+                </div>
+                )}
+              </>
+              )}
 
               {/* API Key Env */}
               <div className="space-y-1.5">
@@ -5042,7 +5139,10 @@ export function App() {
 
               {/* API Key */}
               <div className="space-y-1.5">
-                <Label>API Key {isLocalProvider(providers.find((p) => p.slug === sttProviderSlug)) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}</Label>
+                <Label className="inline-flex items-center gap-2">
+                  API Key {isLocalProvider(providers.find((p) => p.slug === sttProviderSlug)) && <span className="text-muted-foreground text-[11px] font-normal">({t("llm.localNoKey")})</span>}
+                  {(() => { const url = getProviderApplyUrl(sttProviderSlug); const sp = providers.find((p) => p.slug === sttProviderSlug); return url && !isLocalProvider(sp) ? <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => openApplyUrl(url)}>获取 API Key</Button> : null; })()}
+                </Label>
                 <Input value={sttApiKeyValue} onChange={(e) => setSttApiKeyValue(e.target.value)} placeholder={isLocalProvider(providers.find((p) => p.slug === sttProviderSlug)) ? t("llm.localKeyPlaceholder") : "sk-..."} type="password" />
                 {isLocalProvider(providers.find((p) => p.slug === sttProviderSlug)) && <p className="text-xs text-primary">{t("llm.localHint")}</p>}
               </div>
