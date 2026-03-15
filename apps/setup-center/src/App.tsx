@@ -33,9 +33,10 @@ import {
   DotGreen, DotGray, DotYellow, DotRed,
   LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ,
 } from "./icons";
-import { ChevronDownIcon, XIcon, Loader2, RefreshCw, Play, Square, RotateCcw, Power, PowerOff, FolderOpen, Activity, ArrowRight, Server, Download, Zap, Inbox } from "lucide-react";
+import { ChevronDownIcon, ChevronRight, XIcon, Loader2, RefreshCw, Play, Square, RotateCcw, Power, PowerOff, FolderOpen, Activity, ArrowRight, Server, Download, Zap, Inbox, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -7145,11 +7146,17 @@ export function App() {
     const obCurrentIdx = obCurrentIdxRaw >= 0 ? obCurrentIdxRaw : obStepDots.length - 1;
 
     const stepIndicator = (
-      <div className="obStepIndicator">
+      <div className="flex gap-2 py-4">
         {obStepDots.map((s, i) => (
           <div
             key={s}
-            className={`obDot ${i === obCurrentIdx ? "obDotActive" : i < obCurrentIdx ? "obDotDone" : ""}`}
+            className={`size-2 rounded-full transition-all duration-200 ${
+              i === obCurrentIdx
+                ? "bg-primary scale-[1.3]"
+                : i < obCurrentIdx
+                  ? "bg-emerald-500"
+                  : "bg-muted-foreground/25"
+            }`}
           />
         ))}
       </div>
@@ -7159,68 +7166,72 @@ export function App() {
       case "ob-welcome":
         return (
           <div className="obPage">
-            <div className="obCenter">
-              <img src={logoUrl} alt="OpenAkita" className="obLogo" />
-              <h1 className="obTitle">{t("onboarding.welcome.title")}</h1>
-              <p className="obDesc">{t("onboarding.welcome.desc")}</p>
+            <div className="flex flex-col items-center text-center max-w-[520px] gap-5">
+              <img src={logoUrl} alt="OpenAkita" className="w-20 h-20 rounded-2xl shadow-lg mb-1" />
+              <div className="space-y-2">
+                <h1 className="text-[28px] font-bold tracking-tight text-foreground">{t("onboarding.welcome.title")}</h1>
+                <p className="text-sm text-muted-foreground leading-relaxed">{t("onboarding.welcome.desc")}</p>
+              </div>
+
               {obEnvCheck && (
                 <>
                   {obEnvCheck.conflicts.length > 0 && (
-                    <div className={
+                    <Card className={`w-full border text-left text-[13px] ${
                       obEnvCheck.conflicts.some(c => c.includes("失败") || c.includes("进程"))
-                        ? "obWarning"
-                        : "obInfo"
-                    }>
-                      <strong>
-                        {obEnvCheck.conflicts.some(c => c.includes("失败") || c.includes("进程"))
-                          ? t("onboarding.welcome.envWarning")
-                          : t("onboarding.welcome.envCleaned")}
-                      </strong>
-                      <ul>
-                        {obEnvCheck.conflicts.map((c, i) => <li key={i}>{c}</li>)}
-                      </ul>
-                      <p className="obEnvCheckPath" style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
-                        检查路径: {obEnvCheck.openakitaRoot ?? "(未知)"}
-                      </p>
-                      <button
-                        type="button"
-                        className="btnSecondary"
-                        style={{ marginTop: 8 }}
-                        onClick={() => obLoadEnvCheck()}
-                      >
-                        重新检测环境
-                      </button>
-                    </div>
+                        ? "border-amber-300 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/30"
+                        : "border-emerald-300 bg-emerald-50/60 dark:border-emerald-500/40 dark:bg-emerald-950/30"
+                    }`}>
+                      <CardContent className="py-3 px-4 space-y-2">
+                        <div className="flex items-center gap-2 font-semibold">
+                          {obEnvCheck.conflicts.some(c => c.includes("失败") || c.includes("进程"))
+                            ? <AlertTriangle className="size-4 text-amber-500 shrink-0" />
+                            : <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />}
+                          {obEnvCheck.conflicts.some(c => c.includes("失败") || c.includes("进程"))
+                            ? t("onboarding.welcome.envWarning")
+                            : t("onboarding.welcome.envCleaned")}
+                        </div>
+                        <ul className="ml-5 list-disc space-y-0.5">
+                          {obEnvCheck.conflicts.map((c, i) => <li key={i}>{c}</li>)}
+                        </ul>
+                        <p className="text-xs text-muted-foreground">
+                          检查路径: {obEnvCheck.openakitaRoot ?? "(未知)"}
+                        </p>
+                        <Button variant="secondary" size="sm" onClick={() => obLoadEnvCheck()}>
+                          重新检测环境
+                        </Button>
+                      </CardContent>
+                    </Card>
                   )}
                   {obEnvCheck.conflicts.length === 0 && (
-                    <p className="obEnvCheckPath" style={{ fontSize: 12, opacity: 0.75 }}>
+                    <p className="text-xs text-muted-foreground/75">
                       检查路径: {obEnvCheck.openakitaRoot ?? "(未知)"}
                     </p>
                   )}
                 </>
               )}
+
               {obDetectedService && (
-                <div className="obInfo" style={{ marginBottom: 12 }}>
-                  <strong>{t("onboarding.welcome.serviceDetected")}</strong>
-                  <p style={{ margin: "6px 0" }}>
-                    {t("onboarding.welcome.serviceDetectedDesc", { version: obDetectedService.version })}
-                  </p>
-                  <button
-                    className="btnPrimary"
-                    style={{ marginTop: 4 }}
-                    onClick={() => obConnectExistingService()}
-                  >
-                    {t("onboarding.welcome.connectExisting")}
-                  </button>
-                </div>
+                <Card className="w-full border border-emerald-300 bg-emerald-50/60 dark:border-emerald-500/40 dark:bg-emerald-950/30 text-left text-[13px]">
+                  <CardContent className="py-3 px-4 space-y-2">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+                      {t("onboarding.welcome.serviceDetected")}
+                    </div>
+                    <p className="text-muted-foreground">
+                      {t("onboarding.welcome.serviceDetectedDesc", { version: obDetectedService.version })}
+                    </p>
+                    <Button size="sm" onClick={() => obConnectExistingService()}>
+                      {t("onboarding.welcome.connectExisting")}
+                    </Button>
+                  </CardContent>
+                </Card>
               )}
 
-              {/* Custom data storage path (advanced) */}
-              <div style={{ width: "100%", maxWidth: 460, marginTop: 8 }}>
-                <button
-                  type="button"
-                  className="obLinkBtn"
-                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}
+              <div className="w-full max-w-[460px] mt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-xs text-muted-foreground px-2 h-7"
                   onClick={async () => {
                     if (!obShowCustomRoot) {
                       try {
@@ -7235,90 +7246,92 @@ export function App() {
                     setObShowCustomRoot((v) => !v);
                   }}
                 >
-                  {obShowCustomRoot ? "▾" : "▸"} {t("onboarding.welcome.customRootToggle")}
-                </button>
+                  <ChevronRight className={`size-3.5 transition-transform duration-200 ${obShowCustomRoot ? "rotate-90" : ""}`} />
+                  {t("onboarding.welcome.customRootToggle")}
+                </Button>
+
                 {obShowCustomRoot && (
-                  <div style={{ background: "var(--card-bg, rgba(255,255,255,0.72))", border: "1px solid var(--line)", borderRadius: 8, padding: 12, marginTop: 4 }}>
-                    <p style={{ fontSize: 12, opacity: 0.7, margin: "0 0 8px" }}>{t("onboarding.welcome.customRootHint")}</p>
-                    {obCurrentRoot && (
-                      <p style={{ fontSize: 11, opacity: 0.6, margin: "0 0 8px", wordBreak: "break-all" }}>
-                        {t("onboarding.welcome.customRootCurrent", { path: obCurrentRoot })}
-                      </p>
-                    )}
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        style={{ flex: 1, fontSize: 13 }}
-                        value={obCustomRootInput}
-                        onChange={(e) => { setObCustomRootInput(e.target.value); setObCustomRootApplied(false); }}
-                        placeholder={t("onboarding.welcome.customRootPlaceholder")}
-                      />
-                      <button
-                        className="btnPrimary"
-                        style={{ fontSize: 12, padding: "4px 12px", whiteSpace: "nowrap" }}
-                        disabled={!obCustomRootInput.trim() || obCustomRootApplied || obCustomRootBusy}
-                        onClick={async () => {
-                          if (obCustomRootBusy) return;
-                          setObCustomRootBusy(true);
-                          try {
-                            const info = await invoke<{ defaultRoot: string; currentRoot: string; customRoot: string | null }>(
-                              "set_custom_root_dir", { path: obCustomRootInput.trim(), migrate: obCustomRootMigrate }
-                            );
-                            setObCurrentRoot(info.currentRoot);
-                            setObCustomRootApplied(true);
-                            notifySuccess(t("onboarding.welcome.customRootApplied", { path: info.currentRoot }));
-                            obLoadEnvCheck();
-                          } catch (e: any) {
-                            notifyError(String(e));
-                          } finally {
-                            setObCustomRootBusy(false);
-                          }
-                        }}
-                      >
-                        {obCustomRootBusy ? "..." : t("onboarding.welcome.customRootApply")}
-                      </button>
-                    </div>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
-                      <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4, cursor: "pointer", opacity: 0.8, whiteSpace: "nowrap" }}>
-                        <input
-                          type="checkbox"
-                          checked={obCustomRootMigrate}
-                          onChange={(e) => setObCustomRootMigrate(e.target.checked)}
-                          style={{ width: 16, height: 16, flexShrink: 0, accentColor: "var(--brand)" }}
+                  <Card className="mt-2 shadow-sm">
+                    <CardContent className="py-4 px-4 space-y-3">
+                      <p className="text-xs text-muted-foreground leading-relaxed">{t("onboarding.welcome.customRootHint")}</p>
+                      {obCurrentRoot && (
+                        <p className="text-[11px] text-muted-foreground/60 break-all">
+                          {t("onboarding.welcome.customRootCurrent", { path: obCurrentRoot })}
+                        </p>
+                      )}
+                      <div className="flex gap-2 items-center">
+                        <Input
+                          className="flex-1 h-8 text-[13px]"
+                          value={obCustomRootInput}
+                          onChange={(e) => { setObCustomRootInput(e.target.value); setObCustomRootApplied(false); }}
+                          placeholder={t("onboarding.welcome.customRootPlaceholder")}
                         />
-                        {t("onboarding.welcome.customRootMigrate")}
-                      </label>
-                    </div>
-                    {obCustomRootApplied && obCustomRootInput.trim() && (
-                      <button
-                        type="button"
-                        className="obLinkBtn"
-                        style={{ fontSize: 11, marginTop: 6, opacity: 0.6 }}
-                        onClick={async () => {
-                          try {
-                            const info = await invoke<{ defaultRoot: string; currentRoot: string; customRoot: string | null }>(
-                              "set_custom_root_dir", { path: null, migrate: false }
-                            );
-                            setObCurrentRoot(info.currentRoot);
-                            setObCustomRootInput("");
-                            setObCustomRootApplied(false);
-                            notifySuccess(t("onboarding.welcome.customRootDefault") + ": " + info.currentRoot);
-                            obLoadEnvCheck();
-                          } catch (e: any) {
-                            notifyError(String(e));
-                          }
-                        }}
-                      >
-                        {t("onboarding.welcome.customRootDefault")}
-                      </button>
-                    )}
-                  </div>
+                        <Button
+                          size="sm"
+                          className="h-8 shrink-0"
+                          disabled={!obCustomRootInput.trim() || obCustomRootApplied || obCustomRootBusy}
+                          onClick={async () => {
+                            if (obCustomRootBusy) return;
+                            setObCustomRootBusy(true);
+                            try {
+                              const info = await invoke<{ defaultRoot: string; currentRoot: string; customRoot: string | null }>(
+                                "set_custom_root_dir", { path: obCustomRootInput.trim(), migrate: obCustomRootMigrate }
+                              );
+                              setObCurrentRoot(info.currentRoot);
+                              setObCustomRootApplied(true);
+                              notifySuccess(t("onboarding.welcome.customRootApplied", { path: info.currentRoot }));
+                              obLoadEnvCheck();
+                            } catch (e: any) {
+                              notifyError(String(e));
+                            } finally {
+                              setObCustomRootBusy(false);
+                            }
+                          }}
+                        >
+                          {obCustomRootBusy ? <Loader2 className="size-3.5 animate-spin" /> : t("onboarding.welcome.customRootApply")}
+                        </Button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="ob-migrate"
+                          checked={obCustomRootMigrate}
+                          onCheckedChange={(v) => setObCustomRootMigrate(!!v)}
+                        />
+                        <Label htmlFor="ob-migrate" className="text-xs cursor-pointer font-normal">
+                          {t("onboarding.welcome.customRootMigrate")}
+                        </Label>
+                      </div>
+                      {obCustomRootApplied && obCustomRootInput.trim() && (
+                        <Button
+                          variant="link"
+                          className="h-auto p-0 text-[11px] text-muted-foreground"
+                          onClick={async () => {
+                            try {
+                              const info = await invoke<{ defaultRoot: string; currentRoot: string; customRoot: string | null }>(
+                                "set_custom_root_dir", { path: null, migrate: false }
+                              );
+                              setObCurrentRoot(info.currentRoot);
+                              setObCustomRootInput("");
+                              setObCustomRootApplied(false);
+                              notifySuccess(t("onboarding.welcome.customRootDefault") + ": " + info.currentRoot);
+                              obLoadEnvCheck();
+                            } catch (e: any) {
+                              notifyError(String(e));
+                            }
+                          }}
+                        >
+                          {t("onboarding.welcome.customRootDefault")}
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
                 )}
               </div>
 
-              <button
-                className="btnPrimary obBtn"
+              <Button
+                size="lg"
+                className="mt-2 px-10 rounded-xl text-[15px]"
                 onClick={async () => {
-                  // 首次运行：提前创建默认工作区，确保后续 LLM/IM 保存有正确的 workspaceId
                   try {
                     const wsList = await invoke<WorkspaceSummary[]>("list_workspaces");
                     if (!wsList.length) {
@@ -7340,7 +7353,7 @@ export function App() {
                 }}
               >
                 {t("onboarding.welcome.start")}
-              </button>
+              </Button>
             </div>
             {stepIndicator}
           </div>
@@ -7352,56 +7365,41 @@ export function App() {
             <div className="obContent">
               <h2 className="obStepTitle">{t("onboarding.agreement.title")}</h2>
               <p className="obStepDesc">{t("onboarding.agreement.subtitle")}</p>
-              <div className="obFormArea" style={{ textAlign: "left" }}>
-                <div style={{
-                  whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.7,
-                  maxHeight: 340, overflowY: "auto",
-                  padding: "16px 20px", borderRadius: 8,
-                  background: "var(--bg1)",
-                  border: "1px solid var(--line)",
-                  color: "var(--text)",
-                  marginBottom: 20,
-                }}>
-                  {t("onboarding.agreement.content")}
-                </div>
-                <label style={{ display: "block", fontWeight: 600, marginBottom: 8, fontSize: 14 }}>
-                  {t("onboarding.agreement.confirmLabel")}
-                </label>
-                <input
-                  type="text"
-                  value={obAgreementInput}
-                  onChange={(e) => { setObAgreementInput(e.target.value); setObAgreementError(false); }}
-                  placeholder={t("onboarding.agreement.confirmPlaceholder")}
-                  style={{
-                    width: "100%", padding: "10px 14px", fontSize: 15,
-                    borderRadius: 6, border: obAgreementError ? "2px solid #e53e3e" : "1px solid var(--line)",
-                    outline: "none", boxSizing: "border-box",
-                    background: "var(--bg1)", color: "var(--text)",
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (obAgreementInput.trim() === t("onboarding.agreement.confirmText")) {
-                        setObAgreementError(false);
-                        setObStep("ob-llm");
-                      } else {
-                        setObAgreementError(true);
-                      }
-                    }
-                  }}
-                />
-                {obAgreementError && (
-                  <p style={{ color: "#e53e3e", fontSize: 13, marginTop: 6 }}>
-                    {t("onboarding.agreement.errorMismatch")}
-                  </p>
-                )}
-              </div>
+              <Card className="text-left">
+                <CardContent className="py-5 px-5 space-y-4">
+                  <div className="whitespace-pre-wrap text-[13px] leading-[1.7] max-h-[240px] overflow-y-auto rounded-lg border bg-muted/40 p-4 text-foreground">
+                    {t("onboarding.agreement.content")}
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">{t("onboarding.agreement.confirmLabel")}</Label>
+                    <Input
+                      value={obAgreementInput}
+                      onChange={(e) => { setObAgreementInput(e.target.value); setObAgreementError(false); }}
+                      placeholder={t("onboarding.agreement.confirmPlaceholder")}
+                      aria-invalid={obAgreementError || undefined}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          if (obAgreementInput.trim() === t("onboarding.agreement.confirmText")) {
+                            setObAgreementError(false);
+                            setObStep("ob-llm");
+                          } else {
+                            setObAgreementError(true);
+                          }
+                        }
+                      }}
+                    />
+                    {obAgreementError && (
+                      <p className="text-[13px] text-destructive">{t("onboarding.agreement.errorMismatch")}</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
             <div className="obFooter">
               {stepIndicator}
               <div className="obFooterBtns">
-                <button onClick={() => setObStep("ob-welcome")}>{t("config.prev")}</button>
-                <button
-                  className="btnPrimary"
+                <Button variant="outline" onClick={() => setObStep("ob-welcome")}>{t("config.prev")}</Button>
+                <Button
                   onClick={() => {
                     if (obAgreementInput.trim() === t("onboarding.agreement.confirmText")) {
                       setObAgreementError(false);
@@ -7412,7 +7410,7 @@ export function App() {
                   }}
                 >
                   {t("onboarding.agreement.proceed")}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -7430,15 +7428,11 @@ export function App() {
             <div className="obFooter">
               {stepIndicator}
               <div className="obFooterBtns">
-                <button onClick={() => setObStep("ob-agreement")}>{t("config.prev")}</button>
+                <Button variant="outline" onClick={() => setObStep("ob-agreement")}>{t("config.prev")}</Button>
                 {savedEndpoints.length > 0 ? (
-                  <button className="btnPrimary" onClick={() => setObStep("ob-im")}>
-                    {t("config.next")}
-                  </button>
+                  <Button onClick={() => setObStep("ob-im")}>{t("config.next")}</Button>
                 ) : (
-                  <button className="obSkipBtn" onClick={() => setObStep("ob-im")}>
-                    {t("onboarding.llm.skip")}
-                  </button>
+                  <Button variant="secondary" onClick={() => setObStep("ob-im")}>{t("onboarding.llm.skip")}</Button>
                 )}
               </div>
             </div>
@@ -7457,13 +7451,11 @@ export function App() {
             <div className="obFooter">
               {stepIndicator}
               <div className="obFooterBtns">
-                <button onClick={() => setObStep("ob-llm")}>{t("config.prev")}</button>
-                <button className="btnPrimary" onClick={() => setObStep("ob-cli")}>
-                  {t("config.next")}
-                </button>
-                <button className="obSkipBtn" onClick={() => setObStep("ob-cli")} title={t("onboarding.im.skip")}>
+                <Button variant="outline" onClick={() => setObStep("ob-llm")}>{t("config.prev")}</Button>
+                <Button onClick={() => setObStep("ob-cli")}>{t("config.next")}</Button>
+                <Button variant="secondary" onClick={() => setObStep("ob-cli")} title={t("onboarding.im.skip")}>
                   {t("onboarding.im.skipShort") || t("onboarding.im.skip")}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -7478,95 +7470,71 @@ export function App() {
                 {t("onboarding.system.desc")}
               </p>
 
-              <div className="obModuleList">
-                {/* openakita 命令 */}
-                <label className={`obModuleItem`} style={obCliOpenakita ? { borderColor: "var(--brand)", background: "var(--panel2)" } : {}}>
-                  <input
-                    type="checkbox"
-                    checked={obCliOpenakita}
-                    onChange={() => setObCliOpenakita(!obCliOpenakita)}
-                  />
+              <div className="flex flex-col gap-2">
+                <label className="obModuleItem" data-checked={obCliOpenakita || undefined}>
+                  <Checkbox checked={obCliOpenakita} onCheckedChange={() => setObCliOpenakita(!obCliOpenakita)} />
                   <div className="obModuleInfo">
                     <strong style={{ fontFamily: "monospace", fontSize: 15 }}>openakita</strong>
                     <span className="obModuleDesc">完整命令名称</span>
                   </div>
                 </label>
 
-                {/* oa 命令 */}
-                <label className={`obModuleItem`} style={obCliOa ? { borderColor: "var(--brand)", background: "var(--panel2)" } : {}}>
-                  <input
-                    type="checkbox"
-                    checked={obCliOa}
-                    onChange={() => setObCliOa(!obCliOa)}
-                  />
+                <label className="obModuleItem" data-checked={obCliOa || undefined}>
+                  <Checkbox checked={obCliOa} onCheckedChange={() => setObCliOa(!obCliOa)} />
                   <div className="obModuleInfo">
                     <strong style={{ fontFamily: "monospace", fontSize: 15 }}>oa</strong>
                     <span className="obModuleDesc">简短别名，推荐日常使用</span>
                   </div>
-                  <span className="obModuleBadge obModuleBadgeRec">推荐</span>
+                  <Badge variant="secondary" className="obModuleBadge obModuleBadgeRec">推荐</Badge>
                 </label>
 
-                {/* PATH 选项 */}
-                <label className={`obModuleItem`} style={obCliAddToPath ? { borderColor: "var(--brand)", background: "var(--panel2)" } : {}}>
-                  <input
-                    type="checkbox"
-                    checked={obCliAddToPath}
-                    onChange={() => setObCliAddToPath(!obCliAddToPath)}
-                  />
+                <label className="obModuleItem" data-checked={obCliAddToPath || undefined}>
+                  <Checkbox checked={obCliAddToPath} onCheckedChange={() => setObCliAddToPath(!obCliAddToPath)} />
                   <div className="obModuleInfo">
                     <strong>添加到系统 PATH</strong>
                     <span className="obModuleDesc">新打开的终端中可直接输入命令名运行，无需完整路径</span>
                   </div>
                 </label>
 
-                {/* 开机自启 */}
                 <div style={{ borderTop: "1px solid var(--line)", margin: "8px 0" }} />
-                <label className={`obModuleItem`} style={obAutostart ? { borderColor: "var(--brand)", background: "var(--panel2)" } : {}}>
-                  <input
-                    type="checkbox"
-                    checked={obAutostart}
-                    onChange={() => setObAutostart(!obAutostart)}
-                  />
+
+                <label className="obModuleItem" data-checked={obAutostart || undefined}>
+                  <Checkbox checked={obAutostart} onCheckedChange={() => setObAutostart(!obAutostart)} />
                   <div className="obModuleInfo">
                     <strong>{t("onboarding.autostart.label")}</strong>
                     <span className="obModuleDesc">{t("onboarding.autostart.desc")}</span>
                   </div>
-                  <span className="obModuleBadge obModuleBadgeRec">{t("onboarding.autostart.recommended")}</span>
+                  <Badge variant="secondary" className="obModuleBadge obModuleBadgeRec">{t("onboarding.autostart.recommended")}</Badge>
                 </label>
               </div>
 
-              {/* 命令预览 */}
               {(obCliOpenakita || obCliOa) && (
-                <div className="obFormArea" style={{ marginTop: 16, padding: "16px 20px" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>
-                    安装后可使用的命令示例
-                  </div>
-                  <div style={{
-                    background: "#0f172a", borderRadius: 8, padding: "14px 18px",
-                    fontFamily: "'Cascadia Code', 'Fira Code', 'SF Mono', Consolas, monospace",
-                    fontSize: 13, lineHeight: 1.9, color: "#e5e7eb", overflowX: "auto",
-                  }}>
-                    {obCliOa && <>
-                      <div><span style={{ color: "#94a3b8" }}>$</span> <span style={{ color: "#93c5fd" }}>oa</span> serve <span style={{ color: "#94a3b8", marginLeft: 24 }}># 启动后端服务</span></div>
-                      <div><span style={{ color: "#94a3b8" }}>$</span> <span style={{ color: "#93c5fd" }}>oa</span> status <span style={{ color: "#94a3b8", marginLeft: 16 }}># 查看运行状态</span></div>
-                      <div><span style={{ color: "#94a3b8" }}>$</span> <span style={{ color: "#93c5fd" }}>oa</span> run <span style={{ color: "#94a3b8", marginLeft: 36 }}># 单次对话</span></div>
-                    </>}
-                    {obCliOa && obCliOpenakita && <div style={{ height: 4 }} />}
-                    {obCliOpenakita && <>
-                      <div><span style={{ color: "#94a3b8" }}>$</span> <span style={{ color: "#a5b4fc" }}>openakita</span> init <span style={{ color: "#94a3b8", marginLeft: 8 }}># 初始化工作区</span></div>
-                      <div><span style={{ color: "#94a3b8" }}>$</span> <span style={{ color: "#a5b4fc" }}>openakita</span> serve <span style={{ color: "#94a3b8" }}># 启动后端服务</span></div>
-                    </>}
-                  </div>
-                </div>
+                <Card className="mt-4">
+                  <CardContent className="py-4 px-5 space-y-2.5">
+                    <p className="text-[13px] font-semibold text-muted-foreground">安装后可使用的命令示例</p>
+                    <div className="bg-slate-900 rounded-lg px-4 py-3.5 font-mono text-[13px] leading-[1.9] text-slate-200 overflow-x-auto">
+                      {obCliOa && <>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> serve <span className="text-slate-400 ml-6"># 启动后端服务</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> status <span className="text-slate-400 ml-4"># 查看运行状态</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> run <span className="text-slate-400 ml-9"># 单次对话</span></div>
+                      </>}
+                      {obCliOa && obCliOpenakita && <div className="h-1" />}
+                      {obCliOpenakita && <>
+                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> init <span className="text-slate-400 ml-2"># 初始化工作区</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> serve <span className="text-slate-400"># 启动后端服务</span></div>
+                      </>}
+                    </div>
+                  </CardContent>
+                </Card>
               )}
             </div>
             <div className="obFooter">
               {stepIndicator}
               <div className="obFooterBtns">
-                <button onClick={() => setObStep("ob-im")}>{t("config.prev")}</button>
-                <button className="btnPrimary" onClick={() => { setObStep("ob-progress"); obRunSetup(); }}>
+                <Button variant="outline" onClick={() => setObStep("ob-im")}>{t("config.prev")}</Button>
+                <Button onClick={() => { setObStep("ob-progress"); obRunSetup(); }}>
                   {t("onboarding.modules.startInstall")}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -7670,18 +7638,24 @@ export function App() {
       case "ob-done":
         return (
           <div className="obPage">
-            <div className="obCenter">
-              <div className="obDoneIcon">✓</div>
-              <h1 className="obTitle">{t("onboarding.done.title")}</h1>
-              <p className="obDesc">{t("onboarding.done.desc")}</p>
+            <div className="flex flex-col items-center text-center max-w-[520px] gap-5">
+              <div className="flex items-center justify-center size-16 rounded-full bg-emerald-500 text-white text-[32px] shadow-lg shadow-emerald-500/30">✓</div>
+              <h1 className="text-[28px] font-bold tracking-tight text-foreground">{t("onboarding.done.title")}</h1>
+              <p className="text-sm text-muted-foreground leading-relaxed">{t("onboarding.done.desc")}</p>
               {obHasErrors && (
-                <div className="obWarning">
-                  <strong>{t("onboarding.done.someErrors")}</strong>
-                  <p>{t("onboarding.done.errorsHint")}</p>
-                </div>
+                <Card className="w-full border border-amber-300 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/30 text-left text-[13px]">
+                  <CardContent className="py-3 px-4 space-y-1">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <AlertTriangle className="size-4 text-amber-500 shrink-0" />
+                      {t("onboarding.done.someErrors")}
+                    </div>
+                    <p className="text-muted-foreground">{t("onboarding.done.errorsHint")}</p>
+                  </CardContent>
+                </Card>
               )}
-              <button
-                className="btnPrimary obBtn"
+              <Button
+                size="lg"
+                className="mt-2 px-10 rounded-xl text-[15px]"
                 onClick={async () => {
                   // 设置短暂宽限期：onboarding 结束后 HTTP 服务可能还在启动中
                   // 避免心跳检测立刻报"不可达"导致闪烁
@@ -7705,7 +7679,7 @@ export function App() {
                 }}
               >
                 {t("onboarding.done.enter")}
-              </button>
+              </Button>
             </div>
             {stepIndicator}
           </div>
