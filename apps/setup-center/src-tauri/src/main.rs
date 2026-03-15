@@ -2458,6 +2458,15 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &event {
+                if !has_visible_windows {
+                    if let Some(win) = _app_handle.get_webview_window("main") {
+                        let _ = win.show();
+                        let _ = win.set_focus();
+                    }
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 // Safety-net: clean up backend processes on ANY exit path
                 // (SIGTERM, system shutdown, unexpected termination, etc.)
