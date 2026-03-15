@@ -492,10 +492,9 @@ class OpenAIProvider(LLMProvider):
             body.update(request.extra_params)
 
         # ── 本地端点检测 ──
-        # Ollama / LM Studio 等本地推理引擎的 OpenAI 兼容 API 不支持
-        # thinking: {"type": "enabled"} 格式的思考参数。
-        # 本地模型的思考能力通过模型自身机制实现（如 qwen3 的 <think> 标签），
-        # 无需也不能通过 API 参数控制。
+        # Ollama / LM Studio 等本地推理引擎不支持 OpenAI 风格的
+        # thinking: {"type": "enabled"} 嵌套参数，但 Ollama 0.9+ 支持
+        # enable_thinking (bool) 来控制双模模型（如 qwen3.5）的思考模式。
         is_local = self._is_local_endpoint()
 
         # DashScope 思考模式 — 必须在 extra_params 之后，以覆盖其中的 enable_thinking
@@ -554,6 +553,16 @@ class OpenAIProvider(LLMProvider):
             body.pop("thinking", None)
             body.pop("reasoning_effort", None)
 
+        # 本地端点思考模式（Ollama 0.9+ 等）
+        #
+        # Ollama 0.9+ 的 OpenAI 兼容 API 支持 enable_thinking (bool) 来切换
+        # 双模模型（如 qwen3.5）的思考模式。Thinking-only 模型（如 qwen3）
+        # 通过 <think> 标签自行输出思考内容，无需 API 参数控制。
+        # 不使用 OpenAI 风格的 thinking: {"type": "enabled"} 或 reasoning_effort。
+        elif is_local and self.config.has_capability("thinking"):
+            if request.enable_thinking:
+                body["enable_thinking"] = True
+
         # OpenAI 兼容端点思考模式（火山引擎/DeepSeek/vLLM/OpenRouter 等）
         #
         # 背景：
@@ -563,7 +572,7 @@ class OpenAIProvider(LLMProvider):
         # - 如果只传 reasoning_effort 而不启用 thinking，火山引擎等 API 会返回 400:
         #   "Invalid combination of reasoning_effort and thinking type: medium + disabled"
         #
-        # 排除: DashScope（上面已处理）、SiliconFlow（上面已处理）、本地端点
+        # 排除: DashScope（上面已处理）、SiliconFlow（上面已处理）、本地端点（上面已处理）
         elif (
             self.config.has_capability("thinking")
             and not is_local
@@ -591,16 +600,16 @@ class OpenAIProvider(LLMProvider):
                     body["thinking"] = {"type": "disabled"}
 
         # ── 本地端点清理 ──
-        # 移除可能通过 extra_params 泄漏到请求体中的思考相关参数，
-        # 避免 Ollama / LM Studio 返回 400 错误
+        # 移除可能通过 extra_params 泄漏的、本地引擎不支持的思考参数。
+        # enable_thinking (bool) 不在此列：Ollama 0.9+ 原生支持，
+        # 其他本地引擎（LM Studio / 旧版 Ollama）对未知简单字段静默忽略。
         if is_local:
-            _stripped = [k for k in ("thinking", "enable_thinking", "thinking_budget", "reasoning_effort") if k in body]
+            _stripped = [k for k in ("thinking", "thinking_budget", "reasoning_effort") if k in body]
             for _key in _stripped:
                 body.pop(_key, None)
             if _stripped:
                 logger.debug(
-                    f"[OpenAI] Local endpoint '{self.name}': stripped thinking params {_stripped} "
-                    f"(local models use native thinking mechanism, not API params)"
+                    f"[OpenAI] Local endpoint '{self.name}': stripped thinking params {_stripped}"
                 )
 
         # ── 请求体卫生检查 ──
