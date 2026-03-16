@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import secrets
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -310,6 +311,10 @@ class TelegramAdapter(ChannelAdapter):
             pairing_code=pairing_code,
         )
 
+        # 消息去重（防止 webhook 重试或网络抖动导致重复处理）
+        self._seen_update_ids: OrderedDict[int, None] = OrderedDict()
+        self._seen_update_ids_max = 500
+
     async def start(self) -> None:
         """启动 Telegram Bot"""
         _import_telegram()
@@ -554,6 +559,15 @@ class TelegramAdapter(ChannelAdapter):
     async def _handle_message(self, update: Any, context: Any) -> None:
         """处理收到的消息"""
         try:
+            # 去重：防止 webhook 重试 / 网络抖动导致同一 update 被处理多次
+            uid = update.update_id
+            if uid in self._seen_update_ids:
+                logger.debug(f"Duplicate update_id={uid}, skipping")
+                return
+            self._seen_update_ids[uid] = None
+            if len(self._seen_update_ids) > self._seen_update_ids_max:
+                self._seen_update_ids.popitem(last=False)
+
             message = update.message or update.edited_message
             if not message:
                 logger.debug("Received update without message")
@@ -886,13 +900,22 @@ class TelegramAdapter(ChannelAdapter):
                     reply_to_message_id=int(message.reply_to) if message.reply_to else None,
                     disable_web_page_preview=message.disable_preview,
                 )
+            except telegram.error.RetryAfter as e:
+                logger.warning(f"Telegram rate limit, retrying after {e.retry_after}s")
+                await asyncio.sleep(e.retry_after)
+                sent_message = await self._bot.send_message(
+                    chat_id=chat_id,
+                    text=text_to_send,
+                    parse_mode=parse_mode,
+                    reply_to_message_id=int(message.reply_to) if message.reply_to else None,
+                    disable_web_page_preview=message.disable_preview,
+                )
             except telegram.error.BadRequest as e:
-                # MarkdownV2 解析失败，回退到纯文本
                 if "Can't parse entities" in str(e) and parse_mode:
-                    logger.warning(f"MarkdownV2 parse failed, falling back to plain text: {e}")
+                    logger.warning(f"Markdown parse failed, falling back to plain text: {e}")
                     sent_message = await self._bot.send_message(
                         chat_id=chat_id,
-                        text=message.content.text,  # 使用原始文本
+                        text=message.content.text,
                         parse_mode=None,
                         reply_to_message_id=int(message.reply_to) if message.reply_to else None,
                         disable_web_page_preview=message.disable_preview,

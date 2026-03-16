@@ -2782,6 +2782,11 @@ class MessageGateway:
     async def _send_response(self, original: UnifiedMessage, response: str) -> None:
         """
         发送响应（带重试、按渠道分割长消息、分片间限流保护）
+
+        分片失败策略：
+        - 首次以 Markdown 分片发送
+        - 任一分片 3 次重试仍失败 → 中止剩余分片，改用纯文本整体重发
+        - 纯文本重发也失败 → 发送失败通知
         """
         import asyncio
 
@@ -2791,7 +2796,6 @@ class MessageGateway:
             return
 
         channel = original.channel
-        # 提取基础渠道名（兼容 "telegram_bot2" 等多实例命名）
         base_channel = channel.split("_")[0] if "_" in channel else channel
 
         max_length = self._CHANNEL_MAX_LENGTH.get(
@@ -2803,14 +2807,15 @@ class MessageGateway:
             base_channel, self._DEFAULT_SPLIT_INTERVAL
         )
 
+        outgoing_meta = dict(original.metadata) if original.metadata else {}
+        if original.channel_user_id:
+            outgoing_meta["channel_user_id"] = original.channel_user_id
+
+        failed_at = -1
+
         for i, text in enumerate(messages):
-            # 分片间限流保护
             if i > 0 and interval > 0:
                 await asyncio.sleep(interval)
-
-            outgoing_meta = dict(original.metadata) if original.metadata else {}
-            if original.channel_user_id:
-                outgoing_meta["channel_user_id"] = original.channel_user_id
 
             outgoing = OutgoingMessage.text(
                 chat_id=original.chat_id,
@@ -2821,9 +2826,11 @@ class MessageGateway:
                 metadata=outgoing_meta,
             )
 
+            sent = False
             for attempt in range(3):
                 try:
                     await adapter.send_message(outgoing)
+                    sent = True
                     break
                 except Exception as e:
                     if attempt < 2:
@@ -2837,13 +2844,44 @@ class MessageGateway:
                             f"Failed to send response part {i + 1}/{len(messages)} "
                             f"after 3 attempts: {e}"
                         )
-                        with contextlib.suppress(Exception):
-                            await adapter.send_text(
-                                chat_id=original.chat_id,
-                                text=f"消息发送失败（第 {i + 1}/{len(messages)} 段），请稍后重试。",
-                                reply_to=original.thread_id or original.channel_message_id,
-                                metadata=outgoing_meta,
-                            )
+            if not sent:
+                failed_at = i
+                break
+
+        if failed_at < 0:
+            return
+
+        # 分片发送失败 → 仅将失败及后续分片以纯文本重发，避免已送达的部分重复
+        remaining = messages[failed_at:]
+        logger.info(
+            f"[SendResponse] Split send failed at part {failed_at + 1}/{len(messages)}, "
+            f"retrying {len(remaining)} remaining part(s) as plain text"
+        )
+        for j, plain_text in enumerate(remaining):
+            if j > 0 and interval > 0:
+                await asyncio.sleep(interval)
+            plain_out = OutgoingMessage.text(
+                chat_id=original.chat_id,
+                text=plain_text,
+                reply_to=original.channel_message_id if (failed_at + j) == 0 else None,
+                thread_id=original.thread_id,
+                parse_mode="none",
+                metadata=outgoing_meta,
+            )
+            try:
+                await adapter.send_message(plain_out)
+            except Exception as e2:
+                logger.error(
+                    f"Plain-text fallback also failed for part {failed_at + j + 1}: {e2}"
+                )
+                with contextlib.suppress(Exception):
+                    await adapter.send_text(
+                        chat_id=original.chat_id,
+                        text="消息发送失败，请稍后重试。",
+                        reply_to=original.thread_id or original.channel_message_id,
+                        metadata=outgoing_meta,
+                    )
+                return
 
     async def _send_error(self, original: UnifiedMessage, error: str) -> None:
         """
