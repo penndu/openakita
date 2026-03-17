@@ -11,11 +11,11 @@ import { useTranslation } from "react-i18next";
 import {
   ReactFlow,
   Background,
-  Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
   addEdge,
+  useReactFlow,
   type Node,
   type Edge,
   type Connection,
@@ -62,6 +62,112 @@ import { OrgAvatar, AVATAR_PRESETS, AVATAR_MAP } from "../components/OrgAvatars"
 import { OrgChatPanel } from "../components/OrgChatPanel";
 import { OrgDashboard } from "../components/OrgDashboard";
 import { OrgProjectBoard } from "../components/OrgProjectBoard";
+import { ZoomIn, ZoomOut, Maximize, Map as MapIcon, X as XIcon } from "lucide-react";
+import { Button } from "../components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
+
+// ── Custom Canvas Controls (shadcn UI) ──
+
+function OrgCanvasControls() {
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+
+  return (
+    <Panel position="bottom-left">
+      <TooltipProvider>
+        <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-card/90 p-1 shadow-md backdrop-blur-sm">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={() => zoomIn()}>
+                <ZoomIn className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">放大</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={() => zoomOut()}>
+                <ZoomOut className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">缩小</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={() => fitView({ padding: 0.2 })}>
+                <Maximize className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">适应视图</TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
+    </Panel>
+  );
+}
+
+// ── Collapsible MiniMap with Edge Legend ──
+
+const EDGE_TYPE_LABELS: Record<string, string> = {
+  hierarchy: "上下级",
+  collaborate: "协作",
+  escalate: "上报",
+  consult: "咨询",
+};
+
+function CollapsibleMiniMap({ edgeColors }: { edgeColors: Record<string, string> }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <Panel position="bottom-right">
+      <div className="flex flex-col items-end gap-1.5">
+        {expanded ? (
+          <div className="rounded-lg border border-border/50 bg-card/90 shadow-md backdrop-blur-sm overflow-hidden">
+            <div className="flex items-center justify-between px-2 pt-1.5 pb-0.5">
+              <span className="text-[10px] font-medium text-muted-foreground">导航图</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setExpanded(false)}
+              >
+                <XIcon className="size-3" />
+              </Button>
+            </div>
+            <MiniMap
+              nodeStrokeWidth={2}
+              pannable
+              zoomable
+              style={{ position: "relative", width: 180, height: 120, margin: 0, background: "var(--card-bg, #fff)" }}
+            />
+            <div className="flex flex-wrap gap-2.5 px-2 py-1.5 border-t border-border/30">
+              {Object.entries(edgeColors).map(([type, color]) => (
+                <span key={type} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <span className="inline-block w-4 h-0.5 rounded-sm" style={{ background: color }} />
+                  {EDGE_TYPE_LABELS[type] || type}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-xs"
+                  className="shadow-md"
+                  onClick={() => setExpanded(true)}
+                >
+                  <MapIcon className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">展开导航图</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </div>
+    </Panel>
+  );
+}
 
 // ── Time helpers (always show local timezone) ──
 
@@ -2093,7 +2199,7 @@ export function OrgEditorView({
               style={{ background: "var(--bg-app)" }}
             >
               <Background gap={20} size={1} color="var(--line)" />
-              <Controls position="bottom-left" />
+              <OrgCanvasControls />
               {/* Canvas-specific toolbar */}
               <Panel position="top-left">
                 <div className="org-canvas-toolbar">
@@ -2110,28 +2216,7 @@ export function OrgEditorView({
                   )}
                 </div>
               </Panel>
-              {!isMobile && (
-              <MiniMap
-                nodeStrokeWidth={2}
-                pannable
-                zoomable
-                style={{ background: "var(--card-bg, #fff)" }}
-              />
-              )}
-              {!isMobile && (
-              <Panel position="bottom-right">
-                <div style={{ background: "var(--card-bg, #fff)", padding: "6px 10px", borderRadius: "var(--radius-sm)", fontSize: 10, border: "1px solid var(--line)" }}>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {Object.entries(EDGE_COLORS).map(([type, color]) => (
-                      <span key={type} style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                        <span style={{ display: "inline-block", width: 16, height: 2, background: color, borderRadius: 1 }} />
-                        {type === "hierarchy" ? "上下级" : type === "collaborate" ? "协作" : type === "escalate" ? "上报" : "咨询"}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </Panel>
-              )}
+              {!isMobile && <CollapsibleMiniMap edgeColors={EDGE_COLORS} />}
 
             </ReactFlow>
             {/* ── Context menu (portal to body to avoid clipping) ── */}
