@@ -130,12 +130,14 @@ class ToolExecutor:
             self._handler_locks[handler_name] = asyncio.Lock()
 
     # 长时间运行工具的硬超时（秒），防止工具卡死拖垮整个 agent 循环
+    # 值为 0 表示不设硬超时（由工具自身的进度监控负责，如 Orchestrator 的 idle-timeout）
     _TOOL_HARD_TIMEOUT: int = 120
 
     _LONG_RUNNING_TOOLS: dict[str, int] = {
         "org_request_meeting": 600,
         "org_broadcast": 300,
-        "delegate_to_agent": 300,
+        "delegate_to_agent": 0,
+        "delegate_parallel": 0,
         "browser_navigate": 300,
         "browser_use": 300,
         "run_shell": 300,
@@ -157,6 +159,9 @@ class ToolExecutor:
         """
         执行工具协程，同时监听 state.cancel_event 和硬超时。
         如果用户取消或超时，取消工具协程并返回错误信息。
+
+        hard_timeout=0 表示不设硬超时（委派类工具由 Orchestrator 的进度感知
+        idle-timeout 负责，不需要 ToolExecutor 层的固定超时）。
         """
         tool_task = asyncio.ensure_future(coro)
 
@@ -165,9 +170,14 @@ class ToolExecutor:
             cancel_future = asyncio.ensure_future(state.cancel_event.wait())
 
         hard_timeout = self._LONG_RUNNING_TOOLS.get(tool_name, self._TOOL_HARD_TIMEOUT)
-        timeout_task = asyncio.ensure_future(asyncio.sleep(hard_timeout))
 
-        wait_set: set[asyncio.Future] = {tool_task, timeout_task}
+        timeout_task: asyncio.Future | None = None
+        if hard_timeout > 0:
+            timeout_task = asyncio.ensure_future(asyncio.sleep(hard_timeout))
+
+        wait_set: set[asyncio.Future] = {tool_task}
+        if timeout_task is not None:
+            wait_set.add(timeout_task)
         if cancel_future:
             wait_set.add(cancel_future)
 
@@ -196,7 +206,7 @@ class ToolExecutor:
 
         finally:
             for t in [tool_task, timeout_task]:
-                if not t.done():
+                if t is not None and not t.done():
                     t.cancel()
                     try:
                         await t

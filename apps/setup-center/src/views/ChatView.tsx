@@ -3747,12 +3747,50 @@ export function ChatView({
         ctx.isStreaming = false;
         try { ctx.reader?.cancel().catch(() => {}); } catch {}
         ctx.reader = null;
-        if (ctx.pollingTimer) { clearInterval(ctx.pollingTimer); ctx.pollingTimer = null; }
+        const hasRunning = ctx.subAgentTasks.some(
+          (t) => t.status === "running" || t.status === "starting"
+        );
+        if (hasRunning && !ctx.pollingTimer) {
+          const doFetch = () => {
+            safeFetch(`${apiBase}/api/agents/sub-tasks?conversation_id=${encodeURIComponent(thisConvId)}`)
+              .then((r) => r.json())
+              .then((data: SubAgentTask[]) => {
+                if (!Array.isArray(data)) return;
+                if (activeConvIdRef.current === thisConvId) setDisplaySubAgentTasks(data);
+                const allDone = data.length > 0 && data.every(
+                  (t) => t.status === "completed" || t.status === "error" || t.status === "timeout" || t.status === "cancelled"
+                );
+                if (allDone) {
+                  if (finalPollingTimer) { clearInterval(finalPollingTimer); finalPollingTimer = null; }
+                  setTimeout(() => {
+                    if (activeConvIdRef.current === thisConvId) {
+                      setDisplaySubAgentTasks([]);
+                      setDisplayActiveSubAgents([]);
+                    }
+                  }, 5000);
+                }
+              })
+              .catch(() => {});
+          };
+          let finalPollingTimer: ReturnType<typeof setInterval> | null = setInterval(doFetch, 2000);
+          doFetch();
+          setTimeout(() => {
+            if (finalPollingTimer) { clearInterval(finalPollingTimer); finalPollingTimer = null; }
+          }, 600_000);
+        } else if (!hasRunning) {
+          if (ctx.pollingTimer) { clearInterval(ctx.pollingTimer); ctx.pollingTimer = null; }
+          if (activeConvIdRef.current === thisConvId) {
+            setTimeout(() => {
+              setDisplayActiveSubAgents([]);
+              setDisplaySubAgentTasks([]);
+            }, 5000);
+          }
+        } else {
+          if (ctx.pollingTimer) { clearInterval(ctx.pollingTimer); ctx.pollingTimer = null; }
+        }
         saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + thisConvId, ctx.messages);
         if (activeConvIdRef.current === thisConvId) {
           setMessages(ctx.messages);
-          setDisplayActiveSubAgents([]);
-          setDisplaySubAgentTasks([]);
         }
         streamContexts.current.delete(thisConvId);
       }
@@ -4423,7 +4461,7 @@ export function ChatView({
           )}
 
           {/* Active sub-agents in current conversation */}
-          {multiAgentEnabled && displayActiveSubAgents.length > 0 && (
+          {displayActiveSubAgents.length > 0 && (
             <div className="subAgentStrip">
               <span className="subAgentLabel">协作中</span>
               {displayActiveSubAgents.map((sub) => {
@@ -4495,7 +4533,7 @@ export function ChatView({
           )}
 
           {/* Sub-agent progress cards */}
-          {multiAgentEnabled && displaySubAgentTasks.length > 0 && (
+          {displaySubAgentTasks.length > 0 && (
             <SubAgentCards tasks={displaySubAgentTasks} />
           )}
 
