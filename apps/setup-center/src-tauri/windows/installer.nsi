@@ -387,11 +387,9 @@ Function PageLeaveReinstall
     Abort
     ${EndIf}
 
-    ; Uninstall failed — offer user a choice: force-continue or abort
-    MessageBox MB_YESNO|MB_ICONEXCLAMATION "$(unableToUninstall)$\n$\n是否仍然继续安装？（将覆盖旧版本文件）" IDYES reinst_force_continue
-    Abort
-
-    reinst_force_continue:
+    ; Old uninstaller failed — this is common with legacy versions.
+    ; Silently continue: NSIS_HOOK_PREINSTALL will kill processes and
+    ; clean up old files before overwriting, so the failure is harmless.
   ${EndIf}
  reinst_done:
 FunctionEnd

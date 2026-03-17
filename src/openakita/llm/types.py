@@ -10,7 +10,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 
-_OPENAI_ENDPOINT_SUFFIXES = ("/chat/completions", "/completions", "/embeddings", "/models")
+_OPENAI_ENDPOINT_SUFFIXES = (
+    "/chat/completions", "/completions", "/embeddings", "/models", "/responses",
+)
 
 
 def normalize_base_url(url: str, *, extra_suffixes: tuple[str, ...] = ()) -> str:
@@ -464,7 +466,7 @@ class EndpointConfig:
 
     name: str  # 端点名称
     provider: str  # 服务商标识 (anthropic, dashscope, openrouter, ...)
-    api_type: str  # API 类型 ("anthropic" | "openai")
+    api_type: str  # API 类型 ("openai" | "openai_responses" | "anthropic")
     base_url: str  # API 地址
     api_key_env: str | None = None  # API Key 环境变量名
     api_key: str | None = None  # 直接存储的 API Key (不推荐，但支持)

@@ -21,6 +21,7 @@ from .config import get_default_config_path, load_endpoints_config
 from .providers.anthropic import AnthropicProvider
 from .providers.base import LLMProvider
 from .providers.openai import OpenAIProvider
+from .providers.openai_responses import OpenAIResponsesProvider
 from .types import (
     AllEndpointsFailedError,
     AudioBlock,
@@ -234,6 +235,8 @@ class LLMClient:
                 return AnthropicProvider(config)
             elif config.api_type == "openai":
                 return OpenAIProvider(config)
+            elif config.api_type == "openai_responses":
+                return OpenAIResponsesProvider(config)
             else:
                 logger.warning(f"Unknown api_type '{config.api_type}' for endpoint '{config.name}'")
                 return None
@@ -679,12 +682,14 @@ class LLMClient:
                         p.reset_cooldown()
                 return retryable
 
-            # 如果所有端点都是 quota/auth，仍然返回它们（让 _try_endpoints 决定最终错误）
-            logger.warning(
-                f"[LLM] All {len(base_capability_matched)} endpoints have "
-                f"non-retryable errors. Returning for final error handling."
+            # 所有端点都是 quota/auth → 直接报错，不再送回 _try_endpoints 浪费 API 调用
+            last_err = base_capability_matched[0]._last_error or "unknown error"
+            categories = sorted({p.error_category for p in base_capability_matched})
+            hint = _friendly_error_hint(base_capability_matched)
+            raise AllEndpointsFailedError(
+                f"All endpoints failed with {'/'.join(categories)} errors. "
+                f"{hint} Last error: {last_err}"
             )
-            return base_capability_matched
 
         # ── 降级 4: 最终兜底 — 尝试所有端点 ──
         logger.warning(

@@ -352,6 +352,88 @@ def _convert_openai_content_to_blocks(content: list[dict]) -> list[ContentBlock]
     return blocks
 
 
+def convert_messages_to_responses(
+    messages: list[Message],
+    system: str = "",
+    provider: str = "openai",
+    enable_thinking: bool = False,
+) -> tuple[list[dict], str]:
+    """将内部消息转换为 Responses API 的 input items + instructions。
+
+    与 Chat Completions 的区别：
+    - system prompt 不嵌入 messages，改由 instructions 独立传递
+    - tool_result 使用 function_call_output item 而非 role:"tool" 消息
+    - tool_call 使用 function_call item 而非 assistant.tool_calls
+
+    Returns:
+        (input_items, instructions): input 数组和 instructions 字符串
+    """
+    input_items: list[dict] = []
+
+    for msg in messages:
+        converted = _convert_single_message_to_responses(
+            msg, provider=provider, enable_thinking=enable_thinking,
+        )
+        if converted:
+            if isinstance(converted, list):
+                input_items.extend(converted)
+            else:
+                input_items.append(converted)
+
+    return input_items, system
+
+
+def _convert_single_message_to_responses(
+    msg: Message,
+    provider: str = "openai",
+    enable_thinking: bool = False,
+) -> dict | list[dict] | None:
+    """将单条内部消息转换为 Responses API input item(s)。"""
+    from .tools import convert_tool_result_to_responses
+
+    if isinstance(msg.content, str):
+        return {"role": msg.role, "content": msg.content}
+
+    content_blocks = msg.content
+    tool_results = [b for b in content_blocks if isinstance(b, ToolResultBlock)]
+    other_blocks = [b for b in content_blocks if not isinstance(b, ToolResultBlock)]
+
+    result = []
+
+    # tool_result → function_call_output items
+    for tr in tool_results:
+        content = tr.content if isinstance(tr.content, str) else str(tr.content)
+        result.append(convert_tool_result_to_responses(tr.tool_use_id, content))
+
+    if other_blocks:
+        if msg.role == "assistant":
+            tool_uses = [b for b in other_blocks if isinstance(b, ToolUseBlock)]
+            text_blocks = [b for b in other_blocks if isinstance(b, TextBlock)]
+
+            text_content = "".join(b.text for b in text_blocks) if text_blocks else ""
+
+            # Responses API: assistant 的文本输出是 message item
+            if text_content:
+                result.append({"role": "assistant", "content": text_content})
+
+            # tool_use → function_call items
+            import json
+            for tu in tool_uses:
+                result.append({
+                    "type": "function_call",
+                    "id": tu.id,
+                    "call_id": tu.id,
+                    "name": tu.name,
+                    "arguments": json.dumps(tu.input, ensure_ascii=False),
+                })
+        else:
+            # user 消息
+            openai_content = convert_content_blocks_to_openai(other_blocks, provider=provider)
+            result.append({"role": msg.role, "content": openai_content})
+
+    return result if result else None
+
+
 def convert_system_to_openai(system: str) -> dict:
     """将系统提示转换为 OpenAI 格式消息"""
     return {"role": "system", "content": system}

@@ -13,6 +13,7 @@ import { ModalOverlay } from "../components/ModalOverlay";
 import { logger } from "../platform";
 import { IS_WEB, onWsEvent } from "../platform";
 import { FeishuQRModal } from "../components/FeishuQRModal";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -911,29 +912,12 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
             {ONEBOT_TYPES.has(editingBot.type) && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{t("config.imOneBotMode")}</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                  {(["onebot_reverse", "onebot"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={editingBot.type === m ? "capChipActive" : "capChip"}
-                      onClick={() => {
-                        if (editingBot.type !== m) {
-                          setEditingBot((p) => ({ ...p, type: m, credentials: {} }));
-                        }
-                      }}
-                      style={{
-                        padding: "4px 12px", borderRadius: 6, fontSize: 11, cursor: "pointer",
-                        border: editingBot.type === m ? "1px solid var(--accent)" : "1px solid var(--line)",
-                        background: editingBot.type === m ? "var(--accent-bg, rgba(59,130,246,0.1))" : "transparent",
-                        color: editingBot.type === m ? "var(--accent, #3b82f6)" : "inherit",
-                        fontWeight: editingBot.type === m ? 600 : 400,
-                      }}
-                    >
-                      {m === "onebot_reverse" ? t("config.imOneBotModeReverse") : t("config.imOneBotModeForward")}
-                    </button>
-                  ))}
-                </div>
+                <ToggleGroup type="single" variant="outline" size="sm" value={editingBot.type} onValueChange={(v) => {
+                  if (v && v !== editingBot.type) setEditingBot((p) => ({ ...p, type: v as typeof editingBot.type, credentials: {} }));
+                }} className="mt-1 [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground">
+                  <ToggleGroupItem value="onebot_reverse">{t("config.imOneBotModeReverse")}</ToggleGroupItem>
+                  <ToggleGroupItem value="onebot">{t("config.imOneBotModeForward")}</ToggleGroupItem>
+                </ToggleGroup>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
                   {editingBot.type === "onebot_reverse" ? t("config.imOneBotModeReverseHint") : t("config.imOneBotModeForwardHint")}
                 </div>
@@ -944,29 +928,12 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
             {WEWORK_TYPES.has(editingBot.type) && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{t("config.imWeworkMode")}</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                  {(["wework_ws", "wework"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={editingBot.type === m ? "capChipActive" : "capChip"}
-                      onClick={() => {
-                        if (editingBot.type !== m) {
-                          setEditingBot((p) => ({ ...p, type: m, credentials: {} }));
-                        }
-                      }}
-                      style={{
-                        padding: "4px 12px", borderRadius: 6, fontSize: 11, cursor: "pointer",
-                        border: editingBot.type === m ? "1px solid var(--accent)" : "1px solid var(--line)",
-                        background: editingBot.type === m ? "var(--accent-bg, rgba(59,130,246,0.1))" : "transparent",
-                        color: editingBot.type === m ? "var(--accent, #3b82f6)" : "inherit",
-                        fontWeight: editingBot.type === m ? 600 : 400,
-                      }}
-                    >
-                      {m === "wework_ws" ? t("config.imWeworkModeWs") : t("config.imWeworkModeHttp")}
-                    </button>
-                  ))}
-                </div>
+                <ToggleGroup type="single" variant="outline" size="sm" value={editingBot.type} onValueChange={(v) => {
+                  if (v && v !== editingBot.type) setEditingBot((p) => ({ ...p, type: v as typeof editingBot.type, credentials: {} }));
+                }} className="mt-1 [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground">
+                  <ToggleGroupItem value="wework_ws">{t("config.imWeworkModeWs")}</ToggleGroupItem>
+                  <ToggleGroupItem value="wework">{t("config.imWeworkModeHttp")}</ToggleGroupItem>
+                </ToggleGroup>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
                   {editingBot.type === "wework_ws" ? t("config.imWeworkModeWsHint") : t("config.imWeworkModeHttpHint")}
                 </div>
@@ -1025,18 +992,10 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
                 </label>
                 <div style={{ marginBottom: 10 }}>
                   <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>{t("config.imQQBotMode")}</div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {["websocket", "webhook"].map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        className={(String(editingBot.credentials.mode || "websocket")) === m ? "capChipActive" : "capChip"}
-                        onClick={() => updateCredential("mode", m)}
-                      >
-                        {m === "websocket" ? "WebSocket" : "Webhook"}
-                      </button>
-                    ))}
-                  </div>
+                  <ToggleGroup type="single" variant="outline" size="sm" value={String(editingBot.credentials.mode || "websocket")} onValueChange={(v) => { if (v) updateCredential("mode", v); }} className="[&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground">
+                    <ToggleGroupItem value="websocket">WebSocket</ToggleGroupItem>
+                    <ToggleGroupItem value="webhook">Webhook</ToggleGroupItem>
+                  </ToggleGroup>
                   <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
                     {(String(editingBot.credentials.mode || "websocket")) === "websocket"
                       ? t("config.imQQBotModeWsHint")

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { FieldText, FieldBool, TelegramPairingCodeHint } from "../components/EnvFields";
 import { FeishuQRModal } from "../components/FeishuQRModal";
 import { IconBook, IconClipboard, LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ } from "../icons";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { EnvMap } from "../types";
 import { envGet, envSet } from "../utils";
 import { copyToClipboard } from "../utils/clipboard";
@@ -14,10 +15,12 @@ type IMConfigViewProps = {
   busy?: string | null;
   currentWorkspaceId: string | null;
   venvDir?: string;
+  imDisabled?: boolean;
+  onToggleIM?: () => void;
 };
 
 export function IMConfigView(props: IMConfigViewProps) {
-  const { envDraft, setEnvDraft, busy = null, currentWorkspaceId, venvDir = "" } = props;
+  const { envDraft, setEnvDraft, busy = null, currentWorkspaceId, venvDir = "", imDisabled = false, onToggleIM } = props;
   const { t } = useTranslation();
   const [showFeishuQR, setShowFeishuQR] = useState(false);
 
@@ -98,25 +101,21 @@ export function IMConfigView(props: IMConfigViewProps) {
           <>
             <div style={{ marginBottom: 8 }}>
               <div className="label">{t("config.imWeworkMode")}</div>
-              <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                {(["http", "websocket"] as const).map((m) => (
-                  <button key={m} className={weworkMode === m ? "capChipActive" : "capChip"}
-                    onClick={() => {
-                      const oldKey = isWs ? "WEWORK_WS_ENABLED" : "WEWORK_ENABLED";
-                      const newKey = m === "websocket" ? "WEWORK_WS_ENABLED" : "WEWORK_ENABLED";
-                      setEnvDraft((d) => {
-                        const wasEnabled = (d[oldKey] || "false").toLowerCase() === "true";
-                        const next: Record<string, string> = { ...d, WEWORK_MODE: m };
-                        if (wasEnabled && oldKey !== newKey) {
-                          next[oldKey] = "false";
-                          next[newKey] = "true";
-                        }
-                        return next;
-                      });
-                    }}
-                  >{m === "http" ? t("config.imWeworkModeHttp") : t("config.imWeworkModeWs")}</button>
-                ))}
-              </div>
+              <ToggleGroup type="single" variant="outline" size="sm" value={weworkMode} onValueChange={(v) => {
+                if (!v) return;
+                const m = v as "http" | "websocket";
+                const oldKey = isWs ? "WEWORK_WS_ENABLED" : "WEWORK_ENABLED";
+                const newKey = m === "websocket" ? "WEWORK_WS_ENABLED" : "WEWORK_ENABLED";
+                setEnvDraft((d) => {
+                  const wasEnabled = (d[oldKey] || "false").toLowerCase() === "true";
+                  const next: Record<string, string> = { ...d, WEWORK_MODE: m };
+                  if (wasEnabled && oldKey !== newKey) { next[oldKey] = "false"; next[newKey] = "true"; }
+                  return next;
+                });
+              }} className="mt-1 [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground">
+                <ToggleGroupItem value="http">{t("config.imWeworkModeHttp")}</ToggleGroupItem>
+                <ToggleGroupItem value="websocket">{t("config.imWeworkModeWs")}</ToggleGroupItem>
+              </ToggleGroup>
               <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
                 {isWs ? t("config.imWeworkModeWsHint") : t("config.imWeworkModeHttpHint")}
               </div>
@@ -169,12 +168,10 @@ export function IMConfigView(props: IMConfigViewProps) {
           {FB({ k: "QQBOT_SANDBOX", label: t("config.imQQBotSandbox") })}
           <div style={{ marginTop: 8 }}>
             <div className="label">{t("config.imQQBotMode")}</div>
-            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-              {["websocket", "webhook"].map((m) => (
-                <button key={m} className={(envDraft["QQBOT_MODE"] || "websocket") === m ? "capChipActive" : "capChip"}
-                  onClick={() => setEnvDraft((d) => ({ ...d, QQBOT_MODE: m }))}>{m === "websocket" ? "WebSocket" : "Webhook"}</button>
-              ))}
-            </div>
+            <ToggleGroup type="single" variant="outline" size="sm" value={envDraft["QQBOT_MODE"] || "websocket"} onValueChange={(v) => { if (v) setEnvDraft((d) => ({ ...d, QQBOT_MODE: v })); }} className="mt-1 [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground">
+              <ToggleGroupItem value="websocket">WebSocket</ToggleGroupItem>
+              <ToggleGroupItem value="webhook">Webhook</ToggleGroupItem>
+            </ToggleGroup>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
               {(envDraft["QQBOT_MODE"] || "websocket") === "websocket"
                 ? t("config.imQQBotModeWsHint")
@@ -204,13 +201,10 @@ export function IMConfigView(props: IMConfigViewProps) {
           <>
             <div style={{ marginBottom: 8 }}>
               <div className="label">{t("config.imOneBotMode")}</div>
-              <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                {(["reverse", "forward"] as const).map((m) => (
-                  <button key={m} className={obMode === m ? "capChipActive" : "capChip"}
-                    onClick={() => setEnvDraft((d) => ({ ...d, ONEBOT_MODE: m }))}
-                  >{m === "reverse" ? t("config.imOneBotModeReverse") : t("config.imOneBotModeForward")}</button>
-                ))}
-              </div>
+              <ToggleGroup type="single" variant="outline" size="sm" value={obMode} onValueChange={(v) => { if (v) setEnvDraft((d) => ({ ...d, ONEBOT_MODE: v })); }} className="mt-1 [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground">
+                <ToggleGroupItem value="reverse">{t("config.imOneBotModeReverse")}</ToggleGroupItem>
+                <ToggleGroupItem value="forward">{t("config.imOneBotModeForward")}</ToggleGroupItem>
+              </ToggleGroup>
               <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
                 {isReverse ? t("config.imOneBotModeReverseHint") : t("config.imOneBotModeForwardHint")}
               </div>
@@ -245,11 +239,33 @@ export function IMConfigView(props: IMConfigViewProps) {
       )}
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div className="cardTitle">{t("config.imTitle")}</div>
-          <button className="btnSmall" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
-            onClick={async () => { const ok = await copyToClipboard("https://github.com/anthropic-lab/openakita/blob/main/docs/im-channels.md"); if (ok) toast.success(t("config.imGuideDocCopied")); }}
-            title={t("config.imGuideDoc")}
-          ><IconBook size={13} />{t("config.imGuideDoc")}</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="cardTitle" style={{ marginBottom: 0 }}>{t("config.imTitle")}</div>
+            <button className="btnSmall" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
+              onClick={async () => { const ok = await copyToClipboard("https://github.com/anthropic-lab/openakita/blob/main/docs/im-channels.md"); if (ok) toast.success(t("config.imGuideDocCopied")); }}
+              title={t("config.imGuideDoc")}
+            ><IconBook size={13} />{t("config.imGuideDoc")}</button>
+          </div>
+          {onToggleIM && (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--muted)", cursor: "pointer" }}>
+              <span>{imDisabled ? t("config.imDisabledLabel", { defaultValue: "已禁用" }) : t("config.imEnabledLabel", { defaultValue: "已启用" })}</span>
+              <div
+                onClick={onToggleIM}
+                style={{
+                  width: 40, height: 22, borderRadius: 11, cursor: "pointer",
+                  background: imDisabled ? "var(--line)" : "var(--ok)",
+                  position: "relative", transition: "background 0.2s",
+                }}
+              >
+                <div style={{
+                  width: 18, height: 18, borderRadius: 9, background: "#fff",
+                  position: "absolute", top: 2,
+                  left: imDisabled ? 2 : 20,
+                  transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                }} />
+              </div>
+            </label>
+          )}
         </div>
         <div className="cardHint">{t("config.imHint")}</div>
         <div className="divider" />

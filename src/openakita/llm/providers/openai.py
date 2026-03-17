@@ -78,6 +78,11 @@ class OpenAIProvider(LLMProvider):
         """获取 base URL，自动剥离用户误粘贴的 OpenAI 兼容端点路径后缀。"""
         return normalize_base_url(self.config.base_url)
 
+    @property
+    def _api_url(self) -> str:
+        """完整 API 端点 URL，子类可覆写以切换协议（如 Responses API）。"""
+        return f"{self.base_url}/chat/completions"
+
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端
 
@@ -218,7 +223,7 @@ class OpenAIProvider(LLMProvider):
         # 发送请求
         try:
             response = await client.post(
-                f"{self.base_url}/chat/completions",
+                self._api_url,
                 headers=self._build_headers(),
                 json=body,
                 **({"timeout": req_timeout} if req_timeout else {}),
@@ -297,7 +302,7 @@ class OpenAIProvider(LLMProvider):
         try:
             async with client.stream(
                 "POST",
-                f"{self.base_url}/chat/completions",
+                self._api_url,
                 headers=self._build_headers(),
                 json=body,
                 **({"timeout": req_timeout} if req_timeout else {}),
