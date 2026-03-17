@@ -310,6 +310,20 @@ class WeWorkWsAdapter(ChannelAdapter):
 
     channel_name = "wework_ws"
 
+    capabilities = {
+        "streaming": False,
+        "send_image": True,
+        "send_file": True,
+        "send_voice": True,
+        "delete_message": False,
+        "edit_message": False,
+        "get_chat_info": False,
+        "get_user_info": False,
+        "get_chat_members": False,
+        "get_recent_messages": False,
+        "markdown": True,
+    }
+
     def __init__(
         self,
         bot_id: str,
@@ -633,7 +647,11 @@ class WeWorkWsAdapter(ChannelAdapter):
             is_mentioned=is_mentioned,
             is_direct_message=is_direct,
             raw=body,
-            metadata={"req_id": req_id},
+            metadata={
+                "req_id": req_id,
+                "is_group": chat_type == "group",
+                "sender_name": "",
+            },
         )
 
         self._log_message(unified)

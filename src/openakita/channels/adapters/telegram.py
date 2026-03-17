@@ -265,6 +265,20 @@ class TelegramAdapter(ChannelAdapter):
 
     channel_name = "telegram"
 
+    capabilities = {
+        "streaming": False,
+        "send_image": True,
+        "send_file": True,
+        "send_voice": True,
+        "delete_message": True,
+        "edit_message": True,
+        "get_chat_info": True,
+        "get_user_info": False,
+        "get_chat_members": False,
+        "get_recent_messages": False,
+        "markdown": True,
+    }
+
     def __init__(
         self,
         bot_token: str,
@@ -780,6 +794,14 @@ class TelegramAdapter(ChannelAdapter):
                 "user_id": message.from_user.id,
                 "username": message.from_user.username,
                 "first_name": message.from_user.first_name,
+            },
+            metadata={
+                "is_group": chat_type == "group",
+                "sender_name": (
+                    message.from_user.first_name
+                    or message.from_user.username
+                    or ""
+                ),
             },
         )
 

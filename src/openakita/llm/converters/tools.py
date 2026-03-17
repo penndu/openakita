@@ -628,6 +628,85 @@ def _parse_json_tool_calls(text: str) -> tuple[str, list[ToolUseBlock]]:
     return clean_text, tool_calls
 
 
+# ── Responses API 格式转换 ──────────────────────────────────
+#
+# OpenAI Responses API 使用 internally-tagged 格式，与 Chat Completions
+# 的 externally-tagged 格式不同。以下函数仅在 api_type="openai_responses"
+# 的端点中使用，不影响现有 Chat Completions 路径。
+
+
+def convert_tools_to_responses(tools: list[Tool]) -> list[dict]:
+    """将内部工具定义转换为 Responses API 格式。
+
+    Chat Completions: {"type": "function", "function": {"name", "description", "parameters"}}
+    Responses API:    {"type": "function", "name", "description", "parameters", "strict": true}
+    """
+    return [
+        {
+            "type": "function",
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.input_schema,
+        }
+        for tool in tools
+    ]
+
+
+def convert_tool_calls_from_responses(items: list[dict]) -> list[ToolUseBlock]:
+    """从 Responses API output items 中提取工具调用。
+
+    Responses 格式: {"type": "function_call", "id": ..., "call_id": ..., "name": ..., "arguments": "..."}
+    """
+    result = []
+    for item in items:
+        if item.get("type") != "function_call":
+            continue
+        arguments = item.get("arguments", "{}")
+        if isinstance(arguments, str):
+            try:
+                input_dict = json.loads(arguments)
+            except json.JSONDecodeError:
+                tool_name = item.get("name", "?")
+                repaired = _try_repair_json(arguments)
+                _dump_raw_arguments(tool_name, arguments)
+                if repaired is not None:
+                    err_msg = (
+                        f"❌ 工具 '{tool_name}' 的参数 JSON 被 API 截断后自动修复，"
+                        f"但内容可能不完整。请缩短参数后重试。"
+                    )
+                    input_dict = {PARSE_ERROR_KEY: err_msg}
+                else:
+                    err_msg = (
+                        f"❌ 工具 '{tool_name}' 的参数 JSON 被 API 截断且无法修复。"
+                        "请缩短参数后重试。"
+                    )
+                    input_dict = {PARSE_ERROR_KEY: err_msg}
+        else:
+            input_dict = arguments
+
+        result.append(
+            ToolUseBlock(
+                id=item.get("call_id") or item.get("id", ""),
+                name=item.get("name", ""),
+                input=input_dict,
+            )
+        )
+    return result
+
+
+def convert_tool_result_to_responses(call_id: str, content: str) -> dict:
+    """将工具执行结果转换为 Responses API 的 function_call_output item。
+
+    Chat Completions: {"role": "tool", "tool_call_id": ..., "content": ...}
+    Responses API:    {"type": "function_call_output", "call_id": ..., "output": ...}
+    """
+    return {
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": content,
+    }
+
+
 def has_text_tool_calls(text: str) -> bool:
     """
     检查文本中是否包含工具调用格式

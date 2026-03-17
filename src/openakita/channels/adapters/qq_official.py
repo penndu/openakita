@@ -15,6 +15,7 @@ QQ 官方机器人适配器
 """
 
 import asyncio
+import collections
 import contextlib
 import hashlib
 import hmac
@@ -70,6 +71,20 @@ class QQBotAdapter(ChannelAdapter):
     """
 
     channel_name = "qqbot"
+
+    capabilities = {
+        "streaming": False,
+        "send_image": True,
+        "send_file": False,
+        "send_voice": False,
+        "delete_message": False,
+        "edit_message": False,
+        "get_chat_info": False,
+        "get_user_info": False,
+        "get_chat_members": False,
+        "get_recent_messages": False,
+        "markdown": True,
+    }
 
     def __init__(
         self,
@@ -132,6 +147,10 @@ class QQBotAdapter(ChannelAdapter):
         self._typing_msg_ids: dict[str, str] = {}
         # Markdown 能力是否可用（自定义 markdown 需内邀开通，首次失败后自动降级）
         self._markdown_available: bool = True
+
+        # 消息去重：Webhook/WebSocket 可能重复投递
+        self._seen_message_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
+        self._seen_message_ids_max = 500
 
     def _remember_chat(self, chat_id: str, chat_type: str, msg_id: str = "") -> None:
         """记录 chat_id 的路由信息（收到消息时调用）"""
@@ -427,9 +446,37 @@ class QQBotAdapter(ChannelAdapter):
         finally:
             await runner.cleanup()
 
+    def _is_duplicate(self, msg_id: str) -> bool:
+        """检查消息是否重复，并记录到 LRU 缓存"""
+        if not msg_id:
+            return False
+        if msg_id in self._seen_message_ids:
+            logger.debug(f"QQ: duplicate message ignored: {msg_id}")
+            return True
+        self._seen_message_ids[msg_id] = None
+        while len(self._seen_message_ids) > self._seen_message_ids_max:
+            self._seen_message_ids.popitem(last=False)
+        return False
+
     async def _handle_webhook_event(self, event_type: str, data: dict) -> None:
         """处理 Webhook 推送的事件"""
         try:
+            import time as _time
+            from datetime import datetime
+            ts_str = data.get("timestamp")
+            if ts_str and isinstance(ts_str, str):
+                try:
+                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    age_s = _time.time() - dt.timestamp()
+                    if age_s > self.STALE_MESSAGE_THRESHOLD_S:
+                        logger.info(
+                            f"QQ: stale webhook message discarded "
+                            f"(age={age_s:.0f}s): {data.get('id', '?')}"
+                        )
+                        return
+                except (ValueError, OSError):
+                    pass
+
             if event_type == "GROUP_AT_MESSAGE_CREATE":
                 unified = self._convert_webhook_group_message(data)
             elif event_type == "C2C_MESSAGE_CREATE":
@@ -438,6 +485,9 @@ class QQBotAdapter(ChannelAdapter):
                 unified = self._convert_webhook_channel_message(data)
             else:
                 logger.debug(f"QQ Webhook: unhandled event type {event_type}")
+                return
+
+            if self._is_duplicate(unified.channel_message_id):
                 return
 
             self._log_message(unified)
@@ -475,6 +525,7 @@ class QQBotAdapter(ChannelAdapter):
                 "is_group": True,
                 "group_openid": group_openid,
                 "msg_id": data.get("id", ""),
+                "sender_name": "",
             },
         )
 
@@ -506,6 +557,7 @@ class QQBotAdapter(ChannelAdapter):
                 "is_group": False,
                 "user_openid": user_openid,
                 "msg_id": data.get("id", ""),
+                "sender_name": "",
             },
         )
 
@@ -540,6 +592,7 @@ class QQBotAdapter(ChannelAdapter):
                 "channel_id": channel_id,
                 "guild_id": guild_id,
                 "msg_id": data.get("id", ""),
+                "sender_name": author.get("username", ""),
             },
         )
 
@@ -689,6 +742,7 @@ class QQBotAdapter(ChannelAdapter):
                 "is_group": True,
                 "group_openid": group_openid,
                 "msg_id": message.id,
+                "sender_name": "",
             },
         )
 
@@ -723,6 +777,7 @@ class QQBotAdapter(ChannelAdapter):
                 "is_group": False,
                 "user_openid": user_openid,
                 "msg_id": message.id,
+                "sender_name": "",
             },
         )
 
@@ -761,6 +816,7 @@ class QQBotAdapter(ChannelAdapter):
                 "channel_id": channel_id,
                 "guild_id": guild_id,
                 "msg_id": message.id,
+                "sender_name": getattr(author, "username", "") or "",
             },
         )
 
@@ -899,31 +955,52 @@ class QQBotAdapter(ChannelAdapter):
 
         text = message.content.text or ""
 
-        # 检查是否有图片需要发送
-        has_image = bool(message.content.images)
-        image_url: str | None = None
-        image_path: str | None = None
-        if has_image:
+        # 提取首张图片随主消息一起发送
+        first_image_url: str | None = None
+        first_image_path: str | None = None
+        if message.content.images:
             img = message.content.images[0]
             if img.url:
-                image_url = img.url
+                first_image_url = img.url
             elif img.local_path:
-                image_path = img.local_path
+                first_image_path = img.local_path
 
         try:
             if chat_type == "channel":
-                return await self._send_channel_message(
-                    api, message.chat_id, text, image_url, image_path,
+                result_id = await self._send_channel_message(
+                    api, message.chat_id, text, first_image_url, first_image_path,
                     msg_id, parse_mode,
                 )
             else:
-                return await self._send_group_or_c2c_message(
+                result_id = await self._send_group_or_c2c_message(
                     api, chat_type, message.chat_id,
-                    text, image_url, image_path, msg_id, parse_mode,
+                    text, first_image_url, first_image_path, msg_id, parse_mode,
                 )
         except Exception as e:
             logger.error(f"Failed to send QQ Official Bot message: {e}")
             raise
+
+        # 循环发送剩余图片（不带文本，仅图片）
+        for extra_img in message.content.images[1:]:
+            extra_url = extra_img.url if extra_img.url else None
+            extra_path = extra_img.local_path if not extra_url and extra_img.local_path else None
+            if not extra_url and not extra_path:
+                continue
+            try:
+                if chat_type == "channel":
+                    await self._send_channel_message(
+                        api, message.chat_id, "", extra_url, extra_path,
+                        msg_id, None,
+                    )
+                else:
+                    await self._send_group_or_c2c_message(
+                        api, chat_type, message.chat_id,
+                        "", extra_url, extra_path, msg_id, None,
+                    )
+            except Exception as e:
+                logger.warning(f"QQ: send extra image failed: {e}")
+
+        return result_id
 
     async def _send_message_via_http(
         self,
@@ -1363,6 +1440,8 @@ def _create_botpy_client(adapter: "QQBotAdapter", is_sandbox: bool = False, **kw
             """群聊 @机器人消息"""
             try:
                 unified = self._adapter._convert_group_message(message)
+                if self._adapter._is_duplicate(unified.channel_message_id):
+                    return
                 self._adapter._log_message(unified)
                 await self._adapter._emit_message(unified)
             except Exception as e:
@@ -1372,6 +1451,8 @@ def _create_botpy_client(adapter: "QQBotAdapter", is_sandbox: bool = False, **kw
             """单聊消息"""
             try:
                 unified = self._adapter._convert_c2c_message(message)
+                if self._adapter._is_duplicate(unified.channel_message_id):
+                    return
                 self._adapter._log_message(unified)
                 await self._adapter._emit_message(unified)
             except Exception as e:
@@ -1381,6 +1462,8 @@ def _create_botpy_client(adapter: "QQBotAdapter", is_sandbox: bool = False, **kw
             """频道 @机器人消息"""
             try:
                 unified = self._adapter._convert_channel_message(message)
+                if self._adapter._is_duplicate(unified.channel_message_id):
+                    return
                 self._adapter._log_message(unified)
                 await self._adapter._emit_message(unified)
             except Exception as e:

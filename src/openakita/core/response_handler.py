@@ -66,7 +66,7 @@ def strip_tool_simulation_text(text: str) -> str:
     if not text:
         return text
 
-    pattern1 = r"^[a-z_]+\s*\([^)]*\)\s*$"
+    pattern1 = r"^\.?[a-z_]+\s*\(.*\)\s*$"
     pattern2 = r"^[a-z_]+:\d+[\{\(].*[\}\)]\s*$"
     pattern3 = r'^\{["\']?(tool|function|name)["\']?\s*:'
     # 裸工具名：含下划线的标识符独占一行，如 "browser_open"、"web_search"
@@ -75,9 +75,20 @@ def strip_tool_simulation_text(text: str) -> str:
 
     lines = text.split("\n")
     cleaned_lines = []
+    in_code_block = False
 
     for line in lines:
         stripped = line.strip()
+
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            cleaned_lines.append(line)
+            continue
+
+        if in_code_block:
+            cleaned_lines.append(line)
+            continue
+
         is_tool_sim = (
             re.match(pattern1, stripped, re.IGNORECASE)
             or re.match(pattern2, stripped, re.IGNORECASE)

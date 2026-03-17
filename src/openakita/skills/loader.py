@@ -493,7 +493,7 @@ class SkillLoader:
         Returns:
             (成功, 输出) 元组
         """
-        skill = self._loaded_skills.get(name)
+        skill = self._resolve_skill(name)
         if not skill:
             return False, f"Skill not found: {name}"
 

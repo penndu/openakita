@@ -522,7 +522,7 @@ export function App() {
     () => providers.find((p) => p.slug === providerSlug) || null,
     [providers, providerSlug],
   );
-  const [apiType, setApiType] = useState<"openai" | "anthropic">("openai");
+  const [apiType, setApiType] = useState<"openai" | "openai_responses" | "anthropic">("openai");
   const [baseUrl, setBaseUrl] = useState<string>("");
   const [apiKeyEnv, setApiKeyEnv] = useState<string>("");
   const [apiKeyValue, setApiKeyValue] = useState<string>("");
@@ -579,7 +579,7 @@ export function App() {
     name: string;
     priority: number;
     providerSlug: string;
-    apiType: "openai" | "anthropic";
+    apiType: "openai" | "openai_responses" | "anthropic";
     baseUrl: string;
     apiKeyEnv: string;
     apiKeyValue: string; // optional; blank means don't change
@@ -4688,6 +4688,7 @@ export function App() {
                         <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="openai">openai</SelectItem>
+                          <SelectItem value="openai_responses">openai_responses</SelectItem>
                           <SelectItem value="anthropic">anthropic</SelectItem>
                         </SelectContent>
                       </Select>
@@ -4875,6 +4876,7 @@ export function App() {
                         <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="openai">openai</SelectItem>
+                          <SelectItem value="openai_responses">openai_responses</SelectItem>
                           <SelectItem value="anthropic">anthropic</SelectItem>
                         </SelectContent>
                       </Select>
@@ -5353,6 +5355,7 @@ export function App() {
     return (
       <IMConfigView
         {..._configViewProps}
+        venvDir={venvDir}
         imDisabled={imDisabled}
         onToggleIM={opts?.onboarding ? undefined : () => toggleViewDisabled("im")}
         apiBaseUrl={httpApiBase()}
@@ -7961,7 +7964,7 @@ export function App() {
           <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「配置 → IM 通道」中启用</p>
         </div>
       ) : (
-        <IMView serviceRunning={serviceStatus?.running ?? false} multiAgentEnabled={multiAgentEnabled} apiBaseUrl={apiBaseUrl} onRequestRestart={restartService} />
+        <IMView serviceRunning={serviceStatus?.running ?? false} multiAgentEnabled={multiAgentEnabled} apiBaseUrl={apiBaseUrl} onRequestRestart={restartService} venvDir={venvDir} />
       );
     }
     if (view === "token_stats") {
@@ -8536,7 +8539,7 @@ export function App() {
             <div className="modalContent" style={{ maxWidth: 360, padding: "32px 28px", textAlign: "center", borderRadius: 16 }}>
               {(restartOverlay.phase === "saving" || restartOverlay.phase === "restarting" || restartOverlay.phase === "waiting") && (
                 <>
-                  <div style={{ marginBottom: 16 }}>
+                  <div style={{ marginBottom: 16, display: "flex", justifyContent: "center", paddingLeft: 0, paddingRight: 0 }}>
                     <svg width="40" height="40" viewBox="0 0 40 40" style={{ animation: "spin 1s linear infinite" }}>
                       <circle cx="20" cy="20" r="16" fill="none" stroke="#2563eb" strokeWidth="3" strokeDasharray="80" strokeDashoffset="20" strokeLinecap="round" />
                     </svg>
@@ -8553,19 +8556,19 @@ export function App() {
               )}
               {restartOverlay.phase === "done" && (
                 <>
-                  <div style={{ fontSize: 36, marginBottom: 8 }}><IconCheckCircle size={40} /></div>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><IconCheckCircle size={40} /></div>
                   <div style={{ fontSize: 16, fontWeight: 600, color: "#059669" }}>{t("config.restartSuccess")}</div>
                 </>
               )}
               {restartOverlay.phase === "fail" && (
                 <>
-                  <div style={{ fontSize: 36, marginBottom: 8 }}><IconXCircle size={40} /></div>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><IconXCircle size={40} /></div>
                   <div style={{ fontSize: 16, fontWeight: 600, color: "#dc2626" }}>{t("config.restartFail")}</div>
                 </>
               )}
               {restartOverlay.phase === "notRunning" && (
                 <>
-                  <div style={{ fontSize: 36, marginBottom: 8 }}><IconInfo size={40} /></div>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><IconInfo size={40} /></div>
                   <div style={{ fontSize: 14, fontWeight: 500, color: "#64748b" }}>{t("config.restartNotRunning")}</div>
                 </>
               )}

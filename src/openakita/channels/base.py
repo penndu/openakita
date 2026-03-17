@@ -12,6 +12,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import ClassVar
 
 from .types import MediaFile, OutgoingMessage, UnifiedMessage
 
@@ -38,6 +39,22 @@ class ChannelAdapter(ABC):
     # 通道名称（子类必须覆盖）
     channel_name: str = "unknown"
 
+    STALE_MESSAGE_THRESHOLD_S: ClassVar[int] = 120
+
+    capabilities: ClassVar[dict[str, bool]] = {
+        "streaming": False,
+        "send_image": False,
+        "send_file": False,
+        "send_voice": False,
+        "delete_message": False,
+        "edit_message": False,
+        "get_chat_info": False,
+        "get_user_info": False,
+        "get_chat_members": False,
+        "get_recent_messages": False,
+        "markdown": False,
+    }
+
     def __init__(self, *, channel_name: str | None = None, bot_id: str | None = None, agent_profile_id: str = "default"):
         self._message_callback: MessageCallback | None = None
         self._event_callback: EventCallback | None = None
@@ -49,6 +66,9 @@ class ChannelAdapter(ABC):
         else:
             self.bot_id = self.channel_name
         self.agent_profile_id = agent_profile_id
+
+    def has_capability(self, name: str) -> bool:
+        return self.capabilities.get(name, False)
 
     @property
     def channel_type(self) -> str:
@@ -290,11 +310,10 @@ class ChannelAdapter(ABC):
 
     def _log_message(self, message: UnifiedMessage) -> None:
         """记录消息日志"""
+        text_preview = message.text[:80] if message.text else f"({message.message_type.value})"
         logger.info(
             f"{self.channel_name}: received message from {message.channel_user_id} "
-            f"in {message.chat_id}: {message.text}"
-            if message.text
-            else f"{self.channel_name}: received {message.message_type.value}"
+            f"in {message.chat_id}: {text_preview}"
         )
 
 

@@ -78,6 +78,11 @@ class OpenAIProvider(LLMProvider):
         """获取 base URL，自动剥离用户误粘贴的 OpenAI 兼容端点路径后缀。"""
         return normalize_base_url(self.config.base_url)
 
+    @property
+    def _api_url(self) -> str:
+        """完整 API 端点 URL，子类可覆写以切换协议（如 Responses API）。"""
+        return f"{self.base_url}/chat/completions"
+
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端
 
@@ -218,18 +223,19 @@ class OpenAIProvider(LLMProvider):
         # 发送请求
         try:
             response = await client.post(
-                f"{self.base_url}/chat/completions",
+                self._api_url,
                 headers=self._build_headers(),
                 json=body,
                 **({"timeout": req_timeout} if req_timeout else {}),
             )
 
-            if response.status_code == 401:
-                raise AuthenticationError(f"Authentication failed: {response.text}")
-            if response.status_code == 429:
-                raise RateLimitError(f"Rate limit exceeded: {response.text}")
             if response.status_code >= 400:
-                raise LLMError(f"API error ({response.status_code}): {response.text}")
+                body = (response.text or "")[:500]
+                if response.status_code == 401:
+                    raise AuthenticationError(f"Authentication failed: {body}")
+                if response.status_code == 429:
+                    raise RateLimitError(f"Rate limit exceeded: {body}")
+                raise LLMError(f"API error ({response.status_code}): {body}")
 
             try:
                 data = response.json()
@@ -297,24 +303,24 @@ class OpenAIProvider(LLMProvider):
         try:
             async with client.stream(
                 "POST",
-                f"{self.base_url}/chat/completions",
+                self._api_url,
                 headers=self._build_headers(),
                 json=body,
                 **({"timeout": req_timeout} if req_timeout else {}),
             ) as response:
                 if response.status_code >= 400:
                     error_body = await response.aread()
-                    error_text = error_body.decode(errors="replace")
+                    body = error_body.decode(errors="replace")[:500]
                     if response.status_code == 401:
                         raise AuthenticationError(
-                            f"Authentication failed: {error_text}"
+                            f"Authentication failed: {body}"
                         )
                     if response.status_code == 429:
                         raise RateLimitError(
-                            f"Rate limit exceeded: {error_text}"
+                            f"Rate limit exceeded: {body}"
                         )
                     raise LLMError(
-                        f"API error ({response.status_code}): {error_text}"
+                        f"API error ({response.status_code}): {body}"
                     )
 
                 has_content = False

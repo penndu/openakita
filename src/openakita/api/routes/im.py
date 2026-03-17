@@ -100,11 +100,19 @@ async def list_sessions(request: Request, channel: str = Query("")):
         state = getattr(sess, "state", "active")
         state_str = state.value if hasattr(state, "value") else str(state)
 
+        _chat_type = getattr(sess, "chat_type", "private") or "private"
+        _display_name = getattr(sess, "display_name", "") or ""
+        _user_id = getattr(sess, "user_id", None)
+        _chat_id = getattr(sess, "chat_id", None)
+        _sess_id = str(sid)
+
         result.append({
-            "sessionId": str(sid),
+            "sessionId": _sess_id,
             "channel": sess_channel,
-            "chatId": getattr(sess, "chat_id", None),
-            "userId": getattr(sess, "user_id", None),
+            "chatId": _chat_id,
+            "userId": _user_id,
+            "chatType": _chat_type,
+            "displayName": _display_name or _user_id or _chat_id or _sess_id[:12],
             "state": state_str,
             "lastActive": str(getattr(sess, "last_active", None) or getattr(sess, "updated_at", "")),
             "messageCount": msg_count,

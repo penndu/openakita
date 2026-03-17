@@ -162,12 +162,13 @@ class AnthropicProvider(LLMProvider):
                 json=body,
             )
 
-            if response.status_code == 401:
-                raise AuthenticationError(f"Authentication failed: {response.text}")
-            if response.status_code == 429:
-                raise RateLimitError(f"Rate limit exceeded: {response.text}")
             if response.status_code >= 400:
-                raise LLMError(f"API error ({response.status_code}): {response.text}")
+                body = (response.text or "")[:500]
+                if response.status_code == 401:
+                    raise AuthenticationError(f"Authentication failed: {body}")
+                if response.status_code == 429:
+                    raise RateLimitError(f"Rate limit exceeded: {body}")
+                raise LLMError(f"API error ({response.status_code}): {body}")
 
             data = response.json()
             self.mark_healthy()
@@ -200,17 +201,17 @@ class AnthropicProvider(LLMProvider):
             ) as response:
                 if response.status_code >= 400:
                     error_body = await response.aread()
-                    error_text = error_body.decode(errors="replace")
+                    body = error_body.decode(errors="replace")[:500]
                     if response.status_code == 401:
                         raise AuthenticationError(
-                            f"Authentication failed: {error_text}"
+                            f"Authentication failed: {body}"
                         )
                     if response.status_code == 429:
                         raise RateLimitError(
-                            f"Rate limit exceeded: {error_text}"
+                            f"Rate limit exceeded: {body}"
                         )
                     raise LLMError(
-                        f"API error ({response.status_code}): {error_text}"
+                        f"API error ({response.status_code}): {body}"
                     )
 
                 async for line in response.aiter_lines():

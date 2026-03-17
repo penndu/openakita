@@ -279,6 +279,13 @@ export function IconMask(p: IconProps = {}) {
   </>);
 }
 
+export function IconUser(p: IconProps = {}) {
+  return svg(p, <>
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </>);
+}
+
 export function IconUsers(p: IconProps = {}) {
   return svg(p, <>
     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />

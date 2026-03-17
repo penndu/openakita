@@ -23,6 +23,7 @@
 
 import asyncio
 import base64
+import collections
 import contextlib
 import hashlib
 import json
@@ -340,6 +341,20 @@ class WeWorkBotAdapter(ChannelAdapter):
 
     channel_name = "wework"
 
+    capabilities = {
+        "streaming": False,
+        "send_image": True,
+        "send_file": False,
+        "send_voice": False,
+        "delete_message": False,
+        "edit_message": False,
+        "get_chat_info": False,
+        "get_user_info": False,
+        "get_chat_members": False,
+        "get_recent_messages": False,
+        "markdown": True,
+    }
+
     # 过期清理间隔
     CLEANUP_INTERVAL = 120
 
@@ -385,6 +400,10 @@ class WeWorkBotAdapter(ChannelAdapter):
         # response_url 备用存储（stream 超时降级时使用）
         self._msgid_response_urls: dict[str, str] = {}
         self._response_urls: dict[str, list[str]] = {}
+
+        # 消息去重：HTTP 回调可能因重试重复投递
+        self._seen_message_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
+        self._seen_message_ids_max = 500
 
         # 清理任务
         self._cleanup_task: asyncio.Task | None = None
@@ -784,6 +803,15 @@ class WeWorkBotAdapter(ChannelAdapter):
             from_info = msg_data.get("from", {})
             userid = from_info.get("userid", "")
 
+            # 消息去重
+            if msgid:
+                if msgid in self._seen_message_ids:
+                    logger.debug(f"WeWorkBot: duplicate message ignored: {msgid}")
+                    return
+                self._seen_message_ids[msgid] = None
+                while len(self._seen_message_ids) > self._seen_message_ids_max:
+                    self._seen_message_ids.popitem(last=False)
+
             chat_id = chatid if chattype == "group" else userid
             chat_type_str = "group" if chattype == "group" else "private"
 
@@ -860,6 +888,7 @@ class WeWorkBotAdapter(ChannelAdapter):
             is_mentioned=is_mentioned,
             is_direct_message=is_direct_message,
             raw=msg_data,
+            metadata={"is_group": chat_type == "group", "sender_name": ""},
         )
 
         self._log_message(unified)
@@ -902,6 +931,7 @@ class WeWorkBotAdapter(ChannelAdapter):
             is_mentioned=is_mentioned,
             is_direct_message=is_direct_message,
             raw=msg_data,
+            metadata={"is_group": chat_type == "group", "sender_name": ""},
         )
 
         self._log_message(unified)
@@ -972,6 +1002,7 @@ class WeWorkBotAdapter(ChannelAdapter):
             is_mentioned=is_mentioned,
             is_direct_message=is_direct_message,
             raw=msg_data,
+            metadata={"is_group": chat_type == "group", "sender_name": ""},
         )
 
         self._log_message(unified)
@@ -1016,6 +1047,7 @@ class WeWorkBotAdapter(ChannelAdapter):
             is_mentioned=is_mentioned,
             is_direct_message=is_direct_message,
             raw=msg_data,
+            metadata={"is_group": chat_type == "group", "sender_name": ""},
         )
 
         self._log_message(unified)
@@ -1058,6 +1090,7 @@ class WeWorkBotAdapter(ChannelAdapter):
             is_mentioned=is_mentioned,
             is_direct_message=is_direct_message,
             raw=msg_data,
+            metadata={"is_group": chat_type == "group", "sender_name": ""},
         )
 
         self._log_message(unified)

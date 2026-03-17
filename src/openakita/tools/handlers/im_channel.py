@@ -883,7 +883,7 @@ class IMChannelHandler:
             if sid:
                 sm = getattr(self.agent, "_session_manager", None)
                 if sm:
-                    session = sm.get_session(sid)
+                    session = sm.get_session_by_id(sid)
         if not session:
             return "当前没有活跃的会话，无法获取聊天历史"
 

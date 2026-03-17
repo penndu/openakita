@@ -21,6 +21,7 @@ from .config import get_default_config_path, load_endpoints_config
 from .providers.anthropic import AnthropicProvider
 from .providers.base import LLMProvider
 from .providers.openai import OpenAIProvider
+from .providers.openai_responses import OpenAIResponsesProvider
 from .types import (
     AllEndpointsFailedError,
     AudioBlock,
@@ -269,6 +270,8 @@ class LLMClient:
                 return AnthropicProvider(config)
             elif config.api_type == "openai":
                 return OpenAIProvider(config)
+            elif config.api_type == "openai_responses":
+                return OpenAIResponsesProvider(config)
             else:
                 logger.warning(f"Unknown api_type '{config.api_type}' for endpoint '{config.name}'")
                 return None

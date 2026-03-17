@@ -5,12 +5,14 @@ import { useTranslation } from "react-i18next";
 import {
   IconIM, IconMessageCircle, IconRefresh, IconFile, IconImage, IconVolume,
   IconBot, IconPlus, IconEdit, IconTrash,
+  IconUser, IconUsers,
   DotGreen, DotGray,
 } from "../icons";
 import { safeFetch } from "../providers";
 import { ModalOverlay } from "../components/ModalOverlay";
 import { logger } from "../platform";
 import { IS_WEB, onWsEvent } from "../platform";
+import { FeishuQRModal } from "../components/FeishuQRModal";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 // ─── Types ──────────────────────────────────────────────────────────────
@@ -28,6 +30,8 @@ type IMSession = {
   channel: string;
   chatId: string | null;
   userId: string | null;
+  chatType?: string;
+  displayName?: string;
   state: string;
   lastActive: string;
   messageCount: number;
@@ -141,109 +145,17 @@ export function IMView({
   multiAgentEnabled = false,
   apiBaseUrl,
   onRequestRestart,
+  venvDir,
 }: {
   serviceRunning: boolean;
   multiAgentEnabled?: boolean;
   apiBaseUrl?: string;
   onRequestRestart?: () => void;
+  venvDir?: string;
 }) {
   const { t } = useTranslation();
   const api = apiBaseUrl ?? DEFAULT_API;
   const [tab, setTab] = useState<"messages" | "bots">("messages");
-  const [channels, setChannels] = useState<IMChannel[]>([]);
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<IMSession[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<IMMessage[]>([]);
-  const [totalMessages, setTotalMessages] = useState(0);
-  const [loading, setLoading] = useState(false);
-
-  const getChannelDisplayName = useCallback((ch: IMChannel): string => {
-    const key = `status.${(ch.channel || "").toLowerCase()}`;
-    const translated = t(key);
-    return translated && translated !== key ? translated : (ch.name || ch.channel);
-  }, [t]);
-
-  const fetchChannels = useCallback(async () => {
-    if (!serviceRunning) return;
-    try {
-      const res = await safeFetch(`${api}/api/im/channels`);
-      const data = await res.json();
-      setChannels(data.channels || []);
-    } catch { /* ignore */ }
-  }, [serviceRunning, api]);
-
-  const fetchSessions = useCallback(async (channel: string): Promise<IMSession[]> => {
-    if (!serviceRunning) return [];
-    try {
-      const res = await safeFetch(`${api}/api/im/sessions?channel=${encodeURIComponent(channel)}`);
-      const data = await res.json();
-      const list: IMSession[] = data.sessions || [];
-      setSessions(list);
-      return list;
-    } catch { /* ignore */ }
-    return [];
-  }, [serviceRunning, api]);
-
-  const fetchMessages = useCallback(async (sessionId: string, limit = 50, offset = 0) => {
-    if (!serviceRunning) return;
-    try {
-      const res = await safeFetch(`${api}/api/im/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}&offset=${offset}`);
-      const data = await res.json();
-      setMessages(data.messages || []);
-      setTotalMessages(data.total || 0);
-    } catch { /* ignore */ }
-  }, [serviceRunning, api]);
-
-  useEffect(() => {
-    fetchChannels();
-  }, [fetchChannels]);
-
-  useEffect(() => {
-    if (!serviceRunning) return;
-    const channelTimer = setInterval(() => {
-      fetchChannels();
-      if (selectedChannel) fetchSessions(selectedChannel);
-    }, IS_WEB ? 60_000 : 15000);
-    return () => clearInterval(channelTimer);
-  }, [serviceRunning, selectedChannel, fetchChannels, fetchSessions]);
-
-  useEffect(() => {
-    if (!serviceRunning || !selectedSessionId) return;
-    fetchMessages(selectedSessionId);
-    const msgTimer = setInterval(() => {
-      fetchMessages(selectedSessionId);
-    }, IS_WEB ? 30_000 : 8000);
-    return () => clearInterval(msgTimer);
-  }, [serviceRunning, selectedSessionId, fetchMessages]);
-
-  useEffect(() => {
-    if (!IS_WEB) return;
-    return onWsEvent((event) => {
-      if (event === "im:channel_status") fetchChannels();
-      if (event === "im:new_message") {
-        if (selectedChannel) fetchSessions(selectedChannel);
-        if (selectedSessionId) fetchMessages(selectedSessionId);
-      }
-    });
-  }, [fetchChannels, fetchSessions, fetchMessages, selectedChannel, selectedSessionId]);
-
-  const handleSelectChannel = useCallback(async (ch: string) => {
-    setSelectedChannel(ch);
-    setSelectedSessionId(null);
-    setMessages([]);
-    const list = await fetchSessions(ch);
-    if (list.length > 0) {
-      const first = list[0];
-      setSelectedSessionId(first.sessionId);
-      fetchMessages(first.sessionId);
-    }
-  }, [fetchSessions, fetchMessages]);
-
-  const handleSelectSession = useCallback((sid: string) => {
-    setSelectedSessionId(sid);
-    fetchMessages(sid);
-  }, [fetchMessages]);
 
   if (!serviceRunning) {
     return (
@@ -260,24 +172,36 @@ export function IMView({
       {/* Tabs */}
       {multiAgentEnabled && (
         <div style={{
-          display: "flex", gap: 0, borderBottom: "1px solid var(--line)",
-          padding: "0 16px", background: "var(--panel)", flexShrink: 0,
+          display: "flex", alignItems: "center", gap: 4,
+          padding: "10px 16px", background: "var(--panel)", flexShrink: 0,
+          borderBottom: "1px solid var(--line)",
         }}>
-          {(["messages", "bots"] as const).map((key) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              style={{
-                padding: "10px 20px", border: "none", cursor: "pointer",
-                background: "transparent", fontSize: 13, fontWeight: tab === key ? 600 : 400,
-                color: tab === key ? "var(--primary, #3b82f6)" : "inherit",
-                borderBottom: tab === key ? "2px solid var(--primary, #3b82f6)" : "2px solid transparent",
-                transition: "all 0.15s",
-              }}
-            >
-              {key === "messages" ? t("im.tabMessages") : t("im.tabBots")}
-            </button>
-          ))}
+          <div style={{
+            display: "inline-flex", gap: 2, padding: 3,
+            borderRadius: 10, background: "rgba(37,99,235,0.08)",
+          }}>
+            {(["messages", "bots"] as const).map((key) => {
+              const active = tab === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "6px 14px", border: "none", cursor: "pointer",
+                    borderRadius: 8, fontSize: 13, fontWeight: 500,
+                    background: active ? "var(--primary, #2563eb)" : "transparent",
+                    color: active ? "#fff" : "var(--primary, #2563eb)",
+                    boxShadow: active ? "0 1px 4px rgba(37,99,235,0.3)" : "none",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  {key === "messages" ? <IconMessageCircle size={14} /> : <IconBot size={14} />}
+                  {key === "messages" ? t("im.tabMessages") : t("im.tabBots")}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -286,7 +210,7 @@ export function IMView({
         {tab === "messages" ? (
           <MessagesTab serviceRunning={serviceRunning} apiBase={api} />
         ) : (
-          <BotConfigTab apiBase={api} multiAgentEnabled={multiAgentEnabled} onRequestRestart={onRequestRestart} />
+          <BotConfigTab apiBase={api} multiAgentEnabled={multiAgentEnabled} onRequestRestart={onRequestRestart} venvDir={venvDir} apiBaseUrl={apiBaseUrl} />
         )}
       </div>
     </div>
@@ -361,10 +285,14 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
 
   useEffect(() => {
     if (!IS_WEB) return;
-    return onWsEvent((event) => {
+    return onWsEvent((event, data) => {
       if (event === "im:channel_status") fetchChannels();
       if (event === "im:new_message") {
-        if (selectedChannel) fetchSessions(selectedChannel);
+        const d = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+        const evtChannel = d.channel as string | undefined;
+        if (selectedChannel && (!evtChannel || evtChannel === selectedChannel)) {
+          fetchSessions(selectedChannel);
+        }
         if (selectedSessionId) fetchMessages(selectedSessionId);
       }
     });
@@ -428,9 +356,15 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
                   role="button"
                   tabIndex={0}
                 >
-                  <div className="imSessionId">{s.userId || s.chatId || s.sessionId.slice(0, 12)}</div>
-                  <div className="imSessionMeta">
-                    {s.messageCount} {t("im.messages")} · {s.lastActive ? new Date(s.lastActive).toLocaleTimeString() : ""}
+                  <div className="imSessionLeft">
+                    {s.chatType === "group" ? <IconUsers size={13} /> : <IconUser size={13} />}
+                    <span className="imSessionName">{s.displayName || s.userId || s.chatId || s.sessionId.slice(0, 12)}</span>
+                  </div>
+                  <div className="imSessionRight">
+                    <span className="imSessionCount">{s.messageCount}</span>
+                    <span className="imSessionTime">
+                      {s.lastActive ? new Date(s.lastActive).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -476,7 +410,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
 
 // ─── Bot Configuration Tab ──────────────────────────────────────────────
 
-function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart }: { apiBase: string; multiAgentEnabled: boolean; onRequestRestart?: () => void }) {
+function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, apiBaseUrl }: { apiBase: string; multiAgentEnabled: boolean; onRequestRestart?: () => void; venvDir?: string; apiBaseUrl?: string }) {
   const { t } = useTranslation();
   const [bots, setBots] = useState<IMBot[]>([]);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
@@ -488,6 +422,7 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart }: { apiBas
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: "ok" | "err" } | null>(null);
   const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
+  const [showFeishuQR, setShowFeishuQR] = useState(false);
 
   const showToast = useCallback((text: string, type: "ok" | "err" = "ok") => {
     setToastMsg({ text, type });
@@ -1069,6 +1004,103 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart }: { apiBas
                 </div>
               </>
             )}
+
+            {/* ── Feishu: QR onboard + streaming + group mode ── */}
+            {editingBot.type === "feishu" && (
+              <>
+                {venvDir && (
+                  <button
+                    type="button"
+                    style={{
+                      width: "100%", padding: "10px 0", marginBottom: 12,
+                      borderRadius: 8, border: "1.5px dashed var(--accent, #3b82f6)",
+                      background: "var(--accent-bg, rgba(59,130,246,0.06))",
+                      color: "var(--accent, #3b82f6)", fontWeight: 600, fontSize: 13,
+                      cursor: "pointer", transition: "all 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent-bg, rgba(59,130,246,0.12))"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "var(--accent-bg, rgba(59,130,246,0.06))"; }}
+                    onClick={() => setShowFeishuQR(true)}
+                  >{t("feishu.qrScanCreate")}</button>
+                )}
+                <div className="divider" style={{ margin: "10px 0" }} />
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{t("feishu.streaming")}</div>
+                <div
+                  onClick={() => {
+                    const next = !(editingBot.credentials.streaming_enabled === "true" || editingBot.credentials.streaming_enabled === true);
+                    updateCredential("streaming_enabled", next ? "true" : "false");
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "8px 12px", borderRadius: 8, cursor: "pointer",
+                    background: "var(--bg2, #f8fafc)", border: "1px solid var(--line)",
+                    marginBottom: 8, transition: "background 0.15s",
+                  }}
+                >
+                  <span style={{ fontSize: 13 }}>{t("feishu.streaming")}</span>
+                  <div style={{
+                    width: 40, height: 22, borderRadius: 11, position: "relative",
+                    background: (editingBot.credentials.streaming_enabled === "true" || editingBot.credentials.streaming_enabled === true) ? "var(--ok, #10b981)" : "var(--line)",
+                    transition: "background 0.2s",
+                  }}>
+                    <div style={{
+                      width: 18, height: 18, borderRadius: 9, background: "#fff",
+                      position: "absolute", top: 2, boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                      left: (editingBot.credentials.streaming_enabled === "true" || editingBot.credentials.streaming_enabled === true) ? 20 : 2,
+                      transition: "left 0.2s",
+                    }} />
+                  </div>
+                </div>
+                {(editingBot.credentials.streaming_enabled === "true" || editingBot.credentials.streaming_enabled === true) && (
+                  <div
+                    onClick={() => {
+                      const next = !(editingBot.credentials.group_streaming === "true" || editingBot.credentials.group_streaming === true);
+                      updateCredential("group_streaming", next ? "true" : "false");
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "8px 12px", borderRadius: 8, cursor: "pointer",
+                      background: "var(--bg2, #f8fafc)", border: "1px solid var(--line)",
+                      marginBottom: 8, marginLeft: 12, transition: "background 0.15s",
+                    }}
+                  >
+                    <span style={{ fontSize: 13 }}>{t("feishu.groupStreaming")}</span>
+                    <div style={{
+                      width: 40, height: 22, borderRadius: 11, position: "relative",
+                      background: (editingBot.credentials.group_streaming === "true" || editingBot.credentials.group_streaming === true) ? "var(--ok, #10b981)" : "var(--line)",
+                      transition: "background 0.2s",
+                    }}>
+                      <div style={{
+                        width: 18, height: 18, borderRadius: 9, background: "#fff",
+                        position: "absolute", top: 2, boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                        left: (editingBot.credentials.group_streaming === "true" || editingBot.credentials.group_streaming === true) ? 20 : 2,
+                        transition: "left 0.2s",
+                      }} />
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: 8, marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t("feishu.groupMode")}</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {(["mention_only", "smart", "always"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={(editingBot.credentials.group_response_mode || "mention_only") === m ? "capChipActive" : "capChip"}
+                        onClick={() => updateCredential("group_response_mode", m)}
+                      >
+                        {t(`feishu.groupMode_${m}`)}
+                      </button>
+                    ))}
+                  </div>
+                  {(editingBot.credentials.group_response_mode === "smart" || editingBot.credentials.group_response_mode === "always") && (
+                    <div style={{ fontSize: 11, color: "#e67700", marginTop: 6, lineHeight: 1.5 }}>
+                      {t("feishu.groupModeHint")}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Editor footer */}
@@ -1113,6 +1145,19 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart }: { apiBas
           </div>
         </div>
         </ModalOverlay>
+      )}
+
+      {showFeishuQR && venvDir && (
+        <FeishuQRModal
+          venvDir={venvDir}
+          apiBaseUrl={apiBaseUrl}
+          onClose={() => setShowFeishuQR(false)}
+          onSuccess={(appId, appSecret) => {
+            updateCredential("app_id", appId);
+            updateCredential("app_secret", appSecret);
+            setShowFeishuQR(false);
+          }}
+        />
       )}
     </div>
   );

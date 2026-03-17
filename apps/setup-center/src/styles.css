@@ -677,13 +677,13 @@ button.btnPrimary:hover {
   color: #fff;
 }
 
-.btnApplyRestart {
+button.btnApplyRestart {
   background: #0e7490;
   color: #fff;
   border: 1px solid transparent;
 }
 
-.btnApplyRestart:hover {
+button.btnApplyRestart:hover {
   background: #0c6a82;
 }
 
@@ -1680,12 +1680,14 @@ button.btnPrimary:hover {
   background: var(--bg1);
 }
 .capChipActive {
-  border-color: var(--nav-active-border);
-  color: var(--brand);
-  background: var(--nav-active);
+  border-color: var(--accent, #3b82f6);
+  color: var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.08);
+  font-weight: 700;
+  box-shadow: 0 0 0 1px var(--accent, #3b82f6);
 }
 .capChipActive:hover {
-  background: var(--nav-hover);
+  background: rgba(59, 130, 246, 0.14);
 }
 
 /* Advanced details */
@@ -2395,18 +2397,48 @@ button.btnPrimary:hover {
   border-radius: 8px;
 }
 
-.imSessionId {
-  font-size: 12px;
+.imSessionItem {
+  gap: 8px;
+}
+
+.imSessionLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.imSessionName {
+  font-size: 13px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.imSessionMeta {
+.imSessionRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.imSessionCount {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary, #2563eb);
+  background: rgba(37, 99, 235, 0.1);
+  padding: 1px 7px;
+  border-radius: 8px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.imSessionTime {
   font-size: 11px;
   color: var(--muted2);
-  margin-top: 2px;
+  white-space: nowrap;
 }
 
 .imViewEmpty {

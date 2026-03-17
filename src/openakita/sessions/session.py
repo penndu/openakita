@@ -185,6 +185,8 @@ class Session:
     chat_id: str  # 聊天 ID（群/私聊）
     user_id: str  # 用户 ID
     thread_id: str | None = None  # 话题/线程 ID（飞书话题等）
+    chat_type: str = "private"  # "group" | "private"
+    display_name: str = ""  # 用户昵称或群名（用于 UI 展示）
 
     # 状态
     state: SessionState = SessionState.ACTIVE
@@ -208,6 +210,8 @@ class Session:
         user_id: str,
         thread_id: str | None = None,
         config: SessionConfig | None = None,
+        chat_type: str = "private",
+        display_name: str = "",
     ) -> "Session":
         """创建新会话"""
         session_id = (
@@ -219,6 +223,8 @@ class Session:
             chat_id=chat_id,
             user_id=user_id,
             thread_id=thread_id,
+            chat_type=chat_type,
+            display_name=display_name,
             config=config or SessionConfig(),
         )
 
@@ -444,6 +450,8 @@ class Session:
             "chat_id": self.chat_id,
             "user_id": self.user_id,
             "thread_id": self.thread_id,
+            "chat_type": self.chat_type,
+            "display_name": self.display_name,
             "state": self.state.value,
             "created_at": self.created_at.isoformat(),
             "last_active": self.last_active.isoformat(),
@@ -479,6 +487,8 @@ class Session:
             chat_id=data["chat_id"],
             user_id=data["user_id"],
             thread_id=data.get("thread_id"),
+            chat_type=data.get("chat_type", "private"),
+            display_name=data.get("display_name", ""),
             state=SessionState(data.get("state", "active")),
             created_at=datetime.fromisoformat(data["created_at"]),
             last_active=datetime.fromisoformat(data["last_active"]),

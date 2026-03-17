@@ -73,6 +73,20 @@ class OneBotAdapter(ChannelAdapter):
 
     channel_name = "onebot"
 
+    capabilities = {
+        "streaming": False,
+        "send_image": True,
+        "send_file": True,
+        "send_voice": True,
+        "delete_message": True,
+        "edit_message": False,
+        "get_chat_info": False,
+        "get_user_info": True,
+        "get_chat_members": False,
+        "get_recent_messages": False,
+        "markdown": False,
+    }
+
     def __init__(
         self,
         ws_url: str = "ws://127.0.0.1:8080",
@@ -318,6 +332,16 @@ class OneBotAdapter(ChannelAdapter):
             if len(self._seen_message_ids) > self._SEEN_CAPACITY:
                 self._seen_message_ids.popitem(last=False)
 
+        import time as _time
+        event_time = data.get("time")
+        if event_time and isinstance(event_time, (int, float)):
+            age_s = _time.time() - event_time
+            if age_s > self.STALE_MESSAGE_THRESHOLD_S:
+                logger.info(
+                    f"OneBot: stale message discarded (age={age_s:.0f}s): {msg_id}"
+                )
+                return
+
         message_type = data.get("message_type")
         raw_message = data.get("message")
         if raw_message is None:
@@ -370,6 +394,7 @@ class OneBotAdapter(ChannelAdapter):
                 "nickname": sender.get("nickname"),
                 "card": sender.get("card"),
                 "is_group": chat_type == "group",
+                "sender_name": sender.get("card") or sender.get("nickname") or "",
             },
         )
 

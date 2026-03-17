@@ -482,78 +482,23 @@ def _ensure_channel_deps() -> None:
 
 
 def _create_bot_adapter(bot_type: str, creds: dict, *, channel_name: str, bot_id: str, agent_profile_id: str):
-    """Create an IM adapter instance from im_bots config entry."""
-    from .channels.base import ChannelAdapter
+    """Create an IM adapter instance from im_bots config entry.
 
-    if bot_type == "feishu":
-        from .channels.adapters import FeishuAdapter
-        return FeishuAdapter(
-            app_id=creds.get("app_id", ""),
-            app_secret=creds.get("app_secret", ""),
-            channel_name=channel_name, bot_id=bot_id, agent_profile_id=agent_profile_id,
-        )
-    elif bot_type == "telegram":
-        from .channels.adapters import TelegramAdapter
-        return TelegramAdapter(
-            bot_token=creds.get("bot_token", ""),
-            webhook_url=creds.get("webhook_url") or None,
-            channel_name=channel_name, bot_id=bot_id, agent_profile_id=agent_profile_id,
-        )
-    elif bot_type == "dingtalk":
-        from .channels.adapters import DingTalkAdapter
-        return DingTalkAdapter(
-            app_key=creds.get("app_key", creds.get("client_id", "")),
-            app_secret=creds.get("app_secret", creds.get("client_secret", "")),
-            channel_name=channel_name, bot_id=bot_id, agent_profile_id=agent_profile_id,
-        )
-    elif bot_type == "wework":
-        from .channels.adapters import WeWorkBotAdapter
-        return WeWorkBotAdapter(
-            corp_id=creds.get("corp_id", ""),
-            token=creds.get("token", ""),
-            encoding_aes_key=creds.get("encoding_aes_key", ""),
-            callback_port=int(creds.get("callback_port", 9880)),
-            callback_host=creds.get("callback_host", "0.0.0.0"),
-            channel_name=channel_name, bot_id=bot_id, agent_profile_id=agent_profile_id,
-        )
-    elif bot_type == "wework_ws":
-        from .channels.adapters import WeWorkWsAdapter
-        return WeWorkWsAdapter(
-            bot_id=creds.get("bot_id", ""),
-            secret=creds.get("secret", ""),
-            ws_url=creds.get("ws_url", "wss://openws.work.weixin.qq.com"),
-            channel_name=channel_name, bot_id_alias=bot_id, agent_profile_id=agent_profile_id,
-            webhook_url=creds.get("webhook_url", ""),
-        )
-    elif bot_type == "onebot":
-        from .channels.adapters import OneBotAdapter
-        return OneBotAdapter(
-            ws_url=creds.get("ws_url", "ws://127.0.0.1:8080"),
-            access_token=creds.get("access_token") or None,
-            mode=creds.get("mode", "forward"),
-            channel_name=channel_name, bot_id=bot_id, agent_profile_id=agent_profile_id,
-        )
-    elif bot_type == "onebot_reverse":
-        from .channels.adapters import OneBotAdapter
-        return OneBotAdapter(
-            access_token=creds.get("access_token") or None,
-            mode="reverse",
-            reverse_host=creds.get("reverse_host", "0.0.0.0"),
-            reverse_port=int(creds.get("reverse_port", 6700)),
-            channel_name=channel_name, bot_id=bot_id, agent_profile_id=agent_profile_id,
-        )
-    elif bot_type == "qqbot":
-        from .channels.adapters import QQBotAdapter
-        return QQBotAdapter(
-            app_id=creds.get("app_id", ""),
-            app_secret=creds.get("app_secret", ""),
-            sandbox=bool(creds.get("sandbox", False)),
-            mode=creds.get("mode", "websocket"),
-            channel_name=channel_name, bot_id=bot_id, agent_profile_id=agent_profile_id,
-        )
-    else:
+    Uses the centralized adapter registry instead of if/elif branches.
+    """
+    from .channels.registry import ADAPTER_REGISTRY
+
+    factory = ADAPTER_REGISTRY.get(bot_type)
+    if factory is None:
         logger.warning(f"Unknown bot type: {bot_type}")
         return None
+
+    return factory(
+        creds,
+        channel_name=channel_name,
+        bot_id=bot_id,
+        agent_profile_id=agent_profile_id,
+    )
 
 
 def get_message_gateway():
@@ -929,10 +874,23 @@ async def start_im_channels(agent_or_master):
     agent_handler.skip_current_step = agent.skip_current_step
     agent_handler.insert_user_message = agent.insert_user_message
 
+    async def agent_handler_stream(session, message: str):
+        """流式版 agent_handler，yield SSE event dicts（仅单 Agent 模式可用）。"""
+        session_messages = session.context.get_messages()
+        async for event in agent.chat_with_session_stream(
+            message=message,
+            session_messages=session_messages,
+            session_id=session.id,
+            session=session,
+            gateway=_message_gateway,
+        ):
+            yield event
+
     agent.set_scheduler_gateway(_message_gateway)
     _message_gateway.set_brain(agent.brain)
 
     _message_gateway.agent_handler = agent_handler
+    _message_gateway.agent_handler_stream = agent_handler_stream
 
     # 设置 turn_loader 用于 session 崩溃恢复回填
     _setup_session_backfill(agent_or_master)
