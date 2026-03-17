@@ -421,10 +421,10 @@ def _convert_single_message_to_responses(
             for tu in tool_uses:
                 result.append({
                     "type": "function_call",
-                    "id": tu.id,
                     "call_id": tu.id,
                     "name": tu.name,
                     "arguments": json.dumps(tu.input, ensure_ascii=False),
+                    "status": "completed",
                 })
         else:
             # user 消息

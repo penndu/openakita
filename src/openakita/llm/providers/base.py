@@ -328,6 +328,7 @@ class LLMProvider(ABC):
 
         分类优先级：quota > auth > structural > transient > unknown
         quota 必须在 auth 之前检测，因为 403 配额耗尽也包含 "403" 关键字。
+
         """
         err_lower = error.lower()
 
@@ -346,10 +347,11 @@ class LLMProvider(ABC):
             return "auth"
 
         # 结构性/格式类
+        # 注意: 用 "(400)" 而非 "400"，避免匹配 HTML 中的 CSS 类名等内容
         if any(kw in err_lower for kw in [
             "invalid_request", "invalid_parameter", "messages with role",
             "must be a response", "does not support", "not supported",
-            "400",
+            "(400)",
         ]):
             return "structural"
 
