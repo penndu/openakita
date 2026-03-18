@@ -302,7 +302,11 @@ a:hover {
 }
 
 .navGroupItems {
-  /* children inherit normal navItem styles */
+  padding-left: 10px;
+}
+
+.navGroupItems .navItem {
+  font-size: 12.5px;
 }
 
 .sidebarCollapsed .navGroupHeader { justify-content: center; padding: 4px 0; }
