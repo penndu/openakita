@@ -3848,14 +3848,17 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                         endpoint_override=endpoint_override,
                     )
                     content = getattr(response, "content", None)
+                    _raw_parts: list[str] = []
                     if isinstance(content, list):
                         for block in content:
                             text = getattr(block, "text", None) or (block.get("text") if isinstance(block, dict) else None)
                             if text:
-                                _reply_text += text
-                                yield {"type": "text_delta", "content": text}
+                                _raw_parts.append(text)
                     elif content:
-                        _reply_text = str(content)
+                        _raw_parts.append(str(content))
+                    _raw_text = "".join(_raw_parts)
+                    _reply_text = clean_llm_response(_raw_text)
+                    if _reply_text:
                         yield {"type": "text_delta", "content": _reply_text}
                 except Exception as e:
                     logger.error(f"[ChatLightweight/Stream] LLM call failed: {e}")
@@ -4709,8 +4712,10 @@ NEXT: 建议的下一步（如有）"""
                         text_parts.append(block.text)
                     elif isinstance(block, dict) and "text" in block:
                         text_parts.append(block["text"])
-                return "\n".join(text_parts) or ""
-            return str(content or "")
+                raw = "\n".join(text_parts) or ""
+            else:
+                raw = str(content or "")
+            return clean_llm_response(raw)
         except Exception as e:
             logger.error(f"[ChatLightweight] LLM call failed: {e}")
             return "抱歉，暂时无法回复，请稍后再试。"
