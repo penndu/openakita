@@ -383,20 +383,19 @@ class ToolExecutor:
             policy_engine = get_policy_engine()
             policy_result = policy_engine.assert_tool_allowed(tool_name, tool_input)
 
-            # Persist audit for non-ALLOW decisions
-            if policy_result.decision != PolicyDecision.ALLOW:
-                try:
-                    from .audit_logger import get_audit_logger
-                    get_audit_logger().log(
-                        tool_name=tool_name,
-                        decision=policy_result.decision.value,
-                        reason=policy_result.reason,
-                        policy=policy_result.policy_name,
-                        params_preview=str(tool_input)[:200],
-                        metadata=policy_result.metadata,
-                    )
-                except Exception:
-                    pass
+            # Persist audit for ALL policy decisions
+            try:
+                from .audit_logger import get_audit_logger
+                get_audit_logger().log(
+                    tool_name=tool_name,
+                    decision=policy_result.decision.value,
+                    reason=policy_result.reason,
+                    policy=policy_result.policy_name,
+                    params_preview=str(tool_input)[:200],
+                    metadata=policy_result.metadata,
+                )
+            except Exception:
+                pass
 
             if policy_result.decision == PolicyDecision.DENY:
                 return (
