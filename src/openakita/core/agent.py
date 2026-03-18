@@ -2996,19 +2996,34 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 logger.debug(f"[TraitMiner] Mining failed (non-critical): {e}")
 
         # 7. IntentAnalyzer (unified intent analysis — all messages go through LLM)
-        from .intent_analyzer import IntentAnalyzer, IntentType
+        #    Sub-agents skip IntentAnalyzer: they receive structured task instructions
+        #    from the parent, always TASK intent, always need tools.
+        from .intent_analyzer import IntentAnalyzer, IntentResult, IntentType
 
-        if not hasattr(self, "_intent_analyzer"):
-            self._intent_analyzer = IntentAnalyzer(self.brain)
-
-        try:
-            intent_result = await asyncio.wait_for(
-                self._intent_analyzer.analyze(message), timeout=15,
+        if self._is_sub_agent_call:
+            intent_result = IntentResult(
+                intent=IntentType.TASK,
+                confidence=1.0,
+                task_definition=message[:600],
+                task_type="action",
+                tool_hints=[],
+                memory_keywords=[],
+                force_tool=True,
+                plan_required=False,
             )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.warning(f"[Session:{session_id}] Intent analysis failed/timed out: {e}")
-            from .intent_analyzer import _make_default
-            intent_result = _make_default(message)
+            logger.info(f"[Session:{session_id}] Sub-agent: skipping IntentAnalyzer, forced TASK intent")
+        else:
+            if not hasattr(self, "_intent_analyzer"):
+                self._intent_analyzer = IntentAnalyzer(self.brain)
+
+            try:
+                intent_result = await asyncio.wait_for(
+                    self._intent_analyzer.analyze(message), timeout=15,
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning(f"[Session:{session_id}] Intent analysis failed/timed out: {e}")
+                from .intent_analyzer import _make_default
+                intent_result = _make_default(message)
 
         self._current_intent = intent_result
         compiler_summary = intent_result.task_definition
