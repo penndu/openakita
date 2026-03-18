@@ -3116,6 +3116,7 @@ async fn spawn_blocking_result<R: Send + 'static>(
 ///
 /// - Quoted values (`"..."` or `'...'`): return content between quotes literally.
 /// - Unquoted values: strip inline comment (`#` preceded by whitespace).
+#[allow(dead_code)]
 fn clean_env_value(raw: &str) -> String {
     let v = raw.trim();
     if v.len() >= 2 {
@@ -3135,6 +3136,7 @@ fn clean_env_value(raw: &str) -> String {
     v.to_string()
 }
 
+#[allow(dead_code)]
 fn read_env_kv(path: &Path) -> Vec<(String, String)> {
     let Ok(content) = fs::read_to_string(path) else {
         return vec![];
@@ -3267,15 +3269,9 @@ fn openakita_service_start(venv_dir: String, workspace_id: String) -> Result<Ser
     // Disable colored / styled output to avoid ANSI escape codes in log files.
     cmd.env("NO_COLOR", "1");
 
-    // inherit current env, then overlay workspace .env
-    // 注意：忽略会污染 Python 运行时的键，避免用户导入旧 .env 后把
-    // _internal/venv 的模块搜索路径破坏（典型表现：No module named encodings）。
-    for (k, v) in read_env_kv(&ws_dir.join(".env")) {
-        if is_harmful_python_env_key(&k) {
-            continue;
-        }
-        cmd.env(k, v);
-    }
+    // .env 由 Python 端的 load_dotenv(override=True) 自行加载，
+    // 不再由 Rust 注入，避免编码/BOM 问题导致 Key 丢失或损坏值抢占。
+    // Rust 只注入 Python 自己无法确定的路径类环境变量。
     cmd.env("LLM_ENDPOINTS_CONFIG", ws_dir.join("data").join("llm_endpoints.json"));
     cmd.env("OPENAKITA_ROOT", openakita_root_dir().to_string_lossy().to_string());
 

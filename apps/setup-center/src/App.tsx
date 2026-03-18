@@ -1675,7 +1675,7 @@ export function App() {
     setCapSelected(list.length ? list : ["text"]);
   }, [selectedModelId, models, capTouched]);
 
-  async function loadSavedEndpoints(skipAutoFix = false) {
+  async function loadSavedEndpoints() {
     if (!currentWorkspaceId && dataMode !== "remote") {
       setSavedEndpoints([]);
       setSavedCompilerEndpoints([]);
@@ -1759,78 +1759,6 @@ export function App() {
         }))
         .sort((a: EndpointDraft, b: EndpointDraft) => a.priority - b.priority);
       setSavedSttEndpoints(sttEps);
-
-      // Auto-fix: detect endpoints sharing the same api_key_env.
-      // When two endpoints share one env var, editing either one overwrites the
-      // other's API key.  Rename duplicates to unique names and persist.
-      // IMPORTANT: operate on the RAW parsed JSON arrays to preserve all fields
-      // (extra_params, pricing_tiers, etc.) that EndpointDraft doesn't carry.
-      // skipAutoFix prevents infinite recursion when the recursive reload follows a fix.
-      if (skipAutoFix) return;
-      const rawLists = [
-        Array.isArray(parsed?.endpoints) ? parsed.endpoints : [],
-        Array.isArray(parsed?.compiler_endpoints) ? parsed.compiler_endpoints : [],
-        Array.isArray(parsed?.stt_endpoints) ? parsed.stt_endpoints : [],
-      ];
-      const usedKeys = new Set<string>();
-      let envFixNeeded = false;
-      const envCopies: Record<string, string> = {};
-      for (const rawArr of rawLists) {
-        for (const rawEp of rawArr) {
-          const key = String(rawEp?.api_key_env || "");
-          if (!key) continue;
-          if (usedKeys.has(key)) {
-            const newKey = nextEnvKeyName(key, usedKeys);
-            envCopies[newKey] = key;
-            rawEp.api_key_env = newKey;
-            envFixNeeded = true;
-          }
-          usedKeys.add(rawEp.api_key_env);
-        }
-      }
-
-      if (envFixNeeded) {
-        // Persist the renamed config — writes raw JSON so all fields are preserved
-        try {
-          await writeWorkspaceFile("data/llm_endpoints.json", JSON.stringify(parsed, null, 2) + "\n");
-        } catch { /* best-effort */ }
-
-        // Copy env values from the original key to the new key so the endpoint
-        // keeps working with whichever value was last written.
-        const freshEnv = await ensureEnvLoaded(currentWorkspaceId || "__remote__");
-        const copyEntries: Record<string, string> = {};
-        for (const [newKey, origKey] of Object.entries(envCopies)) {
-          const val = envGet(freshEnv, origKey) || "";
-          if (val) {
-            copyEntries[newKey] = val;
-            setEnvDraft((e) => envSet(e, newKey, val));
-          }
-        }
-        if (Object.keys(copyEntries).length > 0) {
-          try {
-            if (shouldUseHttpApi()) {
-              await safeFetch(`${httpApiBase()}/api/config/env`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ entries: copyEntries }),
-              });
-            } else if (IS_TAURI && currentWorkspaceId) {
-              await invoke("workspace_update_env", {
-                workspaceId: currentWorkspaceId,
-                entries: Object.entries(copyEntries).map(([key, value]) => ({ key, value })),
-              });
-            }
-          } catch { /* best-effort */ }
-        }
-
-        // Reload to reflect the fixed env key names in EndpointDraft state
-        await loadSavedEndpoints(/* skipAutoFix */ true);
-
-        notifyError(
-          "检测到多个端点共用相同的 API Key 环境变量名，已自动修复。"
-          + "如果两个端点使用不同的 API Key，请编辑端点重新填写。",
-        );
-      }
     } catch {
       setSavedEndpoints([]);
       setSavedCompilerEndpoints([]);
@@ -2270,13 +2198,6 @@ export function App() {
     }
     const compilerSelectedProvider = providers.find((p) => p.slug === compilerProviderSlug) || null;
     const isCompilerLocal = isLocalProvider(compilerSelectedProvider);
-    const rawCompApiKeyEnv = compilerApiKeyEnv.trim()
-      || compilerSelectedProvider?.api_key_env_suggestion
-      || envKeyFromSlug(compilerProviderSlug || "custom");
-    const effectiveCompApiKeyEnv = nextEnvKeyName(
-      rawCompApiKeyEnv,
-      new Set([...savedEndpoints, ...savedCompilerEndpoints].map((e) => e.api_key_env).filter(Boolean)),
-    );
     const effectiveCompApiKeyValue = compilerApiKeyValue.trim() || (isCompilerLocal ? localProviderPlaceholderKey(compilerSelectedProvider) : "");
     if (!isCompilerLocal && !effectiveCompApiKeyValue) {
       notifyError("请填写编译端点的 API Key 值");
@@ -2284,73 +2205,44 @@ export function App() {
     }
     const _busyId = notifyLoading("写入编译端点...");
     try {
-      // Write API key to .env — 遵循路由原则
-      const compilerEnvPayload = { entries: { [effectiveCompApiKeyEnv]: effectiveCompApiKeyValue } };
-      if (shouldUseHttpApi()) {
-        try {
-          await safeFetch(`${httpApiBase()}/api/config/env`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(compilerEnvPayload),
-          });
-        } catch {
-          if (IS_TAURI && currentWorkspaceId) {
-            await invoke("workspace_update_env", {
-              workspaceId: currentWorkspaceId,
-              entries: [{ key: effectiveCompApiKeyEnv, value: effectiveCompApiKeyValue }],
-            });
-          }
-        }
-      } else if (IS_TAURI && currentWorkspaceId) {
-        await invoke("workspace_update_env", {
-          workspaceId: currentWorkspaceId,
-          entries: [{ key: effectiveCompApiKeyEnv, value: effectiveCompApiKeyValue }],
-        });
-      }
-      setEnvDraft((e) => envSet(e, effectiveCompApiKeyEnv, effectiveCompApiKeyValue));
+      const epName = (compilerEndpointName.trim() || `compiler-${compilerProviderSlug || "provider"}-${compilerModel.trim()}`).slice(0, 64);
 
-      // Read existing JSON
-      let currentJson = "";
-      try {
-        currentJson = await readWorkspaceFile("data/llm_endpoints.json");
-      } catch { currentJson = ""; }
-      const base = currentJson ? JSON.parse(currentJson) : { endpoints: [], settings: {} };
-      base.compiler_endpoints = Array.isArray(base.compiler_endpoints) ? base.compiler_endpoints : [];
-
-      const baseName = (compilerEndpointName.trim() || `compiler-${compilerProviderSlug || "provider"}-${compilerModel.trim()}`).slice(0, 64);
-      const usedNames = new Set(base.compiler_endpoints.map((e: any) => String(e?.name || "")).filter(Boolean));
-      let name = baseName;
-      if (usedNames.has(name)) {
-        for (let i = 2; i < 10; i++) {
-          const n = `${baseName}-${i}`.slice(0, 64);
-          if (!usedNames.has(n)) { name = n; break; }
-        }
-      }
-
-      const endpoint = {
-        name,
+      const endpoint: Record<string, unknown> = {
+        name: epName,
         provider: compilerProviderSlug || "custom",
         api_type: compilerApiType,
         base_url: compilerBaseUrl.trim(),
-        api_key_env: effectiveCompApiKeyEnv,
         model: compilerModel.trim(),
-        priority: base.compiler_endpoints.length + 1,
         max_tokens: 2048,
         context_window: 200000,
         timeout: 30,
         capabilities: ["text"],
       };
-      base.compiler_endpoints.push(endpoint);
-      base.compiler_endpoints.sort((a: any, b: any) => (Number(a?.priority) || 999) - (Number(b?.priority) || 999));
 
-      await writeWorkspaceFile("data/llm_endpoints.json", JSON.stringify(base, null, 2) + "\n");
+      const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint,
+          api_key: effectiveCompApiKeyValue || null,
+          endpoint_type: "compiler_endpoints",
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "error" || data.status === "conflict") {
+        notifyError(data.error || "保存失败");
+        return false;
+      }
 
-      // Reset form
+      if (effectiveCompApiKeyValue && data.endpoint?.api_key_env) {
+        setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveCompApiKeyValue));
+      }
+
       setCompilerModel("");
       setCompilerApiKeyValue("");
       setCompilerEndpointName("");
       setCompilerBaseUrl("");
-      notifySuccess(`编译端点 ${name} 已保存`);
+      notifySuccess(`编译端点 ${data.endpoint?.name || epName} 已保存`);
       await loadSavedEndpoints();
       return true;
     } catch (e) {
@@ -2365,23 +2257,12 @@ export function App() {
     if (!currentWorkspaceId && dataMode !== "remote") return;
     const _busyId = notifyLoading("删除编译端点...");
     try {
-      let currentJson = "";
-      try {
-        currentJson = await readWorkspaceFile("data/llm_endpoints.json");
-      } catch { currentJson = ""; }
-      const base = currentJson ? JSON.parse(currentJson) : { endpoints: [], settings: {} };
-      base.compiler_endpoints = Array.isArray(base.compiler_endpoints) ? base.compiler_endpoints : [];
-      base.compiler_endpoints = base.compiler_endpoints
-        .filter((e: any) => String(e?.name || "") !== epName)
-        .map((e: any, i: number) => ({ ...e, priority: i + 1 }));
-
-      await writeWorkspaceFile("data/llm_endpoints.json", JSON.stringify(base, null, 2) + "\n");
-
-      // Immediately update local state (don't rely solely on re-read which may be stale in remote mode)
+      await safeFetch(
+        `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(epName)}?endpoint_type=compiler_endpoints`,
+        { method: "DELETE" },
+      );
       setSavedCompilerEndpoints((prev) => prev.filter((e) => e.name !== epName));
       notifySuccess(`编译端点 ${epName} 已删除`);
-
-      // Also re-read to sync fully (background)
       loadSavedEndpoints().catch(() => {});
     } catch (e) {
       notifyError(String(e));
@@ -2409,13 +2290,6 @@ export function App() {
     }
     const sttSelectedProvider = providers.find((p) => p.slug === sttProviderSlug) || null;
     const isSttLocal = isLocalProvider(sttSelectedProvider);
-    const rawSttApiKeyEnv = sttApiKeyEnv.trim()
-      || sttSelectedProvider?.api_key_env_suggestion
-      || envKeyFromSlug(sttProviderSlug || "custom");
-    const effectiveSttApiKeyEnv = nextEnvKeyName(
-      rawSttApiKeyEnv,
-      new Set([...savedEndpoints, ...savedCompilerEndpoints, ...savedSttEndpoints].map((e) => e.api_key_env).filter(Boolean)),
-    );
     const effectiveSttApiKeyValue = sttApiKeyValue.trim() || (isSttLocal ? localProviderPlaceholderKey(sttSelectedProvider) : "");
     if (!isSttLocal && !effectiveSttApiKeyValue) {
       notifyError("请填写 STT 端点的 API Key 值");
@@ -2423,71 +2297,45 @@ export function App() {
     }
     const _busyId = notifyLoading("保存 STT 端点...");
     try {
-      const sttEnvPayload = { entries: { [effectiveSttApiKeyEnv]: effectiveSttApiKeyValue } };
-      if (shouldUseHttpApi()) {
-        try {
-          await safeFetch(`${httpApiBase()}/api/config/env`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(sttEnvPayload),
-          });
-        } catch {
-          if (IS_TAURI && currentWorkspaceId) {
-            await invoke("workspace_update_env", {
-              workspaceId: currentWorkspaceId,
-              entries: [{ key: effectiveSttApiKeyEnv, value: effectiveSttApiKeyValue }],
-            });
-          }
-        }
-      } else if (IS_TAURI && currentWorkspaceId) {
-        await invoke("workspace_update_env", {
-          workspaceId: currentWorkspaceId,
-          entries: [{ key: effectiveSttApiKeyEnv, value: effectiveSttApiKeyValue }],
-        });
-      }
-      setEnvDraft((e) => envSet(e, effectiveSttApiKeyEnv, effectiveSttApiKeyValue));
+      const epName = (sttEndpointName.trim() || `stt-${sttProviderSlug || "provider"}-${sttModel.trim()}`).slice(0, 64);
 
-      let currentJson = "";
-      try {
-        currentJson = await readWorkspaceFile("data/llm_endpoints.json");
-      } catch { currentJson = ""; }
-      const base = currentJson ? JSON.parse(currentJson) : { endpoints: [], settings: {} };
-      base.stt_endpoints = Array.isArray(base.stt_endpoints) ? base.stt_endpoints : [];
-
-      const baseName = (sttEndpointName.trim() || `stt-${sttProviderSlug || "provider"}-${sttModel.trim()}`).slice(0, 64);
-      const usedNames = new Set(base.stt_endpoints.map((e: any) => String(e?.name || "")).filter(Boolean));
-      let name = baseName;
-      if (usedNames.has(name)) {
-        for (let i = 2; i < 10; i++) {
-          const candidate = `${baseName}-${i}`.slice(0, 64);
-          if (!usedNames.has(candidate)) { name = candidate; break; }
-        }
-      }
-
-      const endpoint = {
-        name,
+      const endpoint: Record<string, unknown> = {
+        name: epName,
         provider: sttProviderSlug || "custom",
         api_type: sttApiType,
         base_url: sttBaseUrl.trim(),
-        api_key_env: effectiveSttApiKeyEnv,
         model: sttModel.trim(),
-        priority: base.stt_endpoints.length + 1,
         max_tokens: 0,
         context_window: 0,
         timeout: 60,
         capabilities: ["text"],
       };
-      base.stt_endpoints.push(endpoint);
-      base.stt_endpoints.sort((a: any, b: any) => (Number(a?.priority) || 999) - (Number(b?.priority) || 999));
 
-      await writeWorkspaceFile("data/llm_endpoints.json", JSON.stringify(base, null, 2) + "\n");
+      const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint,
+          api_key: effectiveSttApiKeyValue || null,
+          endpoint_type: "stt_endpoints",
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "error" || data.status === "conflict") {
+        notifyError(data.error || "保存失败");
+        return false;
+      }
+
+      if (effectiveSttApiKeyValue && data.endpoint?.api_key_env) {
+        setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveSttApiKeyValue));
+      }
 
       setSttModel("");
       setSttApiKeyValue("");
       setSttEndpointName("");
       setSttBaseUrl("");
       setSttModels([]);
-      notifySuccess(`STT 端点 ${name} 已保存`);
+      notifySuccess(`STT 端点 ${data.endpoint?.name || epName} 已保存`);
       await loadSavedEndpoints();
       return true;
     } catch (e) {
@@ -2502,21 +2350,12 @@ export function App() {
     if (!currentWorkspaceId && dataMode !== "remote") return;
     const _busyId = notifyLoading("删除 STT 端点...");
     try {
-      let currentJson = "";
-      try {
-        currentJson = await readWorkspaceFile("data/llm_endpoints.json");
-      } catch { currentJson = ""; }
-      const base = currentJson ? JSON.parse(currentJson) : { endpoints: [], settings: {} };
-      base.stt_endpoints = Array.isArray(base.stt_endpoints) ? base.stt_endpoints : [];
-      base.stt_endpoints = base.stt_endpoints
-        .filter((e: any) => String(e?.name || "") !== epName)
-        .map((e: any, i: number) => ({ ...e, priority: i + 1 }));
-
-      await writeWorkspaceFile("data/llm_endpoints.json", JSON.stringify(base, null, 2) + "\n");
-
+      await safeFetch(
+        `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(epName)}?endpoint_type=stt_endpoints`,
+        { method: "DELETE" },
+      );
       setSavedSttEndpoints((prev) => prev.filter((e) => e.name !== epName));
       notifySuccess(`STT 端点 ${epName} 已删除`);
-
       loadSavedEndpoints().catch(() => {});
     } catch (e) {
       notifyError(String(e));
@@ -2666,10 +2505,6 @@ export function App() {
       notifyError("模型不能为空");
       return;
     }
-    if (!editDraft.apiKeyEnv.trim()) {
-      notifyError("API Key 环境变量名不能为空");
-      return;
-    }
     if (!editDraft.baseUrl.trim()) {
       notifyError("请填写 Base URL");
       return;
@@ -2680,49 +2515,17 @@ export function App() {
     }
     const _busyId = notifyLoading("保存修改...");
     try {
-      // Update env only if user provided a value (avoid accidental overwrite)
-      if (editDraft.apiKeyValue.trim()) {
-        await ensureEnvLoaded(currentWorkspaceId);
-        setEnvDraft((e) => envSet(e, editDraft.apiKeyEnv.trim(), editDraft.apiKeyValue.trim()));
-        const envPayload = { entries: { [editDraft.apiKeyEnv.trim()]: editDraft.apiKeyValue.trim() } };
-        if (shouldUseHttpApi()) {
-          try {
-            await safeFetch(`${httpApiBase()}/api/config/env`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(envPayload),
-            });
-          } catch {
-            if (IS_TAURI && currentWorkspaceId) {
-              await invoke("workspace_update_env", {
-                workspaceId: currentWorkspaceId,
-                entries: [{ key: editDraft.apiKeyEnv.trim(), value: editDraft.apiKeyValue.trim() }],
-              });
-            }
-          }
-        } else if (IS_TAURI && currentWorkspaceId) {
-          await invoke("workspace_update_env", {
-            workspaceId: currentWorkspaceId,
-            entries: [{ key: editDraft.apiKeyEnv.trim(), value: editDraft.apiKeyValue.trim() }],
-          });
-        }
-      }
+      const newName = editDraft.name.trim().slice(0, 64);
+      const nameChanged = newName !== editingOriginalName;
 
-      const { endpoints, settings } = await readEndpointsJson();
-      const used = new Set(endpoints.map((e: any) => String(e?.name || "")).filter(Boolean));
-      if (editDraft.name.trim() !== editingOriginalName && used.has(editDraft.name.trim())) {
-        throw new Error(`端点名称已存在：${editDraft.name.trim()}（请换一个）`);
-      }
-      const idx = endpoints.findIndex((e: any) => String(e?.name || "") === editingOriginalName);
       const validTiers = (editDraft.pricingTiers || []).filter(
         (t) => t.input_price > 0 || t.output_price > 0
       );
-      const next: Record<string, any> = {
-        name: editDraft.name.trim().slice(0, 64),
+      const endpoint: Record<string, unknown> = {
+        name: nameChanged ? newName : editingOriginalName,
         provider: editDraft.providerSlug || "custom",
         api_type: editDraft.apiType,
         base_url: editDraft.baseUrl.trim(),
-        api_key_env: editDraft.apiKeyEnv.trim(),
         model: editDraft.modelId.trim(),
         priority: normalizePriority(editDraft.priority, 1),
         max_tokens: editDraft.maxTokens ?? 0,
@@ -2730,22 +2533,40 @@ export function App() {
         timeout: editDraft.timeout ?? 180,
         rpm_limit: editDraft.rpmLimit ?? 0,
         capabilities: editDraft.caps?.length ? editDraft.caps : ["text"],
-        extra_params:
-          (editDraft.caps || []).includes("thinking") && editDraft.providerSlug === "dashscope"
-            ? { enable_thinking: true }
-            : undefined,
       };
-      next.pricing_tiers = validTiers.length > 0 ? validTiers : undefined;
-      if (idx >= 0) {
-        const prev = endpoints[idx] || {};
-        const merged = { ...prev, ...next };
-        if (!next.pricing_tiers) delete merged.pricing_tiers;
-        endpoints[idx] = merged;
-      } else {
-        endpoints.push(next);
+      if ((editDraft.caps || []).includes("thinking") && editDraft.providerSlug === "dashscope") {
+        endpoint.extra_params = { enable_thinking: true };
       }
-      endpoints.sort((a: any, b: any) => (Number(a?.priority) || 999) - (Number(b?.priority) || 999));
-      await writeEndpointsJson(endpoints, settings);
+      if (validTiers.length > 0) {
+        endpoint.pricing_tiers = validTiers;
+      }
+
+      if (nameChanged) {
+        await safeFetch(
+          `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(editingOriginalName)}?endpoint_type=endpoints`,
+          { method: "DELETE" },
+        );
+      }
+
+      const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint,
+          api_key: editDraft.apiKeyValue.trim() || null,
+          endpoint_type: "endpoints",
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "conflict" || data.status === "error") {
+        notifyError(data.error || "保存失败");
+        return;
+      }
+
+      if (editDraft.apiKeyValue.trim() && data.endpoint?.api_key_env) {
+        setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, editDraft.apiKeyValue.trim()));
+      }
+
       notifySuccess("端点已更新");
       setEditModalOpen(false);
       await loadSavedEndpoints();
@@ -2780,17 +2601,7 @@ export function App() {
       return false;
     }
     const isLocal = isLocalProvider(selectedProvider);
-    // 本地服务商允许空 API Key（自动填入 placeholder）
     const effectiveApiKeyValue = apiKeyValue.trim() || (isLocal ? localProviderPlaceholderKey(selectedProvider) : "");
-    // apiKeyEnv 兜底：即使 useEffect 未触发也能生成合理的环境变量名
-    // When creating (not editing), deduplicate against existing endpoints to avoid
-    // two endpoints sharing the same env var (which causes key overwrite on save).
-    const rawApiKeyEnv = apiKeyEnv.trim()
-      || selectedProvider?.api_key_env_suggestion
-      || envKeyFromSlug(selectedProvider?.slug || providerSlug || "custom");
-    const effectiveApiKeyEnv = isEditingEndpoint
-      ? rawApiKeyEnv
-      : nextEnvKeyName(rawApiKeyEnv, new Set(savedEndpoints.map((e) => e.api_key_env).filter(Boolean)));
     if (!isLocal && !effectiveApiKeyValue) {
       notifyError("请填写 API Key 值（会写入工作区 .env）");
       return false;
@@ -2798,108 +2609,53 @@ export function App() {
     const _busyId = notifyLoading(isEditingEndpoint ? "更新端点配置..." : "写入端点配置...");
 
     try {
-      await ensureEnvLoaded(currentWorkspaceId);
-      setEnvDraft((e) => envSet(e, effectiveApiKeyEnv, effectiveApiKeyValue));
-      const envPayload = { entries: { [effectiveApiKeyEnv]: effectiveApiKeyValue } };
+      const capList = Array.isArray(capSelected) && capSelected.length ? capSelected : ["text"];
+      const epName = (endpointName.trim() || `${providerSlug || selectedProvider?.slug || "provider"}-${selectedModelId}`).slice(0, 64);
 
-      if (shouldUseHttpApi()) {
-        try {
-          await safeFetch(`${httpApiBase()}/api/config/env`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(envPayload),
-          });
-        } catch {
-          if (IS_TAURI && currentWorkspaceId) {
-            await invoke("workspace_update_env", {
-              workspaceId: currentWorkspaceId,
-              entries: [{ key: effectiveApiKeyEnv, value: effectiveApiKeyValue }],
-            });
-          }
-        }
-      } else if (IS_TAURI && currentWorkspaceId) {
-        await invoke("workspace_update_env", {
-          workspaceId: currentWorkspaceId,
-          entries: [{ key: effectiveApiKeyEnv, value: effectiveApiKeyValue }],
-        });
+      const endpoint: Record<string, unknown> = {
+        name: isEditingEndpoint ? (editingOriginalName || epName) : epName,
+        provider: providerSlug || (selectedProvider?.slug ?? "custom"),
+        api_type: apiType,
+        base_url: baseUrl.trim(),
+        model: selectedModelId,
+        priority: normalizePriority(endpointPriority, 1),
+        max_tokens: addEpMaxTokens,
+        context_window: addEpContextWindow,
+        timeout: addEpTimeout,
+        rpm_limit: addEpRpmLimit,
+        capabilities: capList,
+      };
+      if (capList.includes("thinking") && (providerSlug || selectedProvider?.slug) === "dashscope") {
+        endpoint.extra_params = { enable_thinking: true };
       }
 
-      // 读取现有 llm_endpoints.json
-      let currentJson = "";
-      try {
-        currentJson = await readWorkspaceFile("data/llm_endpoints.json");
-      } catch {
-        currentJson = "";
+      const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint,
+          api_key: effectiveApiKeyValue || null,
+          endpoint_type: "endpoints",
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "conflict") {
+        notifyError(data.error || "配置已被其他会话修改，请刷新后重试");
+        return false;
+      }
+      if (data.status === "error") {
+        notifyError(data.error || "保存失败");
+        return false;
       }
 
-      const next = (() => {
-        const base = currentJson ? JSON.parse(currentJson) : { endpoints: [], settings: {} };
-        base.endpoints = Array.isArray(base.endpoints) ? base.endpoints : [];
-        const usedNames = new Set(base.endpoints.map((e: any) => String(e?.name || "")).filter(Boolean));
-        const baseName = (endpointName.trim() || `${providerSlug || selectedProvider?.slug || "provider"}-${selectedModelId}`).slice(0, 64);
-        const name = (() => {
-          if (isEditingEndpoint) {
-            // allow keeping the same name; prevent collision with other endpoints
-            const original = editingOriginalName || "";
-            if (baseName !== original && usedNames.has(baseName)) {
-              throw new Error(`端点名称已存在：${baseName}（请换一个）`);
-            }
-            return baseName || original;
-          }
-          if (!usedNames.has(baseName)) return baseName;
-          for (let i = 2; i < 100; i++) {
-            const n = `${baseName}-${i}`.slice(0, 64);
-            if (!usedNames.has(n)) return n;
-          }
-          return `${baseName}-${Date.now()}`.slice(0, 64);
-        })();
-        const capList = Array.isArray(capSelected) && capSelected.length ? capSelected : ["text"];
-
-        const endpoint = {
-          name,
-          provider: providerSlug || (selectedProvider?.slug ?? "custom"),
-          api_type: apiType,
-          base_url: baseUrl.trim(),
-          api_key_env: effectiveApiKeyEnv,
-          model: selectedModelId,
-          priority: normalizePriority(endpointPriority, 1),
-          max_tokens: addEpMaxTokens,
-          context_window: addEpContextWindow,
-          timeout: addEpTimeout,
-          rpm_limit: addEpRpmLimit,
-          capabilities: capList,
-          // DashScope 思考模式：OpenAkita 的 OpenAI provider 会识别 enable_thinking
-          extra_params:
-            capList.includes("thinking") && (providerSlug || selectedProvider?.slug) === "dashscope"
-              ? { enable_thinking: true }
-              : undefined,
-        };
-
-        if (isEditingEndpoint) {
-          const original = editingOriginalName || name;
-          const idx = base.endpoints.findIndex((e: any) => String(e?.name || "") === original);
-          if (idx < 0) {
-            base.endpoints.push(endpoint);
-          } else {
-            const prev = base.endpoints[idx] || {};
-            base.endpoints[idx] = { ...prev, ...endpoint };
-          }
-        } else {
-          // 默认行为：不覆盖同名端点；自动改名后直接追加，实现“主端点 + 备份端点”
-          base.endpoints.push(endpoint);
-        }
-        // 重新按 priority 排序（越小越优先）
-        base.endpoints.sort((a: any, b: any) => (Number(a?.priority) || 999) - (Number(b?.priority) || 999));
-
-        return JSON.stringify(base, null, 2) + "\n";
-      })();
-
-      await writeWorkspaceFile("data/llm_endpoints.json", next);
+      if (effectiveApiKeyValue && data.endpoint?.api_key_env) {
+        setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveApiKeyValue));
+      }
 
       notifySuccess(
         isEditingEndpoint
-          ? "端点已更新：data/llm_endpoints.json（同时已写入 API Key 到 .env）。"
-          : "端点已追加写入：data/llm_endpoints.json（同时已写入 API Key 到 .env）。你可以继续添加备份端点。",
+          ? "端点已更新（同时已写入 API Key 到 .env）。"
+          : "端点已保存（同时已写入 API Key 到 .env）。你可以继续添加备份端点。",
       );
       if (isEditingEndpoint) resetEndpointEditor();
       await loadSavedEndpoints();
@@ -2916,18 +2672,12 @@ export function App() {
     if (!currentWorkspaceId && dataMode !== "remote") return;
     const _busyId = notifyLoading("删除端点...");
     try {
-      const raw = await readWorkspaceFile("data/llm_endpoints.json");
-      const base = raw ? JSON.parse(raw) : { endpoints: [], settings: {} };
-      const eps = Array.isArray(base.endpoints) ? base.endpoints : [];
-      base.endpoints = eps.filter((e: any) => String(e?.name || "") !== name);
-      const next = JSON.stringify(base, null, 2) + "\n";
-      await writeWorkspaceFile("data/llm_endpoints.json", next);
-
-      // Immediately update local state
+      await safeFetch(
+        `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(name)}?endpoint_type=endpoints`,
+        { method: "DELETE" },
+      );
       setSavedEndpoints((prev) => prev.filter((e) => e.name !== name));
       notifySuccess(`已删除端点：${name}`);
-
-      // Background re-read to fully sync
       loadSavedEndpoints().catch(() => {});
     } catch (e) {
       notifyError(String(e));
@@ -3089,9 +2839,7 @@ export function App() {
   function getFooterSaveConfig(): { keys: string[]; savedMsg: string } | null {
     switch (stepId) {
       case "llm":
-        // API keys are already written individually by each endpoint save;
-        // bulk-writing them here risks overwriting valid keys with stale envDraft values.
-        return { keys: [], savedMsg: t("config.llmSaved") };
+        return null;
 
       case "im":
         return { keys: getAutoSaveKeysForStep("im"), savedMsg: t("config.imSaved") };
@@ -3257,10 +3005,24 @@ export function App() {
           const epRes = await safeFetch(`${effectiveApiBaseUrl}/api/config/endpoints`);
           const epData = await epRes.json();
           const eps = Array.isArray(epData?.endpoints) ? epData.endpoints : [];
+
+          let statusMap: Record<string, boolean> = {};
+          try {
+            const statusRes = await safeFetch(`${effectiveApiBaseUrl}/api/config/endpoint-status`);
+            const statusData = await statusRes.json();
+            const statusList = Array.isArray(statusData?.endpoints) ? statusData.endpoints : [];
+            for (const s of statusList) {
+              if (s?.name) statusMap[String(s.name)] = !!s.key_present;
+            }
+          } catch { /* endpoint-status API not available, fall back to env */ }
+
           const list = eps
             .map((e: any) => {
               const keyEnv = String(e?.api_key_env || "");
-              const keyPresent = !!(keyEnv && (env[keyEnv] ?? "").trim());
+              const epName = String(e?.name || "");
+              const keyPresent = epName in statusMap
+                ? statusMap[epName]
+                : !!(keyEnv && (env[keyEnv] ?? "").trim());
               return {
                 name: String(e?.name || ""),
                 provider: String(e?.provider || ""),
@@ -6938,12 +6700,10 @@ export function App() {
     setObDetailLog([]);
     setObHasErrors(false);
 
-    // 安装配置日志：单独写入 {data_root}/logs/onboarding-日期.log，便于排查
     const dateLabel = new Date().toISOString().slice(0, 19).replace("T", "_").replace(/:/g, "-");
     let obLogPath: string | null = null;
     try {
       obLogPath = await invoke<string>("start_onboarding_log", { dateLabel });
-      // 写入配置快照（不记录密钥明文）
       if (obLogPath) {
         const configLines: string[] = [];
         configLines.push("");
@@ -6967,30 +6727,25 @@ export function App() {
         invoke("append_onboarding_log_lines", { logPath: obLogPath, lines: configLines }).catch(() => {});
       }
     } catch {
-      // 日志文件创建失败不影响主流程
     }
 
-    // 初始化任务列表
     const taskDefs: SetupTask[] = [
       { id: "workspace", label: "准备工作区", status: "pending" },
-      { id: "llm-config", label: "保存 LLM 配置", status: savedEndpoints.length > 0 ? "pending" : "skipped" },
-      { id: "env-save", label: "保存环境变量", status: "pending" },
     ];
-    
     taskDefs.push({ id: "backend-check", label: "检查后端环境", status: "pending" });
-    // CLI 注册
     const cliCommands: string[] = [];
     if (obCliOpenakita) cliCommands.push("openakita");
     if (obCliOa) cliCommands.push("oa");
     if (cliCommands.length > 0) {
       taskDefs.push({ id: "cli", label: `注册 CLI 命令 (${cliCommands.join(", ")})`, status: "pending" });
     }
-    // 开机自启
     if (obAutostart) {
       taskDefs.push({ id: "autostart", label: t("onboarding.autostart.taskLabel"), status: "pending" });
     }
     taskDefs.push({ id: "service-start", label: "启动后端服务", status: "pending" });
     taskDefs.push({ id: "http-wait", label: "等待 HTTP 服务就绪", status: "pending" });
+    taskDefs.push({ id: "llm-config", label: "保存 LLM 配置", status: savedEndpoints.length > 0 ? "pending" : "skipped" });
+    taskDefs.push({ id: "env-save", label: "保存环境变量", status: "pending" });
     setObTasks(taskDefs);
 
     const log = (msg: string) => {
@@ -7003,7 +6758,6 @@ export function App() {
         invoke("append_onboarding_log", { logPath: obLogPath, line }).catch(() => {});
       }
     };
-    /** 将任务状态写入日志，便于排查 */
     const logTask = (label: string, status: string, detail?: string) => {
       const msg = detail ? `[任务] ${label}: ${status} - ${detail}` : `[任务] ${label}: ${status}`;
       const now = new Date();
@@ -7039,51 +6793,6 @@ export function App() {
       }
       updateTask("workspace", { status: "done" });
       logTask("准备工作区", "done");
-
-      // ── STEP: llm-config ──
-      if (savedEndpoints.length > 0) {
-        updateTask("llm-config", { status: "running" });
-        logTask("保存 LLM 配置", "running");
-        const llmData = { endpoints: savedEndpoints, settings: {} };
-        await invoke("workspace_write_file", {
-          workspaceId: activeWsId,
-          relativePath: "data/llm_endpoints.json",
-          content: JSON.stringify(llmData, null, 2),
-        });
-        log(t("onboarding.progress.llmConfigSaved"));
-        updateTask("llm-config", { status: "done", detail: `${savedEndpoints.length} 个端点` });
-        logTask("保存 LLM 配置", "done", `${savedEndpoints.length} 个端点`);
-      }
-
-      // ── STEP: env-save ──
-      updateTask("env-save", { status: "running" });
-      logTask("保存环境变量", "running");
-      try {
-        const imKeys = getAutoSaveKeysForStep("im");
-        const envEntries: { key: string; value: string }[] = [];
-        for (const k of imKeys) {
-          if (Object.prototype.hasOwnProperty.call(envDraft, k) && envDraft[k]) {
-            envEntries.push({ key: k, value: envDraft[k] });
-          }
-        }
-        for (const ep of savedEndpoints) {
-          const keyName = (ep as any).api_key_env;
-          if (keyName && Object.prototype.hasOwnProperty.call(envDraft, keyName) && envDraft[keyName]) {
-            envEntries.push({ key: keyName, value: envDraft[keyName] });
-          }
-        }
-        if (envEntries.length > 0) {
-          await invoke("workspace_update_env", { workspaceId: activeWsId, entries: envEntries });
-          log(t("onboarding.progress.envSaved") || "✓ 环境变量已保存");
-        }
-        updateTask("env-save", { status: "done", detail: `${envEntries.length} 项` });
-        logTask("保存环境变量", "done", `${envEntries.length} 项`);
-      } catch (e) {
-        log(`⚠ 保存环境变量失败: ${String(e)}`);
-        updateTask("env-save", { status: "error", detail: String(e) });
-        logTask("保存环境变量", "error", String(e));
-        hasErr = true;
-      }
 
       // ── STEP: backend-check ──
       updateTask("backend-check", { status: "running" });
@@ -7169,6 +6878,7 @@ export function App() {
       logTask("启动后端服务", "running");
       log(t("onboarding.progress.startingService"));
       const effectiveVenv = venvDir || (info ? joinPath(info.openakitaRootDir, "venv") : "");
+      let httpReady = false;
       try {
         await invoke("openakita_service_start", { venvDir: effectiveVenv, workspaceId: activeWsId });
         log(t("onboarding.progress.serviceStarted"));
@@ -7179,7 +6889,6 @@ export function App() {
         updateTask("http-wait", { status: "running" });
         logTask("等待 HTTP 服务就绪", "running");
         log("等待 HTTP 服务就绪...");
-        let httpReady = false;
         for (let i = 0; i < 20; i++) {
           await new Promise(r => setTimeout(r, 2000));
           updateTask("http-wait", { detail: `已等待 ${(i + 1) * 2}s...` });
@@ -7217,6 +6926,120 @@ export function App() {
           log('--- 详细错误信息 ---');
           log(errStr);
         }
+        hasErr = true;
+      }
+
+      // ── STEP: llm-config (via HTTP API, after backend is ready) ──
+      if (savedEndpoints.length > 0) {
+        updateTask("llm-config", { status: "running" });
+        logTask("保存 LLM 配置", "running");
+        if (httpReady) {
+          try {
+            const base = httpApiBase();
+            for (const ep of savedEndpoints) {
+              const apiKey = envDraft[(ep as any).api_key_env] || "";
+              await safeFetch(`${base}/api/config/save-endpoint`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  endpoint: ep,
+                  api_key: apiKey || null,
+                  endpoint_type: "endpoints",
+                }),
+              });
+            }
+            for (const ep of savedCompilerEndpoints) {
+              const apiKey = envDraft[(ep as any).api_key_env] || "";
+              await safeFetch(`${base}/api/config/save-endpoint`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  endpoint: ep,
+                  api_key: apiKey || null,
+                  endpoint_type: "compiler_endpoints",
+                }),
+              });
+            }
+            for (const ep of savedSttEndpoints) {
+              const apiKey = envDraft[(ep as any).api_key_env] || "";
+              await safeFetch(`${base}/api/config/save-endpoint`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  endpoint: ep,
+                  api_key: apiKey || null,
+                  endpoint_type: "stt_endpoints",
+                }),
+              });
+            }
+            log(t("onboarding.progress.llmConfigSaved"));
+            updateTask("llm-config", { status: "done", detail: `${savedEndpoints.length + savedCompilerEndpoints.length + savedSttEndpoints.length} 个端点` });
+            logTask("保存 LLM 配置", "done", `${savedEndpoints.length + savedCompilerEndpoints.length + savedSttEndpoints.length} 个端点`);
+          } catch (e) {
+            log(`⚠ LLM 配置保存失败: ${String(e)}`);
+            updateTask("llm-config", { status: "error", detail: String(e).slice(0, 120) });
+            logTask("保存 LLM 配置", "error", String(e));
+            hasErr = true;
+          }
+        } else {
+          log("⚠ HTTP 服务未就绪，使用 Tauri 直接写入 LLM 配置");
+          try {
+            const llmData = { endpoints: savedEndpoints, compiler_endpoints: savedCompilerEndpoints, stt_endpoints: savedSttEndpoints, settings: {} };
+            await invoke("workspace_write_file", {
+              workspaceId: activeWsId,
+              relativePath: "data/llm_endpoints.json",
+              content: JSON.stringify(llmData, null, 2),
+            });
+            log(t("onboarding.progress.llmConfigSaved"));
+            updateTask("llm-config", { status: "done", detail: `${savedEndpoints.length} 个端点 (Tauri)` });
+            logTask("保存 LLM 配置", "done", `${savedEndpoints.length} 个端点 (Tauri 回退)`);
+          } catch (e) {
+            log(`⚠ LLM 配置保存失败: ${String(e)}`);
+            updateTask("llm-config", { status: "error", detail: String(e).slice(0, 120) });
+            logTask("保存 LLM 配置", "error", String(e));
+            hasErr = true;
+          }
+        }
+      }
+
+      // ── STEP: env-save (IM and other non-LLM env vars) ──
+      updateTask("env-save", { status: "running" });
+      logTask("保存环境变量", "running");
+      try {
+        const imKeys = getAutoSaveKeysForStep("im");
+        const entries: Record<string, string> = {};
+        for (const k of imKeys) {
+          if (Object.prototype.hasOwnProperty.call(envDraft, k) && envDraft[k]) {
+            entries[k] = envDraft[k];
+          }
+        }
+        if (!httpReady) {
+          for (const ep of [...savedEndpoints, ...savedCompilerEndpoints, ...savedSttEndpoints]) {
+            const keyName = (ep as any).api_key_env;
+            if (keyName && Object.prototype.hasOwnProperty.call(envDraft, keyName) && envDraft[keyName]) {
+              entries[keyName] = envDraft[keyName];
+            }
+          }
+        }
+        if (Object.keys(entries).length > 0) {
+          if (httpReady) {
+            await safeFetch(`${httpApiBase()}/api/config/env`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ entries }),
+            });
+          } else if (IS_TAURI && activeWsId) {
+            const tauriEntries = Object.entries(entries).map(([key, value]) => ({ key, value }));
+            await invoke("workspace_update_env", { workspaceId: activeWsId, entries: tauriEntries });
+          }
+          log(t("onboarding.progress.envSaved") || "✓ 环境变量已保存");
+        }
+        updateTask("env-save", { status: "done", detail: `${Object.keys(entries).length} 项` });
+        logTask("保存环境变量", "done", `${Object.keys(entries).length} 项`);
+      } catch (e) {
+        log(`⚠ 保存环境变量失败: ${String(e)}`);
+        updateTask("env-save", { status: "error", detail: String(e) });
+        logTask("保存环境变量", "error", String(e));
         hasErr = true;
       }
 
