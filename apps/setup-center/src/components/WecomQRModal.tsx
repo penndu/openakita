@@ -28,16 +28,16 @@ async function onboardStart(venvDir: string, apiBaseUrl?: string): Promise<Recor
   return res.json();
 }
 
-async function onboardPoll(venvDir: string, qrId: string, apiBaseUrl?: string): Promise<Record<string, any>> {
+async function onboardPoll(venvDir: string, scode: string, apiBaseUrl?: string): Promise<Record<string, any>> {
   if (IS_TAURI) {
-    const raw = await invoke<string>("openakita_wecom_onboard_poll", { venvDir, qrId });
+    const raw = await invoke<string>("openakita_wecom_onboard_poll", { venvDir, scode });
     return JSON.parse(raw);
   }
   const base = apiBaseUrl || "";
   const res = await safeFetch(`${base}/api/wecom/onboard/poll`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ qr_id: qrId }),
+    body: JSON.stringify({ scode }),
   });
   return res.json();
 }
@@ -46,7 +46,7 @@ export function WecomQRModal({ venvDir, apiBaseUrl, onClose, onSuccess }: WecomQ
   const { t } = useTranslation();
   const [state, setState] = useState<OnboardState>("idle");
   const [qrUrl, setQrUrl] = useState("");
-  const [qrId, setQrId] = useState("");
+  const [scode, setScode] = useState("");
   const [error, setError] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
@@ -65,11 +65,11 @@ export function WecomQRModal({ venvDir, apiBaseUrl, onClose, onSuccess }: WecomQ
     try {
       const data = await onboardStart(venvDir, apiBaseUrl);
       if (!mountedRef.current) return;
-      if (data.qr_url && data.qr_id) {
-        setQrId(data.qr_id);
-        setQrUrl(data.qr_url);
+      if (data.auth_url && data.scode) {
+        setScode(data.scode);
+        setQrUrl(data.auth_url);
         setState("scanning");
-        startPolling(data.qr_id);
+        startPolling(data.scode);
       } else {
         setError(data.error || t("wecom.qrInitFailed"));
         setState("error");
@@ -81,7 +81,7 @@ export function WecomQRModal({ venvDir, apiBaseUrl, onClose, onSuccess }: WecomQ
     }
   }, [venvDir, apiBaseUrl, t]);
 
-  const startPolling = useCallback((id: string) => {
+  const startPolling = useCallback((sc: string) => {
     let attempts = 0;
     const maxAttempts = 100;
 
@@ -96,7 +96,7 @@ export function WecomQRModal({ venvDir, apiBaseUrl, onClose, onSuccess }: WecomQ
         return;
       }
       try {
-        const data = await onboardPoll(venvDir, id, apiBaseUrl);
+        const data = await onboardPoll(venvDir, sc, apiBaseUrl);
         if (!mountedRef.current) return;
 
         if (data.bot_id && data.secret) {

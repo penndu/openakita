@@ -753,3 +753,55 @@ stop()
 - Telegram Bot API 本地服务器（解除限制）: https://core.telegram.org/bots/api#using-a-local-bot-api-server
 - koishi Telegram 适配器 (satorijs): https://github.com/satorijs/satori (`adapters/telegram/`)
 - AstrBot Telegram 适配器: https://github.com/Soulter/AstrBot (`astrbot/core/platform/sources/telegram/`)
+
+---
+
+## 十三、问题记录：图片双发与 300s 超时取消（2026-03-18 实证）
+
+### 现象
+
+1. 用户请求生成图片后，Bot 先发送了 **photo**，紧接着又以 **document**（文件卡片）形式发送同一张图片
+2. 随后 Bot 发送 "🚫 请求已取消"，后续请求也返回相同取消消息
+
+### 日志实证时间线
+
+```
+16:35:24  收到消息："生成一张可爱的英国长毛猫"
+16:35:40  generate_image 调用（Iter 1）
+16:36:02  图片生成成功（22s），保存到 data/generated_images/
+16:36:06  deliver_artifacts 调用，artifacts=[{type=image, ...}]（仅 image，无 file）
+16:36:26  [IM] send_image failed for telegram:telegram-bot-main: Timed out（20s 超时）
+16:36:47  deliver_artifacts 返回 ok=false, status=failed
+16:36:51  Iter 3 final_answer → ArtifactValidator FAILED → LLM verify INCOMPLETE
+16:38:50  Iter 4 final_answer → ArtifactValidator FAILED → 继续循环
+16:40:24  dispatch_cancelled, elapsed_ms=300000（精确 300s = AGENT_HANDLER_TIMEOUT 默认值）
+```
+
+### 根因分析
+
+**问题一：photo + document 双发**
+
+`_send_image`（im_channel.py）先调用 `adapter.send_image`（→ send_photo），失败后无条件降级到 `adapter.send_file`（→ send_document）。当 send_photo 在 Telegram 服务端成功但客户端 HTTP 响应超时时，photo 已投递但异常触发了 send_document 降级，导致双发。
+
+贡献因素：日志显示大量 `Conflict: terminated by other getUpdates request` 错误，表明有多个 Bot 实例使用同一 token 进行长轮询，导致网络不稳定和 API 超时。
+
+**问题二：ArtifactValidator 无限重试 → 300s 超时取消**
+
+deliver_artifacts 返回 `ok=false` 后，ArtifactValidator 检测到 `delivery_receipts` 中有 `status=failed`，返回 FAIL。LLM 验证也判定 INCOMPLETE。Agent 进入无限重试循环（每轮产出 final_answer → ArtifactValidator FAIL → LLM INCOMPLETE → 继续），直到 Gateway 的 `AGENT_HANDLER_TIMEOUT`（默认 300s）触发任务取消。
+
+delegation_logs 确认：`dispatch_cancelled, elapsed_ms=300000`。
+
+### 修复措施
+
+1. **`_send_image` 超时不降级**（im_channel.py）：区分超时与其他错误，超时时直接返回 "⚠️ 图片发送超时（可能已发送成功）" 而非降级到 send_document
+2. **ArtifactValidator FAIL 降级为 PASS**（response_handler.py）：交付失败是基础设施问题而非 Agent 过错，不应阻塞任务完成
+3. **去重 key 去除 art_type 前缀**（im_channel.py）：`dedupe_key` 从 `{art_type}:{sha256}` 改为 `content:{sha256}`，同一文件无论以 image 还是 file 类型发送都被去重
+4. **generate_image hint 加强**（system.py）：明确指导"仅需调用一次，不要以 file 类型重复发送"
+
+### Bot 多实例冲突说明
+
+日志中持续出现的 `Conflict: terminated by other getUpdates request` 说明存在多个进程使用同一 Bot Token 进行长轮询。可能原因：
+- 旧进程未完全退出，新进程已启动
+- 配置中同时启用了 `TELEGRAM_ENABLED`（全局 env）和 `im_bots` 中的 telegram bot
+
+解决方法：确保同一 Token 只有一个 Bot 实例运行。重启前先确认旧进程已停止。

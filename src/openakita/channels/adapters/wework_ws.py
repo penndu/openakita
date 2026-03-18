@@ -89,6 +89,7 @@ CMD_UPLOAD_FINISH = "aibot_upload_media_finish"
 
 STREAM_CONTENT_MAX_BYTES = 20480
 STREAM_KEEPALIVE_INTERVAL_S = 240  # 4 minutes; WeCom expires streams at 6 min
+MAX_INTERMEDIATE_STREAM_MSGS = 85  # WeCom SDK limit ~100 non-final; keep headroom
 
 # WebSocket upload constraints (official protocol limits)
 UPLOAD_CHUNK_MAX_BYTES = 512 * 1024  # 512KB raw per chunk (before base64)
@@ -119,10 +120,10 @@ DEDUP_TTL_S = 600  # 10 minutes
 PENDING_REPLY_TTL_S = 300  # 5 minutes
 PENDING_REPLY_MAX = 50
 
-# Rate limit tracking (WeCom platform limits per chat)
-RATE_REPLY_PER_MIN = 30
-RATE_REPLY_PER_HOUR = 1000
-RATE_WARN_THRESHOLD = 0.8  # warn at 80% of limit
+# Rate limit tracking (aligned with OpenClaw / WeCom platform limits)
+RATE_REPLY_PER_24H = 30      # replies per 24h sliding window per chat
+RATE_ACTIVE_PER_DAY = 10     # active (bot-initiated) sends per day per chat
+RATE_WARN_THRESHOLD = 0.8    # warn at 80% of limit
 
 
 # ---------------------------------------------------------------------------
@@ -160,45 +161,70 @@ async def _ensure_amr(voice_path: str) -> str:
 # 频率限制追踪器
 # ---------------------------------------------------------------------------
 class _RateLimitTracker:
-    """Lightweight per-chat sliding-window rate limit tracker.
+    """Per-chat sliding-window rate limit tracker aligned with OpenClaw model.
 
-    Tracks reply counts per minute and per hour to warn before hitting
-    WeCom platform limits (30/min, 1000/hour per chat).
+    - Replies: 30 per 24-hour window per chat (window resets on new inbound)
+    - Active sends (bot-initiated): 10 per calendar day per chat
     """
 
     def __init__(self) -> None:
-        self._buckets: dict[str, list[float]] = {}
+        self._reply_buckets: dict[str, list[float]] = {}
+        self._active_buckets: dict[str, list[float]] = {}
         self._max_chats = 500
 
-    def record(self, chat_id: str) -> None:
+    def _evict_if_full(self, buckets: dict[str, list[float]]) -> None:
+        if len(buckets) >= self._max_chats:
+            oldest = min(buckets, key=lambda k: buckets[k][-1] if buckets[k] else 0)
+            del buckets[oldest]
+
+    def record_reply(self, chat_id: str) -> None:
+        """Record a reply (response to user message)."""
         now = time.time()
-        if chat_id not in self._buckets:
-            if len(self._buckets) >= self._max_chats:
-                oldest = min(self._buckets, key=lambda k: self._buckets[k][-1] if self._buckets[k] else 0)
-                del self._buckets[oldest]
-            self._buckets[chat_id] = []
-        self._buckets[chat_id].append(now)
+        if chat_id not in self._reply_buckets:
+            self._evict_if_full(self._reply_buckets)
+            self._reply_buckets[chat_id] = []
+        self._reply_buckets[chat_id].append(now)
+
+    def record_active(self, chat_id: str) -> None:
+        """Record an active (bot-initiated) send."""
+        now = time.time()
+        if chat_id not in self._active_buckets:
+            self._evict_if_full(self._active_buckets)
+            self._active_buckets[chat_id] = []
+        self._active_buckets[chat_id].append(now)
+
+    def reset_reply_window(self, chat_id: str) -> None:
+        """Reset the reply window on new inbound message (OpenClaw behavior)."""
+        self._reply_buckets.pop(chat_id, None)
+
+    def record(self, chat_id: str) -> None:
+        """Legacy compat: record as active send."""
+        self.record_active(chat_id)
 
     def check(self, chat_id: str) -> None:
-        """Log a warning if approaching rate limits."""
-        entries = self._buckets.get(chat_id, [])
-        if not entries:
-            return
+        """Log warnings if approaching rate limits."""
         now = time.time()
-        last_min = sum(1 for t in entries if now - t < 60)
-        last_hour = sum(1 for t in entries if now - t < 3600)
-        if last_min >= int(RATE_REPLY_PER_MIN * RATE_WARN_THRESHOLD):
-            logger.warning(
-                f"[RateLimit] chat={chat_id}: {last_min}/{RATE_REPLY_PER_MIN} "
-                f"replies in last minute, approaching limit"
-            )
-        if last_hour >= int(RATE_REPLY_PER_HOUR * RATE_WARN_THRESHOLD):
-            logger.warning(
-                f"[RateLimit] chat={chat_id}: {last_hour}/{RATE_REPLY_PER_HOUR} "
-                f"replies in last hour, approaching limit"
-            )
-        # prune entries older than 1 hour
-        self._buckets[chat_id] = [t for t in entries if now - t < 3600]
+        day_ago = now - 86400
+
+        replies = self._reply_buckets.get(chat_id, [])
+        if replies:
+            recent = sum(1 for t in replies if t > day_ago)
+            if recent >= int(RATE_REPLY_PER_24H * RATE_WARN_THRESHOLD):
+                logger.warning(
+                    f"[RateLimit] chat={chat_id}: {recent}/{RATE_REPLY_PER_24H} "
+                    f"replies in 24h window, approaching limit"
+                )
+            self._reply_buckets[chat_id] = [t for t in replies if t > day_ago]
+
+        actives = self._active_buckets.get(chat_id, [])
+        if actives:
+            recent = sum(1 for t in actives if t > day_ago)
+            if recent >= int(RATE_ACTIVE_PER_DAY * RATE_WARN_THRESHOLD):
+                logger.warning(
+                    f"[RateLimit] chat={chat_id}: {recent}/{RATE_ACTIVE_PER_DAY} "
+                    f"active sends today, approaching limit"
+                )
+            self._active_buckets[chat_id] = [t for t in actives if t > day_ago]
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +278,32 @@ def _parse_quote_content(body: dict) -> tuple[str | None, list[MediaFile]]:
 
 
 # ---------------------------------------------------------------------------
+# think 标签归一化 (D3)
+# ---------------------------------------------------------------------------
+_THINK_OPEN_RE = re.compile(r"<think>", re.IGNORECASE)
+_THINK_CLOSE_RE = re.compile(r"</think>", re.IGNORECASE)
+
+
+def _normalize_think_tags(text: str) -> str:
+    """Normalize <think> tags: ensure every open tag is properly closed.
+
+    WeCom client renders <think>...</think> as a collapsible thinking block.
+    Unclosed or extra tags can break rendering.
+    """
+    if not text or "<think" not in text.lower():
+        return text
+
+    opens = len(_THINK_OPEN_RE.findall(text))
+    closes = len(_THINK_CLOSE_RE.findall(text))
+
+    if opens > closes:
+        text += "</think>" * (opens - closes)
+    elif closes > opens:
+        text = "<think>" * (closes - opens) + text
+    return text
+
+
+# ---------------------------------------------------------------------------
 # 配置
 # ---------------------------------------------------------------------------
 @dataclass
@@ -265,7 +317,7 @@ class WeWorkWsConfig:
     max_reconnect_attempts: int = -1
     reconnect_base_delay: float = 1.0
     reconnect_max_delay: float = 30.0
-    reply_ack_timeout: float = 5.0
+    reply_ack_timeout: float = 15.0
     max_reply_queue_size: int = 100
 
     def __post_init__(self) -> None:
@@ -448,6 +500,7 @@ class WeWorkWsAdapter(ChannelAdapter):
     """
 
     channel_name = "wework_ws"
+    _THINK_TAG_NATIVE = True
 
     capabilities = {
         "streaming": False,
@@ -532,6 +585,12 @@ class WeWorkWsAdapter(ChannelAdapter):
         # rate limit tracker (A10)
         self._rate_tracker = _RateLimitTracker()
 
+        # D1: intermediate stream message counter per stream_id
+        self._stream_msg_count: dict[str, int] = {}
+
+        # D6: last stream send timestamp per stream_id (for smart keepalive)
+        self._last_stream_sent: dict[str, float] = {}
+
         # background tasks ref holder
         self._bg_tasks: set[asyncio.Task] = set()
 
@@ -566,6 +625,11 @@ class WeWorkWsAdapter(ChannelAdapter):
             self._ws = None
         if self._webhook:
             await self._webhook.close()
+        for task in list(self._bg_tasks):
+            if not task.done():
+                task.cancel()
+        self._bg_tasks.clear()
+
         self._reject_all_pending("adapter stopped")
         logger.info("WeWork WS adapter stopped")
 
@@ -783,17 +847,26 @@ class WeWorkWsAdapter(ChannelAdapter):
             )
             req_id = frame.get("headers", {}).get("req_id", "")
             if req_id:
-                try:
-                    stream_id = self._pre_streams.pop(req_id, None) or secrets.token_hex(16)
-                    body: dict = {
-                        "msgtype": "stream",
-                        "stream": {"id": stream_id, "finish": True, "content": "处理超时，请重新发送。"},
-                    }
-                    await self._send_reply_with_ack(req_id, body, CMD_RESPONSE)
-                except Exception:
-                    pass
+                await self._send_error_finish(req_id, "处理超时，请重新发送。")
         except Exception as e:
+            # D4: general exception fallback — always close the stream
             logger.error(f"Message processing failed: {e}", exc_info=True)
+            req_id = frame.get("headers", {}).get("req_id", "")
+            if req_id:
+                await self._send_error_finish(req_id, f"处理出错：{type(e).__name__}")
+
+    async def _send_error_finish(self, req_id: str, error_text: str) -> None:
+        """Send a finish=true stream with error text, suppressing all exceptions."""
+        try:
+            self._cancel_thinking_task(req_id)
+            stream_id = self._pre_streams.pop(req_id, None) or secrets.token_hex(16)
+            body: dict = {
+                "msgtype": "stream",
+                "stream": {"id": stream_id, "finish": True, "content": error_text},
+            }
+            await self._send_reply_with_ack(req_id, body, CMD_RESPONSE)
+        except Exception:
+            pass
 
     async def _handle_msg_callback(self, frame: dict) -> None:
         body: dict = frame.get("body", {})
@@ -863,6 +936,9 @@ class WeWorkWsAdapter(ChannelAdapter):
         )
 
         self._log_message(unified)
+
+        # D9: reset reply rate window on new inbound message
+        self._rate_tracker.reset_reply_window(chat_id)
 
         # Per-peer serialization lock (A6): serialize messages from the same chat
         lock = self._get_peer_lock(chat_id)
@@ -1055,12 +1131,15 @@ class WeWorkWsAdapter(ChannelAdapter):
             "stream": {
                 "id": stream_id,
                 "finish": False,
-                "content": "等待模型响应 1s",
+                "content": "<think>等待模型响应 1s",
             },
         }
         try:
             await self._send_reply_with_ack(req_id, body, CMD_RESPONSE)
             self._pre_streams[req_id] = stream_id
+            # D1/D6: initialize stream tracking for thinking indicator
+            self._stream_msg_count[stream_id] = 1
+            self._last_stream_sent[stream_id] = time.time()
         except Exception as e:
             logger.debug(f"Thinking indicator send failed (non-fatal): {e}")
             return
@@ -1080,6 +1159,11 @@ class WeWorkWsAdapter(ChannelAdapter):
                 seconds += 1
                 if req_id not in self._pre_streams:
                     break
+                # D1: respect intermediate stream message limit
+                count = self._stream_msg_count.get(stream_id, 0)
+                if count >= MAX_INTERMEDIATE_STREAM_MSGS:
+                    logger.debug(f"[thinking] Stream {stream_id[:8]} hit intermediate limit, stopping counter")
+                    break
                 lines = [f"等待模型响应 {s}s" for s in range(1, seconds + 1)]
                 content = "<think>" + "\n".join(lines)
                 body: dict = {
@@ -1088,6 +1172,8 @@ class WeWorkWsAdapter(ChannelAdapter):
                 }
                 try:
                     await self._send_reply_with_ack(req_id, body, CMD_RESPONSE)
+                    self._stream_msg_count[stream_id] = count + 1
+                    self._last_stream_sent[stream_id] = time.time()
                 except Exception:
                     break
         except asyncio.CancelledError:
@@ -1370,6 +1456,10 @@ class WeWorkWsAdapter(ChannelAdapter):
 
         pre_stream_id = self._pre_streams.pop(req_id, None)
         stream_id = pre_stream_id or secrets.token_hex(16)
+
+        # D3: normalize think tags before sending
+        text = _normalize_think_tags(text)
+
         encoded = text.encode("utf-8")
 
         # Collect queued media messages (uploaded via send_image/send_file/send_voice)
@@ -1418,6 +1508,12 @@ class WeWorkWsAdapter(ChannelAdapter):
         try:
             for i, chunk_text in enumerate(chunks):
                 is_last = i == len(chunks) - 1
+                # D1: check intermediate stream message limit for non-final chunks
+                if not is_last:
+                    count = self._stream_msg_count.get(stream_id, 0)
+                    if count >= MAX_INTERMEDIATE_STREAM_MSGS:
+                        logger.warning(f"[stream_reply] Hit intermediate limit at chunk {i}, forcing finish")
+                        is_last = True
                 body: dict = {
                     "msgtype": "stream",
                     "stream": {
@@ -1428,6 +1524,9 @@ class WeWorkWsAdapter(ChannelAdapter):
                 }
                 try:
                     await self._send_reply_with_ack(req_id, body, CMD_RESPONSE)
+                    if not is_last:
+                        self._stream_msg_count[stream_id] = self._stream_msg_count.get(stream_id, 0) + 1
+                    self._last_stream_sent[stream_id] = time.time()
                 except Exception as e:
                     logger.error(f"Stream reply failed at chunk {i}: {e}")
                     if i == 0:
@@ -1439,8 +1538,18 @@ class WeWorkWsAdapter(ChannelAdapter):
             keepalive_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await keepalive_task
+            # Clean up D1/D6 per-stream state
+            self._stream_msg_count.pop(stream_id, None)
+            self._last_stream_sent.pop(stream_id, None)
+
+        # D9: track reply rate
+        chat_id = message.chat_id
+        self._rate_tracker.record_reply(chat_id)
+        self._rate_tracker.check(chat_id)
 
         # After stream finishes, send queued media as separate reply messages
+        # D11: collect media errors and notify user
+        media_errors: list[str] = []
         for media_msg in pending_media:
             try:
                 await self._send_reply_with_ack(req_id, media_msg, CMD_RESPONSE)
@@ -1450,6 +1559,14 @@ class WeWorkWsAdapter(ChannelAdapter):
                 )
             except Exception as e:
                 logger.error(f"Media reply failed after stream: {e}")
+                media_errors.append(f"{media_msg.get('msgtype', 'unknown')}: {e}")
+
+        if media_errors:
+            error_text = "文件发送失败：\n" + "\n".join(media_errors)
+            try:
+                await self._send_active_message(chat_id, error_text)
+            except Exception:
+                logger.warning(f"[stream_reply] Failed to send media error notification")
 
         self._reply_locks.pop(req_id, None)
         return stream_id
@@ -1457,11 +1574,25 @@ class WeWorkWsAdapter(ChannelAdapter):
     async def _stream_keepalive_loop(
         self, req_id: str, stream_id: str, text: str
     ) -> None:
-        """Send keepalive updates every 4 minutes to prevent stream expiry (A1)."""
+        """Send keepalive updates every 4 minutes to prevent stream expiry (A1).
+
+        D6: Defers keepalive if a recent stream frame was sent within the interval.
+        D1: Respects intermediate stream message limit.
+        """
         try:
             while True:
                 await asyncio.sleep(STREAM_KEEPALIVE_INTERVAL_S)
                 if not self._ws:
+                    break
+                # D6: skip if a stream frame was sent recently
+                last_sent = self._last_stream_sent.get(stream_id, 0)
+                if last_sent and (time.time() - last_sent) < STREAM_KEEPALIVE_INTERVAL_S:
+                    logger.debug(f"[keepalive] Deferred: recent stream activity for {stream_id[:8]}")
+                    continue
+                # D1: check intermediate limit
+                count = self._stream_msg_count.get(stream_id, 0)
+                if count >= MAX_INTERMEDIATE_STREAM_MSGS:
+                    logger.debug(f"[keepalive] Stream {stream_id[:8]} hit intermediate limit")
                     break
                 keepalive_content = text[:100] if text else "处理中..."
                 body: dict = {
@@ -1470,6 +1601,8 @@ class WeWorkWsAdapter(ChannelAdapter):
                 }
                 try:
                     await self._send_reply_with_ack(req_id, body, CMD_RESPONSE)
+                    self._stream_msg_count[stream_id] = count + 1
+                    self._last_stream_sent[stream_id] = time.time()
                     logger.debug(f"[keepalive] Sent for stream_id={stream_id[:8]}")
                 except Exception as e:
                     logger.warning(f"[keepalive] Failed (non-fatal): {e}")
@@ -1485,6 +1618,9 @@ class WeWorkWsAdapter(ChannelAdapter):
         Args:
             chat_type: 1=single chat (userid), 2=group chat, 0=auto (default).
         """
+        # D3: normalize think tags
+        text = _normalize_think_tags(text)
+
         self._rate_tracker.record(chat_id)
         self._rate_tracker.check(chat_id)
 
@@ -1682,7 +1818,7 @@ class WeWorkWsAdapter(ChannelAdapter):
             raise ValueError("File too small (min 5 bytes)")
 
         media_type = self._mime_to_upload_type(mime_type)
-        media_type, downgraded, note = self._check_upload_size(total_size, media_type)
+        media_type, downgraded, note = self._check_upload_size(total_size, media_type, mime_type=mime_type)
         if downgraded:
             logger.info(f"[ws_upload] Media type downgraded: {note}")
 
@@ -1791,8 +1927,13 @@ class WeWorkWsAdapter(ChannelAdapter):
         return "file"
 
     @staticmethod
-    def _check_upload_size(total_size: int, media_type: str) -> tuple[str, bool, str]:
+    def _check_upload_size(
+        total_size: int, media_type: str, *, mime_type: str = ""
+    ) -> tuple[str, bool, str]:
         """Validate size and auto-downgrade oversized media to 'file' type (A3).
+
+        D5: Also downgrades voice to 'file' if the MIME type is not AMR,
+        since WeCom voice messages require AMR format.
 
         Returns (final_type, downgraded, note).
         Raises ValueError only if the file exceeds the absolute max (20MB).
@@ -1802,6 +1943,11 @@ class WeWorkWsAdapter(ChannelAdapter):
                 f"File size {total_size} exceeds absolute max "
                 f"{UPLOAD_ABSOLUTE_MAX} bytes"
             )
+        # D5: non-AMR voice → downgrade to file
+        if media_type == "voice" and mime_type and "amr" not in mime_type.lower():
+            note = f"voice MIME={mime_type} is not AMR, downgraded to 'file'"
+            logger.info(f"[upload_size] {note}")
+            return "file", True, note
         limit = UPLOAD_SIZE_LIMITS.get(media_type, UPLOAD_ABSOLUTE_MAX)
         if total_size <= limit:
             return media_type, False, ""

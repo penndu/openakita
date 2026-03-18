@@ -409,6 +409,8 @@
     "installVersion": "Version",
     "imTitle": "IM Channels",
     "imHint": "Enable and configure channel credentials",
+    "imTabChannels": "Channel Config",
+    "imTabBots": "Bot Config",
     "imChainPush": "Chain-of-Thought Progress Push",
     "imChainPushHelp": "When enabled, IM channels will push real-time thinking process, tool calls and other intermediate states. Disabling does not affect internal reasoning or data saving",
     "imSave": "Save IM Config",
@@ -1492,6 +1494,7 @@
   },
   "wecom": {
     "qrScanConfig": "Scan QR to configure bot",
+    "qrScanCreate": "Scan QR to configure bot",
     "qrTitle": "WeCom QR Configuration",
     "qrSubtitle": "Scan with WeCom admin to auto-fill Bot ID and Secret",
     "qrLoading": "Generating QR code...",

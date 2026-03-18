@@ -432,6 +432,7 @@ class TelegramAdapter(ChannelAdapter):
             await self._app.start()
             await self._bot.set_webhook(
                 self.webhook_url, secret_token=self._webhook_secret,
+                allowed_updates=["message", "edited_message"],
             )
             logger.info(f"Telegram bot started with webhook: {self.webhook_url}")
         else:
@@ -478,6 +479,11 @@ class TelegramAdapter(ChannelAdapter):
             self._watchdog_task = None
 
         if self._app:
+            # Webhook 模式下先删除 webhook
+            if self.webhook_url and self._bot:
+                with contextlib.suppress(Exception):
+                    await self._bot.delete_webhook()
+
             # 先停止 updater
             if self._app.updater and self._app.updater.running:
                 await self._app.updater.stop()
@@ -1052,7 +1058,7 @@ class TelegramAdapter(ChannelAdapter):
             if file.local_path:
                 sent_message = await _send_media_with_retry(
                     lambda _p=file.local_path, _c=cap, _pm=pm, _fn=file.filename: self._bot.send_document(
-                        chat_id=chat_id, document=open(_p, "rb"), filename=_fn,
+                        chat_id=chat_id, document=_p, filename=_fn,
                         caption=_c, parse_mode=_pm,
                         reply_to_message_id=reply_to_id,
                         message_thread_id=_thread_id,
@@ -1075,7 +1081,7 @@ class TelegramAdapter(ChannelAdapter):
             if voice.local_path:
                 sent_message = await _send_media_with_retry(
                     lambda _p=voice.local_path, _c=cap, _pm=pm: self._bot.send_voice(
-                        chat_id=chat_id, voice=open(_p, "rb"), caption=_c,
+                        chat_id=chat_id, voice=_p, caption=_c,
                         parse_mode=_pm, reply_to_message_id=reply_to_id,
                         message_thread_id=_thread_id,
                     ))
@@ -1191,6 +1197,7 @@ class TelegramAdapter(ChannelAdapter):
             return False
 
         tg_parse_mode = None
+        raw_content = new_content
         if parse_mode:
             if parse_mode.lower() == "markdown":
                 tg_parse_mode = telegram.constants.ParseMode.MARKDOWN
@@ -1212,7 +1219,7 @@ class TelegramAdapter(ChannelAdapter):
                     await self._bot.edit_message_text(
                         chat_id=int(chat_id),
                         message_id=int(message_id),
-                        text=new_content,
+                        text=raw_content,
                         parse_mode=None,
                     )
                     return True

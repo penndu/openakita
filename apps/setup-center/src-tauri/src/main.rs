@@ -5216,13 +5216,13 @@ async fn openakita_wecom_onboard_start(
 #[tauri::command]
 async fn openakita_wecom_onboard_poll(
     venv_dir: String,
-    qr_id: String,
+    scode: String,
 ) -> Result<String, String> {
     spawn_blocking_result(move || {
         let args = vec![
             "wecom-onboard-poll",
-            "--qr-id",
-            &qr_id,
+            "--scode",
+            &scode,
         ];
         run_python_module_json(&venv_dir, "openakita.setup_center.bridge", &args, &[])
     })

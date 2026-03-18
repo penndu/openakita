@@ -45,6 +45,12 @@ hidden_imports_core = [
     "openakita.channels.gateway",
     "openakita.channels.base",
     "openakita.channels.types",
+    "openakita.channels.registry",
+    "openakita.channels.group_response",
+    "openakita.channels.policy",
+    "openakita.channels.retry",
+    "openakita.channels.text_splitter",
+    "openakita.channels.media_parser",
     "openakita.channels.adapters",
     "openakita.channels.adapters.telegram",
     "openakita.channels.adapters.feishu",
@@ -52,6 +58,7 @@ hidden_imports_core = [
     "openakita.channels.adapters.onebot",
     "openakita.channels.adapters.qq_official",
     "openakita.channels.adapters.wework_bot",
+    "openakita.channels.adapters.wework_ws",
     "openakita.channels.media",
     "openakita.channels.media.handler",
     "openakita.channels.media.audio_utils",
@@ -62,6 +69,9 @@ hidden_imports_core = [
     "openakita.evolution.installer",
     "openakita.setup_center",
     "openakita.setup_center.bridge",
+    "openakita.setup.qqbot_onboard",
+    "openakita.setup.wecom_onboard",
+    "openakita.setup.feishu_onboard",
     "openakita.mcp_servers",
     "openakita.mcp_servers.desktop_control",
     "openakita.mcp_servers.web_search",
@@ -77,6 +87,8 @@ hidden_imports_core = [
     "openakita.hub.agent_hub_client",
     "openakita.hub.skill_store_client",
     "openakita.agents.packager",
+    "openakita.agents.presets",
+    "openakita.agents.profile",
     # -- tools.handlers / definitions (新增模块需显式声明，避免缓存遗漏) --
     "openakita.tools.handlers.agent_hub",
     "openakita.tools.handlers.skill_store",
@@ -246,6 +258,10 @@ hidden_imports_core = [
     "nacl",                     # PyNaCl: ed25519 签名验证 (QQ 官方机器人)
     "nacl.signing",             # 签名验证
     "nacl.exceptions",          # 签名异常
+    "cryptography",             # cryptography: AES-256-CBC 文件解密 (wework_ws)
+    "cryptography.hazmat",
+    "cryptography.hazmat.primitives",
+    "cryptography.hazmat.primitives.ciphers",
     # -- 浏览器自动化 (原为外置模块，现直接打包以提高用户体验) --
     "playwright",               # Playwright 浏览器自动化 (~20MB Python 包)
     "playwright.async_api",
@@ -501,6 +517,14 @@ if (web_dist_dir / "index.html").exists():
     print(f"[spec] Bundling web frontend: {web_dist_dir}")
 else:
     print("[spec] INFO: dist-web not found, web remote access will not be available")
+
+# openakita source code: needed by bridge subcommand which runs via the bundled
+# system python.exe (not the frozen executable), so it needs importable .py files
+# in _internal/openakita/
+_openakita_src = SRC_DIR / "openakita"
+if _openakita_src.exists():
+    datas.append((str(_openakita_src), "openakita"))
+    print(f"[spec] Bundling openakita source: {_openakita_src}")
 
 # Provider list (single source of truth, shared by frontend and backend)
 # Must be bundled to openakita/llm/registries/ directory, Python reads via Path(__file__).parent

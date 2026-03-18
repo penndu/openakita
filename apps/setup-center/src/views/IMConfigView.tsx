@@ -5,11 +5,12 @@ import { FieldText, FieldBool, TelegramPairingCodeHint } from "../components/Env
 import { FeishuQRModal } from "../components/FeishuQRModal";
 import { QQBotQRModal } from "../components/QQBotQRModal";
 import { WecomQRModal } from "../components/WecomQRModal";
-import { IconBook, IconClipboard, LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ, LogoOneBot } from "../icons";
+import { IconBook, IconClipboard, IconBot, IconIM, LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ, LogoOneBot } from "../icons";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { EnvMap } from "../types";
 import { envGet, envSet } from "../utils";
 import { copyToClipboard } from "../utils/clipboard";
+import { BotConfigTab } from "./IMView";
 
 type IMConfigViewProps = {
   envDraft: EnvMap;
@@ -19,14 +20,37 @@ type IMConfigViewProps = {
   venvDir?: string;
   imDisabled?: boolean;
   onToggleIM?: () => void;
+  multiAgentEnabled?: boolean;
+  apiBaseUrl?: string;
+  onRequestRestart?: () => void;
+  wizardMode?: boolean;
 };
 
+const DEFAULT_API = "http://127.0.0.1:18900";
+
 export function IMConfigView(props: IMConfigViewProps) {
-  const { envDraft, setEnvDraft, busy = null, currentWorkspaceId, venvDir = "", imDisabled = false, onToggleIM } = props;
+  const {
+    envDraft, setEnvDraft, busy = null, currentWorkspaceId, venvDir = "",
+    imDisabled = false, onToggleIM,
+    multiAgentEnabled = false, apiBaseUrl, onRequestRestart, wizardMode = false,
+  } = props;
   const { t } = useTranslation();
   const [showFeishuQR, setShowFeishuQR] = useState(false);
   const [showWecomQR, setShowWecomQR] = useState(false);
   const [showQQBotQR, setShowQQBotQR] = useState(false);
+  const [configTab, setConfigTab] = useState<"channels" | "bots">("channels");
+
+  const showBodyInChannels = !wizardMode && !multiAgentEnabled;
+  const showDocRow = !wizardMode;
+
+  const enabledChannels: string[] = [];
+  if (envGet(envDraft, "TELEGRAM_ENABLED", "false").toLowerCase() === "true") enabledChannels.push("telegram");
+  if (envGet(envDraft, "FEISHU_ENABLED", "false").toLowerCase() === "true") enabledChannels.push("feishu");
+  if (envGet(envDraft, "DINGTALK_ENABLED", "false").toLowerCase() === "true") enabledChannels.push("dingtalk");
+  if (envGet(envDraft, "QQBOT_ENABLED", "false").toLowerCase() === "true") enabledChannels.push("qqbot");
+  if (envGet(envDraft, "ONEBOT_ENABLED", "false").toLowerCase() === "true") enabledChannels.push("onebot_reverse");
+  if (envGet(envDraft, "WEWORK_ENABLED", "false").toLowerCase() === "true"
+      || envGet(envDraft, "WEWORK_WS_ENABLED", "false").toLowerCase() === "true") enabledChannels.push("wework_ws");
 
   const _envBase = { envDraft, onEnvChange: setEnvDraft, busy };
   const FT = (p: { k: string; label: string; placeholder?: string; help?: string; type?: "text" | "password" }) =>
@@ -306,10 +330,45 @@ export function IMConfigView(props: IMConfigViewProps) {
         <div className="cardHint">{t("config.imHint")}</div>
         <div className="divider" />
 
-        {FB({ k: "IM_CHAIN_PUSH", label: t("config.imChainPush"), help: t("config.imChainPushHelp") })}
-        <div className="divider" />
+        {!wizardMode && (
+          <>
+            {FB({ k: "IM_CHAIN_PUSH", label: t("config.imChainPush"), help: t("config.imChainPushHelp") })}
+            <div className="divider" />
+          </>
+        )}
 
-        {channels.map((c) => {
+        {/* Multi-agent mode: tab switcher */}
+        {!wizardMode && multiAgentEnabled && (
+          <div style={{
+            display: "inline-flex", gap: 2, padding: 3, marginBottom: 12,
+            borderRadius: 10, background: "rgba(37,99,235,0.08)",
+          }}>
+            {(["channels", "bots"] as const).map((key) => {
+              const active = configTab === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setConfigTab(key)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "6px 14px", border: "none", cursor: "pointer",
+                    borderRadius: 8, fontSize: 13, fontWeight: 500,
+                    background: active ? "var(--primary, #2563eb)" : "transparent",
+                    color: active ? "#fff" : "var(--primary, #2563eb)",
+                    boxShadow: active ? "0 1px 4px rgba(37,99,235,0.3)" : "none",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  {key === "channels" ? <IconIM size={14} /> : <IconBot size={14} />}
+                  {key === "channels" ? t("config.imTabChannels") : t("config.imTabBots")}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Channel list (shown when not in bots tab) */}
+        {(!multiAgentEnabled || configTab === "channels" || wizardMode) && channels.map((c) => {
           const enabled = envGet(envDraft, c.enabledKey, "false").toLowerCase() === "true";
           return (
             <div key={c.enabledKey} className="card" style={{ marginTop: 10 }}>
@@ -326,15 +385,17 @@ export function IMConfigView(props: IMConfigViewProps) {
                   {t("config.enable")}
                 </label>
               </div>
-              <div className="row" style={{ alignItems: "center", gap: 6, marginTop: 4 }}>
-                <button className="btnSmall"
-                  style={{ fontSize: 11, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: 3 }}
-                  title={c.docUrl}
-                  onClick={async () => { const ok = await copyToClipboard(c.docUrl); if (ok) toast.success(t("config.imDocCopied")); }}
-                ><IconClipboard size={12} />{t("config.imDoc")}</button>
-                <span className="help" style={{ fontSize: 11, userSelect: "all", opacity: 0.6 }}>{c.docUrl}</span>
-              </div>
-              {enabled && (
+              {showDocRow && (
+                <div className="row" style={{ alignItems: "center", gap: 6, marginTop: 4 }}>
+                  <button className="btnSmall"
+                    style={{ fontSize: 11, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: 3 }}
+                    title={c.docUrl}
+                    onClick={async () => { const ok = await copyToClipboard(c.docUrl); if (ok) toast.success(t("config.imDocCopied")); }}
+                  ><IconClipboard size={12} />{t("config.imDoc")}</button>
+                  <span className="help" style={{ fontSize: 11, userSelect: "all", opacity: 0.6 }}>{c.docUrl}</span>
+                </div>
+              )}
+              {showBodyInChannels && enabled && (
                 <>
                   <div className="divider" />
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>{c.body}</div>
@@ -343,6 +404,18 @@ export function IMConfigView(props: IMConfigViewProps) {
             </div>
           );
         })}
+
+        {/* Bot config tab (multi-agent only) */}
+        {!wizardMode && multiAgentEnabled && configTab === "bots" && (
+          <BotConfigTab
+            apiBase={apiBaseUrl ?? DEFAULT_API}
+            multiAgentEnabled={true}
+            onRequestRestart={onRequestRestart}
+            venvDir={venvDir}
+            apiBaseUrl={apiBaseUrl}
+            enabledChannels={enabledChannels}
+          />
+        )}
       </div>
     </>
   );

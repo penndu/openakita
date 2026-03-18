@@ -91,6 +91,12 @@ wework = [
     "pycryptodome>=3.19.0",
 ]
 
+# 企业微信 WebSocket 长连接通道
+wework_ws = [
+    "websockets>=15.0.1",
+    "cryptography>=42.0.0",
+]
+
 # OneBot 协议通道 (NapCat/Lagrange 等)
 onebot = [
     "websockets>=15.0.1",
@@ -119,6 +125,7 @@ all = [
     "aiohttp>=3.9.0",
     "pycryptodome>=3.19.0",
     "websockets>=15.0.1",
+    "cryptography>=42.0.0",
     "qq-botpy>=1.1.5",
     "pilk>=0.2.1",
     # -- 桌面自动化 --

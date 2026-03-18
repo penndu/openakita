@@ -15,6 +15,7 @@ import { logger } from "../platform";
 import { IS_WEB, onWsEvent } from "../platform";
 import { FeishuQRModal } from "../components/FeishuQRModal";
 import { QQBotQRModal } from "../components/QQBotQRModal";
+import { WecomQRModal } from "../components/WecomQRModal";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 // ─── Types ──────────────────────────────────────────────────────────────
@@ -147,20 +148,13 @@ const EMPTY_BOT: IMBot = {
 
 export function IMView({
   serviceRunning,
-  multiAgentEnabled = false,
   apiBaseUrl,
-  onRequestRestart,
-  venvDir,
 }: {
   serviceRunning: boolean;
-  multiAgentEnabled?: boolean;
   apiBaseUrl?: string;
-  onRequestRestart?: () => void;
-  venvDir?: string;
 }) {
   const { t } = useTranslation();
   const api = apiBaseUrl ?? DEFAULT_API;
-  const [tab, setTab] = useState<"messages" | "bots">("messages");
 
   if (!serviceRunning) {
     return (
@@ -174,49 +168,8 @@ export function IMView({
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {/* Tabs */}
-      {multiAgentEnabled && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 4,
-          padding: "10px 16px", background: "var(--panel)", flexShrink: 0,
-          borderBottom: "1px solid var(--line)",
-        }}>
-          <div style={{
-            display: "inline-flex", gap: 2, padding: 3,
-            borderRadius: 10, background: "rgba(37,99,235,0.08)",
-          }}>
-            {(["messages", "bots"] as const).map((key) => {
-              const active = tab === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => setTab(key)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    padding: "6px 14px", border: "none", cursor: "pointer",
-                    borderRadius: 8, fontSize: 13, fontWeight: 500,
-                    background: active ? "var(--primary, #2563eb)" : "transparent",
-                    color: active ? "#fff" : "var(--primary, #2563eb)",
-                    boxShadow: active ? "0 1px 4px rgba(37,99,235,0.3)" : "none",
-                    transition: "all 0.2s",
-                  }}
-                >
-                  {key === "messages" ? <IconMessageCircle size={14} /> : <IconBot size={14} />}
-                  {key === "messages" ? t("im.tabMessages") : t("im.tabBots")}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Tab Content */}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        {tab === "messages" ? (
-          <MessagesTab serviceRunning={serviceRunning} apiBase={api} />
-        ) : (
-          <BotConfigTab apiBase={api} multiAgentEnabled={multiAgentEnabled} onRequestRestart={onRequestRestart} venvDir={venvDir} apiBaseUrl={apiBaseUrl} />
-        )}
+        <MessagesTab serviceRunning={serviceRunning} apiBase={api} />
       </div>
     </div>
   );
@@ -416,7 +369,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
 
 // ─── Bot Configuration Tab ──────────────────────────────────────────────
 
-function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, apiBaseUrl }: { apiBase: string; multiAgentEnabled: boolean; onRequestRestart?: () => void; venvDir?: string; apiBaseUrl?: string }) {
+export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, apiBaseUrl, enabledChannels }: { apiBase: string; multiAgentEnabled: boolean; onRequestRestart?: () => void; venvDir?: string; apiBaseUrl?: string; enabledChannels?: string[] }) {
   const { t } = useTranslation();
   const [bots, setBots] = useState<IMBot[]>([]);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
@@ -430,6 +383,7 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
   const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
   const [showFeishuQR, setShowFeishuQR] = useState(false);
   const [showQQBotQR, setShowQQBotQR] = useState(false);
+  const [showWecomQR, setShowWecomQR] = useState(false);
   const [tgPairingCode, setTgPairingCode] = useState<string | null>(null);
   const [tgPairingLoading, setTgPairingLoading] = useState(false);
 
@@ -882,7 +836,9 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
                   fontSize: 13, lineHeight: 1.4, boxSizing: "border-box",
                 }}
               >
-                {BOT_TYPES.filter((bt) => bt !== "wework" && bt !== "onebot").map((bt) => (
+                {BOT_TYPES.filter((bt) => bt !== "wework" && bt !== "onebot")
+                  .filter((bt) => !enabledChannels || enabledChannels.includes(bt))
+                  .map((bt) => (
                   <option key={bt} value={bt}>
                     {bt === "wework_ws" ? "企业微信" : bt === "onebot_reverse" ? "OneBot" : (BOT_TYPE_LABELS[bt] || bt)}
                   </option>
@@ -961,6 +917,23 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
                   {editingBot.type === "wework_ws" ? t("config.imWeworkModeWsHint") : t("config.imWeworkModeHttpHint")}
                 </div>
               </div>
+            )}
+
+            {/* WeCom WS: QR onboard */}
+            {editingBot.type === "wework_ws" && venvDir && (
+              <button
+                type="button"
+                style={{
+                  width: "100%", padding: "10px 0", marginBottom: 12,
+                  borderRadius: 8, border: "1.5px dashed var(--accent, #3b82f6)",
+                  background: "var(--accent-bg, rgba(59,130,246,0.06))",
+                  color: "var(--accent, #3b82f6)", fontWeight: 600, fontSize: 13,
+                  cursor: "pointer", transition: "all 0.15s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent-bg, rgba(59,130,246,0.12))"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "var(--accent-bg, rgba(59,130,246,0.06))"; }}
+                onClick={() => setShowWecomQR(true)}
+              >{t("wecom.qrScanCreate")}</button>
             )}
 
             {/* Credentials */}
@@ -1246,6 +1219,19 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
             updateCredential("app_id", appId);
             updateCredential("app_secret", appSecret);
             setShowQQBotQR(false);
+          }}
+        />
+      )}
+
+      {showWecomQR && venvDir && (
+        <WecomQRModal
+          venvDir={venvDir}
+          apiBaseUrl={apiBaseUrl}
+          onClose={() => setShowWecomQR(false)}
+          onSuccess={(botId, secret) => {
+            updateCredential("bot_id", botId);
+            updateCredential("secret", secret);
+            setShowWecomQR(false);
           }}
         />
       )}

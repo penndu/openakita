@@ -492,6 +492,12 @@ async def health_check_im(workspace_dir: str, channel: str | None) -> None:
             "enabled_key": "QQBOT_ENABLED",
             "required_keys": ["QQBOT_APP_ID", "QQBOT_APP_SECRET"],
         },
+        {
+            "id": "wework_ws",
+            "name": "企业微信(WS)",
+            "enabled_key": "WEWORK_WS_ENABLED",
+            "required_keys": ["WEWORK_WS_BOT_ID", "WEWORK_WS_SECRET"],
+        },
     ]
 
     import time
@@ -604,6 +610,16 @@ async def health_check_im(workspace_dir: str, channel: str | None) -> None:
                     data = resp.json()
                     if not data.get("access_token"):
                         raise Exception(data.get("message", "QQ 机器人验证失败"))
+                elif ch["id"] == "wework_ws":
+                    bot_id = env.get("WEWORK_WS_BOT_ID", "").strip()
+                    secret = env.get("WEWORK_WS_SECRET", "").strip()
+                    if not bot_id or not secret:
+                        missing_ws = []
+                        if not bot_id:
+                            missing_ws.append("WEWORK_WS_BOT_ID")
+                        if not secret:
+                            missing_ws.append("WEWORK_WS_SECRET")
+                        raise Exception(f"缺少必填参数: {', '.join(missing_ws)}")
 
             results.append({
                 "channel": ch["id"],
@@ -705,6 +721,7 @@ def ensure_channel_deps(workspace_dir: str) -> None:
         "feishu": [("lark_oapi", "lark-oapi")],
         "dingtalk": [("dingtalk_stream", "dingtalk-stream")],
         "wework": [("aiohttp", "aiohttp"), ("Crypto", "pycryptodome")],
+        "wework_ws": [("websockets", "websockets"), ("cryptography", "cryptography")],
         "onebot": [("websockets", "websockets")],
         "onebot_reverse": [("websockets", "websockets")],
         "qqbot": [("botpy", "qq-botpy"), ("pilk", "pilk")],
@@ -714,6 +731,7 @@ def ensure_channel_deps(workspace_dir: str) -> None:
         "feishu": "FEISHU_ENABLED",
         "dingtalk": "DINGTALK_ENABLED",
         "wework": "WEWORK_ENABLED",
+        "wework_ws": "WEWORK_WS_ENABLED",
         "onebot": "ONEBOT_ENABLED",
         "onebot_reverse": "ONEBOT_ENABLED",
         "qqbot": "QQBOT_ENABLED",
@@ -906,25 +924,24 @@ async def feishu_validate(app_id: str, app_secret: str, domain: str) -> None:
 
 
 async def wecom_onboard_start() -> None:
-    """生成企微扫码配置二维码，返回 qr_url + qr_id"""
+    """生成企微扫码配置二维码，返回 auth_url + scode"""
     from openakita.setup.wecom_onboard import WecomOnboard
 
     ob = WecomOnboard()
     data = await ob.generate()
     result = {
-        "qr_url": data.get("qr_url", ""),
-        "qr_id": data.get("qr_id", ""),
-        "expire_in": data.get("expire_in", 300),
+        "auth_url": data.get("auth_url", ""),
+        "scode": data.get("scode", ""),
     }
     _json_print(result)
 
 
-async def wecom_onboard_poll(qr_id: str) -> None:
+async def wecom_onboard_poll(scode: str) -> None:
     """单次轮询企微扫码配置结果"""
     from openakita.setup.wecom_onboard import WecomOnboard
 
     ob = WecomOnboard()
-    result = await ob.poll(qr_id)
+    result = await ob.poll(scode)
     _json_print(result)
 
 
@@ -1601,7 +1618,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("wecom-onboard-start", help="生成企微扫码配置二维码（JSON）")
 
     p_wop = sub.add_parser("wecom-onboard-poll", help="轮询企微扫码配置结果（JSON）")
-    p_wop.add_argument("--qr-id", required=True, help="generate 返回的 qr_id")
+    p_wop.add_argument("--scode", required=True, help="generate 返回的 scode")
 
     sub.add_parser("qqbot-onboard-start", help="创建 QQ 登录会话（JSON）")
 
@@ -1698,7 +1715,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.cmd == "wecom-onboard-poll":
-        asyncio.run(wecom_onboard_poll(qr_id=args.qr_id))
+        asyncio.run(wecom_onboard_poll(scode=args.scode))
         return
 
     if args.cmd == "qqbot-onboard-start":

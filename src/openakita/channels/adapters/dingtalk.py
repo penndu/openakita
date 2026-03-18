@@ -13,7 +13,6 @@
 """
 
 import asyncio
-import collections
 import contextlib
 import json
 import logging
@@ -21,6 +20,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +75,35 @@ class DingTalkConfig:
             raise ValueError("DingTalkConfig: app_secret is required")
 
 
+class DingTalkStreamState(Enum):
+    """Stream 连接状态机"""
+    IDLE = "idle"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    RUNNING = "running"
+    RECONNECTING = "reconnecting"
+    STOPPED = "stopped"
+
+
+@dataclass
+class _StreamMetrics:
+    """Stream 连接运行指标"""
+    connected_since: float | None = None
+    last_message_at: float | None = None
+    last_reconnect_at: float | None = None
+    reconnect_count: int = 0
+    ack_fail_count: int = 0
+    dedupe_hit_count: int = 0
+    messages_received: int = 0
+
+
+@dataclass
+class _CardState:
+    """AI/Standard Card 状态跟踪"""
+    card_id: str
+    is_ai_card: bool = True
+
+
 class DingTalkAdapter(ChannelAdapter):
     """
     钉钉适配器
@@ -107,6 +136,14 @@ class DingTalkAdapter(ChannelAdapter):
 
     API_BASE = "https://oapi.dingtalk.com"
     API_NEW = "https://api.dingtalk.com/v1.0"
+
+    # AI Card (流式卡片) — 官方 AI 模板，支持原生流式输出
+    AI_CARD_TEMPLATE_ID = "382e4302-551d-4880-bf29-a30acfab2e71.schema"
+    AI_CARD_CREATE_URL = "https://api.dingtalk.com/v1.0/card/instances"
+    AI_CARD_DELIVER_URL = "https://api.dingtalk.com/v1.0/card/instances/deliver"
+    AI_CARD_STREAM_URL = "https://api.dingtalk.com/v1.0/card/streaming"
+
+    # StandardCard (降级方案) — 普通互动卡片
     CARD_SEND_URL = "https://api.dingtalk.com/v1.0/im/v1.0/robot/interactiveCards/send"
     CARD_UPDATE_URL = "https://api.dingtalk.com/v1.0/im/robots/interactiveCards"
 
@@ -158,6 +195,8 @@ class DingTalkAdapter(ChannelAdapter):
         self._main_loop: asyncio.AbstractEventLoop | None = None
         self._stream_watchdog_task: asyncio.Task | None = None
         self._stream_restart_count: int = 0
+        self._stream_state = DingTalkStreamState.IDLE
+        self._stream_metrics = _StreamMetrics()
 
         # 缓存每个会话的 session webhook、发送者 userId、会话类型
         self._session_webhooks: dict[str, str] = {}
@@ -165,11 +204,15 @@ class DingTalkAdapter(ChannelAdapter):
         self._conversation_types: dict[str, str] = {}  # conversationId -> "1"(单聊)/"2"(群聊)
 
         # 消息去重：Stream 重连可能导致重复投递
-        self._seen_message_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
-        self._seen_message_ids_max = 500
+        # key = "{bot_id}:{msgId}", value = timestamp (for TTL)
+        self._seen_message_ids: dict[str, float] = {}
+        self._seen_message_ids_max = 5000
+        self._seen_message_ids_ttl = 60.0
 
-        # 互动卡片 typing 状态: chat_id -> cardBizId
-        self._thinking_cards: dict[str, str] = {}
+        # 互动卡片 typing 状态: session_key -> _CardState
+        self._thinking_cards: dict[str, _CardState] = {}
+        # AI Card 可用性 (首次失败后降级为 StandardCard)
+        self._ai_card_available: bool = True
 
         # 流式输出状态
         self._streaming_buffers: dict[str, str] = {}
@@ -194,22 +237,25 @@ class DingTalkAdapter(ChannelAdapter):
     ) -> None:
         """逐 token 流式更新互动卡片内容。"""
         sk = self._make_session_key(chat_id, thread_id)
-        card_biz_id = self._thinking_cards.get(sk)
-        if not card_biz_id:
+        card_state = self._thinking_cards.get(sk)
+        if not card_state:
             return
 
         buf = self._streaming_buffers.get(sk, "") + token
         self._streaming_buffers[sk] = buf
 
-        import time as _time
-        now = _time.time() * 1000
+        now = time.time() * 1000
         last = self._streaming_last_patch.get(sk, 0)
         if now - last < self._streaming_throttle_ms:
             return
 
         self._streaming_last_patch[sk] = now
         try:
-            await self._update_interactive_card(card_biz_id, buf + " ▍")
+            display = buf + " ▍"
+            if card_state.is_ai_card:
+                await self._stream_ai_card(card_state.card_id, display)
+            else:
+                await self._update_interactive_card(card_state.card_id, display)
         except Exception as e:
             logger.debug(f"DingTalk: stream_token patch failed: {e}")
 
@@ -222,16 +268,19 @@ class DingTalkAdapter(ChannelAdapter):
     ) -> bool:
         """完成流式输出，用最终文本更新卡片。"""
         sk = self._make_session_key(chat_id, thread_id)
-        card_biz_id = self._thinking_cards.pop(sk, None)
+        card_state = self._thinking_cards.pop(sk, None)
 
         self._streaming_buffers.pop(sk, None)
         self._streaming_last_patch.pop(sk, None)
 
-        if not card_biz_id:
+        if not card_state:
             return False
 
         try:
-            await self._update_interactive_card(card_biz_id, final_text)
+            if card_state.is_ai_card:
+                await self._stream_ai_card(card_state.card_id, final_text, finished=True)
+            else:
+                await self._update_interactive_card(card_state.card_id, final_text)
             self._streaming_finalized.add(sk)
             return True
         except Exception as e:
@@ -266,6 +315,7 @@ class DingTalkAdapter(ChannelAdapter):
         发到旧连接上的消息因 _main_loop 已失效而被静默丢弃（与飞书同源 Bug）。
         """
         self._running = False
+        self._set_stream_state(DingTalkStreamState.STOPPED)
 
         # 0) 取消看门狗
         if self._stream_watchdog_task and not self._stream_watchdog_task.done():
@@ -274,15 +324,26 @@ class DingTalkAdapter(ChannelAdapter):
                 await self._stream_watchdog_task
             self._stream_watchdog_task = None
 
-        # 1) 停止 Stream 线程的事件循环
+        # 1) 关闭 WebSocket 以中断 Stream recv 循环
+        client = self._stream_client
         stream_loop = self._stream_loop
+        if client is not None and stream_loop is not None:
+            ws = getattr(client, "websocket", None)
+            if ws is not None:
+                try:
+                    asyncio.run_coroutine_threadsafe(ws.close(), stream_loop)
+                except Exception:
+                    pass
+                await asyncio.sleep(0.3)
+
+        # 2) 停止 Stream 线程的事件循环
         if stream_loop is not None:
             try:
                 stream_loop.call_soon_threadsafe(stream_loop.stop)
             except Exception:
                 pass
 
-        # 2) 等待 Stream 线程退出
+        # 3) 等待 Stream 线程退出
         stream_thread = self._stream_thread
         if stream_thread is not None and stream_thread.is_alive():
             stream_thread.join(timeout=5)
@@ -296,9 +357,20 @@ class DingTalkAdapter(ChannelAdapter):
         if self._http_client:
             await self._http_client.aclose()
 
-        logger.info("DingTalk adapter stopped")
+        m = self._stream_metrics
+        logger.info(
+            f"DingTalk adapter stopped "
+            f"(msgs={m.messages_received}, reconnects={m.reconnect_count}, "
+            f"dedup_hits={m.dedupe_hit_count})"
+        )
 
     # ==================== Stream 模式 ====================
+
+    def _set_stream_state(self, state: DingTalkStreamState) -> None:
+        if self._stream_state != state:
+            prev = self._stream_state
+            self._stream_state = state
+            logger.info(f"DingTalk Stream state: {prev.value} -> {state.value}")
 
     def _start_stream(self) -> None:
         """在后台线程中启动 Stream 长连接"""
@@ -308,23 +380,31 @@ class DingTalkAdapter(ChannelAdapter):
             """自定义机器人消息处理器"""
 
             def __init__(self):
-                # 官方 SDK 推荐的 init 模式：跳过 ChatbotHandler.__init__
                 super(dingtalk_stream.ChatbotHandler, self).__init__()
                 self.adapter = adapter
 
             async def process(self, callback: dingtalk_stream.CallbackMessage):
-                """处理收到的消息回调"""
+                """ACK 先行：立即返回 ACK，异步处理消息。
+                避免消息处理耗时导致 SDK 超时重发。"""
+                asyncio.get_running_loop().create_task(self._safe_handle(callback))
+                return dingtalk_stream.AckMessage.STATUS_OK, "OK"
+
+            async def _safe_handle(self, callback: dingtalk_stream.CallbackMessage):
                 try:
                     await self.adapter._handle_stream_message(callback)
                 except Exception as e:
                     logger.error(f"Error handling DingTalk message: {e}", exc_info=True)
-                return dingtalk_stream.AckMessage.STATUS_OK, "OK"
 
         def _run_stream_in_thread() -> None:
-            """在独立线程中运行 Stream 客户端"""
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            self._stream_loop = new_loop
+            """在独立线程中运行 Stream 客户端。
+
+            使用 loop.run_until_complete(client.start()) 而非 client.start_forever()
+            以确保 self._stream_loop 始终指向实际运行的事件循环，使 stop() 能正确中断。
+            """
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._stream_loop = loop
+            self._set_stream_state(DingTalkStreamState.CONNECTING)
 
             try:
                 credential = dingtalk_stream.Credential(
@@ -337,13 +417,27 @@ class DingTalkAdapter(ChannelAdapter):
                 )
                 self._stream_client = client
                 logger.info("DingTalk Stream client starting...")
-                client.start_forever()
+                self._set_stream_state(DingTalkStreamState.RUNNING)
+                self._stream_metrics.connected_since = time.time()
+                loop.run_until_complete(client.start())
+            except KeyboardInterrupt:
+                pass
             except Exception as e:
                 if self._running:
                     logger.error(f"DingTalk Stream error: {e}", exc_info=True)
             finally:
                 self._stream_loop = None
-                new_loop.close()
+                try:
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
+                except Exception:
+                    pass
+                loop.close()
 
         self._stream_thread = threading.Thread(
             target=_run_stream_in_thread,
@@ -382,14 +476,18 @@ class DingTalkAdapter(ChannelAdapter):
                 if self._stream_restart_count > 0 and (now - stable_since) >= self._STREAM_STABLE_THRESHOLD:
                     logger.info("DingTalk Stream watchdog: connection stable, resetting restart count")
                     self._stream_restart_count = 0
+                    self._set_stream_state(DingTalkStreamState.RUNNING)
                 continue
 
+            self._set_stream_state(DingTalkStreamState.RECONNECTING)
             now = asyncio.get_running_loop().time()
             since_last = now - last_restart_time
             if since_last < self._STREAM_RECONNECT_MIN_INTERVAL:
                 continue
 
             self._stream_restart_count += 1
+            self._stream_metrics.reconnect_count += 1
+            self._stream_metrics.last_reconnect_at = time.time()
             backoff = min(
                 self._STREAM_RECONNECT_MIN_INTERVAL * (2 ** min(self._stream_restart_count - 1, 6)),
                 self._STREAM_RECONNECT_MAX_DELAY,
@@ -433,24 +531,41 @@ class DingTalkAdapter(ChannelAdapter):
         msg_id = raw_data.get("msgId", "")
 
         # 过期消息丢弃（createAt 为毫秒级时间戳）
-        import time as _time
         create_at_ms = raw_data.get("createAt")
         if create_at_ms and isinstance(create_at_ms, (int, float)):
-            age_s = _time.time() - create_at_ms / 1000
+            age_s = time.time() - create_at_ms / 1000
             if age_s > self.STALE_MESSAGE_THRESHOLD_S:
                 logger.info(
                     f"DingTalk: stale message discarded (age={age_s:.0f}s): {msg_id}"
                 )
                 return
+        else:
+            logger.debug(f"DingTalk: message missing createAt field: {msg_id}")
 
-        # 消息去重
+        # 消息去重 (bot_id 前缀 + TTL 过期清理)
         if msg_id:
-            if msg_id in self._seen_message_ids:
+            dedup_key = f"{self.bot_id or ''}:{msg_id}"
+            now = time.time()
+            if dedup_key in self._seen_message_ids:
+                self._stream_metrics.dedupe_hit_count += 1
                 logger.debug(f"DingTalk: duplicate message ignored: {msg_id}")
                 return
-            self._seen_message_ids[msg_id] = None
-            while len(self._seen_message_ids) > self._seen_message_ids_max:
-                self._seen_message_ids.popitem(last=False)
+            # TTL 清理：移除过期条目
+            if len(self._seen_message_ids) > self._seen_message_ids_max // 2:
+                expired = [
+                    k for k, ts in self._seen_message_ids.items()
+                    if now - ts > self._seen_message_ids_ttl
+                ]
+                for k in expired:
+                    del self._seen_message_ids[k]
+            # 容量保护：如果仍超上限，移除最旧的
+            if len(self._seen_message_ids) >= self._seen_message_ids_max:
+                oldest = min(self._seen_message_ids, key=self._seen_message_ids.get)
+                del self._seen_message_ids[oldest]
+            self._seen_message_ids[dedup_key] = now
+
+        self._stream_metrics.messages_received += 1
+        self._stream_metrics.last_message_at = time.time()
 
         chat_type = "group" if conversation_type == "2" else "private"
 
@@ -690,17 +805,16 @@ class DingTalkAdapter(ChannelAdapter):
     async def send_typing(self, chat_id: str, thread_id: str | None = None) -> None:
         """发送"思考中..."占位卡片（首次调用时发送，后续调用跳过）。
 
+        优先使用 AI Card (382e4302 模板)，失败时降级为 StandardCard。
         Gateway 的 _keep_typing 每 4 秒调用一次，仅第一次生成卡片。
         """
         sk = self._make_session_key(chat_id, thread_id)
         if sk in self._thinking_cards:
             return
-        card_biz_id = f"thinking_{uuid.uuid4().hex[:16]}"
-        self._thinking_cards[sk] = card_biz_id
         try:
-            await self._send_interactive_card(chat_id, card_biz_id, "💭 **正在思考中...**")
+            card_state = await self._create_card(chat_id)
+            self._thinking_cards[sk] = card_state
         except Exception as e:
-            self._thinking_cards.pop(sk, None)
             logger.debug(f"DingTalk: send_typing card failed: {e}")
 
     async def clear_typing(self, chat_id: str, thread_id: str | None = None) -> None:
@@ -710,13 +824,125 @@ class DingTalkAdapter(ChannelAdapter):
         仅在异常路径（Agent + _send_error 双重失败、或 typing 重建后未被消费）时触发。
         """
         sk = self._make_session_key(chat_id, thread_id)
-        card_biz_id = self._thinking_cards.pop(sk, None)
-        if not card_biz_id:
+        card_state = self._thinking_cards.pop(sk, None)
+        if not card_state:
             return
-        try:
-            await self._update_interactive_card(card_biz_id, "✅ 处理完成")
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            await self._finish_card(card_state, "✅ 处理完成")
+
+    async def _create_card(self, chat_id: str) -> _CardState:
+        """创建互动卡片。优先 AI Card，失败降级 StandardCard。"""
+        if self._ai_card_available:
+            try:
+                card_id = await self._create_ai_card(chat_id)
+                if card_id:
+                    return _CardState(card_id=card_id, is_ai_card=True)
+            except Exception as e:
+                logger.info(f"DingTalk: AI Card unavailable, falling back to StandardCard: {e}")
+                self._ai_card_available = False
+        return await self._create_standard_card(chat_id)
+
+    async def _finish_card(self, card_state: _CardState, content: str) -> None:
+        """完成卡片更新（AI Card 设置 FINISHED，StandardCard 更新内容）"""
+        if card_state.is_ai_card:
+            await self._stream_ai_card(card_state.card_id, content, finished=True)
+        else:
+            await self._update_interactive_card(card_state.card_id, content)
+
+    # --- AI Card (流式卡片) ---
+
+    async def _create_ai_card(self, chat_id: str) -> str | None:
+        """创建 AI Card 实例并投递，返回 outTrackId。"""
+        await self._refresh_token()
+        out_track_id = f"ai_{uuid.uuid4().hex[:16]}"
+        headers = {"x-acs-dingtalk-access-token": self._access_token}
+
+        create_body = {
+            "cardTemplateId": self.AI_CARD_TEMPLATE_ID,
+            "outTrackId": out_track_id,
+            "cardData": {
+                "cardParamMap": {
+                    "flowStatus": "PROCESSING",
+                    "msgContent": "💭 正在思考中...",
+                }
+            },
+        }
+        resp = await self._http_client.post(
+            self.AI_CARD_CREATE_URL, headers=headers, json=create_body
+        )
+        result = resp.json()
+        if not result.get("outTrackId") and not result.get("success"):
+            raise RuntimeError(f"AI Card create failed: {result}")
+
+        conv_type = self._conversation_types.get(chat_id, "1")
+        if conv_type == "2":
+            open_space_id = f"dtv1.card//IM_GROUP.{chat_id}"
+        else:
+            staff_id = self._conversation_users.get(chat_id)
+            if not staff_id or staff_id.startswith("$:LWCP"):
+                raise ValueError("No valid staffId for AI Card delivery")
+            open_space_id = f"dtv1.card//IM_ROBOT.{staff_id}"
+
+        deliver_body = {
+            "outTrackId": out_track_id,
+            "openSpaceId": open_space_id,
+            "deliverType": "IM",
+        }
+        resp = await self._http_client.post(
+            self.AI_CARD_DELIVER_URL, headers=headers, json=deliver_body
+        )
+        result = resp.json()
+        if not result.get("spaceId") and not result.get("success"):
+            raise RuntimeError(f"AI Card deliver failed: {result}")
+
+        logger.debug(f"DingTalk: AI Card created and delivered: {out_track_id}")
+        return out_track_id
+
+    async def _stream_ai_card(
+        self, out_track_id: str, content: str, *, finished: bool = False
+    ) -> None:
+        """流式更新 AI Card 内容。finished=True 时将卡片标记为 FINISHED。"""
+        await self._refresh_token()
+        headers = {"x-acs-dingtalk-access-token": self._access_token}
+
+        if finished:
+            body = {
+                "outTrackId": out_track_id,
+                "cardData": {
+                    "cardParamMap": {
+                        "flowStatus": "FINISHED",
+                        "msgContent": content,
+                    }
+                },
+            }
+            resp = await self._http_client.put(
+                self.AI_CARD_CREATE_URL, headers=headers, json=body
+            )
+            result = resp.json()
+            if not result.get("success", True):
+                logger.debug(f"AI Card finish failed: {result}")
+        else:
+            body = {
+                "outTrackId": out_track_id,
+                "guid": uuid.uuid4().hex,
+                "key": "msgContent",
+                "content": content,
+                "isFull": True,
+            }
+            resp = await self._http_client.put(
+                self.AI_CARD_STREAM_URL, headers=headers, json=body
+            )
+            result = resp.json()
+            if not result.get("success", True):
+                logger.debug(f"AI Card stream failed: {result}")
+
+    # --- StandardCard (降级方案) ---
+
+    async def _create_standard_card(self, chat_id: str) -> _CardState:
+        """发送 StandardCard 互动卡片，返回 CardState。"""
+        card_biz_id = f"thinking_{uuid.uuid4().hex[:16]}"
+        await self._send_interactive_card(chat_id, card_biz_id, "💭 **正在思考中...**")
+        return _CardState(card_id=card_biz_id, is_ai_card=False)
 
     async def _send_interactive_card(
         self, chat_id: str, card_biz_id: str, content: str
@@ -794,20 +1020,20 @@ class DingTalkAdapter(ChannelAdapter):
         # ---- 思考卡片处理：尝试更新占位卡片为最终回复 ----
         # 流式/非流式保护期间跳过，避免进度消息消费卡片
         if sk in self._streaming_buffers:
-            card_biz_id = None
+            card_state = None
         else:
-            card_biz_id = self._thinking_cards.pop(sk, None)
-        if card_biz_id:
+            card_state = self._thinking_cards.pop(sk, None)
+        if card_state:
             text = message.content.text or ""
             if text and not message.content.has_media:
                 try:
-                    await self._update_interactive_card(card_biz_id, text)
-                    return f"card_{card_biz_id}"
+                    await self._finish_card(card_state, text)
+                    return f"card_{card_state.card_id}"
                 except Exception as e:
                     logger.warning(f"DingTalk: update thinking card failed, fallback: {e}")
             else:
                 with contextlib.suppress(Exception):
-                    await self._update_interactive_card(card_biz_id, "✅ 处理完成")
+                    await self._finish_card(card_state, "✅ 处理完成")
 
         # 获取 webhook
         session_webhook = message.metadata.get("session_webhook", "")
@@ -901,7 +1127,7 @@ class DingTalkAdapter(ChannelAdapter):
                     await self.send_image(message.chat_id, extra_img.local_path)
                 except Exception as e:
                     logger.warning(f"DingTalk: send extra image failed: {e}")
-        for extra_file in message.content.files[1:]:
+        for extra_file in (message.content.files or [])[1:]:
             if extra_file.local_path:
                 try:
                     await self.send_file(message.chat_id, extra_file.local_path)
@@ -994,6 +1220,30 @@ class DingTalkAdapter(ChannelAdapter):
                 return "sampleAudio", {"mediaId": media_id, "duration": duration_ms}
             return "sampleText", {"content": "[语音发送失败]"}
 
+        # 视频消息
+        if message.content.videos:
+            video = message.content.videos[0]
+            media_id = video.file_id
+
+            if not media_id and video.local_path:
+                try:
+                    uploaded = await self.upload_media(
+                        Path(video.local_path), video.mime_type or "video/mp4"
+                    )
+                    media_id = uploaded.file_id
+                except Exception as e:
+                    logger.error(f"Failed to upload video: {e}")
+
+            if media_id:
+                duration_ms = str(int((video.duration or 0) * 1000))
+                ext = Path(video.filename).suffix.lstrip(".") or "mp4"
+                return "sampleVideo", {
+                    "mediaId": media_id,
+                    "duration": duration_ms,
+                    "videoType": ext,
+                }
+            return "sampleText", {"content": "[视频发送失败]"}
+
         # 纯文本 / Markdown
         text = message.content.text or ""
         if message.parse_mode == "markdown" or any(
@@ -1006,39 +1256,48 @@ class DingTalkAdapter(ChannelAdapter):
         self, message: OutgoingMessage, webhook_url: str
     ) -> str:
         """
-        通过 SessionWebhook 发送消息
+        通过 SessionWebhook 发送消息（自动分块超长文本）
 
         仅支持 text 和 markdown 类型，不支持图片/文件/语音。
         参考: https://open.dingtalk.com/document/robots/custom-robot-access/
         """
         text = message.content.text or ""
 
-        # 支持 Markdown 格式
-        if message.parse_mode == "markdown" or (
+        is_markdown = message.parse_mode == "markdown" or (
             text and any(c in text for c in ["**", "##", "- ", "```", "[", "]"])
-        ):
-            payload = {
-                "msgtype": "markdown",
-                "markdown": {
-                    "title": text[:20] if text else "消息",
-                    "text": text,
-                },
-            }
-        else:
-            payload = {
-                "msgtype": "text",
-                "text": {"content": text},
-            }
+        )
 
-        response = await self._http_client.post(webhook_url, json=payload)
-        result = response.json()
+        chunks = self._chunk_markdown_text(text, self._MARKDOWN_MAX_LENGTH) if text else [text]
+        if len(chunks) > 1:
+            logger.info(f"DingTalk: splitting long message into {len(chunks)} chunks")
 
-        if result.get("errcode", 0) != 0:
-            error_msg = result.get("errmsg", "Unknown error")
-            logger.error(f"DingTalk webhook send failed: {error_msg}")
-            raise RuntimeError(f"Failed to send via webhook: {error_msg}")
+        result_id = ""
+        for chunk in chunks:
+            if is_markdown:
+                payload = {
+                    "msgtype": "markdown",
+                    "markdown": {
+                        "title": chunk[:20] if chunk else "消息",
+                        "text": chunk,
+                    },
+                }
+            else:
+                payload = {
+                    "msgtype": "text",
+                    "text": {"content": chunk},
+                }
 
-        return f"webhook_{int(time.time())}"
+            response = await self._http_client.post(webhook_url, json=payload)
+            result = response.json()
+
+            if result.get("errcode", 0) != 0:
+                error_msg = result.get("errmsg", "Unknown error")
+                logger.error(f"DingTalk webhook send failed: {error_msg}")
+                raise RuntimeError(f"Failed to send via webhook: {error_msg}")
+
+            result_id = f"webhook_{int(time.time())}"
+
+        return result_id
 
     async def _send_group_message(self, message: OutgoingMessage) -> str:
         """
@@ -1338,6 +1597,51 @@ class DingTalkAdapter(ChannelAdapter):
         钉钉 Webhook 不支持语音，降级为文件发送 → 文本
         """
         return await self.send_file(chat_id, voice_path, caption or "语音消息")
+
+    # ==================== 文本分块 ====================
+
+    _MARKDOWN_MAX_LENGTH = 4000
+
+    @staticmethod
+    def _chunk_markdown_text(text: str, max_length: int = 4000) -> list[str]:
+        """将超长 Markdown 文本分块，避免在代码块中间断开。
+
+        分块策略（按优先级）：
+        1. 在段落边界 (\\n\\n) 处断开
+        2. 在行边界 (\\n) 处断开
+        3. 硬截断
+        额外检查：避免在未闭合的 ``` 代码块中间断开。
+        """
+        if len(text) <= max_length:
+            return [text]
+
+        chunks: list[str] = []
+        remaining = text
+        while remaining:
+            if len(remaining) <= max_length:
+                chunks.append(remaining)
+                break
+
+            chunk = remaining[:max_length]
+            split_pos = chunk.rfind("\n\n")
+            if split_pos < max_length // 3:
+                split_pos = chunk.rfind("\n")
+            if split_pos < max_length // 4:
+                split_pos = max_length
+            else:
+                split_pos += 1
+
+            # 检查是否会截断代码块
+            open_fences = chunk[:split_pos].count("```")
+            if open_fences % 2 != 0:
+                fence_pos = chunk[:split_pos].rfind("```")
+                if fence_pos > max_length // 4:
+                    split_pos = fence_pos
+
+            chunks.append(remaining[:split_pos])
+            remaining = remaining[split_pos:]
+
+        return chunks
 
     # ==================== Markdown / 卡片 ====================
 

@@ -2462,6 +2462,16 @@ class ReasoningEngine:
                 return "写入成功" if "成功" in r or "ok" in r.lower() or r_len < 100 else f"完成 ({r_len} 字符)"
             case "browser_screenshot":
                 return "截图已获取"
+            case "desktop_screenshot":
+                return "桌面截图已保存"
+            case "deliver_artifacts":
+                try:
+                    import json as _json
+                    _d = _json.loads(r)
+                    _n = len(_d.get("receipts", []))
+                    return f"已交付 {_n} 个文件" if _n else ""
+                except Exception:
+                    return ""
             case "switch_persona":
                 return "切换完成"
             case _:

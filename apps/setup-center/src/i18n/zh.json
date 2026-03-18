@@ -409,6 +409,8 @@
     "installVersion": "指定版本",
     "imTitle": "IM 通道",
     "imHint": "启用后展开填写配置信息",
+    "imTabChannels": "通道配置",
+    "imTabBots": "Bot 配置",
     "imChainPush": "思维链进度推送",
     "imChainPushHelp": "开启后 IM 通道会实时推送思考过程、工具调用等中间状态。关闭不影响内部推理和数据保存，仅减少消息推送",
     "imSave": "保存 IM 配置",
@@ -1492,6 +1494,7 @@
   },
   "wecom": {
     "qrScanConfig": "扫码配置机器人",
+    "qrScanCreate": "扫码配置机器人",
     "qrTitle": "企业微信扫码配置",
     "qrSubtitle": "使用企业微信管理员扫描二维码，自动获取 Bot ID 和 Secret",
     "qrLoading": "正在生成二维码...",

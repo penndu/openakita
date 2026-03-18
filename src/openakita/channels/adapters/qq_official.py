@@ -1083,8 +1083,8 @@ class QQBotAdapter(ChannelAdapter):
                         e,
                     )
 
-            # 纯文本发送（含 40054005 去重重试）
-            for attempt in range(6):
+            # 纯文本发送（含 40054005 去重重试，最多 2 次）
+            for attempt in range(2):
                 body: dict[str, Any] = {
                     "msg_type": 0,
                     "content": text,
@@ -1097,7 +1097,7 @@ class QQBotAdapter(ChannelAdapter):
                 if resp.status_code == 200:
                     data = resp.json()
                     return str(data.get("id", ""))
-                if "40054005" in resp.text and attempt < 5:
+                if "40054005" in resp.text and attempt < 1:
                     logger.warning(
                         f"QQ HTTP 40054005 dedup (attempt {attempt + 1}), retrying"
                     )
@@ -1217,8 +1217,7 @@ class QQBotAdapter(ChannelAdapter):
     @staticmethod
     def _is_dedup_error(exc: BaseException) -> bool:
         """检测是否为 QQ API 40054005 消息去重错误。"""
-        text = str(exc).lower()
-        return "40054005" in text or "msg_seq" in text
+        return "40054005" in str(exc)
 
     async def _do_send(self, api: Any, chat_type: str, target_id: str, **kwargs) -> Any:
         """底层发送调用，根据 chat_type 路由到对应 API。"""
@@ -1241,7 +1240,7 @@ class QQBotAdapter(ChannelAdapter):
         若 msg_id 被动回复失败（窗口过期），自动尝试 event_id 回退。
         """
         seq_key = kwargs.get("msg_id") or target_id
-        max_dedup_retries = 5
+        max_dedup_retries = 1
         last_error: Exception | None = None
 
         for attempt in range(max_dedup_retries + 1):

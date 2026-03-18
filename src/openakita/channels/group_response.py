@@ -9,7 +9,6 @@
 - disabled:     完全禁用群聊响应
 """
 
-import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -76,14 +75,18 @@ class SmartModeThrottle:
         """清理超过 1 小时无活动的 chat 条目，防止内存泄漏。"""
         stale_threshold = 3600  # 1 小时
 
-        stale_keys = [
-            cid for cid, ts_list in self._counter.items()
-            if not ts_list or (now - max(ts_list)) > stale_threshold
-        ]
-        for cid in stale_keys:
-            self._counter.pop(cid, None)
-            self._last_reply_time.pop(cid, None)
-            self._buffer.pop(cid, None)
+        all_cids = set(self._counter) | set(self._last_reply_time) | set(self._buffer)
+        for cid in all_cids:
+            ts_list = self._counter.get(cid, [])
+            last_activity = max(ts_list) if ts_list else 0
+            last_activity = max(last_activity, self._last_reply_time.get(cid, 0))
+            buf = self._buffer.get(cid, [])
+            if buf:
+                last_activity = max(last_activity, buf[-1].get("time", 0))
+            if now - last_activity > stale_threshold:
+                self._counter.pop(cid, None)
+                self._last_reply_time.pop(cid, None)
+                self._buffer.pop(cid, None)
 
     def record_process(self, chat_id: str) -> None:
         """记录处理了一条消息"""

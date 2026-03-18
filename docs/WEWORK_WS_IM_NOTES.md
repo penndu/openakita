@@ -119,14 +119,16 @@
 - **回复消息**：透传收到消息的 `req_id`
 - **主动推送**：自己生成 `req_id`（前缀 `aibot_send_msg`）
 - **串行队列**：同一 `req_id` 的回复串行发送，每条等回执后才发下一条
-- **回执超时**：5 秒
+- **回执超时**：15 秒 (D2，从 5s 调整为 15s 对齐 OpenClaw)
 - **流式内容上限**：20480 字节/片（UTF-8），自动分片
+- **中间流消息上限**：85 帧 (D1，WeCom SDK 限制约 100 帧，保留余量)
 
-### 频率限制
+### 频率限制 (D9，对齐 OpenClaw)
 
 | 限制 | 值 |
 |------|-----|
-| 单会话消息频率 | 30 条/分钟，1000 条/小时 |
+| 回复频率 | 30 条/24h 滑动窗口/会话（收到新入站消息时重置） |
+| 主动发送频率 | 10 条/天/会话 |
 | 上传频率 | 30 次/分钟，1000 次/小时 |
 | 回复窗口 | 收到消息后 24 小时内 |
 | 流式消息超时 | 首帧发送后 **6 分钟**内必须 finish=true |
@@ -377,14 +379,52 @@ start()
 - [ ] `_WebhookSender` 是否在 `stop()` 时关闭 httpx 客户端？
 - [ ] 媒体发送是否优先 WS upload → fallback webhook → fallback markdown hint？
 - [ ] 长耗时流式回复是否有 keepalive timer 防止 6 分钟超时？
+- [ ] keepalive 是否考虑了最近流帧发送时间（D6 智能跳过）？
 - [ ] 消息处理是否有超时保护（`_handle_msg_callback_safe`）？
+- [ ] 消息处理异常是否发送了 `finish=true` 关闭流（D4）？
 - [ ] 同一对话的消息处理是否经过 `_peer_locks` 串行化？
 - [ ] 超尺寸媒体是否通过 `_check_upload_size` 自动降级为 file 类型？
+- [ ] 非 AMR 语音是否自动降级为 file 类型（D5）？
 - [ ] 语音发送 ffmpeg 失败时是否降级为文件发送（而非抛异常）？
+- [ ] 中间流消息（finish=false）是否在 85 帧上限内（D1）？
+- [ ] think 标签是否通过 `_normalize_think_tags()` 归一化（D3）？
+- [ ] 媒体发送失败后是否向用户发送了错误通知（D11）？
 
 ---
 
 ## 九、变更记录
+
+### 2026-03-18 (四): 思考内容整合到回复流
+
+**问题**: 当 `IM_CHAIN_PUSH=true` 时，模型的 thinking content 被 gateway 以独立 markdown 消息（💭）推送给用户，与 WeCom 原生 `<think>` 折叠块体验冲突。
+
+**修复**:
+
+- **P1** `gateway.py`: 在 `flush_progress` 前检查 adapter 是否声明 `_THINK_TAG_NATIVE`；若是，从 progress buffer 提取 💭 行并整合到 response_text 的 `<think>` 标签中，而非作为独立消息推送
+- **P2** `wework_ws.py`: 新增类属性 `_THINK_TAG_NATIVE = True`，声明该 adapter 原生支持 think 标签渲染
+
+### 2026-03-18 (三): 深度优化 & QR 修正 (D0-D11)
+
+基于 `openclaw-plugin-wecom` 和 `@wecom/wecom-openclaw-cli` 源码深度对比，完成 14 项改动：
+
+**QR 扫码修正 (D0a-D0c)：**
+
+- **D0a** `wecom_onboard.py`: 域名从 `developer.work.weixin.qq.com` 修正为 `work.weixin.qq.com`；HTTP 方法从 POST 改为 GET；响应字段从 `qr_url`/`qr_id` 修正为 `auth_url`/`scode`，bot_info 从 `resp.data.bot_info.{botid, secret}` 解析
+- **D0b** 全链路 `qr_id` → `scode` 适配：routes、bridge.py、main.rs、WecomQRModal.tsx
+- **D0c** IMView.tsx 添加 `wework_ws` 类型的"扫码配置机器人"按钮
+
+**适配器优化 (D1-D6, D9-D11)：**
+
+1. **D1 中间流消息上限**: 新增 `MAX_INTERMEDIATE_STREAM_MSGS=85` 常量 + `_stream_msg_count` 计数器，在 thinking counter/keepalive/stream reply 中检查
+2. **D2 回执超时调整**: `reply_ack_timeout` 从 5s 提高到 15s，对齐 OpenClaw `REPLY_SEND_TIMEOUT_MS=15000`
+3. **D3 think 标签归一化**: 新增 `_normalize_think_tags()` 修正未闭合/多余 `<think>` 标签，在 stream reply 和 active message 中调用
+4. **D4 异常兜底 finish=true**: `_handle_msg_callback_safe` 新增通用 `Exception` 捕获，确保任何处理错误都会发送 `finish=true` 关闭流
+5. **D5 语音格式校验**: `_check_upload_size` 新增 `mime_type` 参数，非 AMR 语音自动降级为 file 类型
+6. **D6 智能 keepalive**: `_stream_keepalive_loop` 跟踪 `_last_stream_sent`，最近发过流帧时跳过冗余 keepalive
+7. **D7 quote.file 确认**: 验证 `_parse_quote_content` 已正确处理 `quote.msgtype == "file"`（无需修改）
+8. **D9 频率限制重构**: `_RateLimitTracker` 重构为双模型：回复 30/24h 滑动窗口（入站重置）+ 主动发送 10/天/会话，对齐 OpenClaw
+9. **D10 思考指示器首帧**: 首帧内容从 `"等待模型响应 1s"` 改为 `"<think>等待模型响应 1s"`，从第一帧即激活 WeCom 思考动画
+10. **D11 媒体失败反馈**: 流回复后媒体发送失败时，通过 active message 向用户发送错误通知文本
 
 ### 2026-03-18 (二): 适配器健壮性优化 & 扫码配置
 

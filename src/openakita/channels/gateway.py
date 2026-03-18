@@ -924,6 +924,7 @@ class MessageGateway:
         self._progress_buffers: dict[str, list[str]] = {}  # session_key -> [lines]
         self._progress_flush_tasks: dict[str, asyncio.Task] = {}  # session_key -> flush task
         self._progress_throttle_seconds: float = 2.0  # 默认节流窗口
+        self._progress_card_accum: dict[str, list[str]] = {}  # session_key -> accumulated progress lines (for card PATCH)
 
         # ==================== 群聊响应策略 ====================
         self._smart_throttle = SmartModeThrottle()
@@ -1620,6 +1621,12 @@ class MessageGateway:
         stale = [k for k, t in self._progress_flush_tasks.items() if t.done()]
         for k in stale:
             del self._progress_flush_tasks[k]
+            cleaned += 1
+
+        # 清理 _progress_card_accum 中非活跃的条目
+        stale = [k for k in self._progress_card_accum if k not in active_keys]
+        for k in stale:
+            del self._progress_card_accum[k]
             cleaned += 1
 
         # 清理 _session_tasks 中已完成的条目
@@ -2459,11 +2466,23 @@ class MessageGateway:
                 f"preview=\"{response_text[:80]}\""
             )
             if not streamed_ok:
+                # Extract 💭 thinking lines for adapters that render <think> natively
+                _adapter = self._adapters.get(message.channel)
+                if _adapter and getattr(_adapter, "_THINK_TAG_NATIVE", False):
+                    _buf = self._progress_buffers.get(session.session_key, [])
+                    _think_lines = [ln[2:].strip() for ln in _buf if ln.startswith("💭")]
+                    if _think_lines:
+                        _buf[:] = [ln for ln in _buf if not ln.startswith("💭")]
+                        _think_text = "\n".join(_think_lines)
+                        response_text = f"<think>{_think_text}</think>{response_text}"
+
                 _had_progress = bool(self._progress_buffers.get(session.session_key))
                 await self.flush_progress(session)
 
+                _card_used = bool(self._progress_card_accum.get(session.session_key))
                 _adapter = self._adapters.get(message.channel)
-                if _had_progress:
+
+                if _had_progress and not _card_used:
                     _cp = session.get_metadata("chain_push")
                     if _cp is None:
                         from ..config import settings as _s
@@ -2474,10 +2493,7 @@ class MessageGateway:
                                 message.chat_id, thread_id=message.thread_id,
                             )
 
-                if _adapter and hasattr(_adapter, "_streaming_buffers") and hasattr(_adapter, "_make_session_key"):
-                    _adapter._streaming_buffers.pop(
-                        _adapter._make_session_key(message.chat_id, message.thread_id), None,
-                    )
+                self._progress_card_accum.pop(session.session_key, None)
 
                 await self._send_response(message, response_text)
 
@@ -2510,7 +2526,8 @@ class MessageGateway:
                 typing_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await typing_task
-            # 清除"思考中"提示消息（飞书/QQ 官方等需要撤回文本提示的平台）
+            if session:
+                self._progress_card_accum.pop(session.session_key, None)
             _adapter = self._adapters.get(message.channel)
             if _adapter:
                 with contextlib.suppress(Exception):
@@ -2993,14 +3010,6 @@ class MessageGateway:
                     session, input_text, message, adapter,
                 )
             else:
-                if (
-                    adapter is not None
-                    and hasattr(adapter, "_streaming_buffers")
-                    and hasattr(adapter, "_make_session_key")
-                ):
-                    _sk = adapter._make_session_key(message.chat_id, message.thread_id)
-                    adapter._streaming_buffers.setdefault(_sk, "")
-
                 _AGENT_TIMEOUT = float(os.environ.get("AGENT_HANDLER_TIMEOUT", "300"))
                 try:
                     response = await asyncio.wait_for(
@@ -3121,6 +3130,15 @@ class MessageGateway:
 
         if not reply_text or not reply_text.strip():
             return (reply_text, False)
+
+        # Extract 💭 thinking lines for adapters that render <think> natively
+        if getattr(adapter, "_THINK_TAG_NATIVE", False):
+            _buf = self._progress_buffers.get(session.session_key, [])
+            _think_lines = [ln[2:].strip() for ln in _buf if ln.startswith("💭")]
+            if _think_lines:
+                _buf[:] = [ln for ln in _buf if not ln.startswith("💭")]
+                _think_text = "\n".join(_think_lines)
+                reply_text = f"<think>{_think_text}</think>{reply_text}"
 
         await self.flush_progress(session)
 
@@ -3289,7 +3307,8 @@ class MessageGateway:
                     await adapter.send_text(
                         chat_id=original.chat_id,
                         text="消息发送失败，请稍后重试。",
-                        reply_to=original.thread_id or original.channel_message_id,
+                        reply_to=original.channel_message_id,
+                        thread_id=original.thread_id,
                         metadata=outgoing_meta,
                     )
                 return
@@ -3371,7 +3390,7 @@ class MessageGateway:
             await adapter.send_text(
                 chat_id=original.chat_id,
                 text=f"❌ 处理出错: {error}",
-                reply_to=original.channel_message_id,
+                reply_to=original.thread_id or original.channel_message_id,
                 metadata=_meta,
             )
         except Exception as e:
@@ -3561,6 +3580,53 @@ class MessageGateway:
 
         return result
 
+    async def _try_patch_progress_to_card(
+        self, session: Session, new_lines: list[str],
+    ) -> bool:
+        """尝试将进度文本 PATCH 到思考卡片（不消费卡片）。
+
+        非流式路径下，进度消息通过此方法直接更新占位卡片，
+        避免发送独立灰色文本消息。卡片由最终回复消费（pop）。
+
+        Returns True if PATCH succeeded.
+        """
+        if not session:
+            return False
+        adapter = self._adapters.get(session.channel)
+        if (
+            not adapter
+            or not hasattr(adapter, "_thinking_cards")
+            or not hasattr(adapter, "_make_session_key")
+            or not hasattr(adapter, "_patch_card_content")
+        ):
+            return False
+
+        chat_id = session.chat_id
+        thread_id = None
+        try:
+            current_message = session.get_metadata("_current_message")
+            if current_message:
+                thread_id = getattr(current_message, "thread_id", None)
+        except Exception:
+            pass
+
+        sk = adapter._make_session_key(chat_id, thread_id)
+        card_id = adapter._thinking_cards.get(sk)
+        if not card_id:
+            return False
+
+        session_key = session.session_key
+        accum = self._progress_card_accum.setdefault(session_key, [])
+        accum.extend(new_lines)
+        if len(accum) > 20:
+            accum[:] = accum[-20:]
+
+        display = "\n".join(accum)
+        try:
+            return await adapter._patch_card_content(card_id, display)
+        except Exception:
+            return False
+
     async def emit_progress_event(
         self,
         session: Session,
@@ -3608,11 +3674,12 @@ class MessageGateway:
                 lines = self._progress_buffers.get(session_key, [])
                 if not lines:
                     return
-                # 合并并清空
-                combined = "\n".join(lines[:20])  # 强上限：最多合并 20 行
                 self._progress_buffers[session_key] = []
 
-                # 尽量回复到当前消息（若存在）
+                if await self._try_patch_progress_to_card(session, lines):
+                    return
+
+                combined = "\n".join(lines[:20])
                 reply_to = None
                 try:
                     current_message = session.get_metadata("_current_message")
@@ -3659,10 +3726,12 @@ class MessageGateway:
         if not lines:
             return
 
-        combined = "\n".join(lines[:20])
         self._progress_buffers[session_key] = []
 
-        # reply_to 逻辑与 emit_progress_event 一致
+        if await self._try_patch_progress_to_card(session, lines):
+            return
+
+        combined = "\n".join(lines[:20])
         reply_to = None
         try:
             current_message = session.get_metadata("_current_message")

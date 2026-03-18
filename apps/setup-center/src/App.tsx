@@ -5341,10 +5341,19 @@ export function App() {
     disabledViews, toggleViewDisabled,
   };
 
-  function renderIM() {
+  function renderIM(wizardMode?: boolean) {
     const imDisabled = disabledViews.includes("im");
     return (
-      <IMConfigView {..._configViewProps} venvDir={venvDir} imDisabled={imDisabled} onToggleIM={() => toggleViewDisabled("im")} />
+      <IMConfigView
+        {..._configViewProps}
+        venvDir={venvDir}
+        imDisabled={imDisabled}
+        onToggleIM={() => toggleViewDisabled("im")}
+        multiAgentEnabled={multiAgentEnabled}
+        apiBaseUrl={apiBaseUrl}
+        onRequestRestart={restartService}
+        wizardMode={wizardMode}
+      />
     );
   }
 
@@ -7544,7 +7553,7 @@ export function App() {
             <div className="obContent">
               <h2 className="obStepTitle">{t("onboarding.im.title")}</h2>
               <p className="obStepDesc">{t("onboarding.im.desc")}</p>
-              <div className="obFormArea">{renderIM()}</div>
+              <div className="obFormArea">{renderIM(true)}</div>
               <p className="obSkipHint">{t("onboarding.skipHint")}</p>
             </div>
             <div className="obFooter">
@@ -7841,7 +7850,7 @@ export function App() {
           <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「配置 → IM 通道」中启用</p>
         </div>
       ) : (
-        <IMView serviceRunning={serviceStatus?.running ?? false} multiAgentEnabled={multiAgentEnabled} apiBaseUrl={apiBaseUrl} onRequestRestart={restartService} venvDir={venvDir} />
+        <IMView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "token_stats") {

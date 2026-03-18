@@ -17,21 +17,20 @@ class StartRequest(BaseModel):
 
 
 class PollRequest(BaseModel):
-    qr_id: str
+    scode: str
 
 
 @router.post("/start")
 async def onboard_start(body: StartRequest):
-    """Generate QR code for WeCom bot configuration. Returns qr_url and qr_id."""
+    """Generate QR code for WeCom bot configuration. Returns auth_url and scode."""
     try:
         from openakita.setup.wecom_onboard import WecomOnboard
 
         ob = WecomOnboard()
         data = await ob.generate()
         result = {
-            "qr_url": data.get("qr_url", ""),
-            "qr_id": data.get("qr_id", ""),
-            "expire_in": data.get("expire_in", 300),
+            "auth_url": data.get("auth_url", ""),
+            "scode": data.get("scode", ""),
         }
         return JSONResponse(content=result)
     except Exception as e:
@@ -46,7 +45,7 @@ async def onboard_poll(body: PollRequest):
         from openakita.setup.wecom_onboard import WecomOnboard
 
         ob = WecomOnboard()
-        result = await ob.poll(body.qr_id)
+        result = await ob.poll(body.scode)
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"WeCom onboard poll failed: {e}", exc_info=True)
