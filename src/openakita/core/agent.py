@@ -1938,352 +1938,14 @@ class Agent:
         session_type: str = "cli",
     ) -> str:
         """
-        构建系统提示词 (动态生成，包含技能清单、MCP 清单和相关记忆)
+        构建系统提示词。
 
-        遵循规范的渐进式披露:
-        - Agent Skills: name + description 在系统提示中
-        - MCP: server + tool name + description 在系统提示中
-        - Memory: 相关记忆按需注入
-        - Tools: 从 BASE_TOOLS 动态生成
-        - User Profile: 首次引导或日常询问
-
-        Args:
-            base_prompt: 基础提示词 (身份信息，use_compiled=True 时忽略)
-            task_description: 任务描述 (用于检索相关记忆)
-            use_compiled: 是否使用编译管线 (v2)，降低约 55% token 消耗
-
-        Returns:
-            完整的系统提示词
+        .. deprecated::
+            非编译路径已废弃，所有路径现统一使用编译管线 (v2)。
+            工具指引已迁移至 prompt.builder._get_tools_guide_short()。
+            核心原则已迁移至 AGENT.md + SOUL.md + prompt.builder._CORE_RULES。
         """
-        # 使用编译管线 (v2) - 降低 token 消耗（同步版本，启动时使用）
-        if use_compiled:
-            return self._build_system_prompt_compiled_sync(task_description, session_type=session_type)
-
-        # 技能清单 (Agent Skills 规范) - 每次动态生成，确保新创建的技能被包含
-        skill_catalog = self.skill_catalog.generate_catalog()
-
-        # MCP 清单 (Model Context Protocol 规范)
-        # pool agent (lightweight=True) 跳过 _load_mcp_servers()，
-        # 但共享全局 mcp_catalog，因此从共享实例动态获取。
-        mcp_catalog = getattr(self, "_mcp_catalog_text", "") or self.mcp_catalog.get_catalog()
-
-        # 相关记忆 (按任务相关性注入)
-        memory_context = self.memory_manager.get_injection_context(task_description)
-
-        # 动态生成工具列表
-        tools_text = self._generate_tools_text()
-
-        # 用户档案收集提示 (首次引导或日常询问)
-        profile_prompt = ""
-        if self.profile_manager.is_first_use():
-            profile_prompt = self.profile_manager.get_onboarding_prompt()
-        else:
-            profile_prompt = self.profile_manager.get_daily_question_prompt()
-
-        # 系统环境信息
-        import os
-        import platform
-
-        system_info = f"""## 运行环境
-
-- **操作系统**: {platform.system()} {platform.release()}
-- **当前工作目录**: {os.getcwd()}
-- **临时目录**:
-  - Windows: 使用当前目录下的 `data/temp/` 或 `%TEMP%`
-  - Linux/macOS: 使用当前目录下的 `data/temp/` 或 `/tmp`
-- **建议**: 创建临时文件时优先使用 `data/temp/` 目录（相对于当前工作目录）
-
-## ⚠️ 重要：运行时状态不持久化
-
-**服务重启后以下状态会丢失，不能依赖会话历史记录判断当前状态：**
-
-| 状态 | 重启后 | 正确做法 |
-|------|--------|----------|
-| 浏览器 | **已关闭** | 必须先调用 `browser_open` 确认状态，不能假设已打开 |
-| 变量/内存数据 | **已清空** | 通过工具重新获取，不能依赖历史 |
-| 临时文件 | **可能清除** | 重新检查文件是否存在 |
-| 网络连接 | **已断开** | 需要重新建立连接 |
-
-**⚠️ 会话历史中的"成功打开浏览器"等记录只是历史，不代表当前状态！每次执行任务必须通过工具调用获取实时状态。**
-"""
-
-        # 工具使用指南
-        tools_guide = """
-## 工具体系说明
-
-你有三类工具可以使用，**它们都是工具，都可以调用**：
-
-### 1. 系统工具（渐进式披露）
-
-系统内置的核心工具，采用渐进式披露：
-
-| 步骤 | 操作 | 说明 |
-|-----|-----|-----|
-| 1 | 查看上方 "Available System Tools" 清单 | 了解有哪些工具可用 |
-| 2 | `get_tool_info(tool_name)` | 获取工具的完整参数定义 |
-| 3 | 直接调用工具 | 如 `read_file(path="...")` |
-
-**工具类别**：文件系统、浏览器、记忆、定时任务、用户档案等
-
-### 2. Skills 技能（渐进式披露）
-
-可扩展的能力模块，采用渐进式披露：
-
-| 步骤 | 操作 | 说明 |
-|-----|-----|-----|
-| 1 | 查看上方 "Available Skills" 清单 | 了解有哪些技能可用 |
-| 2 | `get_skill_info(skill_name)` | 获取技能的详细使用说明 |
-| 3 | `run_skill_script(skill_name, script_name)` | 执行技能提供的脚本 |
-
-**特点**：
-- `install_skill` - 从 URL/Git 安装新技能
-- `load_skill` - 加载新创建的技能（用于 skill-creator 创建后）
-- `reload_skill` - 重新加载已修改的技能
-- 缺少工具时，使用 `skill-creator` 技能创建新技能
-
-### 3. MCP 外部服务（全量暴露）
-
-MCP (Model Context Protocol) 连接外部服务，**工具定义已全量展示**：
-
-| 步骤 | 操作 | 说明 |
-|-----|-----|-----|
-| 1 | 查看上方 "MCP Servers" 清单 | 包含完整的工具定义和参数 |
-| 2 | `call_mcp_tool(server, tool_name, arguments)` | 直接调用 |
-
-**特点**：连接数据库、API 等外部服务
-
-### 工具选择原则
-
-1. **系统工具**：文件操作、命令执行、浏览器、记忆等基础能力
-2. **Skills**：复杂任务、特定领域能力、可复用的工作流
-3. **MCP**：外部服务集成（数据库、第三方 API）
-4. **找不到工具？使用 `skill-creator` 技能创建一个！**
-
-**记住：这三类都是工具，都可以调用，不要说"我没有这个能力"！**
-"""
-
-        prompt = f"""{base_prompt}
-
-{system_info}
-{skill_catalog}
-{mcp_catalog}
-{memory_context}
-
-{tools_text}
-
-{tools_guide}
-
-## 核心原则 (最高优先级!!!)
-
-### 第一铁律：任务型请求必须使用工具
-
-**⚠️ 先判断请求类型，再决定是否调用工具！**
-
-| 请求类型 | 示例 | 处理方式 |
-|---------|------|----------|
-| **任务型** | "打开百度"、"提醒我开会"、"查天气" | ✅ **必须调用工具** |
-| **对话型** | "你好"、"什么是机器学习"、"谢谢" | ✅ 可直接回复 |
-
-**任务型请求的正确做法**：
-| 场景 | ❌ 错误 | ✅ 正确 |
-|------|--------|--------|
-| 用户要提醒 | "好的我会提醒你" | 调用 schedule_task |
-| 用户要查信息 | 凭记忆回答 | 调用 web_search |
-| 用户要操作文件 | 描述怎么操作 | 调用 write_file/read_file |
-
-**对话型请求**：直接回复即可，不需要调用工具。
-
-### 第二铁律：没有工具就创造工具
-
-**绝不说"我没有这个能力"！立即行动：**
-
-**方式一：临时脚本（一次性任务）**
-```
-# 根据运行环境信息中的当前工作目录和临时目录建议
-write_file("data/temp/task.py", "脚本内容")
-run_shell("python data/temp/task.py")
-```
-
-**方式二：搜索安装（有现成的）**
-```
-search_github → install_skill → 使用
-```
-
-**方式三：创建技能（需要复用）**
-```
-使用 skill-creator 技能 → 创建 SKILL.md → 保存到 skills/<name>/ → 调用 load_skill 加载 → 使用
-```
-
-**方式四：修改已有技能**
-```
-修改 skills/<name>/SKILL.md → 调用 reload_skill 重新加载 → 修改立即生效
-```
-
-**从"不会"到"会"只需要几分钟！**
-
-### 第三铁律：问题自己解决
-
-**遇到问题，默认自己解决，不要甩给用户：**
-
-- 报错了？自己读日志、分析、修复
-- 缺信息？自己用工具查找
-- 不确定？先尝试，失败了再换方法
-- **只有完全无法解决才询问用户**
-
-### 第四铁律：永不放弃
-
-- 第一次失败？换个方法再试
-- 第二次失败？再换一个
-- 工具不够用？创建新工具
-- 信息不完整？主动去查找
-
-**禁止说"我做不到"、"这超出了我的能力"、"请你自己..."！**
-**正确做法：分析问题 → 搜索方案 → 获取工具 → 执行任务 → 验证结果**
-
----
-
-## 重要提示
-
-### 深度思考模式 (Thinking Mode)
-
-**默认启用 thinking 模式**，这样可以保证回答质量。
-
-如果遇到非常简单的任务（如：简单问候、快速提醒），可以调用 `enable_thinking(enabled=false)` 临时关闭以加快响应。
-大多数情况下保持默认启用即可，不需要主动管理。
-
-### Plan 模式（复杂任务必须使用！）
-
-**当任务需要超过 2 步完成时，先调用 create_plan 创建计划：**
-
-**触发条件**：
-- 用户请求中有"然后"、"接着"、"之后"等词
-- 涉及多个工具协作（如：打开网页 + 搜索 + 截图 + 发送）
-- 需要依次完成多个操作
-
-**执行流程**：
-1. `create_plan` → 创建计划，通知用户
-2. 执行步骤 → `update_plan_step` 更新状态
-3. 重复 2 直到所有步骤完成
-4. `complete_plan` → 生成总结
-
-**示例**：
-用户："打开百度搜索天气并截图发我"
-→ create_plan → browser_task("打开百度搜索天气并截图") + update_plan_step → deliver_artifacts + complete_plan
-
-### 工具调用
-- 工具直接使用工具名调用，不需要任何前缀
-- **提醒/定时任务必须使用 schedule_task 工具**，不要只是回复"好的"
-- 当用户说"X分钟后提醒我"时，立即调用 schedule_task 创建任务
-
-### 主动沟通
-
-- 对话型请求：直接回答即可，不需要固定的“收到/开始处理”确认语。
-- 任务型请求：在关键节点给出简短进度与结果（避免刷屏）。
-- 如涉及附件交付：使用 `deliver_artifacts` 并以回执为证据（不要空口宣称“已发送/已交付”）。
-
-### 定时任务/提醒 (极其重要!!!)
-
-**当用户请求设置提醒、定时任务时，你必须立即调用 schedule_task 工具！**
-**禁止只回复"好的，我会提醒你"这样的文字！那样任务不会被创建！**
-**只有调用了 schedule_task 工具，任务才会真正被调度执行！**
-
-**⚠️ 任务类型判断 (task_type) - 这是最重要的决策！**
-
-**默认使用 reminder！除非明确需要AI执行操作才用 task！**
-
-✅ **reminder** (90%的情况都是这个!):
-- 只需要到时间发一条消息提醒用户
-- 例子: "提醒我喝水"、"叫我起床"、"站立提醒"、"开会提醒"、"午睡提醒"
-- 特点: 用户说"提醒我xxx"、"叫我xxx"、"通知我xxx"
-
-❌ **task** (仅10%的特殊情况):
-- 需要AI在触发时执行查询、操作、截图等
-- 例子: "查天气告诉我"、"截图发给我"、"执行脚本"、"帮我发消息给别人"
-- 特点: 用户说"帮我做xxx"、"执行xxx"、"查询xxx"
-
-**创建任务后，必须明确告知用户**:
-- reminder: "好的，到时间我会提醒你：[提醒内容]" (只发一条消息)
-- task: "好的，到时间我会自动执行：[任务内容]" (AI会运行并汇报结果)
-
-调用 schedule_task 时的参数:
-
-1. **简单提醒** (task_type="reminder"):
-   - name: "喝水提醒"
-   - description: "提醒用户喝水"
-   - task_type: "reminder"
-   - trigger_type: "once"
-   - trigger_config: {{"run_at": "2026-02-01 10:00"}}
-   - reminder_message: "⏰ 该喝水啦！记得保持水分摄入哦~"
-
-2. **复杂任务** (task_type="task"):
-   - name: "每日天气查询"
-   - description: "查询今日天气并告知用户"
-   - task_type: "task"
-   - trigger_type: "cron"
-   - trigger_config: {{"cron": "0 8 * * *"}}
-   - prompt: "查询今天的天气，并以友好的方式告诉用户"
-
-**触发类型**:
-- once: 一次性，trigger_config 包含 run_at
-- interval: 间隔执行，trigger_config 包含 interval_minutes
-- cron: 定时执行，trigger_config 包含 cron 表达式
-
-**再次强调：收到提醒请求时，第一反应就是调用 schedule_task 工具！**
-
-### 系统已内置功能 (不需要自己实现!)
-
-以下功能**系统已经内置**，当用户提到时，不要尝试"开发"或"实现"，而是直接使用：
-
-1. **语音转文字** - 系统**已自动处理**语音识别！
-   - 用户发送的语音消息会被系统**自动**转写为文字（通过本地 Whisper medium 模型）
-   - 你收到的消息中，语音内容已经被转写为文字了
-   - 如果看到 `[语音: X秒]` 但没有文字内容，说明自动识别失败
-   - **只有**在自动识别失败时（如看到"语音识别失败"提示），才需要手动处理语音文件
-   - ⚠️ **重要**：不要每次收到语音消息都调用语音识别工具！系统已经自动处理了！
-
-2. **图片理解** - 用户发送的图片会自动传递给你进行多模态理解
-   - 你可以直接"看到"用户发送的图片并描述或分析
-
-3. **Telegram 配对** - 已内置配对验证机制
-
-**当用户说"帮我实现语音转文字"时**：
-- ❌ 不要开始写代码、安装 whisper、配置 ffmpeg
-- ❌ 不要调用语音识别技能或工具去处理
-- ✅ 告诉用户"语音转文字已内置并自动运行，请发送语音测试"
-
-**语音消息处理流程**：
-1. 用户发送语音 → 2. 系统自动下载并用 Whisper 转文字 → 3. 你收到的是转写后的文字
-4. 只有当你看到"[语音识别失败]"或"自动识别失败"时，才需要用 get_voice_file 工具获取文件路径并手动处理
-
-### 记忆使用原则
-**上下文优先**：当前对话内容永远优先于记忆中的信息。
-**不要让记忆主导对话**——每次对话都是新鲜的开始，记忆中的事情等用户主动提起或真正相关时再说。
-记忆系统的详细使用说明见系统提示词中的"你的记忆系统"章节。
-
-### 诚实原则 (极其重要!!!)
-**绝对禁止编造不存在的功能或进度！**
-
-❌ **严禁以下行为**：
-- 声称"正在运行"、"已完成"但实际没有创建任何文件/脚本
-- 在回复中贴一段代码假装在执行，但实际没有调用任何工具
-- 声称"每X秒监控"但没有创建对应的定时任务
-- 承诺"5分钟内完成"但根本没有开始执行
-
-✅ **正确做法**：
-- 如果需要创建脚本，必须调用 write_file 工具实际写入
-- 如果需要定时任务，必须调用 schedule_task 工具实际创建
-- 如果做不到，诚实告知"这个功能我目前无法实现，原因是..."
-- 如果需要时间开发，先实际开发完成，再告诉用户结果
-
-**用户信任比看起来厉害更重要！宁可说"我做不到"也不要骗人！**
-{profile_prompt}"""
-        
-        if self._custom_prompt_suffix:
-            prompt = prompt + f"\n\n{self._custom_prompt_suffix}"
-
-        prompt += self._build_multi_agent_prompt_section()
-        
-        return prompt
+        return self._build_system_prompt_compiled_sync(task_description, session_type=session_type)
 
     def _build_system_prompt_compiled_sync(self, task_description: str = "", session_type: str = "cli") -> str:
         """同步版本：启动时构建初始系统提示词（此时事件循环可能未就绪）"""
@@ -2528,76 +2190,10 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
 
     def _generate_tools_text(self) -> str:
         """
-        从 BASE_TOOLS 动态生成工具列表文本
-
-        按类别分组显示，包含重要参数说明
+        .. deprecated::
+            工具清单现由 prompt.builder 的编译管线自动生成，此方法不再使用。
         """
-        # 工具分类
-        categories = {
-            "File System": ["run_shell", "write_file", "read_file", "list_directory"],
-            "Skills Management": [
-                "list_skills",
-                "get_skill_info",
-                "run_skill_script",
-                "get_skill_reference",
-                "install_skill",
-                "load_skill",
-                "reload_skill",
-            ],
-            "Memory Management": ["add_memory", "search_memory", "get_memory_stats"],
-            "Browser Automation": [
-                "browser_task",
-                "browser_open",
-                "browser_navigate",
-                "browser_get_content",
-                "browser_screenshot",
-                "browser_close",
-            ],
-            "Scheduled Tasks": [
-                "schedule_task",
-                "list_scheduled_tasks",
-                "cancel_scheduled_task",
-                "trigger_scheduled_task",
-            ],
-        }
-
-        # 构建工具名到完整定义的映射
-        tool_map = {t["name"]: t for t in self._tools}
-
-        lines = ["## Available Tools"]
-
-        for category, tool_names in categories.items():
-            # 过滤出存在的工具
-            existing_tools = [(name, tool_map[name]) for name in tool_names if name in tool_map]
-
-            if existing_tools:
-                lines.append(f"\n### {category}")
-                for name, tool_def in existing_tools:
-                    desc = tool_def.get("description", "")
-                    # 不再截断描述，完整显示
-                    lines.append(f"- **{name}**: {desc}")
-
-                    # 显示重要参数（可选）
-                    schema = tool_def.get("input_schema", {})
-                    schema.get("properties", {})
-                    schema.get("required", [])
-
-                    # 注意：工具的完整参数定义通过 tools=self._tools 传递给 LLM API
-                    # 这里只在 system prompt 中简要列出，避免过长
-
-        # 添加未分类的工具
-        categorized = set()
-        for names in categories.values():
-            categorized.update(names)
-
-        uncategorized = [(t["name"], t) for t in self._tools if t["name"] not in categorized]
-        if uncategorized:
-            lines.append("\n### Other Tools")
-            for name, tool_def in uncategorized:
-                desc = tool_def.get("description", "")
-                lines.append(f"- **{name}**: {desc}")
-
-        return "\n".join(lines)
+        return ""
 
     def _get_max_context_tokens(self) -> int:
         """动态获取当前模型的可用上下文 token 数。"""
@@ -3679,6 +3275,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         gateway: Any = None,
         *,
         plan_mode: bool = False,
+        mode: str = "agent",
         endpoint_override: str | None = None,
         attachments: list | None = None,
         thinking_mode: str | None = None,
@@ -3698,7 +3295,8 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
             session_id: 会话 ID
             session: Session 对象
             gateway: MessageGateway 对象
-            plan_mode: 是否启用 Plan 模式
+            plan_mode: 是否启用 Plan 模式 (deprecated, use mode)
+            mode: 交互模式 (ask/plan/agent)
             endpoint_override: 端点覆盖
             attachments: Desktop Chat 附件列表
             thinking_mode: 思考模式覆盖 ('auto'/'on'/'off'/None)
@@ -3897,6 +3495,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 task_monitor=task_monitor,
                 session_type=session_type,
                 plan_mode=plan_mode,
+                mode=mode,
                 endpoint_override=endpoint_override,
                 conversation_id=conversation_id,
                 thinking_mode=_thinking_mode,

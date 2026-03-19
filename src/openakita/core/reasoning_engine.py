@@ -49,6 +49,66 @@ logger = logging.getLogger(__name__)
 
 _SSE_RESULT_PREVIEW_CHARS = 32000
 
+# ---------------------------------------------------------------------------
+# Mode-based tool filtering
+# ---------------------------------------------------------------------------
+
+# Ask mode: only allow read-only + information-gathering tools
+_ASK_MODE_WHITELIST = {
+    # File System (read-only)
+    "read_file", "list_directory", "grep", "glob", "run_shell",
+    # Memory (read + write allowed — adding memory is safe)
+    "search_memory", "add_memory", "get_memory_stats",
+    "list_recent_tasks", "trace_memory", "search_conversation_traces",
+    # Tool / Skill / MCP discovery (read-only)
+    "get_tool_info", "get_skill_info", "list_skills",
+    "list_mcp_servers", "get_mcp_instructions",
+    # Plan (read-only)
+    "get_plan_status",
+    # System (read-only + interaction)
+    "ask_user", "get_workspace_map", "get_session_logs",
+    # Web search (read-only, useful for research)
+    "web_search", "news_search",
+    # Browser (read-only observation)
+    "browser_screenshot", "view_image",
+    # Scheduled tasks (read-only)
+    "list_scheduled_tasks",
+    # Profile / Persona (read-only)
+    "get_user_profile", "get_persona_profile",
+}
+
+# Plan mode: read-only + plan management tools
+_PLAN_MODE_WHITELIST = _ASK_MODE_WHITELIST | {
+    "create_plan", "create_plan_file", "update_plan_step", "complete_plan",
+    "exit_plan_mode",
+}
+
+
+def _filter_tools_by_mode(tools: list[dict], mode: str) -> list[dict]:
+    """Filter tool list based on the active mode.
+
+    - ask: only read-only tools (whitelist)
+    - plan: read-only + plan tools (whitelist)
+    - agent: all tools (no filter)
+    """
+    if mode == "agent" or not tools:
+        return tools
+
+    whitelist = _PLAN_MODE_WHITELIST if mode == "plan" else _ASK_MODE_WHITELIST
+
+    filtered = []
+    for tool in tools:
+        name = tool.get("name", "")
+        if not name:
+            # tool schema format may vary
+            fn = tool.get("function", {})
+            name = fn.get("name", "")
+        if name in whitelist:
+            filtered.append(tool)
+
+    logger.info(f"[ToolFilter] mode={mode}: {len(tools)} -> {len(filtered)} tools")
+    return filtered
+
 
 class DecisionType(Enum):
     """LLM 决策类型"""
@@ -1416,6 +1476,7 @@ class ReasoningEngine:
         task_monitor: Any = None,
         session_type: str = "desktop",
         plan_mode: bool = False,
+        mode: str = "agent",
         endpoint_override: str | None = None,
         conversation_id: str | None = None,
         thinking_mode: str | None = None,
@@ -1495,11 +1556,26 @@ class ReasoningEngine:
                     return _base_sp
 
             effective_prompt = _build_effective_prompt()
-            if plan_mode:
-                effective_prompt += (
-                    "\n\n[PLAN MODE] 用户请求 Plan 模式。"
-                    "请先制定详细计划（使用 create_plan 工具），然后按计划执行。"
-                )
+
+            # Backward compat: plan_mode bool → mode string
+            _effective_mode = mode
+            if plan_mode and _effective_mode == "agent":
+                _effective_mode = "plan"
+
+            # Mode-specific prompt injection
+            if _effective_mode == "plan":
+                from ..prompt.builder import _build_mode_rules
+                _plan_rules = _build_mode_rules("plan")
+                if _plan_rules:
+                    effective_prompt += f"\n\n{_plan_rules}"
+            elif _effective_mode == "ask":
+                from ..prompt.builder import _build_mode_rules
+                _ask_rules = _build_mode_rules("ask")
+                if _ask_rules:
+                    effective_prompt += f"\n\n{_ask_rules}"
+
+            # Tool filtering by mode — restrict available tools based on current mode
+            tools = _filter_tools_by_mode(tools, _effective_mode)
 
             # === 端点覆盖 ===
             _endpoint_switched = False
