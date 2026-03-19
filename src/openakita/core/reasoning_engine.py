@@ -536,6 +536,7 @@ class ReasoningEngine:
         endpoint_override: str | None = None,
         force_tool_retries: int | None = None,
         is_sub_agent: bool = False,
+        mode: str = "agent",
     ) -> str:
         """
         主推理循环: Reason -> Act -> Observe。
@@ -697,6 +698,9 @@ class ReasoningEngine:
 
             param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
             return f"{name}({param_hash})"
+
+        # Mode-based tool filtering (same as reason_stream)
+        tools = _filter_tools_by_mode(tools, mode)
 
         # ==================== 主循环 ====================
         logger.info(f"[ReAct] === Loop started (max_iterations={max_iterations}, model={current_model}) ===")

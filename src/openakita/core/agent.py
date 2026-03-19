@@ -3486,6 +3486,23 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 )
                 return
 
+            # Complexity detection: suggest Plan mode for complex tasks
+            if (
+                mode == "agent"
+                and hasattr(self, "_current_intent")
+                and self._current_intent
+                and getattr(self._current_intent, "suggest_plan", False)
+            ):
+                _score = getattr(getattr(self._current_intent, "complexity", None), "score", 0)
+                system_prompt += (
+                    "\n\n<system-reminder>"
+                    f"\n⚠️ 复杂任务检测（评分: {_score}/10）：此任务涉及多文件修改、跨模块或破坏性操作。"
+                    "\n在开始执行前，你必须先使用 ask_user 工具询问用户是否要切换到 Plan 模式进行详细规划。"
+                    "\n建议选项：1) 切换到 Plan 模式（推荐） 2) 直接执行"
+                    "\n</system-reminder>"
+                )
+                logger.info(f"[ComplexityDetection] Injected plan suggestion (score={_score})")
+
             async for event in self.reasoning_engine.reason_stream(
                 messages=messages,
                 tools=self._effective_tools,
