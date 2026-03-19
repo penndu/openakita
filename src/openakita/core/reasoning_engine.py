@@ -78,10 +78,9 @@ _ASK_MODE_WHITELIST = {
     "get_user_profile", "get_persona_profile",
 }
 
-# Plan mode: read-only + plan management tools
+# Plan mode: read-only + plan document tools (NOT the old create_plan/update_plan_step execution tools)
 _PLAN_MODE_WHITELIST = _ASK_MODE_WHITELIST | {
-    "create_plan", "create_plan_file", "update_plan_step", "complete_plan",
-    "exit_plan_mode",
+    "create_plan_file", "exit_plan_mode", "get_plan_status",
 }
 
 
