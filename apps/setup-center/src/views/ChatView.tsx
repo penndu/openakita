@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { setThemePref } from "../theme";
 import type { Theme } from "../theme";
 import { invoke, downloadFile, openFileWithDefault, showInFolder, readFileBase64, onDragDrop, IS_TAURI, IS_WEB, IS_MOBILE_BROWSER, onWsEvent, logger, getAssetUrl } from "../platform";
@@ -1834,7 +1835,8 @@ export function ChatView({
     try { const v = localStorage.getItem("chat_thinkingDepth"); return (v === "low" || v === "medium" || v === "high") ? v : "medium"; }
     catch { return "medium"; }
   });
-
+  const [thinkingModeTipOpen, setThinkingModeTipOpen] = useState(false);
+  const [thinkingDepthTipOpen, setThinkingDepthTipOpen] = useState(false);
 
   // 持久化思考偏好
   useEffect(() => { try { localStorage.setItem("chat_thinkingMode", thinkingMode); } catch {} }, [thinkingMode]);
@@ -2464,22 +2466,22 @@ export function ChatView({
         setMessages((prev) => [...prev, { id: genId(), role: "system", content: `当前思考模式: ${currentLabel}\n用法: /thinking on|off|auto`, timestamp: Date.now() }]);
       }
     }},
-    { id: "thinking_depth", label: "思考深度", description: "设置思考深度 (low/medium/high)", action: (args) => {
+    { id: "thinking_depth", label: "思考程度", description: "设置思考程度 (low/medium/high)", action: (args) => {
       const depth = args?.toLowerCase().trim();
       if (depth === "low" || depth === "medium" || depth === "high") {
         setThinkingDepth(depth);
         const label = { low: "低", medium: "中", high: "高" }[depth];
-        setMessages((prev) => [...prev, { id: genId(), role: "system", content: `思考深度已设置为: ${label}`, timestamp: Date.now() }]);
+        setMessages((prev) => [...prev, { id: genId(), role: "system", content: `思考程度已设置为: ${label}`, timestamp: Date.now() }]);
       } else {
         const currentLabel = { low: "低", medium: "中", high: "高" }[thinkingDepth];
-        setMessages((prev) => [...prev, { id: genId(), role: "system", content: `当前思考深度: ${currentLabel}\n用法: /thinking_depth low|medium|high`, timestamp: Date.now() }]);
+        setMessages((prev) => [...prev, { id: genId(), role: "system", content: `当前思考程度: ${currentLabel}\n用法: /thinking_depth low|medium|high`, timestamp: Date.now() }]);
       }
     }},
     { id: "help", label: "帮助", description: "显示可用命令列表", action: () => {
       setMessages((prev) => [...prev, {
         id: genId(),
         role: "system",
-        content: "**可用命令：**\n- `/model [端点名]` — 切换 LLM 端点\n- `/plan` — 开启/关闭计划模式\n- `/thinking [on|off|auto]` — 深度思考模式\n- `/thinking_depth [low|medium|high]` — 思考深度\n- `/clear` — 清空对话\n- `/skill [技能名]` — 使用技能\n- `/persona [角色ID]` — 查看/切换角色\n- `/agent [Agent名]` — 切换 Agent\n- `/agents` — 查看 Agent 列表\n- `/help` — 显示此帮助",
+        content: "**可用命令：**\n- `/model [端点名]` — 切换 LLM 端点\n- `/plan` — 开启/关闭计划模式\n- `/thinking [on|off|auto]` — 深度思考模式\n- `/thinking_depth [low|medium|high]` — 思考程度\n- `/clear` — 清空对话\n- `/skill [技能名]` — 使用技能\n- `/persona [角色ID]` — 查看/切换角色\n- `/agent [Agent名]` — 切换 Agent\n- `/agents` — 查看 Agent 列表\n- `/help` — 显示此帮助",
         timestamp: Date.now(),
       }]);
     }},
@@ -4409,56 +4411,88 @@ export function ChatView({
             {/* Bottom toolbar */}
             <div className="chatInputToolbar">
               <div className="chatInputToolbarLeft">
-                <button data-slot="toolbar" onClick={() => fileInputRef.current?.click()} className="chatInputIconBtn" title={t("chat.attach")}>
-                  <IconPaperclip size={16} />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button data-slot="toolbar" onClick={() => fileInputRef.current?.click()} className="chatInputIconBtn">
+                      <IconPaperclip size={16} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">{t("chat.attach")}</TooltipContent>
+                </Tooltip>
                 <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,audio/*,.pdf,.txt,.md,.py,.js,.ts,.json,.csv" style={{ display: "none" }} onChange={handleFileSelect} />
 
-                <button data-slot="toolbar" onClick={toggleRecording} className={`chatInputIconBtn ${isRecording ? "chatInputIconBtnDanger" : ""}`} title={isRecording ? t("chat.stopRecording") : t("chat.voice")}>
-                  {isRecording ? <IconStopCircle size={16} /> : <IconMic size={16} />}
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button data-slot="toolbar" onClick={toggleRecording} className={`chatInputIconBtn ${isRecording ? "chatInputIconBtnDanger" : ""}`}>
+                      {isRecording ? <IconStopCircle size={16} /> : <IconMic size={16} />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">{isRecording ? t("chat.stopRecording") : t("chat.voice")}</TooltipContent>
+                </Tooltip>
 
-                <button data-slot="toolbar" onClick={() => setPlanMode((v) => !v)} className={`chatInputIconBtn ${planMode ? "chatInputIconBtnActive" : ""}`} title={t("chat.planMode")}>
-                  <IconPlan size={16} />
-                  <span style={{ fontSize: 11, marginLeft: 2 }}>Plan</span>
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button data-slot="toolbar" onClick={() => setPlanMode((v) => !v)} className={`chatInputIconBtn ${planMode ? "chatInputIconBtnActive" : ""}`}>
+                      <IconPlan size={16} />
+                      <span style={{ fontSize: 11, marginLeft: 2 }}>Plan</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">{t("chat.planMode")}</TooltipContent>
+                </Tooltip>
 
-                {/* 深度思考按钮 + 思考深度按钮 */}
-                <button
-                  data-slot="toolbar"
-                  onClick={() => {
-                    if (thinkingMode === "auto") {
-                      setThinkingMode("on");
-                    } else if (thinkingMode === "on") {
-                      setThinkingMode("off");
-                    } else {
-                      setThinkingMode("auto");
-                    }
-                  }}
-                  className={`chatInputIconBtn ${thinkingMode === "on" ? "chatInputIconBtnActive" : thinkingMode === "off" ? "chatInputIconBtnOff" : ""}`}
-                  title={`深度思考: ${thinkingMode === "on" ? "开启" : thinkingMode === "off" ? "关闭" : "自动"}`}
-                >
-                  <IconZap size={16} />
-                  <span style={{ fontSize: 11, marginLeft: 2 }}>
-                    {thinkingMode === "on" ? "Think" : thinkingMode === "off" ? "NoThink" : "Auto"}
-                  </span>
-                </button>
+                {/* 深度思考按钮 + 思考程度按钮 */}
+                <Tooltip open={thinkingModeTipOpen}>
+                  <TooltipTrigger asChild>
+                    <button
+                      data-slot="toolbar"
+                      onMouseEnter={() => setThinkingModeTipOpen(true)}
+                      onMouseLeave={() => setThinkingModeTipOpen(false)}
+                      onClick={() => {
+                        if (thinkingMode === "auto") {
+                          setThinkingMode("on");
+                        } else if (thinkingMode === "on") {
+                          setThinkingMode("off");
+                        } else {
+                          setThinkingMode("auto");
+                        }
+                      }}
+                      className={`chatInputIconBtn ${thinkingMode === "on" ? "chatInputIconBtnActive" : thinkingMode === "off" ? "chatInputIconBtnOff" : ""}`}
+                    >
+                      <IconZap size={16} />
+                      <span style={{ fontSize: 11, marginLeft: 2 }}>
+                        {thinkingMode === "on" ? "Think" : thinkingMode === "off" ? "NoThink" : "Auto"}
+                      </span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs" onPointerDownOutside={(e) => e.preventDefault()}>
+                    {`深度思考: ${thinkingMode === "on" ? "开启" : thinkingMode === "off" ? "关闭" : "自动"}`}
+                  </TooltipContent>
+                </Tooltip>
                 {thinkingMode !== "off" && (
-                  <button
-                    data-slot="toolbar"
-                    onClick={() => {
-                      setThinkingDepth((d) => d === "low" ? "medium" : d === "medium" ? "high" : "low");
-                    }}
-                    className="chatInputIconBtn"
-                    title={{ low: "思考深度: 低 — 快速响应\n点击切换", medium: "思考深度: 中 — 平衡模式\n点击切换", high: "思考深度: 高 — 深度推理\n点击切换" }[thinkingDepth]}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
-                      <rect x="1" y="9" width="3" height="4" rx="0.5" fill="currentColor" opacity={thinkingDepth === "low" || thinkingDepth === "medium" || thinkingDepth === "high" ? 1 : 0.25} />
-                      <rect x="5.5" y="5.5" width="3" height="7.5" rx="0.5" fill="currentColor" opacity={thinkingDepth === "medium" || thinkingDepth === "high" ? 1 : 0.25} />
-                      <rect x="10" y="2" width="3" height="11" rx="0.5" fill="currentColor" opacity={thinkingDepth === "high" ? 1 : 0.25} />
-                    </svg>
-                    <span style={{ fontSize: 10 }}>{{ low: "低", medium: "中", high: "高" }[thinkingDepth]}</span>
-                  </button>
+                  <Tooltip open={thinkingDepthTipOpen}>
+                    <TooltipTrigger asChild>
+                      <button
+                        data-slot="toolbar"
+                        onMouseEnter={() => setThinkingDepthTipOpen(true)}
+                        onMouseLeave={() => setThinkingDepthTipOpen(false)}
+                        onClick={() => {
+                          setThinkingDepth((d) => d === "low" ? "medium" : d === "medium" ? "high" : "low");
+                        }}
+                        className="chatInputIconBtn"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+                          <rect x="1" y="9" width="3" height="4" rx="0.5" fill="currentColor" opacity={thinkingDepth === "low" || thinkingDepth === "medium" || thinkingDepth === "high" ? 1 : 0.25} />
+                          <rect x="5.5" y="5.5" width="3" height="7.5" rx="0.5" fill="currentColor" opacity={thinkingDepth === "medium" || thinkingDepth === "high" ? 1 : 0.25} />
+                          <rect x="10" y="2" width="3" height="11" rx="0.5" fill="currentColor" opacity={thinkingDepth === "high" ? 1 : 0.25} />
+                        </svg>
+                        <span style={{ fontSize: 10 }}>{{ low: "低", medium: "中", high: "高" }[thinkingDepth]}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs" onPointerDownOutside={(e) => e.preventDefault()}>
+                      {{ low: "思考程度: 低 — 快速响应", medium: "思考程度: 中 — 平衡模式", high: "思考程度: 高 — 深度推理" }[thinkingDepth]}
+                      <span className="block text-[10px] opacity-60 mt-0.5">点击切换</span>
+                    </TooltipContent>
+                  </Tooltip>
                 )}
               </div>
 
