@@ -5006,9 +5006,9 @@ export function ChatView({
                     <div className="chatModeMenu">
                       <div className="chatModeMenuSection">执行模式</div>
                       {([
-                        { key: "agent" as const, icon: "🤖", label: "Agent", desc: "直接执行任务" },
-                        { key: "plan" as const, icon: "📋", label: "Plan", desc: "先规划再执行" },
-                        { key: "ask" as const, icon: "💬", label: "Ask", desc: "只读分析模式" },
+                        { key: "agent" as const, icon: <IconBot size={14} />, label: "Agent", desc: "直接执行任务" },
+                        { key: "plan" as const, icon: <IconPlan size={14} />, label: "Plan", desc: "先规划再执行" },
+                        { key: "ask" as const, icon: <IconSearch size={14} />, label: "Ask", desc: "只读分析模式" },
                       ]).map((m) => (
                         <div
                           key={m.key}
@@ -5016,7 +5016,7 @@ export function ChatView({
                           onClick={() => { setChatMode(m.key); setModeMenuOpen(false); }}
                         >
                           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <span>{m.icon}</span>
+                            {m.icon}
                             <span style={{ fontWeight: 600 }}>{m.label}</span>
                           </span>
                           <span style={{ fontSize: 10, opacity: 0.5 }}>{m.desc}</span>
