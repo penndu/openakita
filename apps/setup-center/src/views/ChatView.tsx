@@ -2561,18 +2561,6 @@ export function ChatView({
     return () => document.removeEventListener("mousedown", handler);
   }, [modelMenuOpen]);
 
-  // ── 点击外部关闭思考菜单 ──
-  useEffect(() => {
-    if (!thinkingMenuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (thinkingMenuRef.current && !thinkingMenuRef.current.contains(e.target as Node)) {
-        setThinkingMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [thinkingMenuOpen]);
-
   // ── 点击外部关闭模式菜单 ──
   useEffect(() => {
     if (!modeMenuOpen) return;
