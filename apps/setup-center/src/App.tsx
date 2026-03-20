@@ -2864,19 +2864,6 @@ export function App() {
 
           {/* ── Model Downloads & Voice Recognition — hidden (not actively used) ── */}
 
-          {/* ── Tool Parallelism ── */}
-          <details className="group/net rounded-lg border border-border mt-2">
-            <summary className="cursor-pointer flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium select-none list-none [&::-webkit-details-marker]:hidden hover:bg-accent/50 transition-colors">
-              <ChevronRight className="size-4 shrink-0 transition-transform group-open/net:rotate-90 text-muted-foreground" />
-              {t("config.toolsParallel")}
-            </summary>
-            <div className="flex flex-col gap-2.5 px-4 py-3 border-t border-border">
-              <div className="grid2">
-                {FT({ k: "TOOL_MAX_PARALLEL", label: t("config.toolsParallel"), placeholder: "1", help: t("config.toolsParallelHelp") })}
-              </div>
-            </div>
-          </details>
-
           {/* ── Other ── */}
           <details className="group/other rounded-lg border border-border mt-2">
             <summary className="cursor-pointer flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium select-none list-none [&::-webkit-details-marker]:hidden hover:bg-accent/50 transition-colors">
@@ -2886,6 +2873,7 @@ export function App() {
             <div className="flex flex-col gap-2.5 px-4 py-3 border-t border-border">
               <div className="grid2">
                 {FT({ k: "FORCE_TOOL_CALL_MAX_RETRIES", label: t("config.toolsForceRetry"), placeholder: "1" })}
+                {FT({ k: "TOOL_MAX_PARALLEL", label: t("config.toolsParallel"), placeholder: "1", help: t("config.toolsParallelHelp") })}
               </div>
             </div>
           </details>
