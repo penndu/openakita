@@ -1398,11 +1398,18 @@ class OrgRuntime:
                 if not org or org.status not in (OrgStatus.ACTIVE, OrgStatus.RUNNING):
                     break
 
+                recovered_nodes = []
                 for node in org.nodes:
                     if node.status == NodeStatus.ERROR:
                         self._set_node_status(org, node, NodeStatus.IDLE, "health_check_recovery")
                         self._agent_cache.pop(f"{org_id}:{node.id}", None)
+                        recovered_nodes.append(node)
                 await self._save_org(org)
+                for node in recovered_nodes:
+                    await self._broadcast_ws("org:node_status", {
+                        "org_id": org_id, "node_id": node.id,
+                        "status": "idle", "current_task": "",
+                    })
 
             except asyncio.CancelledError:
                 break
@@ -1482,6 +1489,14 @@ class OrgRuntime:
                                 {"reason": "stuck_busy", "stuck_secs": stuck_secs},
                             )
                             await self._save_org(org)
+                            await self._broadcast_ws("org:node_status", {
+                                "org_id": org_id, "node_id": node.id,
+                                "status": "idle", "current_task": "",
+                            })
+                            await self._broadcast_ws("org:watchdog_recovery", {
+                                "org_id": org_id, "node_id": node.id,
+                                "reason": "stuck_busy", "stuck_secs": stuck_secs,
+                            })
                             await self._watchdog_notify_delegator(
                                 org, node, "stuck_busy", stuck_secs,
                             )
@@ -1497,6 +1512,14 @@ class OrgRuntime:
                             "watchdog_recovery", node.id, {"reason": "error_not_recovering"},
                         )
                         await self._save_org(org)
+                        await self._broadcast_ws("org:node_status", {
+                            "org_id": org_id, "node_id": node.id,
+                            "status": "idle", "current_task": "",
+                        })
+                        await self._broadcast_ws("org:watchdog_recovery", {
+                            "org_id": org_id, "node_id": node.id,
+                            "reason": "error_not_recovering",
+                        })
                         await self._watchdog_notify_delegator(
                             org, node, "error_not_recovering", 0,
                         )
