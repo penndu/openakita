@@ -2509,7 +2509,10 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         )
 
         # 8. Plan mode detection (仅 Agent 模式 — Plan/Ask 模式由提示词和工具过滤控制)
-        if intent_result.todo_required and mode == "agent":
+        if mode in ("plan", "ask"):
+            from ..tools.handlers.plan import require_todo_for_session
+            require_todo_for_session(conversation_id, False)
+        elif intent_result.todo_required and mode == "agent":
             from ..tools.handlers.plan import require_todo_for_session, should_require_todo
             has_multi_actions = should_require_todo(message)
             if intent_result.todo_required or has_multi_actions:
@@ -5761,29 +5764,30 @@ NEXT: 建议的下一步（如有）"""
         # ============================================
         # Plan 强制检查（仅 Agent 模式下的 todo 跟踪）
         # ============================================
-        # Plan/Ask 模式的控制工具始终放行，避免死锁
-        _todo_exempt = ("create_todo", "create_plan_file", "exit_plan_mode",
-                        "get_todo_status", "ask_user")
-        if tool_name not in _todo_exempt:
-            from ..tools.handlers.plan import has_active_todo, is_todo_required
+        _effective_mode = getattr(self.tool_executor, "_current_mode", "agent")
+        if _effective_mode not in ("plan", "ask"):
+            _todo_exempt = ("create_todo", "create_plan_file", "exit_plan_mode",
+                            "get_todo_status", "ask_user")
+            if tool_name not in _todo_exempt:
+                from ..tools.handlers.plan import has_active_todo, is_todo_required
 
-            session_id = getattr(self, "_current_session_id", None)
-            if session_id and is_todo_required(session_id) and not has_active_todo(session_id):
-                return (
-                    "⚠️ **这是一个多步骤任务，建议先创建 Todo！**\n\n"
-                    "请先调用 `create_todo` 工具创建任务计划，然后再执行具体操作。\n\n"
-                    "示例：\n"
-                    "```\n"
-                    "create_todo(\n"
-                    "  task_summary='写脚本获取时间并显示',\n"
-                    "  steps=[\n"
-                    "    {id: 'step1', description: '创建Python脚本', tool: 'write_file'},\n"
-                    "    {id: 'step2', description: '执行脚本', tool: 'run_shell'},\n"
-                    "    {id: 'step3', description: '读取结果', tool: 'read_file'}\n"
-                    "  ]\n"
-                    ")\n"
-                    "```"
-                )
+                session_id = getattr(self, "_current_session_id", None)
+                if session_id and is_todo_required(session_id) and not has_active_todo(session_id):
+                    return (
+                        "⚠️ **这是一个多步骤任务，建议先创建 Todo！**\n\n"
+                        "请先调用 `create_todo` 工具创建任务计划，然后再执行具体操作。\n\n"
+                        "示例：\n"
+                        "```\n"
+                        "create_todo(\n"
+                        "  task_summary='写脚本获取时间并显示',\n"
+                        "  steps=[\n"
+                        "    {id: 'step1', description: '创建Python脚本', tool: 'write_file'},\n"
+                        "    {id: 'step2', description: '执行脚本', tool: 'run_shell'},\n"
+                        "    {id: 'step3', description: '读取结果', tool: 'read_file'}\n"
+                        "  ]\n"
+                        ")\n"
+                        "```"
+                    )
 
         # 导入日志缓存
         from ..logging import get_session_log_buffer

@@ -703,7 +703,9 @@ class ToolExecutor:
         Returns:
             阻止消息字符串，或 None（允许执行）
         """
-        # Plan/Ask 模式有自己的工作流控制，不使用此强制机制
+        if self._current_mode in ("plan", "ask"):
+            return None
+
         if tool_name in ("create_todo", "create_plan_file", "exit_plan_mode",
                          "get_todo_status", "ask_user"):
             return None
