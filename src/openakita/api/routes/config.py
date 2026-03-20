@@ -242,23 +242,33 @@ async def write_env(body: EnvUpdateRequest):
         existing = env_path.read_bytes().decode("utf-8", errors="replace")
     import re as _re
     _env_key_pattern = _re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
-    for key in body.entries:
+    _sensitive_key = _re.compile(
+        r"(TOKEN|SECRET|PASSWORD|KEY|APIKEY)", _re.IGNORECASE,
+    )
+    safe_entries: dict[str, str] = {}
+    for key, value in body.entries.items():
         if not _env_key_pattern.match(key):
             from fastapi import HTTPException as _HE
             raise _HE(status_code=400, detail=f"Invalid env key: {key}")
+        if "***" in value and _sensitive_key.search(key):
+            logger.warning(
+                "[Config API] write_env: dropping masked value for %s", key,
+            )
+            continue
+        safe_entries[key] = value
 
     new_content = _update_env_content(
-        existing, body.entries, delete_keys=set(body.delete_keys)
+        existing, safe_entries, delete_keys=set(body.delete_keys)
     )
     env_path.write_text(new_content, encoding="utf-8")
-    for key, value in body.entries.items():
+    for key, value in safe_entries.items():
         if value:
             os.environ[key] = value
     for key in body.delete_keys:
         os.environ.pop(key, None)
-    count = len([v for v in body.entries.values() if v]) + len(body.delete_keys)
+    count = len([v for v in safe_entries.values() if v]) + len(body.delete_keys)
     logger.info(f"[Config API] Updated .env with {count} entries")
-    return {"status": "ok", "updated_keys": list(body.entries.keys())}
+    return {"status": "ok", "updated_keys": list(safe_entries.keys())}
 
 
 @router.get("/api/config/endpoints")
