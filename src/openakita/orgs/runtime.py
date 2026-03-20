@@ -46,6 +46,13 @@ logger = logging.getLogger(__name__)
 AGENT_CACHE_MAX = 10
 AGENT_CACHE_TTL = 600
 
+_runtime_instance: OrgRuntime | None = None
+
+
+def get_runtime() -> OrgRuntime | None:
+    """Return the active OrgRuntime singleton (set during __init__)."""
+    return _runtime_instance
+
 
 class _CachedAgent:
     """Wrapper for a cached Agent instance with TTL tracking."""
@@ -112,6 +119,9 @@ class OrgRuntime:
         self._save_locks: dict[str, asyncio.Lock] = {}
 
         self._started = False
+
+        global _runtime_instance
+        _runtime_instance = self
 
     def _get_org_semaphore(self, org_id: str) -> asyncio.Semaphore:
         """获取组织级并发信号量（限制同时激活的节点数）。"""
@@ -304,6 +314,37 @@ class OrgRuntime:
         })
 
         return org
+
+    async def delete_org(self, org_id: str) -> None:
+        """Permanently delete an organization: stop runtime, clean all state, remove disk data."""
+        org = self._active_orgs.get(org_id) or self._manager.get(org_id)
+        if not org:
+            raise ValueError(f"Organization not found: {org_id}")
+
+        if org.status in (OrgStatus.ACTIVE, OrgStatus.RUNNING, OrgStatus.PAUSED):
+            try:
+                await self.stop_org(org_id)
+            except Exception as e:
+                logger.warning(f"[OrgRuntime] stop_org before delete failed for {org_id}: {e}")
+
+        await self._deactivate_org(org_id)
+
+        self._org_semaphores.pop(org_id, None)
+        self._save_locks.pop(org_id, None)
+
+        idle_task = self._idle_tasks.pop(org_id, None)
+        if idle_task and not idle_task.done():
+            idle_task.cancel()
+        watchdog_task = self._watchdog_tasks.pop(org_id, None)
+        if watchdog_task and not watchdog_task.done():
+            watchdog_task.cancel()
+
+        self._manager.delete(org_id)
+
+        await self._broadcast_ws("org:status_change", {
+            "org_id": org_id, "status": "deleted"
+        })
+        logger.info(f"[OrgRuntime] Deleted org: {org_id} ({org.name})")
 
     async def reset_org(self, org_id: str) -> Organization:
         """Reset an organization: stop it, clear all runtime state, and restart fresh."""
