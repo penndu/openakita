@@ -132,3 +132,20 @@
   from { transform: scaleX(1); opacity: 0.1; }
   to { transform: scaleX(0.7); opacity: 0.05; }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-anim-idle,
+  .pet-anim-thinking,
+  .pet-anim-tool_execution,
+  .pet-anim-completed,
+  .pet-anim-error {
+    animation: none !important;
+  }
+  .pet-shadow-tool_execution,
+  .pet-shadow-completed {
+    animation: none !important;
+  }
+  .pet-img {
+    will-change: auto;
+  }
+}

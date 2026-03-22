@@ -3,8 +3,33 @@ import ForceGraph3D from "react-force-graph-3d";
 import * as THREE from "three";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { safeFetch } from "../providers";
-import { Loader2, X } from "lucide-react";
+import { Loader2, X, Zap, Monitor, BatteryLow } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+export type GraphQuality = "high" | "medium" | "low";
+
+const QUALITY_PRESETS: Record<GraphQuality, {
+  bloom: boolean;
+  particles: number;
+  particleWidth: number;
+  alphaDecay: number;
+  warmupTicks: number;
+  cooldownTicks: number;
+}> = {
+  high:   { bloom: true,  particles: 2, particleWidth: 1.2, alphaDecay: 0.02, warmupTicks: 80, cooldownTicks: 100 },
+  medium: { bloom: false, particles: 1, particleWidth: 0.8, alphaDecay: 0.04, warmupTicks: 40, cooldownTicks: 60 },
+  low:    { bloom: false, particles: 0, particleWidth: 0,   alphaDecay: 0.06, warmupTicks: 20, cooldownTicks: 30 },
+};
+
+const QUALITY_LABELS: Record<GraphQuality, string> = { high: "高", medium: "中", low: "低" };
+const QUALITY_ICONS: Record<GraphQuality, typeof Zap> = { high: Zap, medium: Monitor, low: BatteryLow };
+const QUALITY_ORDER: GraphQuality[] = ["high", "medium", "low"];
+
+function loadQuality(): GraphQuality {
+  const v = localStorage.getItem("memoryGraph3dQuality");
+  if (v === "high" || v === "medium" || v === "low") return v;
+  return "high";
+}
 
 type GraphNode = {
   id: string;
@@ -61,9 +86,11 @@ const NODE_TYPE_LABELS: Record<string, string> = {
 interface Props {
   apiBaseUrl?: string;
   searchQuery?: string;
+  quality?: GraphQuality;
+  onQualityChange?: (q: GraphQuality) => void;
 }
 
-export function MemoryGraph3D({ apiBaseUrl = "", searchQuery = "" }: Props) {
+export function MemoryGraph3D({ apiBaseUrl = "", searchQuery = "", quality: qualityProp, onQualityChange }: Props) {
   // ForceGraph3D ref type doesn't export cleanly; use its expected shape
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(undefined);
@@ -75,6 +102,16 @@ export function MemoryGraph3D({ apiBaseUrl = "", searchQuery = "" }: Props) {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const bloomRef = useRef<UnrealBloomPass | null>(null);
   const bloomAdded = useRef(false);
+
+  const [internalQuality, setInternalQuality] = useState<GraphQuality>(loadQuality);
+  const quality = qualityProp ?? internalQuality;
+  const preset = QUALITY_PRESETS[quality];
+
+  const handleQualityChange = useCallback((q: GraphQuality) => {
+    localStorage.setItem("memoryGraph3dQuality", q);
+    setInternalQuality(q);
+    onQualityChange?.(q);
+  }, [onQualityChange]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -107,8 +144,18 @@ export function MemoryGraph3D({ apiBaseUrl = "", searchQuery = "" }: Props) {
     return () => { cancelled = true; };
   }, [apiBaseUrl]);
 
-  // Bloom post-processing (init once, update resolution on resize)
+  // Bloom post-processing — only when quality = high
   useEffect(() => {
+    if (!preset.bloom) {
+      if (bloomRef.current) {
+        bloomRef.current.enabled = false;
+      }
+      return;
+    }
+    if (bloomRef.current) {
+      bloomRef.current.enabled = true;
+      return;
+    }
     if (!fgRef.current || bloomAdded.current) return;
     const timer = setTimeout(() => {
       try {
@@ -130,7 +177,7 @@ export function MemoryGraph3D({ apiBaseUrl = "", searchQuery = "" }: Props) {
       } catch { /* bloom unavailable */ }
     }, 500);
     return () => clearTimeout(timer);
-  }, [graphData]);
+  }, [graphData, preset.bloom]);
 
   // Update bloom resolution on container resize
   useEffect(() => {
@@ -328,26 +375,57 @@ export function MemoryGraph3D({ apiBaseUrl = "", searchQuery = "" }: Props) {
 
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative", background: "#0a0a12", borderRadius: 8, overflow: "hidden" }}>
-      {/* Legend */}
+      {/* Legend + Quality selector */}
       <div style={{
-        position: "absolute", top: 10, left: 10, zIndex: 10,
-        background: "rgba(10,10,18,0.85)", borderRadius: 8, padding: "8px 12px",
-        display: "flex", gap: 12, fontSize: 11, color: "#ccc",
+        position: "absolute", top: 10, left: 10, right: 10, zIndex: 10,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
-        {Object.entries(NODE_COLORS).map(([type, color]) => (
-          <span key={type} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block" }} />
-            {NODE_TYPE_LABELS[type] || type}
+        <div style={{
+          background: "rgba(10,10,18,0.85)", borderRadius: 8, padding: "8px 12px",
+          display: "flex", gap: 12, fontSize: 11, color: "#ccc",
+        }}>
+          {Object.entries(NODE_COLORS).map(([type, color]) => (
+            <span key={type} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block" }} />
+              {NODE_TYPE_LABELS[type] || type}
+            </span>
+          ))}
+          <span style={{ borderLeft: "1px solid #333", paddingLeft: 10, color: "#888" }}>
+            {graphData.meta.total_nodes} 节点 · {graphData.meta.total_edges} 边 · {graphData.meta.mode}
           </span>
-        ))}
-        <span style={{ borderLeft: "1px solid #333", paddingLeft: 10, color: "#888" }}>
-          {graphData.meta.total_nodes} 节点 · {graphData.meta.total_edges} 边 · {graphData.meta.mode}
-        </span>
-        {matchedNodeIds && (
-          <span style={{ borderLeft: "1px solid #333", paddingLeft: 10, color: "#f59e0b", fontWeight: 600 }}>
-            搜索匹配: {matchedNodeIds.size} 个节点
-          </span>
-        )}
+          {matchedNodeIds && (
+            <span style={{ borderLeft: "1px solid #333", paddingLeft: 10, color: "#f59e0b", fontWeight: 600 }}>
+              搜索匹配: {matchedNodeIds.size} 个节点
+            </span>
+          )}
+        </div>
+        <div style={{
+          background: "rgba(10,10,18,0.85)", borderRadius: 8, padding: "4px",
+          display: "flex", gap: 2,
+        }}>
+          {QUALITY_ORDER.map((q) => {
+            const Icon = QUALITY_ICONS[q];
+            const active = quality === q;
+            return (
+              <button
+                key={q}
+                onClick={() => handleQualityChange(q)}
+                title={`画质: ${QUALITY_LABELS[q]}`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "4px 10px", borderRadius: 6, border: "none",
+                  fontSize: 11, fontWeight: active ? 600 : 400, cursor: "pointer",
+                  background: active ? "rgba(99,102,241,0.3)" : "transparent",
+                  color: active ? "#a5b4fc" : "#888",
+                  transition: "all 0.15s",
+                }}
+              >
+                <Icon size={12} />
+                {QUALITY_LABELS[q]}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <ForceGraph3D
@@ -364,13 +442,13 @@ export function MemoryGraph3D({ apiBaseUrl = "", searchQuery = "" }: Props) {
         linkColor={linkColor as any}
         linkWidth={(link: any) => Math.max(0.3, (link.weight || 0.5) * 1.5)}
         linkOpacity={0.4}
-        linkDirectionalParticles={2}
-        linkDirectionalParticleWidth={1.2}
+        linkDirectionalParticles={preset.particles}
+        linkDirectionalParticleWidth={preset.particleWidth}
         linkDirectionalParticleSpeed={0.005}
-        d3AlphaDecay={0.02}
+        d3AlphaDecay={preset.alphaDecay}
         d3VelocityDecay={0.3}
-        warmupTicks={80}
-        cooldownTicks={100}
+        warmupTicks={preset.warmupTicks}
+        cooldownTicks={preset.cooldownTicks}
         enablePointerInteraction={true}
       />
 

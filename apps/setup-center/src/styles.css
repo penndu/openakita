@@ -3550,8 +3550,8 @@ button.btnApplyRestart:hover {
 }
 
 @keyframes orbitGlow {
-  0%, 100% { box-shadow: 0 0 4px rgba(37, 99, 235, 0.2); }
-  50% { box-shadow: 0 0 14px rgba(37, 99, 235, 0.5); }
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
 }
 
 @keyframes orbitPulseRing {
@@ -4178,10 +4178,53 @@ button.btnApplyRestart:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
+  .sidebar,
+  .agentOrbitTooltip,
+  .chainPanel,
+  [style*="backdrop-filter"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .agentOrbitRunning {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  .agentOrbitPulse {
+    animation: none !important;
+    display: none !important;
+  }
+}
+
+/* ── Global performance mode ──
+   Activated via: document.documentElement.dataset.perfMode = "low"
+   Removes backdrop-filter, heavy animations, and shadows to cut GPU load.
+*/
+[data-perf-mode="low"] *,
+[data-perf-mode="low"] *::before,
+[data-perf-mode="low"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+[data-perf-mode="low"] .agentOrbitRunning,
+[data-perf-mode="low"] .agentOrbitPulse {
+  animation: none !important;
+}
+[data-perf-mode="low"] .dotProcessing::after {
+  animation: none !important;
+}
+[data-perf-mode="low"] .sidebar,
+[data-perf-mode="low"] .chainPanel {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* ── CAPTCHA popup: force above Radix Dialog (z-50, modal pointer-events:none) ── */

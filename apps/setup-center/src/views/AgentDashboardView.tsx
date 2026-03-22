@@ -211,6 +211,8 @@ export function AgentDashboardView({
   const sizeRef = useRef({ w: 800, h: 500 });
   const breathRef = useRef(0);
   const lastPulseRef = useRef<Map<string, number>>(new Map());
+  const pageHiddenRef = useRef(false);
+  const lastFrameTimeRef = useRef(0);
   const dragRef = useRef<{ nodeId: string; offsetX: number; offsetY: number; moved: boolean } | null>(null);
 
   const [topoData, setTopoData] = useState<TopoData | null>(null);
@@ -367,7 +369,7 @@ export function AgentDashboardView({
     const W = sizeRef.current.w;
     const H = sizeRef.current.h;
     if (motesRef.current.length === 0) {
-      for (let i = 0; i < 50; i++) {
+      for (let i = 0; i < 20; i++) {
         motesRef.current.push({
           x: Math.random() * W,
           y: Math.random() * H,
@@ -408,7 +410,27 @@ export function AgentDashboardView({
     darkRef.current = isDark();
     const themeObs = setInterval(() => { darkRef.current = isDark(); }, 2000);
 
+    const onVisChange = () => { pageHiddenRef.current = document.hidden; };
+    document.addEventListener("visibilitychange", onVisChange);
+    pageHiddenRef.current = document.hidden;
+
     const step = () => {
+      if (pageHiddenRef.current) {
+        animRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      const t = now();
+      const hasRunning = Array.from(simNodesRef.current.values()).some(
+        (n) => n.status === "running",
+      );
+      const targetInterval = hasRunning ? 1 / 30 : 1 / 10;
+      if (t - lastFrameTimeRef.current < targetInterval) {
+        animRef.current = requestAnimationFrame(step);
+        return;
+      }
+      lastFrameTimeRef.current = t;
+
       const cvs = canvasRef.current;
       if (!cvs) { animRef.current = requestAnimationFrame(step); return; }
       const ctx = cvs.getContext("2d");
@@ -417,7 +439,6 @@ export function AgentDashboardView({
       const dpr = devicePixelRatio;
       const W = sizeRef.current.w;
       const H = sizeRef.current.h;
-      const t = now();
       const dark = darkRef.current;
       const map = simNodesRef.current;
       const nodes = Array.from(map.values());
@@ -641,18 +662,21 @@ export function AgentDashboardView({
         ctx.fill();
       }
 
-      // constellation lines between nearby motes (batched by alpha bin)
+      // constellation lines between nearby motes (batched by alpha bin, capped)
       ctx.lineWidth = 0.5;
       const moteBins: [number, number, number, number][][] = [[], [], []];
-      for (let i = 0; i < motes.length; i++) {
-        for (let j = i + 1; j < motes.length; j++) {
+      let moteLineCount = 0;
+      const MAX_MOTE_LINES = 30;
+      for (let i = 0; i < motes.length && moteLineCount < MAX_MOTE_LINES; i++) {
+        for (let j = i + 1; j < motes.length && moteLineCount < MAX_MOTE_LINES; j++) {
           const dx = motes[i].x - motes[j].x;
           const dy = motes[i].y - motes[j].y;
           const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < 60) {
-            const a = (1 - d / 60) * 0.06;
+          if (d < 40) {
+            const a = (1 - d / 40) * 0.06;
             const bin = a > 0.04 ? 2 : a > 0.02 ? 1 : 0;
             moteBins[bin].push([motes[i].x, motes[i].y, motes[j].x, motes[j].y]);
+            moteLineCount++;
           }
         }
       }
@@ -1004,6 +1028,7 @@ export function AgentDashboardView({
     return () => {
       cancelAnimationFrame(animRef.current);
       clearInterval(themeObs);
+      document.removeEventListener("visibilitychange", onVisChange);
     };
   }, [visible, multiAgentEnabled]);
 
