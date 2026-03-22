@@ -653,10 +653,13 @@ class WeWorkWsAdapter(ChannelAdapter):
     async def _connection_loop(self) -> None:
         """Main connection loop with exponential back-off reconnect."""
         attempt = 0
+        _consecutive_auth_failures = 0
+        _MAX_AUTH_FAILURES = 3
         while self._running:
             try:
                 await self._connect_and_run()
                 attempt = 0
+                _consecutive_auth_failures = 0
             except asyncio.CancelledError:
                 return
             except Exception as e:
@@ -671,6 +674,16 @@ class WeWorkWsAdapter(ChannelAdapter):
                     "Stopping reconnect to avoid infinite loop."
                 )
                 return
+
+            if getattr(self, "_auth_fatal", False):
+                _consecutive_auth_failures += 1
+                if _consecutive_auth_failures >= _MAX_AUTH_FAILURES:
+                    logger.error(
+                        f"Fatal auth error persisted after {_consecutive_auth_failures} "
+                        f"attempts (last: {getattr(self, '_auth_error', '?')}). "
+                        "Stopping reconnect — check bot_id/secret configuration."
+                    )
+                    return
 
             # check max reconnect
             max_att = self.config.max_reconnect_attempts
@@ -692,6 +705,8 @@ class WeWorkWsAdapter(ChannelAdapter):
         """Single connection lifetime: connect → auth → heartbeat + receive."""
         self._authenticated.clear()
         self._missed_pong = 0
+        self._auth_error: str | None = None
+        self._auth_fatal: bool = False
         self._reject_all_pending("reconnecting")
 
         async with websockets.connect(
@@ -715,7 +730,9 @@ class WeWorkWsAdapter(ChannelAdapter):
                 receive_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await receive_task
-                return
+                raise ConnectionError(
+                    self._auth_error or "Authentication timeout"
+                )
 
             logger.info("WebSocket authenticated successfully")
 
@@ -834,7 +851,11 @@ class WeWorkWsAdapter(ChannelAdapter):
                     self._authenticated.set()
                 else:
                     errmsg = frame.get("errmsg", "unknown")
+                    self._auth_error = f"{errcode} {errmsg}"
                     logger.error(f"Auth failed: {errcode} {errmsg}")
+                    _FATAL_AUTH_CODES = {600041, 600042, 600043}
+                    if errcode in _FATAL_AUTH_CODES:
+                        self._auth_fatal = True
                 return
 
             # heartbeat response

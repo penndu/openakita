@@ -89,9 +89,9 @@ CONFIG_CACHE_MAX_RETRY_S = 3600.0
 DEDUP_TTL_S = 600  # 10 min
 DEDUP_MAX_SIZE = 500
 
-SEND_MIN_INTERVAL_S = 1.5
-SEND_RATE_LIMIT_RETRIES = 3
-SEND_RATE_LIMIT_BASE_DELAY_S = 3.0
+SEND_MIN_INTERVAL_S = 2.5
+SEND_RATE_LIMIT_RETRIES = 4
+SEND_RATE_LIMIT_BASE_DELAY_S = 5.0
 
 # MessageItemType
 ITEM_NONE = 0
@@ -962,8 +962,11 @@ class WeChatAdapter(ChannelAdapter):
     # iLink Bot API 不支持通过同一 client_id 更新消息（API 按 client_id 去重），
     # 因此无法实现"单气泡流式更新"。仅使用原生 typing 指示器。
 
+    _TYPING_STALE_THRESHOLD_S = 1800  # 30 min
+
     async def send_typing(self, chat_id: str, thread_id: str | None = None) -> None:
-        if chat_id not in self._typing_start_time:
+        existing = self._typing_start_time.get(chat_id)
+        if existing is None or (time.time() - existing) > self._TYPING_STALE_THRESHOLD_S:
             self._typing_start_time[chat_id] = time.time()
         ticket = await self._get_typing_ticket(chat_id)
         if not ticket:
@@ -982,7 +985,6 @@ class WeChatAdapter(ChannelAdapter):
             logger.debug(f"{self.channel_name}: sendTyping failed (ignored)")
 
     async def clear_typing(self, chat_id: str, thread_id: str | None = None) -> None:
-        self._typing_start_time.pop(chat_id, None)
         ticket = await self._get_typing_ticket(chat_id)
         if not ticket:
             return

@@ -124,6 +124,7 @@ class ReasoningEngine:
         # Checkpoint 管理
         self._checkpoints: list[Checkpoint] = []
         self._tool_failure_counter: dict[str, int] = {}  # tool_name -> consecutive_failures
+        self._consecutive_truncation_count: int = 0  # 连续截断计数（防止截断→回滚死循环）
 
         # 思维链: 暂存最近一次推理的 react_trace，供 agent_handler 读取
         self._last_react_trace: list[dict] = []
@@ -1242,9 +1243,28 @@ class ReasoningEngine:
                         logger.info(f"[ReAct] Iter {iteration+1} — tool_result id={t_id} len={r_len}")
                 react_trace.append(_iter_trace)
 
-                # 检查是否应该回滚
+                # 检测截断错误（PARSE_ERROR_KEY）— 截断导致的失败不应触发回滚，
+                # 因为回滚会丢弃错误反馈，导致 LLM 重复生成同样的超长内容形成死循环
+                _has_truncation = any(
+                    isinstance(tc.get("input"), dict) and PARSE_ERROR_KEY in tc["input"]
+                    for tc in decision.tool_calls
+                )
+                if _has_truncation:
+                    self._consecutive_truncation_count += 1
+                    for tc in decision.tool_calls:
+                        if isinstance(tc.get("input"), dict) and PARSE_ERROR_KEY in tc["input"]:
+                            self._tool_failure_counter.pop(tc.get("name", ""), None)
+                    logger.info(
+                        f"[ReAct] Iter {iteration+1} — Tool args truncated "
+                        f"(count: {self._consecutive_truncation_count}), "
+                        f"skipping rollback to preserve error feedback"
+                    )
+                else:
+                    self._consecutive_truncation_count = 0
+
+                # 检查是否应该回滚 — 截断错误不回滚
                 should_rb, rb_reason = self._should_rollback(tool_results)
-                if should_rb:
+                if should_rb and not _has_truncation:
                     rollback_result = self._rollback(rb_reason)
                     if rollback_result:
                         working_messages, _ = rollback_result
@@ -1263,6 +1283,22 @@ class ReasoningEngine:
                     "role": "user",
                     "content": tool_results,
                 })
+
+                # 连续截断 >= 2 次：注入强制分拆指导，打破死循环
+                if _has_truncation and self._consecutive_truncation_count >= 2:
+                    _split_guidance = (
+                        "⚠️ 你的工具调用参数因内容过长被 API 反复截断（已连续 "
+                        f"{self._consecutive_truncation_count} 次）。你必须立即改变策略：\n"
+                        "1. 将大文件拆分为多次 write_file 调用（每次不超过 2000 行）\n"
+                        "2. 先创建文件框架，再用 edit_file 逐段补充内容\n"
+                        "3. 减少内联 CSS/JS，使用简洁实现\n"
+                        "4. 如果内容确实很长，考虑用 Markdown 替代 HTML"
+                    )
+                    working_messages.append({"role": "user", "content": _split_guidance})
+                    logger.warning(
+                        f"[ReAct] Injected split guidance after "
+                        f"{self._consecutive_truncation_count} consecutive truncations"
+                    )
 
                 # Supervisor: 记录工具调用数据
                 # 使用 decision.tool_calls 和 tool_results 按索引对齐，
@@ -2265,9 +2301,27 @@ class ReasoningEngine:
                     except ValueError:
                         state.status = TaskStatus.OBSERVING
 
-                    # --- Rollback 检查（与 run() 一致） ---
+                    # --- 截断检测（与 run() 一致）---
+                    _has_truncation = any(
+                        isinstance(tc.get("input"), dict) and PARSE_ERROR_KEY in tc["input"]
+                        for tc in decision.tool_calls
+                    )
+                    if _has_truncation:
+                        self._consecutive_truncation_count += 1
+                        for tc in decision.tool_calls:
+                            if isinstance(tc.get("input"), dict) and PARSE_ERROR_KEY in tc["input"]:
+                                self._tool_failure_counter.pop(tc.get("name", ""), None)
+                        logger.info(
+                            f"[ReAct-Stream] Iter {_iteration+1} — Tool args truncated "
+                            f"(count: {self._consecutive_truncation_count}), "
+                            f"skipping rollback"
+                        )
+                    else:
+                        self._consecutive_truncation_count = 0
+
+                    # --- Rollback 检查（与 run() 一致）— 截断错误不回滚 ---
                     should_rb, rb_reason = self._should_rollback(tool_results_for_msg)
-                    if should_rb:
+                    if should_rb and not _has_truncation:
                         rollback_result = self._rollback(rb_reason)
                         if rollback_result:
                             working_messages, _ = rollback_result
@@ -2292,6 +2346,22 @@ class ReasoningEngine:
                         "role": "user",
                         "content": tool_results_for_msg,
                     })
+
+                    # 连续截断 >= 2 次：注入强制分拆指导（与 run() 一致）
+                    if _has_truncation and self._consecutive_truncation_count >= 2:
+                        _split_guidance = (
+                            "⚠️ 你的工具调用参数因内容过长被 API 反复截断（已连续 "
+                            f"{self._consecutive_truncation_count} 次）。你必须立即改变策略：\n"
+                            "1. 将大文件拆分为多次 write_file 调用（每次不超过 2000 行）\n"
+                            "2. 先创建文件框架，再用 edit_file 逐段补充内容\n"
+                            "3. 减少内联 CSS/JS，使用简洁实现\n"
+                            "4. 如果内容确实很长，考虑用 Markdown 替代 HTML"
+                        )
+                        working_messages.append({"role": "user", "content": _split_guidance})
+                        logger.warning(
+                            f"[ReAct-Stream] Injected split guidance after "
+                            f"{self._consecutive_truncation_count} consecutive truncations"
+                        )
 
                     # === 统一处理 skip 反思 + 用户插入消息 ===
                     if state:

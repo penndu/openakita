@@ -3287,13 +3287,13 @@ class MessageGateway:
     # 分片间发送间隔（秒），避免触发平台限流
     _SPLIT_SEND_INTERVAL: dict[str, float] = {
         "telegram": 0.5,
-        "wechat":   1.5,
+        "wechat":   2.5,
     }
     _DEFAULT_SPLIT_INTERVAL = 0.15
 
     # 进度消息节流间隔（秒）— 不支持卡片更新的平台需要更高的节流间隔
     _CHANNEL_PROGRESS_THROTTLE: dict[str, float] = {
-        "wechat": 8.0,
+        "wechat": 12.0,
     }
 
     @staticmethod
