@@ -1024,12 +1024,7 @@ class OrgRuntime:
         if not node or node.status in (NodeStatus.FROZEN, NodeStatus.OFFLINE):
             return
 
-        active_key = f"{org_id}:{node_id}"
-        running = self._running_tasks.get(org_id, {})
-        active_count = sum(
-            1 for k, t in running.items()
-            if k.startswith(f"{node_id}:") and not t.done()
-        )
+        active_count = self._node_active_count(org_id, node_id)
 
         messenger = self.get_messenger(org_id)
         pending = messenger.get_pending_count(node_id) if messenger else 0
@@ -1445,29 +1440,63 @@ class OrgRuntime:
     # Task completion hook & idle probe
     # ------------------------------------------------------------------
 
-    async def _drain_node_pending(self, org: Organization, node: OrgNode) -> bool:
-        """Process one pending message from a node's mailbox. Returns True if processed."""
+    def _node_active_count(self, org_id: str, node_id: str) -> int:
+        """Count running (not-done) tasks for a node."""
+        running = self._running_tasks.get(org_id, {})
+        return sum(
+            1 for k, t in running.items()
+            if k.startswith(f"{node_id}:") and not t.done()
+        )
+
+    async def _drain_node_pending(
+        self, org: Organization, node: OrgNode, *, max_msgs: int = 0,
+    ) -> int:
+        """Drain pending messages from a node's mailbox.
+
+        Processes up to *max_msgs* messages (0 = fill all available
+        concurrency slots).  Returns the number of messages dispatched.
+        """
         messenger = self.get_messenger(org.id)
         if not messenger:
-            return False
+            return 0
         mailbox = messenger.get_mailbox(node.id)
         if not mailbox or mailbox.pending_count <= 0:
-            return False
-        msg = await mailbox.get(timeout=0.5)
-        if not msg:
-            return False
-        mailbox.mark_dispatched()
-        logger.info(
-            f"[OrgRuntime] Draining pending message {msg.id} for {node.id} "
-            f"(remaining: {mailbox.pending_count})"
-        )
-        task_prompt = self._format_incoming_message(msg)
-        chain_id = msg.metadata.get("task_chain_id") or None
-        await self._activate_and_run(org, node, task_prompt, chain_id=chain_id)
-        return True
+            return 0
+
+        active = self._node_active_count(org.id, node.id)
+        slots = self.max_concurrent_per_node - active
+        if slots <= 0:
+            return 0
+        if max_msgs > 0:
+            slots = min(slots, max_msgs)
+
+        dispatched = 0
+        for _ in range(slots):
+            if mailbox.pending_count <= 0:
+                break
+            msg = await mailbox.get(timeout=0.5)
+            if not msg:
+                break
+            mailbox.mark_dispatched()
+            logger.info(
+                f"[OrgRuntime] Draining pending message {msg.id} for {node.id} "
+                f"(remaining: {mailbox.pending_count})"
+            )
+            task_prompt = self._format_incoming_message(msg)
+            chain_id = msg.metadata.get("task_chain_id") or None
+            await self._activate_and_run(org, node, task_prompt, chain_id=chain_id)
+            dispatched += 1
+        return dispatched
 
     async def _post_task_hook(self, org: Organization, node: OrgNode) -> None:
-        """After a node finishes, process pending messages or notify parent."""
+        """After a node finishes, process pending messages or notify parent.
+
+        Priority order:
+        1. Drain THIS node's own pending messages (it just freed a slot).
+        2. If parent has pending messages (e.g. deliverables from children),
+           drain those instead of creating a new "completion notification".
+        3. Only when parent has NO pending messages, send the notification.
+        """
         try:
             await asyncio.sleep(2)
             org = self.get_org(org.id)
@@ -1483,15 +1512,18 @@ class OrgRuntime:
             parent = org.get_parent(node.id)
             if not parent:
                 return
-            if parent.status in (NodeStatus.BUSY, NodeStatus.FROZEN, NodeStatus.OFFLINE):
+            if parent.status in (NodeStatus.FROZEN, NodeStatus.OFFLINE):
                 return
 
             messenger = self.get_messenger(org.id)
-            pending = messenger.get_pending_count(parent.id) if messenger else 0
+            parent_pending = messenger.get_pending_count(parent.id) if messenger else 0
 
-            if pending > 0:
+            if parent_pending > 0:
                 if parent.status == NodeStatus.IDLE:
                     await self._drain_node_pending(org, parent)
+                return
+
+            if parent.status == NodeStatus.BUSY:
                 return
 
             role_title = node.role_title or node.id

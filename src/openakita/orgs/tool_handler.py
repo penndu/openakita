@@ -508,7 +508,12 @@ class OrgToolHandler:
             f"委派给 {to_node}: {args['task'][:80]}",
             node_id,
         )
-        return f"任务已分配给 {to_node}（chain: {chain_id[:12]}）: {args['task'][:50]}"
+        return (
+            f"任务已分配给 {to_node}（chain: {chain_id[:12]}）: {args['task'][:50]}\n"
+            f"⚠️ 注意：任务已异步下发，下级尚未完成。"
+            f"请勿立即汇报「已完成」，应使用 org_list_delegated_tasks 跟踪进度，"
+            f"或等待下级通过 org_submit_deliverable 提交结果后再做最终汇报。"
+        )
 
     async def _handle_org_escalate(
         self, args: dict, org_id: str, node_id: str
