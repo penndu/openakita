@@ -64,7 +64,8 @@
         "height": 760,
         "minWidth": 800,
         "minHeight": 600,
-        "resizable": true
+        "resizable": true,
+        "additionalBrowserArgs": "--use-angle=d3d11 --enable-gpu-rasterization --force-gpu-mem-available-mb=512"
       },
       {
         "label": "pet_window",
