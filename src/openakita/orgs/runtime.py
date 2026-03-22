@@ -166,11 +166,17 @@ class OrgRuntime:
                 idle_task.cancel()
         self._idle_tasks.clear()
 
+        for _org_id, watchdog_task in list(self._watchdog_tasks.items()):
+            if watchdog_task and not watchdog_task.done():
+                watchdog_task.cancel()
+        self._watchdog_tasks.clear()
+
         for org_id, tasks in list(self._running_tasks.items()):
             for node_id, task in tasks.items():
                 if not task.done():
                     task.cancel()
             tasks.clear()
+        self._running_tasks.clear()
 
         for key, cached in list(self._agent_cache.items()):
             try:
@@ -192,6 +198,11 @@ class OrgRuntime:
         self._event_stores.clear()
         self._identities.clear()
         self._policies.clear()
+        self._org_semaphores.clear()
+        self._save_locks.clear()
+        self._node_busy_since.clear()
+        self._node_current_chain.clear()
+        self._chain_delegation_depth.clear()
 
         self._started = False
         logger.info("[OrgRuntime] Shutdown complete.")
@@ -265,17 +276,13 @@ class OrgRuntime:
 
         return org
 
-    async def stop_org(self, org_id: str) -> Organization:
-        """Stop an organization."""
-        org = self._active_orgs.get(org_id) or self._manager.get(org_id)
-        if not org:
-            raise ValueError(f"Organization not found: {org_id}")
-
-        self._check_transition(org, OrgStatus.DORMANT)
-
+    async def _stop_org_services(self, org_id: str) -> None:
+        """Stop heartbeat and scheduler for an organization."""
         await self._heartbeat.stop_for_org(org_id)
         await self._scheduler.stop_for_org(org_id)
 
+    async def _cancel_org_tasks(self, org_id: str) -> None:
+        """Cancel all background tasks (idle, watchdog, running) for an organization."""
         idle_task = self._idle_tasks.pop(org_id, None)
         if idle_task and not idle_task.done():
             idle_task.cancel()
@@ -289,14 +296,25 @@ class OrgRuntime:
                 pass
 
         org_tasks = self._running_tasks.pop(org_id, {})
-        for node_id, task in org_tasks.items():
+        for _node_id, task in org_tasks.items():
             if not task.done():
                 task.cancel()
-        for node_id, task in org_tasks.items():
+        for _node_id, task in org_tasks.items():
             try:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+
+    async def stop_org(self, org_id: str) -> Organization:
+        """Stop an organization."""
+        org = self._active_orgs.get(org_id) or self._manager.get(org_id)
+        if not org:
+            raise ValueError(f"Organization not found: {org_id}")
+
+        self._check_transition(org, OrgStatus.DORMANT)
+
+        await self._stop_org_services(org_id)
+        await self._cancel_org_tasks(org_id)
 
         for node in org.nodes:
             if node.status in (NodeStatus.BUSY, NodeStatus.WAITING, NodeStatus.ERROR):
@@ -306,9 +324,10 @@ class OrgRuntime:
         org.updated_at = _now_iso()
         self._manager.update(org_id, {"status": org.status.value})
         await self._save_org(org)
-        await self._deactivate_org(org_id)
 
         self.get_event_store(org_id).emit("org_stopped", "system")
+        await self._deactivate_org(org_id)
+
         await self._broadcast_ws("org:status_change", {
             "org_id": org_id, "status": "dormant"
         })
@@ -366,17 +385,15 @@ class OrgRuntime:
         logger.info(f"[OrgRuntime] Deleted org: {org_id} ({org.name})")
 
     async def reset_org(self, org_id: str) -> Organization:
-        """Reset an organization: stop it, clear all runtime state, and restart fresh."""
+        """Reset an organization: stop runtime, clear all data, prepare for fresh start."""
         org = self._active_orgs.get(org_id) or self._manager.get(org_id)
         if not org:
             raise ValueError(f"Organization not found: {org_id}")
 
-        # 1. Stop if running
-        if org.status in (OrgStatus.ACTIVE, OrgStatus.RUNNING, OrgStatus.PAUSED):
-            try:
-                await self.stop_org(org_id)
-            except Exception:
-                pass
+        # 1. Stop services and cancel tasks (without calling stop_org/_deactivate_org,
+        #    so that in-memory references remain alive for data cleanup below)
+        await self._stop_org_services(org_id)
+        await self._cancel_org_tasks(org_id)
 
         # 2. Reset all node statuses to idle, clear frozen state and current_task
         for node in org.nodes:
@@ -391,29 +408,27 @@ class OrgRuntime:
         for k in keys_to_evict:
             self._agent_cache.pop(k, None)
 
-        # 4. Clear event store
-        es = self._event_stores.pop(org_id, None)
-        if es:
-            es.clear()
-
-        # 5. Clear blackboard
-        bb = self._blackboards.pop(org_id, None)
+        # 4. Clear data stores while references are still alive
+        bb = self._blackboards.get(org_id)
         if bb and hasattr(bb, "clear"):
-            self.get_event_store(org_id).emit(
-                "blackboard_cleared", "system", {"reason": "org_reset"}
-            )
             bb.clear()
 
-        # 6. Clear messenger queues
-        messenger = self._messengers.pop(org_id, None)
+        es = self._event_stores.get(org_id)
+        if es and hasattr(es, "clear"):
+            es.clear()
+
+        messenger = self._messengers.get(org_id)
         if messenger and hasattr(messenger, "clear_all"):
             messenger.clear_all()
 
-        # 7. Clear identity / policies caches
-        self._identities.pop(org_id, None)
-        self._policies.pop(org_id, None)
+        # Emit a single audit event as the first entry in the fresh event store
+        if es:
+            es.emit("org_reset", "system", {"reason": "org_reset"})
 
-        # 8. Save clean state
+        # 5. Tear down all in-memory references
+        await self._deactivate_org(org_id)
+
+        # 6. Save clean state
         org.status = OrgStatus.DORMANT
         org.updated_at = _now_iso()
         self._manager.update(org_id, org.to_dict())
