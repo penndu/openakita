@@ -101,6 +101,7 @@ class MemoryNode:
     session_id: str = ""
     project: str = ""
     goal: str = ""
+    agent_id: str = ""
 
     importance: float = 0.5
     confidence: float = 0.5

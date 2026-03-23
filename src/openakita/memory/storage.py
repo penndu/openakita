@@ -213,6 +213,13 @@ class MemoryStorage:
                 pass  # 列已存在
         c.execute("CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope, scope_owner)")
 
+        # v4: 多 Agent 记忆隔离预留 — agent_id 标识记忆归属
+        try:
+            c.execute("ALTER TABLE memories ADD COLUMN agent_id TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+        c.execute("CREATE INDEX IF NOT EXISTS idx_memories_agent ON memories(agent_id)")
+
         # --- FTS5 full-text index ---
         try:
             c.execute("""
@@ -479,8 +486,8 @@ class MemoryStorage:
                      access_count, tags, created_at, updated_at, expires_at, metadata,
                      subject, predicate, confidence, decay_rate,
                      last_accessed_at, superseded_by, source_episode_id,
-                     scope, scope_owner)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     scope, scope_owner, agent_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         memory.get("id", ""),
@@ -504,6 +511,7 @@ class MemoryStorage:
                         memory.get("source_episode_id"),
                         memory.get("scope", "global"),
                         memory.get("scope_owner", ""),
+                        memory.get("agent_id", ""),
                     ),
                 )
                 self._conn.commit()
@@ -525,8 +533,8 @@ class MemoryStorage:
                      access_count, tags, created_at, updated_at, expires_at, metadata,
                      subject, predicate, confidence, decay_rate,
                      last_accessed_at, superseded_by, source_episode_id,
-                     scope, scope_owner)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     scope, scope_owner, agent_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -551,6 +559,7 @@ class MemoryStorage:
                             m.get("source_episode_id"),
                             m.get("scope", "global"),
                             m.get("scope_owner", ""),
+                            m.get("agent_id", ""),
                         )
                         for m in memories
                     ],

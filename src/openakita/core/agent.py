@@ -412,6 +412,7 @@ class Agent:
             embedding_api_provider=settings.embedding_api_provider,
             embedding_api_key=settings.embedding_api_key,
             embedding_api_model=settings.embedding_api_model,
+            agent_id=self.name,
         )
 
         # 用户档案管理器

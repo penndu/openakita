@@ -91,9 +91,11 @@ class MemoryManager:
         embedding_api_provider: str = "",
         embedding_api_key: str = "",
         embedding_api_model: str = "",
+        agent_id: str = "",
     ):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.agent_id = agent_id
 
         self.memory_md_path = Path(memory_md_path)
         self.brain = brain
@@ -152,6 +154,12 @@ class MemoryManager:
 
         # Load existing memories
         self._load_memories()
+
+    def _stamp_agent_id(self, mem: Memory) -> Memory:
+        """Set agent_id on a memory if not already set."""
+        if self.agent_id and not mem.agent_id:
+            mem.agent_id = self.agent_id
+        return mem
 
     # ==================== Initialization ====================
 
@@ -271,7 +279,7 @@ class MemoryManager:
                 skipped += 1
                 continue
 
-            self.store.save_semantic(mem)
+            self.store.save_semantic(self._stamp_agent_id(mem))
             existing_ids.add(mem.id)
             existing_fingerprints.add(fingerprint)
             migrated += 1
@@ -506,7 +514,7 @@ class MemoryManager:
             tags=[item.get("type", "fact").lower()],
         )
         _apply_retention(mem, item.get("duration"))
-        self.store.save_semantic(mem)
+        self.store.save_semantic(self._stamp_agent_id(mem))
 
         with self._memories_lock:
             self._memories[mem.id] = mem
@@ -711,6 +719,9 @@ class MemoryManager:
                             session_id=session_id,
                         )
                         if result.nodes:
+                            for n in result.nodes:
+                                if self.agent_id and not n.agent_id:
+                                    n.agent_id = self.agent_id
                             self.relational_store.save_nodes_batch(result.nodes)
                         if result.edges:
                             self.relational_store.save_edges_batch(result.edges)
@@ -816,7 +827,7 @@ class MemoryManager:
         """Called before context compression — extract quick facts and save to queue."""
         quick_facts = self.extractor.extract_quick_facts(messages)
         for fact in quick_facts:
-            self.store.save_semantic(fact)
+            self.store.save_semantic(self._stamp_agent_id(fact))
             with self._memories_lock:
                 self._memories[fact.id] = fact
         if quick_facts:
@@ -840,6 +851,9 @@ class MemoryManager:
             try:
                 result = self.relational_encoder.encode_quick(messages, self._current_session_id or "")
                 if result.nodes:
+                    for n in result.nodes:
+                        if self.agent_id and not n.agent_id:
+                            n.agent_id = self.agent_id
                     self.relational_store.save_nodes_batch(result.nodes)
                     self._relational_pending_nodes.extend(result.nodes)
                 if result.edges:
@@ -863,6 +877,9 @@ class MemoryManager:
         try:
             result = self.relational_encoder.backfill_from_summary(summary, pending)
             if result.nodes:
+                for n in result.nodes:
+                    if self.agent_id and not n.agent_id:
+                        n.agent_id = self.agent_id
                 self.relational_store.save_nodes_batch(result.nodes)
             if result.edges:
                 self.relational_store.save_edges_batch(result.edges)
@@ -940,7 +957,7 @@ class MemoryManager:
         )
         if hasattr(memory, "expires_at"):
             sem.expires_at = memory.expires_at
-        self.store.save_semantic(sem, scope=scope, scope_owner=scope_owner)
+        self.store.save_semantic(self._stamp_agent_id(sem), scope=scope, scope_owner=scope_owner)
 
         logger.debug(f"Added memory: {memory.id} - {memory.content}")
         return memory.id

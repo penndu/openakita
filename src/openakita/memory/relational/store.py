@@ -92,11 +92,18 @@ class RelationalMemoryStore:
             );
         """)
 
+        # v2: 多 Agent 记忆隔离预留
+        try:
+            c.execute("ALTER TABLE mdrm_nodes ADD COLUMN agent_id TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+
         for idx_sql in [
             "CREATE INDEX IF NOT EXISTS idx_mdrm_nodes_time ON mdrm_nodes(occurred_at)",
             "CREATE INDEX IF NOT EXISTS idx_mdrm_nodes_type ON mdrm_nodes(node_type)",
             "CREATE INDEX IF NOT EXISTS idx_mdrm_nodes_project ON mdrm_nodes(project)",
             "CREATE INDEX IF NOT EXISTS idx_mdrm_nodes_session ON mdrm_nodes(session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_mdrm_nodes_agent ON mdrm_nodes(agent_id)",
             "CREATE INDEX IF NOT EXISTS idx_mdrm_edges_source ON mdrm_edges(source_id)",
             "CREATE INDEX IF NOT EXISTS idx_mdrm_edges_target ON mdrm_edges(target_id)",
             "CREATE INDEX IF NOT EXISTS idx_mdrm_edges_dim ON mdrm_edges(dimension)",
@@ -278,8 +285,9 @@ class RelationalMemoryStore:
             """INSERT OR REPLACE INTO mdrm_nodes
                (id, content, node_type, occurred_at, valid_from, valid_until,
                 entities, action_verb, action_category, session_id, project, goal,
-                importance, confidence, access_count, embedding, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                importance, confidence, access_count, embedding, created_at, updated_at,
+                agent_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 node.id,
                 node.content,
@@ -299,6 +307,7 @@ class RelationalMemoryStore:
                 node.embedding,
                 node.created_at.isoformat() if node.created_at else now,
                 now,
+                node.agent_id,
             ),
         )
 
@@ -333,8 +342,9 @@ class RelationalMemoryStore:
                 """INSERT OR REPLACE INTO mdrm_nodes
                    (id, content, node_type, occurred_at, valid_from, valid_until,
                     entities, action_verb, action_category, session_id, project, goal,
-                    importance, confidence, access_count, embedding, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    importance, confidence, access_count, embedding, created_at, updated_at,
+                    agent_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     node.id, node.content, node.node_type.value,
                     node.occurred_at.isoformat(),
@@ -346,6 +356,7 @@ class RelationalMemoryStore:
                     node.embedding,
                     node.created_at.isoformat() if node.created_at else now,
                     now,
+                    node.agent_id,
                 ),
             )
             self._conn.execute(
@@ -715,6 +726,7 @@ class RelationalMemoryStore:
             embedding=d.get("embedding"),
             created_at=_parse_dt(d.get("created_at")),
             updated_at=_parse_dt(d.get("updated_at")),
+            agent_id=d.get("agent_id", ""),
         )
 
     def _row_to_edge(self, description: Any, row: tuple) -> MemoryEdge:

@@ -160,6 +160,9 @@ class SemanticMemory:
     scope: str = "global"        # MemoryScope value
     scope_owner: str = ""        # agent_profile_id or session_id
 
+    # v4: 多 Agent 记忆隔离
+    agent_id: str = ""
+
     # v2: retention / TTL
     expires_at: datetime | None = None
 
@@ -186,6 +189,7 @@ class SemanticMemory:
             "source_episode_id": self.source_episode_id,
             "scope": self.scope,
             "scope_owner": self.scope_owner,
+            "agent_id": self.agent_id,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
         }
         return d
@@ -219,6 +223,7 @@ class SemanticMemory:
             source_episode_id=data.get("source_episode_id"),
             scope=data.get("scope", "global"),
             scope_owner=data.get("scope_owner", ""),
+            agent_id=data.get("agent_id", ""),
             expires_at=datetime.fromisoformat(data["expires_at"]) if data.get("expires_at") else None,
         )
 
