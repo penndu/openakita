@@ -530,12 +530,19 @@ class WeWorkBotAdapter(ChannelAdapter):
                 f"{self.config.callback_host}:{self.config.callback_port}"
             )
         except OSError as e:
-            if e.errno == 10048 or "Address already in use" in str(e):
-                logger.error(
-                    f"WeWorkBot: Port {self.config.callback_port} already in use. "
-                    f"Change WEWORK_CALLBACK_PORT in .env"
-                )
-            raise
+            if e.errno in (10048, 98) or "Address already in use" in str(e):
+                raise ConnectionError(
+                    f"企业微信回调端口 {self.config.callback_port} 已被占用，"
+                    f"请修改 WEWORK_CALLBACK_PORT 或释放端口。"
+                ) from e
+            if e.errno in (10013, 13) or "Permission" in str(e):
+                raise ConnectionError(
+                    f"企业微信回调端口 {self.config.callback_port} 绑定失败：权限不足，"
+                    f"请尝试使用大于 1024 的端口。"
+                ) from e
+            raise ConnectionError(
+                f"企业微信回调服务器启动失败: {e}"
+            ) from e
 
     async def _handle_health(
         self, request: "aiohttp.web.Request"
