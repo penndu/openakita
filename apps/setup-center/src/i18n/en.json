@@ -1628,7 +1628,13 @@
     "permTitle": "Plugin Permissions",
     "permDesc": "This plugin requests the following permissions. Basic permissions are auto-granted. Advanced and system permissions require manual authorization. Ungranted permissions won't block the plugin but will limit certain features.",
     "grantAll": "Grant All",
-    "grantAllAndReload": "Grant & Reload"
+    "grantAllAndReload": "Grant & Reload",
+    "openFolder": "Open Plugin Folder",
+    "export": "Export Plugin",
+    "viewLogs": "View Runtime Logs",
+    "logsTitle": "Runtime Logs",
+    "noLogs": "No logs recorded",
+    "logsLoadFail": "Failed to load logs"
   },
   "poster": {
     "title": "Poster Generator",

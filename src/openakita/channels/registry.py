@@ -23,6 +23,14 @@ def register_adapter(bot_type: str, factory: AdapterFactory) -> None:
     ADAPTER_REGISTRY[bot_type] = factory
 
 
+def unregister_adapter(bot_type: str) -> bool:
+    """Remove a registered adapter factory. Returns True if it existed."""
+    removed = ADAPTER_REGISTRY.pop(bot_type, None)
+    if removed is not None:
+        logger.info("Unregistered adapter type '%s'", bot_type)
+    return removed is not None
+
+
 def _cred_bool(val: Any) -> bool | None:
     if val is None:
         return None

@@ -431,6 +431,11 @@ class PluginAPI:
             logger.debug("Plugin '%s' tool cleanup error: %s", self._plugin_id, e)
 
         try:
+            self._cleanup_channels()
+        except Exception as e:
+            logger.debug("Plugin '%s' channel cleanup error: %s", self._plugin_id, e)
+
+        try:
             memory_backends = self._host.get("memory_backends")
             if memory_backends is not None:
                 memory_backends.pop(self._plugin_id, None)
@@ -505,6 +510,22 @@ class PluginAPI:
                     tool_catalog.remove_tool(name)
                 except Exception:
                     pass
+
+
+    def _cleanup_channels(self) -> None:
+        """Remove plugin-registered channel types from the adapter registry."""
+        if not self._registered_channels:
+            return
+        try:
+            from ..channels.registry import unregister_adapter
+        except ImportError:
+            return
+        for type_name in self._registered_channels:
+            try:
+                unregister_adapter(type_name)
+            except Exception:
+                pass
+        self._registered_channels.clear()
 
 
 class PluginBase(ABC):

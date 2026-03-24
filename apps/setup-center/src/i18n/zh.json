@@ -1628,7 +1628,13 @@
     "permTitle": "插件权限",
     "permDesc": "该插件请求以下权限。基础权限已自动授予，高级和系统权限需手动授权。未授权的权限不会阻止插件加载，但相关功能将被限制。",
     "grantAll": "全部授权",
-    "grantAllAndReload": "授权并重新加载"
+    "grantAllAndReload": "授权并重新加载",
+    "openFolder": "打开插件文件夹",
+    "export": "导出插件",
+    "viewLogs": "查看运行日志",
+    "logsTitle": "运行日志",
+    "noLogs": "暂无日志记录",
+    "logsLoadFail": "日志加载失败"
   },
   "poster": {
     "title": "海报生成",

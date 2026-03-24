@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { safeFetch } from "../providers";
-import { IconCode, IconPlug, IconFileText2, IconPackage, IconBook, IconGear, IconShield } from "../icons";
+import { showInFolder, downloadFile } from "../platform";
+import { IconCode, IconPlug, IconFileText2, IconPackage, IconBook, IconGear, IconShield, IconFolderOpen, IconDownload, IconTerminal } from "../icons";
 
 interface PluginInfo {
   id: string;
@@ -22,6 +23,7 @@ interface PluginInfo {
   tags?: string[];
   has_readme?: boolean;
   has_config_schema?: boolean;
+  has_icon?: boolean;
   pending_permissions?: string[];
   granted_permissions?: string[];
 }
@@ -103,6 +105,21 @@ function TypeIcon({ type }: { type: string }) {
   }
 }
 
+function PluginIcon({ plugin, apiBase }: { plugin: PluginInfo; apiBase: string }) {
+  const [imgErr, setImgErr] = useState(false);
+  if (plugin.has_icon && !imgErr) {
+    return (
+      <img
+        src={`${apiBase}/api/plugins/${plugin.id}/icon`}
+        alt=""
+        onError={() => setImgErr(true)}
+        style={{ width: 28, height: 28, borderRadius: 6, objectFit: "cover", flexShrink: 0 }}
+      />
+    );
+  }
+  return <TypeIcon type={plugin.type} />;
+}
+
 interface Props {
   visible: boolean;
   httpApiBase: () => string;
@@ -129,6 +146,9 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
 
   const [permDialog, setPermDialog] = useState<string | null>(null);
   const [granting, setGranting] = useState(false);
+
+  const [logsPanel, setLogsPanel] = useState<string | null>(null);
+  const [logsContent, setLogsContent] = useState("");
 
   const apiBaseRef = useRef(httpApiBase);
   apiBaseRef.current = httpApiBase;
@@ -278,6 +298,56 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
       setError(e.message);
     } finally {
       setGranting(false);
+    }
+  };
+
+  const handleOpenFolder = async (pluginId: string) => {
+    try {
+      const resp = await safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/open-folder`, {
+        method: "POST",
+      });
+      const data = await resp.json();
+      if (data.path) {
+        await showInFolder(data.path);
+      }
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const handleExport = async (pluginId: string) => {
+    try {
+      const url = `${apiBaseRef.current()}/api/plugins/${pluginId}/export`;
+      await downloadFile(url, `${pluginId}.zip`);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const toggleLogs = async (pluginId: string) => {
+    if (logsPanel === pluginId) {
+      setLogsPanel(null);
+      return;
+    }
+    setLogsPanel(pluginId);
+    setLogsContent("");
+    try {
+      const resp = await safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/logs?lines=200`);
+      const data = await resp.json();
+      setLogsContent(data.logs || t("plugins.noLogs"));
+    } catch {
+      setLogsContent(t("plugins.logsLoadFail"));
+    }
+  };
+
+  const refreshLogs = async (pluginId: string) => {
+    setLogsContent("");
+    try {
+      const resp = await safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/logs?lines=200`);
+      const data = await resp.json();
+      setLogsContent(data.logs || t("plugins.noLogs"));
+    } catch {
+      setLogsContent(t("plugins.logsLoadFail"));
     }
   };
 
@@ -433,7 +503,7 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
                 {/* Header row */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-                    <TypeIcon type={p.type} />
+                    <PluginIcon plugin={p} apiBase={apiBaseRef.current()} />
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 14, color: "var(--fg)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         {p.name}
@@ -510,6 +580,40 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
                         <IconGear size={14} />
                       </button>
                     )}
+                    <button
+                      onClick={() => handleOpenFolder(p.id)}
+                      title={t("plugins.openFolder")}
+                      style={{
+                        padding: "4px 8px", borderRadius: 4, display: "inline-flex", alignItems: "center",
+                        border: "1px solid var(--line)", background: "transparent",
+                        color: "var(--muted)", cursor: "pointer",
+                      }}
+                    >
+                      <IconFolderOpen size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleExport(p.id)}
+                      title={t("plugins.export")}
+                      style={{
+                        padding: "4px 8px", borderRadius: 4, display: "inline-flex", alignItems: "center",
+                        border: "1px solid var(--line)", background: "transparent",
+                        color: "var(--muted)", cursor: "pointer",
+                      }}
+                    >
+                      <IconDownload size={14} />
+                    </button>
+                    <button
+                      onClick={() => toggleLogs(p.id)}
+                      title={t("plugins.viewLogs")}
+                      style={{
+                        padding: "4px 8px", borderRadius: 4, display: "inline-flex", alignItems: "center",
+                        border: "1px solid var(--line)",
+                        background: logsPanel === p.id ? "var(--bg-subtle, var(--panel2))" : "transparent",
+                        color: "var(--muted)", cursor: "pointer",
+                      }}
+                    >
+                      <IconTerminal size={14} />
+                    </button>
                     <button
                       onClick={() => handleAction(p.id, p.enabled === false ? "enable" : "disable")}
                       style={{
@@ -767,6 +871,43 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
                         </pre>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Logs panel */}
+                {logsPanel === p.id && (
+                  <div style={{
+                    marginTop: 10, padding: "14px 16px", borderRadius: 6,
+                    background: "var(--bg-subtle, var(--panel2))", border: "1px solid var(--line)",
+                  }}>
+                    <div style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      marginBottom: 8,
+                    }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "var(--fg)", display: "flex", alignItems: "center", gap: 6 }}>
+                        <IconTerminal size={14} style={{ color: "var(--muted)" }} />
+                        {t("plugins.logsTitle")}
+                      </div>
+                      <button
+                        onClick={() => refreshLogs(p.id)}
+                        style={{
+                          padding: "3px 10px", borderRadius: 4,
+                          border: "1px solid var(--line)", background: "transparent",
+                          color: "var(--muted)", cursor: "pointer", fontSize: 11,
+                        }}
+                      >
+                        {t("plugins.refresh")}
+                      </button>
+                    </div>
+                    <pre style={{
+                      margin: 0, padding: 10, borderRadius: 4,
+                      background: "var(--bg, #1a1a2e)", border: "1px solid var(--line)",
+                      fontSize: 11, lineHeight: 1.5, color: "var(--fg)",
+                      maxHeight: 360, overflowY: "auto", whiteSpace: "pre-wrap",
+                      wordBreak: "break-all", fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+                    }}>
+                      {logsContent || t("plugins.loading")}
+                    </pre>
                   </div>
                 )}
               </div>

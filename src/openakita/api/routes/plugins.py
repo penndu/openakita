@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ...config import settings
@@ -72,8 +75,20 @@ def _read_config_schema(plugin_dir: Path) -> dict[str, Any] | None:
         return None
 
 
+_ICON_NAMES = ("icon.png", "icon.svg", "logo.png", "logo.svg", "icon.jpg", "logo.jpg")
+
+
+def _find_icon(plugin_dir: Path) -> str | None:
+    """Return the filename of the first matching icon file, or None."""
+    for name in _ICON_NAMES:
+        if (plugin_dir / name).is_file():
+            return name
+    return None
+
+
 def _manifest_meta(manifest, plugin_dir: Path) -> dict[str, Any]:
     """Common metadata extracted from manifest + files."""
+    icon_file = _find_icon(plugin_dir)
     meta: dict[str, Any] = {
         "id": manifest.id,
         "name": manifest.name,
@@ -88,6 +103,7 @@ def _manifest_meta(manifest, plugin_dir: Path) -> dict[str, Any]:
         "tags": manifest.tags,
         "has_readme": (plugin_dir / "README.md").is_file() or (plugin_dir / "readme.md").is_file(),
         "has_config_schema": (plugin_dir / "config_schema.json").is_file(),
+        "has_icon": icon_file is not None,
     }
     return meta
 
@@ -367,9 +383,64 @@ async def get_plugin_logs(
     request: Request,
     lines: int = 100,
 ) -> dict[str, str]:
-    pm = _require_manager(request)
-    text = pm.get_plugin_logs(plugin_id, lines)
+    pm = _get_plugin_manager(request)
+    if pm is not None:
+        text = pm.get_plugin_logs(plugin_id, lines)
+    else:
+        log_file = _plugins_dir() / plugin_id / "logs" / f"{plugin_id}.log"
+        if log_file.is_file():
+            all_lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            text = "\n".join(all_lines[-lines:])
+        else:
+            text = f"No logs found for plugin '{plugin_id}'"
     return {"logs": text}
+
+
+@router.get("/{plugin_id}/icon")
+async def get_plugin_icon(plugin_id: str) -> Response:
+    """Serve the plugin's icon file (png/svg/jpg)."""
+    plugin_dir = _plugins_dir() / plugin_id
+    if not plugin_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    icon_name = _find_icon(plugin_dir)
+    if icon_name is None:
+        raise HTTPException(status_code=404, detail="No icon file")
+    icon_path = plugin_dir / icon_name
+    data = icon_path.read_bytes()
+    ext = icon_path.suffix.lower()
+    media_map = {".png": "image/png", ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+    return Response(content=data, media_type=media_map.get(ext, "application/octet-stream"))
+
+
+@router.post("/{plugin_id}/open-folder")
+async def open_plugin_folder(plugin_id: str) -> dict[str, str]:
+    """Return the absolute path so frontend can open it via Tauri/OS."""
+    plugin_dir = _plugins_dir() / plugin_id
+    if not plugin_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    return {"path": str(plugin_dir.resolve())}
+
+
+@router.get("/{plugin_id}/export")
+async def export_plugin(plugin_id: str) -> Response:
+    """Export a plugin as a .zip file for sharing."""
+    plugin_dir = _plugins_dir() / plugin_id
+    if not plugin_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Plugin not found")
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for file in sorted(plugin_dir.rglob("*")):
+            if file.is_file():
+                arc_name = f"{plugin_id}/{file.relative_to(plugin_dir)}"
+                zf.write(file, arc_name)
+    buf.seek(0)
+    filename = f"{plugin_id}.zip"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # --- Hub / Marketplace ---

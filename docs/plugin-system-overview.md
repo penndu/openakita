@@ -206,7 +206,26 @@ my-plugin/
   config_schema.json   # 可选 — 声明可配置参数
   config.json          # 运行时生成 — 用户实际配置值
   README.md            # 推荐 — 插件说明文档
+  icon.png             # 可选 — 插件图标（推荐 128×128 PNG）
 ```
+
+### 插件图标规范 (icon)
+
+插件可在根目录放置图标文件，前端会自动加载并在列表中显示。
+
+**支持的文件名**（按优先级排序）：
+1. `icon.png` — 推荐，PNG 格式
+2. `icon.svg` — 矢量格式，任意尺寸
+3. `logo.png` — 备选名称
+4. `logo.svg` — 备选矢量
+5. `icon.jpg` / `logo.jpg` — JPEG 格式
+
+**设计建议**：
+- 推荐尺寸：128×128 像素（PNG）或正方形 SVG
+- 文件大小：建议 < 50KB
+- 背景：建议使用透明背景（PNG/SVG），适配深浅主题
+- 风格：圆角或圆形，简洁扁平，避免过多细节
+- 无图标时：前端自动使用插件类型对应的默认图标
 
 ### config_schema.json 格式
 
@@ -275,3 +294,6 @@ my-plugin/
 | `/api/plugins/{id}/config` | GET | 获取当前配置值 |
 | `/api/plugins/{id}/config` | PUT | 更新配置值 |
 | `/api/plugins/{id}/readme` | GET | 获取 README 文档内容 |
+| `/api/plugins/{id}/icon` | GET | 获取插件图标文件 |
+| `/api/plugins/{id}/open-folder` | POST | 返回插件目录路径（前端调用系统文件管理器打开） |
+| `/api/plugins/{id}/export` | GET | 导出插件为 .zip 压缩包 |
