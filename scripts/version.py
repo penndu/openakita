@@ -301,6 +301,20 @@ def check(expected: str | None) -> int:
         if not gm or gm.group(1) != v:
             mismatches.append("apps/setup-center/android/app/build.gradle")
 
+    # Plugin SDK: version.py 和 pyproject.toml 必须一致（SDK 版本独立于主包）
+    sdk_pyproject = ROOT / "openakita-plugin-sdk" / "pyproject.toml"
+    sdk_version_py = ROOT / "openakita-plugin-sdk" / "src" / "openakita_plugin_sdk" / "version.py"
+    if sdk_pyproject.exists() and sdk_version_py.exists():
+        sdk_pp_text = _read_text(sdk_pyproject)
+        spm = re.search(r'(?ms)^\[project\]\s*\n.*?^version\s*=\s*"([^"]+)"\s*$', sdk_pp_text)
+        sdk_vpy_text = _read_text(sdk_version_py)
+        svm = re.search(r'SDK_VERSION\s*=\s*"([^"]+)"', sdk_vpy_text)
+        if spm and svm and spm.group(1) != svm.group(1):
+            mismatches.append(
+                f"openakita-plugin-sdk 版本不一致: "
+                f"pyproject.toml={spm.group(1)} vs version.py SDK_VERSION={svm.group(1)}"
+            )
+
     if mismatches:
         print(f"ERROR: 版本未统一到 VERSION={v}，不一致文件：", file=sys.stderr)
         for x in mismatches:
