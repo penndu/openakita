@@ -2990,6 +2990,8 @@ export function ChatView({
       const maxAttempts = 40;
       const basePollInterval = 3000;
       let lastContentLen = 0;
+      let staleCount = 0;
+      const maxStale = 5;
 
       const getInterval = () => {
         if (attempts <= 10) return basePollInterval;
@@ -3021,8 +3023,12 @@ export function ChatView({
               return;
             }
             const contentLen = (lastAssistant.content as string).length;
-            const contentGrowing = contentLen > lastContentLen;
-            lastContentLen = contentLen;
+            if (contentLen > lastContentLen) {
+              staleCount = 0;
+              lastContentLen = contentLen;
+            } else {
+              staleCount++;
+            }
             setMessages((prev) => {
               const updated = prev.map((m) => {
                 if (m.id !== _recoverMsgId) return m;
@@ -3040,7 +3046,7 @@ export function ChatView({
               try { saveMessagesToStorage(_recoverKey, updated); } catch { /* quota */ }
               return updated;
             });
-            if (contentGrowing && attempts < maxAttempts) {
+            if (staleCount < maxStale && attempts < maxAttempts) {
               setTimeout(poll, getInterval());
             }
           })
@@ -3638,32 +3644,37 @@ export function ChatView({
               }
             : m
         ));
-        // 兜底对账：若 SSE 流正常完成却未交付任何有效响应，从 session history 回填。
-        // 注意：ask_user / 纯工具执行等结构化响应设计上不产生 text_delta，
-        // 需同时检查所有响应载体，避免将"无文本的正常响应"误判为"流失败"。
-        const streamDeliveredPayload = !!(
-          currentContent.trim() || currentAsk || currentToolCalls.length > 0
-        );
-        if (gracefulDone && !streamDeliveredPayload && convId) {
-          safeFetch(`${apiBase}/api/sessions/${encodeURIComponent(convId)}/history`)
-            .then((r) => r.json())
-            .then((data) => {
-              const rows = Array.isArray(data?.messages) ? data.messages : [];
-              // Prefer assistant replies generated after this user turn; fallback to latest assistant.
-              const candidates = rows.filter((m: { role?: string; content?: string }) => m?.role === "assistant" && typeof m?.content === "string");
-              const newerThanUser = candidates.filter((m: { timestamp?: number }) => typeof m?.timestamp === "number" && m.timestamp >= userMsg.timestamp);
-              const lastAssistant = (newerThanUser.length > 0 ? newerThanUser : candidates).slice(-1)[0];
-              if (!lastAssistant?.content) return;
-              setMessages((prev) => prev.map((m) => {
-                if (m.id !== assistantMsg.id) return m;
-                const patched: ChatMessage = { ...m, content: m.content || lastAssistant.content };
-                if ((!m.thinkingChain || m.thinkingChain.length === 0) && Array.isArray(lastAssistant.chain_summary) && lastAssistant.chain_summary.length > 0) {
-                  patched.thinkingChain = buildChainFromSummary(lastAssistant.chain_summary);
-                }
-                return patched;
-              }));
-            })
-            .catch(() => {});
+
+        if (!gracefulDone && convId) {
+          // SSE 连接被中断（未收到 "done" 事件），后端可能仍在运行，启动持续轮询恢复
+          attemptRecovery(3000);
+        } else if (gracefulDone) {
+          // SSE 正常完成，但若未交付任何有效响应，做一次性回填
+          const streamDeliveredPayload = !!(
+            currentContent.trim() || currentAsk || currentToolCalls.length > 0
+          );
+          if (!streamDeliveredPayload && convId) {
+            safeFetch(`${apiBase}/api/sessions/${encodeURIComponent(convId)}/history`)
+              .then((r) => r.json())
+              .then((data) => {
+                const rows = Array.isArray(data?.messages) ? data.messages : [];
+                const candidates = rows.filter((m: { role?: string; content?: string }) => m?.role === "assistant" && typeof m?.content === "string");
+                const newerThanUser = candidates.filter((m: { timestamp?: number }) => typeof m?.timestamp === "number" && m.timestamp >= userMsg.timestamp);
+                const lastAssistant = (newerThanUser.length > 0 ? newerThanUser : candidates).slice(-1)[0];
+                if (!lastAssistant?.content) return;
+                const backendLen = (lastAssistant.content as string).length;
+                setMessages((prev) => prev.map((m) => {
+                  if (m.id !== assistantMsg.id) return m;
+                  if (m.content && m.content.length >= backendLen) return m;
+                  const patched: ChatMessage = { ...m, content: lastAssistant.content };
+                  if ((!m.thinkingChain || m.thinkingChain.length === 0) && Array.isArray(lastAssistant.chain_summary) && lastAssistant.chain_summary.length > 0) {
+                    patched.thinkingChain = buildChainFromSummary(lastAssistant.chain_summary);
+                  }
+                  return patched;
+                }));
+              })
+              .catch(() => {});
+          }
         }
       }
     } catch (e: unknown) {
