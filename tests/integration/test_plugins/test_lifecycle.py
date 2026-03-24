@@ -142,8 +142,8 @@ async def test_load_all_example_plugins(tmp_path: Path) -> None:
     # or hitting import/compat issues (message-logger, ollama-provider) end up
     # in the failed list — the important thing is they don't crash the manager.
     all_discovered = loaded_ids | failed_ids
-    assert len(all_discovered) == 8, (
-        f"Expected all 8 plugins discovered, got {len(all_discovered)}: {all_discovered}"
+    assert len(all_discovered) == 11, (
+        f"Expected all 11 plugins discovered, got {len(all_discovered)}: {all_discovered}"
     )
     assert pm.loaded_count >= 3, (
         f"Expected at least 3 plugins loaded, got {pm.loaded_count}"
@@ -279,14 +279,10 @@ async def test_permission_boundary(tmp_path: Path) -> None:
     loaded = pm.get_loaded("basic-only")
     assert loaded is not None, "basic-only plugin should be loaded"
 
-    with pytest.raises(PluginPermissionError):
-        loaded.api.get_brain()
-
-    with pytest.raises(PluginPermissionError):
-        loaded.api.get_memory_manager()
-
-    with pytest.raises(PluginPermissionError):
-        loaded.api.get_settings()
+    assert loaded.api.get_brain() is None, "get_brain should return None without permission"
+    assert loaded.api.get_memory_manager() is None, "get_memory_manager should return None"
+    assert loaded.api.get_settings() is None, "get_settings should return None"
+    assert "brain.access" in loaded.api._pending_permissions
 
 
 @pytest.mark.asyncio

@@ -131,8 +131,11 @@ class TestRegisterHook:
         tracker = PluginErrorTracker()
         hr = HookRegistry(error_tracker=tracker)
         api = _make_api(tmp_path, granted=list(BASIC_PERMISSIONS), hook_registry=hr)
-        with pytest.raises(PluginPermissionError):
-            api.register_hook("on_message_received", lambda: None)
+        api.register_hook("on_message_received", lambda: None)
+        assert len(hr.get_hooks("on_message_received")) == 0, (
+            "Hook should be silently skipped when permission not granted"
+        )
+        assert "hooks.message" in api._pending_permissions
 
     def test_message_hook_works_when_granted(self, tmp_path):
         tracker = PluginErrorTracker()
@@ -156,8 +159,11 @@ class TestRegisterHook:
 class TestRegisterChannel:
     def test_requires_channel_register_permission(self, tmp_path):
         api = _make_api(tmp_path, granted=list(BASIC_PERMISSIONS))
-        with pytest.raises(PluginPermissionError):
-            api.register_channel("slack", lambda: None)
+        api.register_channel("slack", lambda: None)
+        assert "slack" not in api._registered_channels, (
+            "Channel should be silently skipped when permission not granted"
+        )
+        assert "channel.register" in api._pending_permissions
 
     def test_works_when_granted(self, tmp_path):
         mock_registry = MagicMock()
@@ -177,8 +183,12 @@ class TestRegisterChannel:
 class TestRegisterLlmProvider:
     def test_requires_llm_register_permission(self, tmp_path):
         api = _make_api(tmp_path, granted=list(BASIC_PERMISSIONS))
-        with pytest.raises(PluginPermissionError):
-            api.register_llm_provider("custom", type)
+        api.register_llm_provider("custom", type)
+        from openakita.plugins import PLUGIN_PROVIDER_MAP
+        assert "custom" not in PLUGIN_PROVIDER_MAP, (
+            "LLM provider should be silently skipped when permission not granted"
+        )
+        assert "llm.register" in api._pending_permissions
 
     def test_works_when_granted(self, tmp_path):
         granted = list(BASIC_PERMISSIONS) + ["llm.register"]
@@ -200,8 +210,9 @@ class TestRegisterLlmProvider:
 class TestGetBrain:
     def test_requires_brain_access(self, tmp_path):
         api = _make_api(tmp_path, granted=list(BASIC_PERMISSIONS))
-        with pytest.raises(PluginPermissionError):
-            api.get_brain()
+        result = api.get_brain()
+        assert result is None, "get_brain should return None when permission not granted"
+        assert "brain.access" in api._pending_permissions
 
     def test_returns_brain_when_granted(self, tmp_path):
         fake_brain = MagicMock()
@@ -221,8 +232,9 @@ class TestPermissionCheck:
 
     def test_advanced_permission_fails_if_not_granted(self, tmp_path):
         api = _make_api(tmp_path, granted=list(BASIC_PERMISSIONS))
-        with pytest.raises(PluginPermissionError):
-            api._check_permission("brain.access")
+        result = api._check_permission("brain.access")
+        assert result is False, "_check_permission should return False when not granted"
+        assert "brain.access" in api._pending_permissions
 
     def test_advanced_permission_passes_when_granted(self, tmp_path):
         api = _make_api(tmp_path, granted=["brain.access"])
