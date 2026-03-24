@@ -190,3 +190,88 @@ Plugin 是 Skill 和 MCP 的**超集**，一个 Plugin 可以同时包含：
 | `channels/registry.py` 中的内置通道 | 继续工作，插件通道与内置通道并存 |
 
 插件系统是**增量添加**，不会破坏任何现有功能。
+
+---
+
+## 七、插件配置规范 (config_schema.json)
+
+每个插件可通过 `config_schema.json` 声明可配置参数。前端 UI 会根据 schema 自动渲染配置表单，用户无需编辑 JSON 文件。
+
+### 文件结构
+
+```
+my-plugin/
+  plugin.json          # 必须
+  plugin.py            # 必须 (type=python)
+  config_schema.json   # 可选 — 声明可配置参数
+  config.json          # 运行时生成 — 用户实际配置值
+  README.md            # 推荐 — 插件说明文档
+```
+
+### config_schema.json 格式
+
+采用 JSON Schema 子集，前端 UI 直接解析渲染：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "vault_path": {
+      "type": "string",
+      "description": "Obsidian Vault 目录路径"
+    },
+    "api_key": {
+      "type": "string",
+      "description": "API 密钥（前端自动隐藏输入）"
+    },
+    "max_results": {
+      "type": "integer",
+      "description": "最大返回结果数",
+      "default": 10
+    },
+    "enabled_features": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "启用的功能列表",
+      "default": ["search", "index"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["fast", "balanced", "thorough"],
+      "description": "搜索模式"
+    },
+    "debug": {
+      "type": "boolean",
+      "description": "是否启用调试日志",
+      "default": false
+    }
+  },
+  "required": ["vault_path"]
+}
+```
+
+### 支持的字段类型
+
+| type | 前端渲染 | 备注 |
+|------|---------|------|
+| `string` | 文本输入框 | 字段名含 key/secret/password 时自动切为密码输入 |
+| `integer` / `number` | 数字输入框 | |
+| `boolean` | 复选框 | |
+| `array` | 逗号分隔文本框 | items.type 建议为 string |
+| `string` + `enum` | 下拉选择 | |
+
+### 前端行为
+
+- **📖 文档按钮**：有 `README.md` 的插件在列表中显示文档按钮，点击展开查看
+- **⚙️ 配置按钮**：有 `config_schema.json` 的插件显示配置按钮，点击展开配置表单
+- `required` 字段在标签后显示红色 `*` 标记
+- 配置修改后点"保存"写入 `config.json`，插件通过 `api.get_config()` 读取
+
+### 后端 API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/plugins/{id}/schema` | GET | 获取 config_schema.json |
+| `/api/plugins/{id}/config` | GET | 获取当前配置值 |
+| `/api/plugins/{id}/config` | PUT | 更新配置值 |
+| `/api/plugins/{id}/readme` | GET | 获取 README 文档内容 |

@@ -1608,7 +1608,18 @@
     "remove": "Remove",
     "failed": "Failed",
     "failedToLoad": "Failed to Load",
-    "notAvailable": "Plugin system requires backend v1.28+. Please upgrade and retry."
+    "notAvailable": "Plugin system requires backend v1.28+. Please upgrade and retry.",
+    "viewDocs": "View Docs",
+    "settings": "Settings",
+    "noReadme": "No documentation available for this plugin.",
+    "readmeLoadFail": "Failed to load documentation",
+    "configLoadFail": "Failed to load config",
+    "configSaved": "Config saved",
+    "configSaveFail": "Failed to save",
+    "saveConfig": "Save",
+    "saving": "Saving...",
+    "noConfigSchema": "This plugin has no config schema (config_schema.json). Current config:",
+    "arrayHint": "Comma-separated values"
   },
   "poster": {
     "title": "Poster Generator",

@@ -51,6 +51,47 @@ class InstallBody(BaseModel):
     source: str = Field(..., min_length=1)
 
 
+def _read_readme(plugin_dir: Path) -> str:
+    for name in ("README.md", "readme.md", "README.txt", "README"):
+        p = plugin_dir / name
+        if p.is_file():
+            try:
+                return p.read_text(encoding="utf-8", errors="ignore")[:8000]
+            except OSError:
+                pass
+    return ""
+
+
+def _read_config_schema(plugin_dir: Path) -> dict[str, Any] | None:
+    p = plugin_dir / "config_schema.json"
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _manifest_meta(manifest, plugin_dir: Path) -> dict[str, Any]:
+    """Common metadata extracted from manifest + files."""
+    meta: dict[str, Any] = {
+        "id": manifest.id,
+        "name": manifest.name,
+        "version": manifest.version,
+        "type": manifest.plugin_type,
+        "category": manifest.category,
+        "description": manifest.description,
+        "author": manifest.author,
+        "homepage": manifest.homepage,
+        "permissions": manifest.permissions,
+        "permission_level": manifest.max_permission_level,
+        "tags": manifest.tags,
+        "has_readme": (plugin_dir / "README.md").is_file() or (plugin_dir / "readme.md").is_file(),
+        "has_config_schema": (plugin_dir / "config_schema.json").is_file(),
+    }
+    return meta
+
+
 def _build_plugin_list(pm, plugins_dir: Path) -> tuple[list[dict[str, Any]], dict[str, str]]:
     state = pm.state if pm is not None else PluginState.load(_plugin_state_path())
     failed: dict[str, str] = dict(pm.list_failed()) if pm else {}
@@ -81,41 +122,21 @@ def _build_plugin_list(pm, plugins_dir: Path) -> tuple[list[dict[str, Any]], dic
         pid = manifest.id
         enabled = state.is_enabled(pid)
         entry = state.get_entry(pid)
+        meta = _manifest_meta(manifest, child)
 
         if pm and pid in loaded_by_id:
-            row = {**loaded_by_id[pid], "status": "loaded", "enabled": enabled}
+            row = {**meta, **loaded_by_id[pid], "status": "loaded", "enabled": enabled}
         elif pid in failed:
-            row = {
-                "id": pid,
-                "name": manifest.name,
-                "version": manifest.version,
-                "type": manifest.plugin_type,
-                "category": manifest.category,
-                "status": "failed",
-                "error": failed[pid],
-                "enabled": enabled,
-            }
+            row = {**meta, "status": "failed", "error": failed[pid], "enabled": enabled}
         elif not enabled:
             row = {
-                "id": pid,
-                "name": manifest.name,
-                "version": manifest.version,
-                "type": manifest.plugin_type,
-                "category": manifest.category,
+                **meta,
                 "status": "disabled",
                 "enabled": False,
                 "disabled_reason": entry.disabled_reason if entry else "",
             }
         else:
-            row = {
-                "id": pid,
-                "name": manifest.name,
-                "version": manifest.version,
-                "type": manifest.plugin_type,
-                "category": manifest.category,
-                "status": "installed",
-                "enabled": True,
-            }
+            row = {**meta, "status": "installed", "enabled": True}
         plugins.append(row)
 
     return plugins, failed
@@ -141,9 +162,14 @@ async def install_plugin(body: InstallBody) -> dict[str, str]:
         if src.startswith(("http://", "https://")):
             plugin_id = await asyncio.to_thread(installer.install_from_url, src, plugins_dir)
         else:
-            plugin_id = await asyncio.to_thread(installer.install_from_path, src, plugins_dir)
+            plugin_id = await asyncio.to_thread(
+                installer.install_from_path, Path(src), plugins_dir
+            )
     except (PluginInstallError, ValueError, OSError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Unexpected error installing plugin from %s", src)
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return {"plugin_id": plugin_id}
 
 
@@ -214,6 +240,26 @@ async def update_plugin_config(
         encoding="utf-8",
     )
     return current
+
+
+@router.get("/{plugin_id}/readme")
+async def get_plugin_readme(plugin_id: str) -> dict[str, str]:
+    plugin_dir = _plugins_dir() / plugin_id
+    if not plugin_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    readme = _read_readme(plugin_dir)
+    return {"readme": readme}
+
+
+@router.get("/{plugin_id}/schema")
+async def get_plugin_config_schema(plugin_id: str) -> dict[str, Any]:
+    plugin_dir = _plugins_dir() / plugin_id
+    if not plugin_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    schema = _read_config_schema(plugin_dir)
+    if schema is None:
+        return {"schema": None}
+    return {"schema": schema}
 
 
 @router.get("/{plugin_id}/logs")

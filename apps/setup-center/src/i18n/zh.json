@@ -1608,7 +1608,18 @@
     "remove": "移除",
     "failed": "加载失败",
     "failedToLoad": "插件加载失败",
-    "notAvailable": "插件系统需要后端 v1.28+ 版本支持，请升级后端后重试。"
+    "notAvailable": "插件系统需要后端 v1.28+ 版本支持，请升级后端后重试。",
+    "viewDocs": "查看文档",
+    "settings": "配置",
+    "noReadme": "该插件没有说明文档。",
+    "readmeLoadFail": "文档加载失败",
+    "configLoadFail": "配置加载失败",
+    "configSaved": "配置已保存",
+    "configSaveFail": "保存失败",
+    "saveConfig": "保存配置",
+    "saving": "保存中...",
+    "noConfigSchema": "该插件没有定义配置结构 (config_schema.json)，当前配置：",
+    "arrayHint": "多个值用逗号分隔"
   },
   "poster": {
     "title": "海报生成",
