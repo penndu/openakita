@@ -104,6 +104,7 @@ def _manifest_meta(manifest, plugin_dir: Path) -> dict[str, Any]:
         "has_readme": (plugin_dir / "README.md").is_file() or (plugin_dir / "readme.md").is_file(),
         "has_config_schema": (plugin_dir / "config_schema.json").is_file(),
         "has_icon": icon_file is not None,
+        "onboard": manifest.raw.get("onboard"),
     }
     return meta
 

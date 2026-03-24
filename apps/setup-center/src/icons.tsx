@@ -654,6 +654,15 @@ export function LogoWechat({ size = 20 }: LogoProps) {
   return <PlatformLogo src={wechatLogoUrl} alt="WeChat" size={size} />;
 }
 
+export function LogoWhatsApp({ size = 20 }: LogoProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2C6.48 2 2 6.48 2 12c0 1.77.46 3.43 1.27 4.88L2 22l5.23-1.24A9.96 9.96 0 0012 22c5.52 0 10-4.48 10-10S17.52 2 12 2z" fill="#25D366"/>
+      <path d="M16.75 14.62c-.23-.12-1.37-.68-1.58-.75-.21-.08-.36-.12-.51.11-.15.23-.6.75-.73.9-.13.16-.27.18-.5.06-1.4-.7-2.33-1.27-3.27-2.83-.25-.4.25-.37.7-1.27.08-.15.04-.28-.02-.4-.06-.11-.51-1.23-.7-1.68-.18-.44-.37-.38-.51-.38h-.43c-.15 0-.4.06-.6.28-.21.23-.8.78-.8 1.9s.82 2.2.93 2.35c.12.16 1.62 2.47 3.93 3.47 1.46.63 2.03.7 2.76.58.44-.07 1.37-.56 1.56-1.1.2-.53.2-.99.14-1.09-.06-.1-.21-.15-.44-.27z" fill="white"/>
+    </svg>
+  );
+}
+
 export const IM_LOGO_MAP: Record<string, (p: { size?: number }) => React.JSX.Element> = {
   telegram: LogoTelegram,
   feishu: LogoFeishu,
@@ -669,6 +678,7 @@ export const IM_LOGO_MAP: Record<string, (p: { size?: number }) => React.JSX.Ele
   slack: LogoSlack,
   line: LogoLine,
   wechat: LogoWechat,
+  whatsapp: LogoWhatsApp,
 };
 
 export function IconBug(p: IconProps = {}) {

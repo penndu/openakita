@@ -956,6 +956,12 @@
     "botTypeOnebot": "OneBot",
     "botTypeQQBot": "QQ",
     "botTypeWechat": "WeChat",
+    "botTypeWhatsApp": "WhatsApp",
+    "waMode": "Mode (cloud_api / web)",
+    "waPhoneId": "Phone Number ID",
+    "waAccessToken": "Access Token",
+    "waVerifyToken": "Webhook Verify Token",
+    "waWebhookPort": "Webhook Port",
     "adapterStartFailed": "Channel {{name}} failed to start"
   },
   "llm": {

@@ -8,8 +8,13 @@
   "type": "python",
   "entry": "plugin.py",
   "permissions": ["memory.write", "memory.replace", "config.read", "config.write", "hooks.basic"],
+  "requires": {
+    "openakita": ">=1.5.0",
+    "plugin_api": "~1",
+    "python": ">=3.11",
+    "pip": ["qdrant-client"]
+  },
   "provides": {"memory_backend": "qdrant"},
   "category": "memory",
-  "tags": ["demo", "memory", "qdrant"],
-  "requires": {"pip": ["qdrant-client"]}
+  "tags": ["demo", "memory", "qdrant"]
 }

@@ -314,3 +314,80 @@ my-plugin/
 | `/api/plugins/{id}/icon` | GET | 获取插件图标文件 |
 | `/api/plugins/{id}/open-folder` | POST | 返回插件目录路径（前端调用系统文件管理器打开） |
 | `/api/plugins/{id}/export` | GET | 导出插件为 .zip 压缩包 |
+
+---
+
+## 版本兼容体系
+
+插件系统使用三层版本来管理兼容性：
+
+| 版本类型 | 当前值 | 说明 |
+|----------|--------|------|
+| System Version | `1.27.3` | OpenAkita 整体发布版本号 |
+| Plugin API Version | `1.0.0` | 插件与宿主的接口契约版本 |
+| SDK Version | `0.1.0` | 开发工具包版本 |
+
+### plugin.json requires 字段
+
+```json
+{
+  "requires": {
+    "openakita": ">=1.27.0",
+    "plugin_api": "~1",
+    "sdk": ">=0.1.0",
+    "python": ">=3.11"
+  }
+}
+```
+
+### 检查规则
+
+| 字段 | 格式 | 不满足时 |
+|------|------|----------|
+| `openakita` | `>=X.Y.Z` | 阻止加载 |
+| `plugin_api` | `~N` (兼容主版本 N) | 主版本不匹配则阻止，次版本不匹配则警告 |
+| `sdk` | `>=X.Y.Z` | 仅警告 |
+| `python` | `>=X.Y` | 阻止加载 |
+
+实现文件：`src/openakita/plugins/compat.py`
+
+---
+
+## 插件 Skill 加载机制
+
+Python 类型的插件可以通过 `provides.skill` 声明附带的 SKILL.md 文件：
+
+```json
+{
+  "type": "python",
+  "provides": {
+    "skill": "SKILL.md"
+  }
+}
+```
+
+加载流程：
+1. `PluginManager._load_single` 在调用 `on_load()` 后检查 `provides.skill`
+2. 如有声明，调用 `skill_loader.load_skill()` 加载
+3. 所有插件加载完成后，自动刷新 `SkillCatalog` 缓存
+
+---
+
+## 插件 Onboard 协议
+
+通道类插件可在 `plugin.json` 中声明交互式 onboarding 流程：
+
+```json
+{
+  "onboard": {
+    "type": "qr",
+    "start_endpoint": "/onboard/start",
+    "poll_endpoint": "/onboard/poll",
+    "description": "扫描 QR 码链接账号"
+  }
+}
+```
+
+支持的 onboard 类型：`qr`（QR 扫码）、`oauth`（OAuth 跳转）、`credentials`（普通表单）
+
+前端 `PluginOnboardModal` 组件会根据 `type` 自动渲染对应 UI（QR 码显示、OAuth 重定向等）。

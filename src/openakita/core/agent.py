@@ -1035,6 +1035,7 @@ class Agent:
             "tool_catalog": self.tool_catalog,
             "gateway": None,
             "skill_loader": getattr(self, "skill_loader", None),
+            "skill_catalog": getattr(self, "skill_catalog", None),
             "mcp_client": getattr(self, "mcp_client", None),
             "memory_backends": memory_backends,
             "search_backends": search_backends,

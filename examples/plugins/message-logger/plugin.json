@@ -8,6 +8,11 @@
   "type": "python",
   "entry": "plugin.py",
   "permissions": ["hooks.message", "data.own", "log"],
+  "requires": {
+    "openakita": ">=1.5.0",
+    "plugin_api": "~1",
+    "python": ">=3.11"
+  },
   "provides": {"hooks": ["on_message_received", "on_message_sending"]},
   "category": "hook",
   "tags": ["demo", "hook", "logging"]

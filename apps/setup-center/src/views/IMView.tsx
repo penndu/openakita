@@ -19,6 +19,7 @@ import { FeishuQRModal } from "../components/FeishuQRModal";
 import { QQBotQRModal } from "../components/QQBotQRModal";
 import { WecomQRModal } from "../components/WecomQRModal";
 import { WechatQRModal } from "../components/WechatQRModal";
+import { PluginOnboardModal } from "../components/PluginOnboardModal";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -100,7 +101,7 @@ type AgentProfile = {
 
 const DEFAULT_API = "http://127.0.0.1:18900";
 
-const BOT_TYPES = ["wechat", "wework", "wework_ws", "qqbot", "feishu", "dingtalk", "telegram", "onebot", "onebot_reverse"] as const;
+const BOT_TYPES = ["wechat", "wework", "wework_ws", "qqbot", "feishu", "dingtalk", "telegram", "onebot", "onebot_reverse", "whatsapp"] as const;
 
 const BOT_TYPE_LABEL_KEYS: Record<string, string> = {
   feishu: "im.botTypeFeishu",
@@ -112,6 +113,7 @@ const BOT_TYPE_LABEL_KEYS: Record<string, string> = {
   onebot_reverse: "im.botTypeOnebotReverse",
   qqbot: "im.botTypeQQBot",
   wechat: "im.botTypeWechat",
+  whatsapp: "im.botTypeWhatsApp",
 };
 
 const WEWORK_TYPES = new Set(["wework", "wework_ws"]);
@@ -158,6 +160,13 @@ const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; secret?: b
   ],
   wechat: [
     { key: "token", label: "Token", secret: true, placeholder: "wechat.tokenHint" },
+  ],
+  whatsapp: [
+    { key: "mode", label: "im.waMode", placeholder: "cloud_api" },
+    { key: "phone_number_id", label: "im.waPhoneId", placeholder: "Phone Number ID" },
+    { key: "access_token", label: "im.waAccessToken", secret: true, placeholder: "Graph API Token" },
+    { key: "verify_token", label: "im.waVerifyToken", placeholder: "openakita-verify" },
+    { key: "webhook_port", label: "im.waWebhookPort", placeholder: "9881" },
   ],
 };
 
@@ -1229,6 +1238,7 @@ export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, ven
   const [showQQBotQR, setShowQQBotQR] = useState(false);
   const [showWecomQR, setShowWecomQR] = useState(false);
   const [showWechatQR, setShowWechatQR] = useState(false);
+  const [showPluginOnboard, setShowPluginOnboard] = useState(false);
   const [tgPairingCode, setTgPairingCode] = useState<string | null>(null);
   const [tgPairingLoading, setTgPairingLoading] = useState(false);
   const [isAutoId, setIsAutoId] = useState(false);
@@ -1699,6 +1709,11 @@ export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, ven
                 <p className="text-[11px] text-muted-foreground leading-relaxed">{t("wechat.hint")}</p>
               </>
             )}
+            {editingBot.type === "whatsapp" && editingBot.credentials.mode === "web" && (
+              <Button variant="outline" className="w-full border-dashed border-primary text-primary" onClick={() => setShowPluginOnboard(true)}>
+                {t("im.waQrScan", { defaultValue: "Scan QR to connect WhatsApp" })}
+              </Button>
+            )}
 
             {/* 7. Credentials */}
             <div className="space-y-2.5">
@@ -1956,6 +1971,24 @@ export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, ven
         />
       )}
 
+      {showPluginOnboard && editingBot?.type === "whatsapp" && (
+        <PluginOnboardModal
+          pluginId="whatsapp-channel"
+          apiBaseUrl={apiBaseUrl}
+          onboard={{
+            type: "qr",
+            start_endpoint: "/onboard/start",
+            poll_endpoint: "/onboard/poll",
+            description: t("im.waQrDescription", { defaultValue: "Scan QR code with WhatsApp to connect" }),
+          }}
+          onClose={() => setShowPluginOnboard(false)}
+          onSuccess={() => {
+            setShowPluginOnboard(false);
+            toast.success(t("im.pluginOnboardSuccess", { defaultValue: "Connected!" }));
+          }}
+        />
+      )}
+
       {/* Bot Creation Wizard */}
       <BotCreationWizard
         open={wizardOpen}
@@ -2007,7 +2040,7 @@ function hasExtra(botType: string): boolean {
 }
 
 function hasQrScan(botType: string): boolean {
-  return ["feishu", "qqbot", "wework_ws", "wechat"].includes(botType);
+  return ["feishu", "qqbot", "wework_ws", "wechat", "whatsapp"].includes(botType);
 }
 
 function getActiveSteps(botType: string): WizardStep[] {

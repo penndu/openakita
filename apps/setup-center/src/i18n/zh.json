@@ -956,6 +956,12 @@
     "botTypeOnebot": "OneBot",
     "botTypeQQBot": "QQ",
     "botTypeWechat": "微信",
+    "botTypeWhatsApp": "WhatsApp",
+    "waMode": "接入模式 (cloud_api / web)",
+    "waPhoneId": "手机号 ID",
+    "waAccessToken": "访问令牌",
+    "waVerifyToken": "Webhook 验证令牌",
+    "waWebhookPort": "Webhook 端口",
     "adapterStartFailed": "通道 {{name}} 启动失败"
   },
   "llm": {

@@ -24,6 +24,8 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+from .version import MIN_OPENAKITA_VERSION, PLUGIN_API_VERSION, SDK_VERSION
+
 PLUGIN_TEMPLATES: dict[str, dict[str, Any]] = {
     "tool": {
         "permissions": ["tools.register"],
@@ -363,6 +365,12 @@ def scaffold_plugin(
         "permissions": template.get("permissions", []),
         "category": template.get("category", ""),
         "tags": [plugin_type, "example"],
+    }
+    manifest["requires"] = {
+        "openakita": f">={MIN_OPENAKITA_VERSION}",
+        "plugin_api": f"~{PLUGIN_API_VERSION.split('.')[0]}",
+        "sdk": f">={SDK_VERSION}",
+        "python": ">=3.11",
     }
     if "provides" in template:
         manifest["provides"] = template["provides"]

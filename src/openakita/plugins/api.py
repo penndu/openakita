@@ -9,6 +9,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .compat import PLUGIN_API_VERSION
 from .manifest import (
     BASIC_PERMISSIONS,
     PluginManifest,

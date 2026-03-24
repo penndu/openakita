@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .api import PluginAPI, PluginBase
+from .compat import check_compatibility
 from .hooks import HookRegistry
 from .manifest import ManifestError, PluginManifest, parse_manifest
 from .sandbox import PluginErrorTracker
@@ -71,27 +72,15 @@ class PluginManager:
 
     @staticmethod
     def _check_openakita_version(manifest: PluginManifest) -> bool:
-        """Check if the plugin's required OpenAkita version is compatible."""
-        required = manifest.requires.get("openakita", "")
-        if not required:
-            return True
-        try:
-            from packaging.version import Version
-
-            from .. import __version__
-
-            current = Version(__version__)
-            if required.startswith(">="):
-                min_ver = Version(required[2:].strip())
-                if current < min_ver:
-                    logger.warning(
-                        "Plugin '%s' requires openakita %s, current is %s, skipping",
-                        manifest.id, required, __version__,
-                    )
-                    return False
-        except Exception:
-            pass
-        return True
+        """Check plugin compatibility (system version, API version, Python, SDK)."""
+        result = check_compatibility(manifest)
+        for w in result.warnings:
+            logger.warning(w)
+        for e in result.errors:
+            logger.error(e)
+        if not result.ok:
+            logger.warning("Plugin '%s' skipped due to compatibility errors", manifest.id)
+        return result.ok
 
     # --- Discovery ---
 
@@ -171,6 +160,7 @@ class PluginManager:
                 self._failed[manifest.id] = msg
                 self._state.record_error(manifest.id, msg)
 
+        self._refresh_skill_catalog()
         self._save_state()
 
     async def _load_single(
@@ -196,6 +186,7 @@ class PluginManager:
             if manifest.plugin_type == "python":
                 plugin_instance = self._load_python_plugin(manifest, plugin_dir)
                 plugin_instance.on_load(api)
+                self._try_load_plugin_skill(manifest, plugin_dir, api)
             elif manifest.plugin_type == "mcp":
                 self._load_mcp_plugin(manifest, plugin_dir, api)
             elif manifest.plugin_type == "skill":
@@ -328,6 +319,49 @@ class PluginManager:
                 f"skill_loader ({type(skill_loader).__name__}) has no load_skill method",
                 "warning",
             )
+
+    def _try_load_plugin_skill(
+        self, manifest: PluginManifest, plugin_dir: Path, api: PluginAPI
+    ) -> None:
+        """Load a skill file bundled with a Python plugin (via provides.skill)."""
+        skill_file = manifest.provides.get("skill", "")
+        if not skill_file:
+            return
+
+        skill_path = plugin_dir / skill_file
+        if not skill_path.exists():
+            api.log(f"Declared skill '{skill_file}' not found in {plugin_dir}", "warning")
+            return
+
+        skill_loader = self._host_refs.get("skill_loader")
+        if skill_loader is None:
+            api.log("No skill_loader available for plugin skill", "warning")
+            return
+
+        try:
+            if hasattr(skill_loader, "load_skill"):
+                skill_loader.load_skill(skill_path.parent)
+            elif hasattr(skill_loader, "load_from_directory"):
+                skill_loader.load_from_directory(skill_path.parent)
+            else:
+                api.log("skill_loader has no load_skill method", "warning")
+                return
+            api.log(f"Plugin skill loaded from {skill_path.parent}")
+            self._skills_loaded = True
+        except Exception as e:
+            api.log(f"Failed to load plugin skill: {e}", "warning")
+
+    def _refresh_skill_catalog(self) -> None:
+        """Invalidate skill catalog cache if any plugin loaded a skill."""
+        if not getattr(self, "_skills_loaded", False):
+            return
+        skill_catalog = self._host_refs.get("skill_catalog")
+        if skill_catalog is not None and hasattr(skill_catalog, "invalidate_cache"):
+            try:
+                skill_catalog.invalidate_cache()
+                logger.debug("Skill catalog cache invalidated after plugin skill load")
+            except Exception as e:
+                logger.warning("Failed to refresh skill catalog: %s", e)
 
     # --- Permissions ---
 

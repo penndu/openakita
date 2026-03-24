@@ -8,6 +8,11 @@
   "type": "mcp",
   "entry": "mcp_config.json",
   "permissions": ["tools.register"],
+  "requires": {
+    "openakita": ">=1.5.0",
+    "plugin_api": "~1",
+    "python": ">=3.11"
+  },
   "provides": {"tools": ["github"]},
   "category": "tool",
   "tags": ["demo", "mcp", "github"]
