@@ -418,8 +418,11 @@ class PluginManager:
         return self._loaded.get(plugin_id)
 
     def list_loaded(self) -> list[dict]:
-        return [
-            {
+        result = []
+        for lp in self._loaded.values():
+            pending = list(lp.api._pending_permissions) if lp.api._pending_permissions else []
+            granted = list(lp.api._granted_permissions)
+            result.append({
                 "id": lp.manifest.id,
                 "name": lp.manifest.name,
                 "version": lp.manifest.version,
@@ -427,9 +430,41 @@ class PluginManager:
                 "category": lp.manifest.category,
                 "permissions": lp.manifest.permissions,
                 "permission_level": lp.manifest.max_permission_level,
-            }
-            for lp in self._loaded.values()
-        ]
+                "granted_permissions": granted,
+                "pending_permissions": pending,
+            })
+        return result
+
+    async def reload_plugin(self, plugin_id: str) -> None:
+        """Unload then re-load a plugin (e.g. after granting new permissions)."""
+        loaded = self._loaded.get(plugin_id)
+        if loaded is not None:
+            plugin_dir = loaded.plugin_dir
+            manifest = loaded.manifest
+            await self.unload_plugin(plugin_id)
+        else:
+            plugin_dir = self._plugins_dir / plugin_id
+            if not (plugin_dir / "plugin.json").exists():
+                logger.warning("Cannot reload '%s': plugin dir not found", plugin_id)
+                return
+            try:
+                manifest = parse_manifest(plugin_dir)
+            except ManifestError as e:
+                logger.error("Cannot reload '%s': %s", plugin_id, e)
+                return
+
+        self._failed.pop(plugin_id, None)
+        try:
+            await asyncio.wait_for(
+                self._load_single(manifest, plugin_dir),
+                timeout=manifest.load_timeout,
+            )
+            logger.info("Plugin '%s' reloaded after permission grant", plugin_id)
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            logger.error("Plugin '%s' reload failed: %s", plugin_id, msg)
+            self._failed[plugin_id] = msg
+        self._save_state()
 
     def list_failed(self) -> dict[str, str]:
         return dict(self._failed)

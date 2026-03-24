@@ -1619,7 +1619,16 @@
     "saveConfig": "Save",
     "saving": "Saving...",
     "noConfigSchema": "This plugin has no config schema (config_schema.json). Current config:",
-    "arrayHint": "Comma-separated values"
+    "arrayHint": "Comma-separated values",
+    "permPendingTitle": "Some plugins need permission grants",
+    "permPendingDesc": "The following plugins are loaded with limited functionality. Grant permissions and reload to enable all features.",
+    "permPending": "Pending",
+    "permGranted": "Granted",
+    "permManage": "Manage Permissions",
+    "permTitle": "Plugin Permissions",
+    "permDesc": "This plugin requests the following permissions. Basic permissions are auto-granted. Advanced and system permissions require manual authorization. Ungranted permissions won't block the plugin but will limit certain features.",
+    "grantAll": "Grant All",
+    "grantAllAndReload": "Grant & Reload"
   },
   "poster": {
     "title": "Poster Generator",

@@ -55,6 +55,7 @@ class PluginAPI:
         self._registered_hooks: list[str] = []
         self._registered_llm_slugs: list[str] = []
         self._registered_search_backends: list[str] = []
+        self._pending_permissions: set[str] = set()
 
         self._logger = logging.getLogger(f"openakita.plugin.{plugin_id}")
         if self._logger.level == logging.NOTSET:
@@ -79,14 +80,31 @@ class PluginAPI:
             )
             self._logger.addHandler(handler)
 
-    def _check_permission(self, required: str) -> None:
+    def _check_permission(self, required: str, *, raise_on_deny: bool = False) -> bool:
+        """Check if the plugin has the required permission.
+
+        Returns True if granted, False if denied.
+        When raise_on_deny=True, raises PluginPermissionError instead of returning False.
+        By default (raise_on_deny=False), denied permissions are logged and skipped,
+        allowing the plugin to load with reduced capabilities.
+        """
         if required in BASIC_PERMISSIONS:
-            return  # basic permissions are always granted
-        if required not in self._granted_permissions:
+            return True
+        if required in self._granted_permissions:
+            return True
+        if raise_on_deny:
             raise PluginPermissionError(
                 f"Plugin '{self._plugin_id}' requires permission '{required}' "
                 f"which was not granted. Add it to plugin.json permissions."
             )
+        self.log(
+            f"Permission '{required}' not granted — skipping this registration. "
+            f"Grant it in plugin settings to enable this feature.",
+            "warning",
+        )
+        if required not in self._pending_permissions:
+            self._pending_permissions.add(required)
+        return False
 
     # --- Logging (basic, always available) ---
 
@@ -102,7 +120,8 @@ class PluginAPI:
     # --- Config / Data (basic) ---
 
     def get_config(self) -> dict:
-        self._check_permission("config.read")
+        if not self._check_permission("config.read"):
+            return {}
         config_path = self._data_dir / "config.json"
         if config_path.exists():
             import json
@@ -111,7 +130,8 @@ class PluginAPI:
         return {}
 
     def set_config(self, updates: dict) -> None:
-        self._check_permission("config.write")
+        if not self._check_permission("config.write"):
+            return
         import json
 
         config = self.get_config()
@@ -121,8 +141,9 @@ class PluginAPI:
             json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
-    def get_data_dir(self) -> Path:
-        self._check_permission("data.own")
+    def get_data_dir(self) -> Path | None:
+        if not self._check_permission("data.own"):
+            return None
         data = self._data_dir / "data"
         data.mkdir(parents=True, exist_ok=True)
         return data
@@ -132,7 +153,8 @@ class PluginAPI:
     def register_tools(
         self, definitions: list[dict], handler: Callable
     ) -> None:
-        self._check_permission("tools.register")
+        if not self._check_permission("tools.register"):
+            return
         tool_registry = self._host.get("tool_registry")
         if tool_registry is None:
             self.log("No tool_registry available, tools not registered", "warning")
@@ -185,13 +207,17 @@ class PluginAPI:
         retrieve_hooks = {"on_retrieve", "on_prompt_build", "on_tool_result"}
 
         if hook_name in basic_hooks:
-            self._check_permission("hooks.basic")
+            if not self._check_permission("hooks.basic"):
+                return
         elif hook_name in message_hooks:
-            self._check_permission("hooks.message")
+            if not self._check_permission("hooks.message"):
+                return
         elif hook_name in retrieve_hooks:
-            self._check_permission("hooks.retrieve")
+            if not self._check_permission("hooks.retrieve"):
+                return
         else:
-            self._check_permission("hooks.all")
+            if not self._check_permission("hooks.all"):
+                return
 
         if self._hook_registry is None:
             self.log("No hook_registry available", "warning")
@@ -207,7 +233,8 @@ class PluginAPI:
     # --- API routes (advanced) ---
 
     def register_api_routes(self, router) -> None:
-        self._check_permission("routes.register")
+        if not self._check_permission("routes.register"):
+            return
         api_server = self._host.get("api_app")
         if api_server is None:
             self.log("No API app available, routes not registered", "warning")
@@ -221,7 +248,8 @@ class PluginAPI:
     # --- Channel registration (advanced) ---
 
     def register_channel(self, type_name: str, factory: Callable) -> None:
-        self._check_permission("channel.register")
+        if not self._check_permission("channel.register"):
+            return
         if not type_name:
             self.log("register_channel: type_name cannot be empty", "error")
             return
@@ -241,9 +269,11 @@ class PluginAPI:
     def register_memory_backend(self, backend: MemoryBackendProtocol) -> None:
         replace_mode = "memory.replace" in self._granted_permissions
         if replace_mode:
-            self._check_permission("memory.replace")
+            if not self._check_permission("memory.replace"):
+                return
         else:
-            self._check_permission("memory.write")
+            if not self._check_permission("memory.write"):
+                return
 
         memory_backends = self._host.get("memory_backends")
         if memory_backends is not None:
@@ -260,7 +290,8 @@ class PluginAPI:
     # --- Search backend (advanced) ---
 
     def register_search_backend(self, name: str, backend) -> None:
-        self._check_permission("search.register")
+        if not self._check_permission("search.register"):
+            return
         search_backends = self._host.get("search_backends")
         if search_backends is not None:
             search_backends[name] = backend
@@ -272,7 +303,8 @@ class PluginAPI:
     # --- LLM provider dual registration (advanced) ---
 
     def register_llm_provider(self, api_type: str, provider_class: type) -> None:
-        self._check_permission("llm.register")
+        if not self._check_permission("llm.register"):
+            return
         if not isinstance(provider_class, type):
             self.log(
                 f"register_llm_provider: expected a class, got {type(provider_class).__name__}",
@@ -286,7 +318,8 @@ class PluginAPI:
         self.log(f"Registered LLM provider for api_type: {api_type}")
 
     def register_llm_registry(self, slug: str, registry) -> None:
-        self._check_permission("llm.register")
+        if not self._check_permission("llm.register"):
+            return
         from . import PLUGIN_REGISTRY_MAP
 
         PLUGIN_REGISTRY_MAP[slug] = registry
@@ -296,7 +329,8 @@ class PluginAPI:
     # --- Retrieval source (advanced) ---
 
     def register_retrieval_source(self, source: RetrievalSource) -> None:
-        self._check_permission("retrieval.register")
+        if not self._check_permission("retrieval.register"):
+            return
         if source is None:
             self.log("register_retrieval_source: source cannot be None", "error")
             return
@@ -315,22 +349,26 @@ class PluginAPI:
     # --- Host access (advanced) ---
 
     def get_brain(self):
-        self._check_permission("brain.access")
+        if not self._check_permission("brain.access"):
+            return None
         return self._host.get("brain")
 
     def get_memory_manager(self):
-        self._check_permission("memory.read")
+        if not self._check_permission("memory.read"):
+            return None
         return self._host.get("memory_manager")
 
     def get_vector_store(self):
-        self._check_permission("vector.access")
+        if not self._check_permission("vector.access"):
+            return None
         mm = self._host.get("memory_manager")
         if mm and hasattr(mm, "vector_store"):
             return mm.vector_store
         return None
 
     def get_settings(self):
-        self._check_permission("settings.read")
+        if not self._check_permission("settings.read"):
+            return None
         try:
             from ..config import settings
 
@@ -339,7 +377,8 @@ class PluginAPI:
             return None
 
     def send_message(self, channel: str, chat_id: str, text: str) -> None:
-        self._check_permission("channel.send")
+        if not self._check_permission("channel.send"):
+            return
         gateway = self._host.get("gateway")
         if gateway is None:
             self.log("No gateway available for send_message", "warning")

@@ -124,19 +124,50 @@ def _build_plugin_list(pm, plugins_dir: Path) -> tuple[list[dict[str, Any]], dic
         entry = state.get_entry(pid)
         meta = _manifest_meta(manifest, child)
 
+        from ...plugins.manifest import BASIC_PERMISSIONS as _BASIC_PERMS
+
+        granted_perms = entry.granted_permissions if entry else []
+        granted_set = set(granted_perms) | _BASIC_PERMS
+        all_requested = manifest.permissions
+        pending_perms = [p for p in all_requested if p not in granted_set]
+
         if pm and pid in loaded_by_id:
-            row = {**meta, **loaded_by_id[pid], "status": "loaded", "enabled": enabled}
+            loaded_info = loaded_by_id[pid]
+            pending_perms = loaded_info.get("pending_permissions", pending_perms)
+            granted_perms = loaded_info.get("granted_permissions", granted_perms)
+            row = {
+                **meta, **loaded_info,
+                "status": "loaded",
+                "enabled": enabled,
+                "granted_permissions": granted_perms,
+                "pending_permissions": pending_perms,
+            }
         elif pid in failed:
-            row = {**meta, "status": "failed", "error": failed[pid], "enabled": enabled}
+            row = {
+                **meta,
+                "status": "failed",
+                "error": failed[pid],
+                "enabled": enabled,
+                "granted_permissions": granted_perms,
+                "pending_permissions": pending_perms,
+            }
         elif not enabled:
             row = {
                 **meta,
                 "status": "disabled",
                 "enabled": False,
                 "disabled_reason": entry.disabled_reason if entry else "",
+                "granted_permissions": granted_perms,
+                "pending_permissions": pending_perms,
             }
         else:
-            row = {**meta, "status": "installed", "enabled": True}
+            row = {
+                **meta,
+                "status": "installed",
+                "enabled": True,
+                "granted_permissions": granted_perms,
+                "pending_permissions": pending_perms,
+            }
         plugins.append(row)
 
     return plugins, failed
@@ -260,6 +291,74 @@ async def get_plugin_config_schema(plugin_id: str) -> dict[str, Any]:
     if schema is None:
         return {"schema": None}
     return {"schema": schema}
+
+
+class PermissionGrantBody(BaseModel):
+    permissions: list[str] = Field(..., min_length=1)
+    reload: bool = Field(True, description="Reload plugin after granting permissions")
+
+
+@router.post("/{plugin_id}/permissions/grant")
+async def grant_permissions(
+    plugin_id: str, body: PermissionGrantBody, request: Request
+) -> dict[str, Any]:
+    """Grant permissions to a plugin and optionally reload it."""
+    pm = _require_manager(request)
+    pm.approve_permissions(plugin_id, body.permissions)
+    if body.reload:
+        await pm.reload_plugin(plugin_id)
+    return {"ok": True, "granted": body.permissions}
+
+
+@router.get("/{plugin_id}/permissions")
+async def get_plugin_permissions(plugin_id: str, request: Request) -> dict[str, Any]:
+    """Get detailed permission info for a plugin."""
+    plugin_dir = _plugins_dir() / plugin_id
+    if not plugin_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    try:
+        manifest = parse_manifest(plugin_dir)
+    except ManifestError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    from ...plugins.manifest import BASIC_PERMISSIONS, ADVANCED_PERMISSIONS, SYSTEM_PERMISSIONS
+
+    state = _get_plugin_manager(request)
+    if state:
+        entry = state.state.get_entry(plugin_id)
+        granted = entry.granted_permissions if entry else list(BASIC_PERMISSIONS)
+    else:
+        granted = list(BASIC_PERMISSIONS)
+
+    perm_details = []
+    for p in manifest.permissions:
+        if p in BASIC_PERMISSIONS:
+            level = "basic"
+        elif p in ADVANCED_PERMISSIONS:
+            level = "advanced"
+        elif p in SYSTEM_PERMISSIONS:
+            level = "system"
+        else:
+            level = "unknown"
+        perm_details.append({
+            "permission": p,
+            "level": level,
+            "granted": p in granted or p in BASIC_PERMISSIONS,
+        })
+
+    return {
+        "plugin_id": plugin_id,
+        "permission_level": manifest.max_permission_level,
+        "permissions": perm_details,
+    }
+
+
+@router.post("/{plugin_id}/reload")
+async def reload_plugin(plugin_id: str, request: Request) -> dict[str, Any]:
+    """Reload a plugin (useful after granting permissions or changing config)."""
+    pm = _require_manager(request)
+    await pm.reload_plugin(plugin_id)
+    return {"ok": True}
 
 
 @router.get("/{plugin_id}/logs")

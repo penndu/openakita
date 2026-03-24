@@ -1619,7 +1619,16 @@
     "saveConfig": "保存配置",
     "saving": "保存中...",
     "noConfigSchema": "该插件没有定义配置结构 (config_schema.json)，当前配置：",
-    "arrayHint": "多个值用逗号分隔"
+    "arrayHint": "多个值用逗号分隔",
+    "permPendingTitle": "部分插件需要授权权限",
+    "permPendingDesc": "以下插件已加载但部分功能因权限未授予而受限。授权后将重新加载插件以启用完整功能。",
+    "permPending": "待授权",
+    "permGranted": "已授权",
+    "permManage": "管理权限",
+    "permTitle": "插件权限",
+    "permDesc": "该插件请求以下权限。基础权限已自动授予，高级和系统权限需手动授权。未授权的权限不会阻止插件加载，但相关功能将被限制。",
+    "grantAll": "全部授权",
+    "grantAllAndReload": "授权并重新加载"
   },
   "poster": {
     "title": "海报生成",

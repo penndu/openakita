@@ -4239,3 +4239,66 @@ body > div[id*="sm-" i] {
   pointer-events: auto !important;
 }
 
+/* Plugin README markdown styling */
+.plugin-readme-content h1,
+.plugin-readme-content h2,
+.plugin-readme-content h3 {
+  margin: 12px 0 6px;
+  color: var(--fg);
+}
+.plugin-readme-content h1 { font-size: 18px; }
+.plugin-readme-content h2 { font-size: 15px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.plugin-readme-content h3 { font-size: 13px; }
+.plugin-readme-content p { margin: 6px 0; }
+.plugin-readme-content ul, .plugin-readme-content ol { padding-left: 20px; margin: 6px 0; }
+.plugin-readme-content li { margin: 2px 0; }
+.plugin-readme-content code {
+  background: var(--bg, rgba(0,0,0,0.05));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+.plugin-readme-content pre {
+  background: var(--bg, rgba(0,0,0,0.05));
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.plugin-readme-content pre code {
+  background: none;
+  padding: 0;
+}
+.plugin-readme-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.plugin-readme-content th,
+.plugin-readme-content td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+}
+.plugin-readme-content th {
+  background: var(--bg, rgba(0,0,0,0.03));
+  font-weight: 600;
+}
+.plugin-readme-content blockquote {
+  border-left: 3px solid var(--primary, #2563eb);
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: var(--muted);
+}
+.plugin-readme-content a {
+  color: var(--primary, #2563eb);
+  text-decoration: none;
+}
+.plugin-readme-content a:hover {
+  text-decoration: underline;
+}
+.plugin-readme-content strong { color: var(--fg); }
+
