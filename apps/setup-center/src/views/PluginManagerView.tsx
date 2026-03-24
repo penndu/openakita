@@ -96,6 +96,24 @@ function levelLabel(level: string, lang: string): string {
   return lang.startsWith("zh") ? entry.zh : entry.en;
 }
 
+const CATEGORY_LABELS: Record<string, { zh: string; en: string }> = {
+  all:       { zh: "全部",       en: "All" },
+  channel:   { zh: "IM 通道",    en: "Channels" },
+  llm:       { zh: "AI 模型",    en: "AI Models" },
+  knowledge: { zh: "知识库",     en: "Knowledge" },
+  tool:      { zh: "工具",       en: "Tools" },
+  memory:    { zh: "记忆",       en: "Memory" },
+  hook:      { zh: "钩子",       en: "Hooks" },
+  skill:     { zh: "技能",       en: "Skills" },
+  mcp:       { zh: "MCP 服务",   en: "MCP Servers" },
+};
+
+function categoryLabel(cat: string, lang: string): string {
+  const entry = CATEGORY_LABELS[cat];
+  if (!entry) return cat;
+  return lang.startsWith("zh") ? entry.zh : entry.en;
+}
+
 function TypeIcon({ type }: { type: string }) {
   const style = { flexShrink: 0, color: "var(--muted)" } as const;
   switch (type) {
@@ -150,6 +168,7 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
 
   const [logsPanel, setLogsPanel] = useState<string | null>(null);
   const [logsContent, setLogsContent] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
 
   const apiBaseRef = useRef(httpApiBase);
   apiBaseRef.current = httpApiBase;
@@ -480,6 +499,37 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
         </div>
       )}
 
+      {/* Category filter */}
+      {!notAvailable && plugins.length > 0 && (() => {
+        const cats = Array.from(new Set(plugins.map((p) => p.category || p.type || "tool")));
+        const tabs = ["all", ...cats.sort()];
+        return (
+          <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+            {tabs.map((cat) => {
+              const active = categoryFilter === cat;
+              const count = cat === "all" ? plugins.length : plugins.filter((p) => (p.category || p.type || "tool") === cat).length;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setCategoryFilter(cat)}
+                  style={{
+                    padding: "4px 12px", borderRadius: 14, fontSize: 12,
+                    border: active ? "1px solid var(--primary, #2563eb)" : "1px solid var(--line)",
+                    background: active ? "var(--primary, #2563eb)" : "transparent",
+                    color: active ? "#fff" : "var(--muted)",
+                    cursor: "pointer", transition: "all 0.15s",
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  {categoryLabel(cat, lang)}
+                  <span style={{ marginLeft: 4, opacity: 0.7 }}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {loading && !notAvailable ? (
         <div style={{ color: "var(--muted)", padding: 40, textAlign: "center" }}>
           {t("plugins.loading")}
@@ -490,7 +540,9 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
         </div>
       ) : !notAvailable ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {plugins.map((p) => {
+          {plugins
+            .filter((p) => categoryFilter === "all" || (p.category || p.type || "tool") === categoryFilter)
+            .map((p) => {
             const hasPending = (p.pending_permissions?.length ?? 0) > 0;
             return (
               <div
@@ -530,7 +582,7 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
                         )}
                       </div>
                       <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>
-                        v{p.version} · {p.category || p.type}
+                        v{p.version} · {categoryLabel(p.category || p.type || "tool", lang)}
                         {p.author ? ` · ${p.author}` : ""}
                       </div>
                     </div>
