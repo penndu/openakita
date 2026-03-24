@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { safeFetch } from "../providers";
 
 interface PluginInfo {
   id: string;
@@ -20,58 +21,6 @@ interface PluginListResponse {
   failed: Record<string, string>;
 }
 
-function httpApiBase(): string {
-  const w = window as any;
-  return w.__API_BASE__ || "http://127.0.0.1:19980";
-}
-
-async function fetchPlugins(): Promise<PluginListResponse> {
-  const resp = await fetch(`${httpApiBase()}/api/plugins/list`, {
-    headers: { Authorization: `Bearer ${(window as any).__API_TOKEN__ || ""}` },
-  });
-  if (!resp.ok) {
-    let detail = "";
-    try {
-      const body = await resp.json();
-      detail = body.detail || "";
-    } catch { /* ignore */ }
-    throw new Error(detail ? `HTTP ${resp.status}: ${detail}` : `HTTP ${resp.status}`);
-  }
-  return resp.json();
-}
-
-async function pluginAction(
-  pluginId: string,
-  action: "enable" | "disable" | "delete",
-): Promise<void> {
-  const method = action === "delete" ? "DELETE" : "POST";
-  const url =
-    action === "delete"
-      ? `${httpApiBase()}/api/plugins/${pluginId}`
-      : `${httpApiBase()}/api/plugins/${pluginId}/${action}`;
-  const resp = await fetch(url, {
-    method,
-    headers: { Authorization: `Bearer ${(window as any).__API_TOKEN__ || ""}` },
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-}
-
-async function installPlugin(source: string): Promise<any> {
-  const resp = await fetch(`${httpApiBase()}/api/plugins/install`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${(window as any).__API_TOKEN__ || ""}`,
-    },
-    body: JSON.stringify({ source }),
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${resp.status}`);
-  }
-  return resp.json();
-}
-
 const LEVEL_COLORS: Record<string, string> = {
   basic: "var(--ok, #22c55e)",
   advanced: "var(--warning, #f59e0b)",
@@ -84,7 +33,12 @@ const TYPE_ICONS: Record<string, string> = {
   skill: "📝",
 };
 
-export default function PluginManagerView({ visible }: { visible: boolean }) {
+interface Props {
+  visible: boolean;
+  httpApiBase: () => string;
+}
+
+export default function PluginManagerView({ visible, httpApiBase }: Props) {
   const { t } = useTranslation();
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [failed, setFailed] = useState<Record<string, string>>({});
@@ -99,7 +53,8 @@ export default function PluginManagerView({ visible }: { visible: boolean }) {
     setError("");
     setNotAvailable(false);
     try {
-      const data = await fetchPlugins();
+      const resp = await safeFetch(`${httpApiBase()}/api/plugins/list`);
+      const data: PluginListResponse = await resp.json();
       setPlugins(data.plugins || []);
       setFailed(data.failed || {});
     } catch (e: any) {
@@ -112,7 +67,7 @@ export default function PluginManagerView({ visible }: { visible: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, httpApiBase]);
 
   useEffect(() => {
     if (visible) refresh();
@@ -120,7 +75,12 @@ export default function PluginManagerView({ visible }: { visible: boolean }) {
 
   const handleAction = async (id: string, action: "enable" | "disable" | "delete") => {
     try {
-      await pluginAction(id, action);
+      const method = action === "delete" ? "DELETE" : "POST";
+      const url =
+        action === "delete"
+          ? `${httpApiBase()}/api/plugins/${id}`
+          : `${httpApiBase()}/api/plugins/${id}/${action}`;
+      await safeFetch(url, { method });
       await refresh();
     } catch (e: any) {
       setError(e.message);
@@ -132,7 +92,11 @@ export default function PluginManagerView({ visible }: { visible: boolean }) {
     setInstalling(true);
     setError("");
     try {
-      await installPlugin(installUrl.trim());
+      await safeFetch(`${httpApiBase()}/api/plugins/install`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: installUrl.trim() }),
+      });
       setInstallUrl("");
       await refresh();
     } catch (e: any) {

@@ -4694,7 +4694,7 @@ export function App() {
       );
     }
     if (view === "plugins") {
-      return <PluginManagerView visible={true} />;
+      return <PluginManagerView visible={true} httpApiBase={httpApiBase} />;
     }
     if (view === "scheduler") {
       return disabledViews.includes("scheduler") ? (
