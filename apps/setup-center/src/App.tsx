@@ -1,6 +1,6 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke, listen, IS_TAURI, IS_WEB, IS_CAPACITOR, IS_LOCAL_WEB, getAppVersion, onWsEvent, reconnectWsNow, logger, relaunchApp } from "./platform";
+import { invoke, listen, IS_TAURI, IS_WEB, IS_CAPACITOR, IS_LOCAL_WEB, getAppVersion, onWsEvent, reconnectWsNow, logger } from "./platform";
 import { getActiveServer, getActiveServerId } from "./platform/servers";
 import { checkAuth, installFetchInterceptor, AUTH_EXPIRED_EVENT, isPasswordUserSet, clearAccessToken, setTauriRemoteMode, isTauriRemoteMode } from "./platform/auth";
 import { LoginView } from "./views/LoginView";
@@ -704,12 +704,12 @@ export function App() {
     const now = Date.now();
     if (now - lastResumeRef.current < 3000) return;
     lastResumeRef.current = now;
-    visibilityGraceRef.current = true;
-    heartbeatFailCount.current = 0;
-    setTimeout(() => { visibilityGraceRef.current = false; }, 10000);
-    reconnectWsNow();
-    window.dispatchEvent(new Event("openakita_app_resumed"));
-    logger.info("App", "Resumed from background");
+        visibilityGraceRef.current = true;
+        heartbeatFailCount.current = 0;
+        setTimeout(() => { visibilityGraceRef.current = false; }, 10000);
+        reconnectWsNow();
+        window.dispatchEvent(new Event("openakita_app_resumed"));
+        logger.info("App", "Resumed from background");
   }, []);
 
   useEffect(() => {
@@ -1616,8 +1616,7 @@ export function App() {
       const wsId = currentWorkspaceId || workspaces[0]?.id;
 
       if (IS_TAURI && wsId && venvDir && dataMode === "local") {
-        // ── Tauri 本地模式：停止后端 → 重启整个应用 ──
-        // 避免在同一进程内 stop+start 导致 tao 窗口事件循环崩溃
+        // ── Tauri 本地模式：进程级重启（杀旧进程 → 启新进程） ──
         try {
           const shutRes = await fetch(`${base}/api/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) });
           if (shutRes.ok) await new Promise((r) => setTimeout(r, 1000));
@@ -1629,9 +1628,20 @@ export function App() {
 
         await waitForServiceDown(base, 15000);
 
-        setRestartOverlay(null);
-        await relaunchApp();
-        return;
+        setRestartOverlay({ phase: "waiting" });
+        try {
+          const ss = await invoke<{ running: boolean; pid: number | null; pidFile: string }>(
+            "openakita_service_start", { venvDir, workspaceId: wsId },
+          );
+          setServiceStatus(ss);
+        } catch (e) {
+          setRestartOverlay({ phase: "fail" });
+          setTimeout(() => {
+            setRestartOverlay(null);
+            notifyError(t("config.restartFail") + ": " + String(e));
+          }, 2500);
+          return;
+        }
       } else {
         // ── Web / Capacitor 模式：进程内重启（唯一可用方式） ──
         try {
@@ -2366,14 +2376,11 @@ export function App() {
     const _busyId = notifyLoading(t("status.stopping"));
     try {
       await doStopService(wsId);
+      // 轮询等待旧服务完全关闭（端口释放），而非固定延时
       await waitForServiceDown("http://127.0.0.1:18900", 15000);
     } catch { /* ignore stop errors */ }
     dismissLoading(_busyId);
-    if (IS_TAURI) {
-      await relaunchApp();
-    } else {
-      await doStartLocalService(wsId);
-    }
+    await doStartLocalService(wsId);
   }
 
   // ── Check for app updates once desktop version is known (respects auto-update toggle) ──
@@ -3743,40 +3750,40 @@ export function App() {
           logTask("等待 HTTP 服务就绪", "done", "已就绪");
         } else {
           log(t("onboarding.progress.startingService"));
-          await invoke("openakita_service_start", { venvDir: effectiveVenv, workspaceId: activeWsId });
-          log(t("onboarding.progress.serviceStarted"));
-          updateTask("service-start", { status: "done" });
-          logTask("启动后端服务", "done");
+        await invoke("openakita_service_start", { venvDir: effectiveVenv, workspaceId: activeWsId });
+        log(t("onboarding.progress.serviceStarted"));
+        updateTask("service-start", { status: "done" });
+        logTask("启动后端服务", "done");
 
-          // ── STEP: http-wait ──
-          updateTask("http-wait", { status: "running" });
-          logTask("等待 HTTP 服务就绪", "running");
-          log("等待 HTTP 服务就绪...");
-          for (let i = 0; i < 20; i++) {
-            await new Promise(r => setTimeout(r, 2000));
-            updateTask("http-wait", { detail: `已等待 ${(i + 1) * 2}s...` });
-            if (i > 0 && obLogPath) {
-              const now = new Date();
-              const ts = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-              invoke("append_onboarding_log", { logPath: obLogPath, line: `[${ts}] [任务] 等待 HTTP 服务就绪: 已等待 ${(i + 1) * 2}s...` }).catch(() => {});
-            }
-            try {
-              const res = await fetch("http://127.0.0.1:18900/api/health", { signal: AbortSignal.timeout(3000) });
-              if (res.ok) {
-                log("✓ HTTP 服务已就绪");
-                setServiceStatus({ running: true, pid: null, pidFile: "" });
-                httpReady = true;
-                updateTask("http-wait", { status: "done", detail: `${(i + 1) * 2}s` });
-                logTask("等待 HTTP 服务就绪", "done", `${(i + 1) * 2}s`);
-                break;
-              }
-            } catch { /* not ready yet */ }
-            if (i % 5 === 4) log(`仍在等待 HTTP 服务启动... (${(i + 1) * 2}s)`);
+        // ── STEP: http-wait ──
+        updateTask("http-wait", { status: "running" });
+        logTask("等待 HTTP 服务就绪", "running");
+        log("等待 HTTP 服务就绪...");
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          updateTask("http-wait", { detail: `已等待 ${(i + 1) * 2}s...` });
+          if (i > 0 && obLogPath) {
+            const now = new Date();
+            const ts = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+            invoke("append_onboarding_log", { logPath: obLogPath, line: `[${ts}] [任务] 等待 HTTP 服务就绪: 已等待 ${(i + 1) * 2}s...` }).catch(() => {});
           }
-          if (!httpReady) {
-            log("⚠ HTTP 服务尚未就绪，可进入主页面后手动刷新");
-            updateTask("http-wait", { status: "error", detail: "超时" });
-            logTask("等待 HTTP 服务就绪", "error", "超时");
+          try {
+            const res = await fetch("http://127.0.0.1:18900/api/health", { signal: AbortSignal.timeout(3000) });
+            if (res.ok) {
+              log("✓ HTTP 服务已就绪");
+              setServiceStatus({ running: true, pid: null, pidFile: "" });
+              httpReady = true;
+              updateTask("http-wait", { status: "done", detail: `${(i + 1) * 2}s` });
+              logTask("等待 HTTP 服务就绪", "done", `${(i + 1) * 2}s`);
+              break;
+            }
+          } catch { /* not ready yet */ }
+          if (i % 5 === 4) log(`仍在等待 HTTP 服务启动... (${(i + 1) * 2}s)`);
+        }
+        if (!httpReady) {
+          log("⚠ HTTP 服务尚未就绪，可进入主页面后手动刷新");
+          updateTask("http-wait", { status: "error", detail: "超时" });
+          logTask("等待 HTTP 服务就绪", "error", "超时");
           }
         }
       } catch (e) {
