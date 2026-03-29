@@ -136,8 +136,8 @@ Path zoning · Confirmation gates · Command interception · File snapshots · S
 ### 📱 IM Scan-to-Bind
 WeChat, Feishu, WeCom — scan a QR code, 30 seconds to bind, use AI directly in your chat app.
 
-### 🔧 89+ Tools — Actually Does Things
-Web search · Desktop automation · File management · Browser automation · Scheduled tasks · MCP extensions …
+### 💾 Dual-Mode Memory — Smarter Over Time
+Fragment memory + MDRM relational graph (causal chains · timelines · entity graph · 3D visualization), auto smart switching.
 
 </td></tr>
 </table>
@@ -161,7 +161,7 @@ Web search · Desktop automation · File management · Browser automation · Sch
 | 🌐 | **30+ LLM Providers** | Anthropic / OpenAI / DeepSeek / Qwen / Kimi / MiniMax / Gemini … smart failover |
 | 💬 | **6 IM Platforms** | Telegram / Feishu / WeCom / DingTalk / QQ / OneBot, voice recognition, smart group chat |
 | 🔗 | **MCP Integration** | Standard MCP client, stdio / HTTP / SSE transports, multi-directory scan, dynamic server management |
-| 💾 | **3-Layer Memory** | Working + Core + Dynamic retrieval, 7 memory types, AI-driven extraction & review |
+| 💾 | **Dual-Mode Memory** | Mode 1 fragments (3 layers + 7 types + multi-path recall) + Mode 2 MDRM relational graph (5 dimensions + multi-hop traversal + 3D visualization), auto smart switching |
 | 🎭 | **8 Personas** | Default / Tech Expert / Boyfriend / Girlfriend / Jarvis / Butler / Business / Family |
 | 🤖 | **Proactive Engine** | Greetings, task follow-ups, idle chat, goodnight — adapts frequency to your feedback |
 | 🧬 | **Self-Evolution** | Daily self-check & repair, failure root cause analysis, auto skill generation |
@@ -516,13 +516,38 @@ When the policy engine classifies a shell command as **HIGH risk**, it automatic
 
 ## Memory System
 
-Not just a "context window" — true long-term memory:
+Not just a "context window" — true long-term memory. Supports **dual modes** with automatic switching:
+
+### Mode 1: Fragment Memory (Classic)
 
 - **Three layers**: Working memory (current task) + Core memory (user profile) + Dynamic retrieval (past experience)
 - **7 memory types**: Fact / Preference / Skill / Error / Rule / Persona trait / Experience
-- **AI-driven extraction**: Automatically distills valuable information after each conversation
 - **Multi-path recall**: Semantic + full-text + temporal + attachment search
 - **Gets smarter over time**: Preferences you mentioned two months ago? Still remembered.
+
+### Mode 2: MDRM Relational Graph Memory (New)
+
+On top of fragment memory, builds **causal chains, timelines, and entity relationship graphs** — letting AI truly understand connections between events:
+
+| Dimension | Description | Example |
+|-----------|-------------|---------|
+| **Temporal** | Event chronology and timelines | "What did I do last week?" → auto-constructs timeline |
+| **Causal** | Cause-and-effect chains | "What caused this bug?" → traces causal chain |
+| **Entity** | Relationships between people/projects/concepts | "Which projects did Alice work on?" → entity graph |
+| **Action** | Dependencies, prerequisites, compositions | "What else is needed to finish X?" → dependency analysis |
+| **Context** | Project/session attribution | "All discussions about this project" → cross-session aggregation |
+
+- **4 node types**: Event / Fact / Decision / Goal
+- **Multi-hop graph traversal**: Starting from seed nodes, expands along relationship edges to find deep connections
+- **3-layer encoding**: Fast rule-based encoding → summary backfill → session-end batch LLM encoding
+- **3D visualization**: Frontend supports 3D visualization of the memory graph
+
+### Smart Mode Switching
+
+Set `memory_mode` to `auto` (default) and the system auto-routes based on query characteristics: causal/timeline/cross-session questions use **Mode 2 graph traversal**, preference/fact queries use **Mode 1 semantic retrieval**.
+
+- **AI-driven extraction**: Automatically distills valuable information after each conversation, dual-track writes to both modes
+- **3D memory graph**: Visualize memory nodes and relationships, intuitively understand AI's memory structure
 
 ---
 
@@ -577,8 +602,9 @@ Org      ─── OrgRuntime(Runtime) · OrgManager(CRUD)
 Plugins  ─── PluginManager(Discovery/Loading) · PluginAPI(Host Interface)
     │        HookRegistry(10 Hooks) · PluginSandbox(Fault Isolation)
     │
-Memory   ─── UnifiedStore(SQLite+Vector) · RetrievalEngine(Multi-path)
-    │        MemoryExtractor · MemoryConsolidator
+Memory   ─── Mode1: UnifiedStore(SQLite+Vector) · RetrievalEngine(Multi-path)
+    │        Mode2: RelationalStore(MDRM Graph) · GraphEngine(Multi-hop)
+    │        MemoryModeRouter(Auto Switch) · MemoryEncoder(3-Layer)
     │
 Tools    ─── Shell · File · Browser · Desktop · Web · MCP · Skills
     │        Plan · Scheduler · Sticker · Persona · Agent Delegation
