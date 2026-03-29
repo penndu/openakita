@@ -1392,7 +1392,18 @@
     "batchExport": "批量导出 ({{count}})",
     "batchExportNone": "请先勾选要导出的 Agent",
     "batchExportDone": "已导出 {{count}} 个 Agent",
-    "selectForBatch": "选择该 Agent 进行批量操作"
+    "selectForBatch": "选择该 Agent 进行批量操作",
+    "isolationTitle": "隔离配置",
+    "identityMode": "独立身份",
+    "memoryMode": "独立记忆",
+    "inheritGlobal": "继承全局记忆",
+    "identityInheritHint": "留空则继承系统默认",
+    "sourceGlobal": "来源: 系统默认",
+    "sourceProfile": "来源: Agent 专属",
+    "saveFile": "保存文件",
+    "identitySaveSuccess": "身份文件已保存",
+    "identitySaveFailed": "身份文件保存失败",
+    "semanticCount": "{{count}} 条语义记忆"
   },
   "dashboard": {
     "title": "Agent 仪表盘",

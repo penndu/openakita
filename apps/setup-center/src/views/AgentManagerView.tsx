@@ -27,6 +27,9 @@ type AgentProfile = {
   category?: string;
   hidden?: boolean;
   user_customized?: boolean;
+  identity_mode?: string;
+  memory_mode?: string;
+  memory_inherit_global?: boolean;
 };
 
 type SkillItem = {
@@ -57,6 +60,9 @@ const EMPTY_PROFILE: AgentProfile = {
   preferred_endpoint: null,
   category: "",
   hidden: false,
+  identity_mode: "shared",
+  memory_mode: "shared",
+  memory_inherit_global: true,
 };
 
 type CategoryInfo = {
@@ -188,10 +194,62 @@ export function AgentManagerView({
   const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  // Isolation UI state
+  const [identityTab, setIdentityTab] = useState<string>("SOUL.md");
+  const [identityContent, setIdentityContent] = useState<string>("");
+  const [identitySource, setIdentitySource] = useState<string>("global");
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [memoryStats, setMemoryStats] = useState<{ exists: boolean; semantic_count: number; db_size_bytes: number } | null>(null);
+
   const showToast = useCallback((text: string, type: "ok" | "err" = "ok") => {
     setToastMsg({ text, type });
     setTimeout(() => setToastMsg(null), 3500);
   }, []);
+
+  const loadIdentityFile = useCallback(async (profileId: string, filename: string) => {
+    if (!profileId) return;
+    setIdentityLoading(true);
+    try {
+      const res = await safeFetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/identity/${filename}`);
+      const data = await res.json();
+      setIdentityContent(data.content || "");
+      setIdentitySource(data.source || "global");
+    } catch {
+      setIdentityContent("");
+      setIdentitySource("global");
+    }
+    setIdentityLoading(false);
+  }, [apiBaseUrl]);
+
+  const saveIdentityFile = useCallback(async (profileId: string, filename: string, content: string) => {
+    try {
+      await safeFetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/identity/${filename}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      showToast(t("agentManager.identitySaveSuccess"), "ok");
+      setIdentitySource("profile");
+    } catch {
+      showToast(t("agentManager.identitySaveFailed"), "err");
+    }
+  }, [apiBaseUrl, showToast, t]);
+
+  const loadMemoryStats = useCallback(async (profileId: string) => {
+    try {
+      const res = await safeFetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/memory/stats`);
+      const data = await res.json();
+      setMemoryStats(data);
+    } catch {
+      setMemoryStats(null);
+    }
+  }, [apiBaseUrl]);
+
+  const initProfileIdentity = useCallback(async (profileId: string) => {
+    try {
+      await safeFetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/identity/init`, { method: "POST" });
+    } catch {}
+  }, [apiBaseUrl]);
 
   const extractErrorMsg = (detail: unknown, fallback: string): string => {
     if (typeof detail === "string") return detail;
@@ -374,6 +432,9 @@ export function AgentManagerView({
     setIsCreating(true);
     setEditorOpen(true);
     setEmojiPickerOpen(false);
+    setIdentityContent("");
+    setIdentitySource("global");
+    setMemoryStats(null);
   };
 
   const openEditEditor = (profile: AgentProfile) => {
@@ -381,6 +442,12 @@ export function AgentManagerView({
     setIsCreating(false);
     setEditorOpen(true);
     setEmojiPickerOpen(false);
+    if (profile.identity_mode === "custom") {
+      loadIdentityFile(profile.id, identityTab);
+    }
+    if (profile.memory_mode === "isolated") {
+      loadMemoryStats(profile.id);
+    }
   };
 
   const closeEditor = () => {
@@ -422,6 +489,9 @@ export function AgentManagerView({
         custom_prompt: editingProfile.custom_prompt,
         preferred_endpoint: editingProfile.preferred_endpoint || null,
         category: editingProfile.category || "",
+        identity_mode: editingProfile.identity_mode || "shared",
+        memory_mode: editingProfile.memory_mode || "shared",
+        memory_inherit_global: editingProfile.memory_inherit_global ?? true,
       };
 
       const url = isCreating
@@ -1206,6 +1276,114 @@ export function AgentManagerView({
                 {editingProfile.custom_prompt.length} / 5000
               </p>
             </div>
+
+            {/* Isolation Config */}
+            {!isCreating && (
+            <div className="space-y-3 rounded-md border p-3">
+              <p className="text-xs font-medium opacity-80">{t("agentManager.isolationTitle")}</p>
+
+              {/* Identity mode toggle */}
+              <div className="flex items-center justify-between">
+                <Label className="text-xs opacity-70">{t("agentManager.identityMode")}</Label>
+                <button
+                  type="button"
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${editingProfile.identity_mode === "custom" ? "bg-primary" : "bg-muted"}`}
+                  onClick={async () => {
+                    const next = editingProfile.identity_mode === "custom" ? "shared" : "custom";
+                    setEditingProfile((p) => ({ ...p, identity_mode: next }));
+                    if (next === "custom") {
+                      await initProfileIdentity(editingProfile.id);
+                      loadIdentityFile(editingProfile.id, identityTab);
+                    }
+                  }}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-background transition-transform ${editingProfile.identity_mode === "custom" ? "translate-x-4" : "translate-x-0.5"}`} />
+                </button>
+              </div>
+
+              {/* Memory mode toggle */}
+              <div className="flex items-center justify-between">
+                <Label className="text-xs opacity-70">{t("agentManager.memoryMode")}</Label>
+                <button
+                  type="button"
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${editingProfile.memory_mode === "isolated" ? "bg-primary" : "bg-muted"}`}
+                  onClick={() => {
+                    const next = editingProfile.memory_mode === "isolated" ? "shared" : "isolated";
+                    setEditingProfile((p) => ({ ...p, memory_mode: next }));
+                    if (next === "isolated") loadMemoryStats(editingProfile.id);
+                  }}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-background transition-transform ${editingProfile.memory_mode === "isolated" ? "translate-x-4" : "translate-x-0.5"}`} />
+                </button>
+              </div>
+
+              {/* Inherit global memory checkbox */}
+              {editingProfile.memory_mode === "isolated" && (
+                <div className="flex items-center gap-2 pl-1">
+                  <input
+                    type="checkbox"
+                    id="inherit-global"
+                    checked={editingProfile.memory_inherit_global ?? true}
+                    onChange={(e) => setEditingProfile((p) => ({ ...p, memory_inherit_global: e.target.checked }))}
+                    className="h-3.5 w-3.5 rounded border"
+                  />
+                  <Label htmlFor="inherit-global" className="text-xs opacity-70">{t("agentManager.inheritGlobal")}</Label>
+                </div>
+              )}
+
+              {/* Identity file editor */}
+              {editingProfile.identity_mode === "custom" && (
+                <div className="space-y-2">
+                  <div className="flex gap-1">
+                    {["SOUL.md", "AGENT.md", "USER.md", "MEMORY.md"].map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        className={`rounded px-2 py-0.5 text-xs transition-colors ${identityTab === f ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"}`}
+                        onClick={() => { setIdentityTab(f); loadIdentityFile(editingProfile.id, f); }}
+                      >
+                        {f.replace(".md", "")}
+                      </button>
+                    ))}
+                  </div>
+                  {identityLoading ? (
+                    <p className="text-xs text-muted-foreground py-4 text-center">{t("common.loading")}</p>
+                  ) : (
+                    <>
+                      <Textarea
+                        value={identityContent}
+                        onChange={(e) => setIdentityContent(e.target.value)}
+                        rows={8}
+                        className="min-h-[120px] resize-y font-mono text-xs leading-relaxed"
+                        placeholder={identitySource === "global" ? t("agentManager.identityInheritHint") : ""}
+                      />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-muted-foreground">
+                          {identitySource === "global" ? t("agentManager.sourceGlobal") : t("agentManager.sourceProfile")}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-xs"
+                          onClick={() => saveIdentityFile(editingProfile.id, identityTab, identityContent)}
+                        >
+                          {t("agentManager.saveFile")}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Memory stats */}
+              {editingProfile.memory_mode === "isolated" && memoryStats && (
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>{t("agentManager.semanticCount", { count: memoryStats.semantic_count })}</span>
+                  <span>{(memoryStats.db_size_bytes / 1024).toFixed(0)} KB</span>
+                </div>
+              )}
+            </div>
+            )}
 
             {/* Actions */}
             <div className="flex gap-2 pt-2">

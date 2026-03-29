@@ -139,6 +139,12 @@ class AgentProfile:
     ephemeral: bool = False
     inherit_from: str | None = None
 
+    # 隔离配置
+    identity_mode: str = "shared"  # "shared" | "custom"
+    memory_mode: str = "shared"  # "shared" | "isolated"
+    memory_inherit_global: bool = True
+    user_profile_content: str = ""
+
     def __post_init__(self):
         self.type = safe_agent_type(self.type)
         self.skills_mode = safe_skills_mode(self.skills_mode)
@@ -268,6 +274,7 @@ class ProfileStore:
         "name", "description", "icon", "color", "skills", "skills_mode",
         "tools", "tools_mode", "mcp_servers", "mcp_mode", "plugins", "plugins_mode",
         "custom_prompt", "category", "fallback_profile_id", "preferred_endpoint",
+        "identity_mode", "memory_mode", "memory_inherit_global",
     })
 
     def update(self, profile_id: str, updates: dict[str, Any]) -> AgentProfile:
@@ -306,8 +313,28 @@ class ProfileStore:
         logger.info(f"ProfileStore updated: {profile_id}")
         return profile
 
+    _RESERVED_DIR_NAMES = frozenset({"profiles"})
+
+    def get_profile_dir(self, profile_id: str) -> Path:
+        """返回 Profile 专属数据目录 data/agents/{profile_id}/
+
+        Raises ValueError if profile_id collides with reserved directory names.
+        """
+        if profile_id in self._RESERVED_DIR_NAMES:
+            raise ValueError(
+                f"Profile ID '{profile_id}' conflicts with a reserved directory name"
+            )
+        return self._base_dir / profile_id
+
+    def ensure_profile_dir(self, profile_id: str) -> Path:
+        """确保 Profile 专属目录存在并初始化必要子目录。"""
+        d = self.get_profile_dir(profile_id)
+        (d / "identity").mkdir(parents=True, exist_ok=True)
+        (d / "memory").mkdir(parents=True, exist_ok=True)
+        return d
+
     def delete(self, profile_id: str) -> bool:
-        """删除 Profile。SYSTEM 类型禁止删除。"""
+        """删除 Profile。SYSTEM 类型禁止删除。同时清理 Profile 专属目录。"""
         with self._lock:
             existing = self._cache.get(profile_id)
             if existing is None:
@@ -320,6 +347,13 @@ class ProfileStore:
             fp = self._profiles_dir / f"{profile_id}.json"
             if fp.exists():
                 fp.unlink()
+
+        import shutil
+        profile_dir = self.get_profile_dir(profile_id)
+        if profile_dir.is_dir():
+            shutil.rmtree(profile_dir, ignore_errors=True)
+            logger.info(f"ProfileStore cleaned profile dir: {profile_dir}")
+
         logger.info(f"ProfileStore deleted: {profile_id}")
         return True
 
