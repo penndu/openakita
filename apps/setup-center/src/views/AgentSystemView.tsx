@@ -127,7 +127,8 @@ export function AgentSystemView(props: AgentSystemViewProps) {
         toast.success(t("config.personaTemplateDownloaded"));
       }
     } catch (e: any) {
-      toast.error(e.message || "Download failed");
+      const msg = e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
+      toast.error(msg || t("config.personaImportError"));
     }
   };
 

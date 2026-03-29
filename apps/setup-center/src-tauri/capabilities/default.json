@@ -33,6 +33,9 @@
     "process:allow-exit",
     "dialog:default",
     "dialog:allow-save",
+    "fs:default",
+    "fs:allow-write-text-file",
+    "fs:allow-read-text-file",
     {
       "identifier": "http:default",
       "allow": [
