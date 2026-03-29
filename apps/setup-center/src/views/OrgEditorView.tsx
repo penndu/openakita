@@ -21,6 +21,7 @@ import {
   type Connection,
   type NodeTypes,
   type EdgeTypes,
+  type ReactFlowInstance,
   type NodeChange,
   type EdgeChange,
   Handle,
@@ -604,14 +605,47 @@ function computeTreeLayout(nodes: Node[], edges: Edge[]): Node[] {
   });
 }
 
+const NODE_COLLISION_W = 200;
+const NODE_COLLISION_H = 80;
+const NEW_NODE_ANCHOR = { x: 250, y: 200 };
+const NEW_NODE_STEP_X = 240;
+const NEW_NODE_STEP_Y = 140;
+
+function isPositionOccupied(nodes: Node[], candidate: { x: number; y: number }): boolean {
+  return nodes.some((n) => {
+    const p = n.position || { x: 0, y: 0 };
+    return Math.abs(p.x - candidate.x) < NODE_COLLISION_W && Math.abs(p.y - candidate.y) < NODE_COLLISION_H;
+  });
+}
+
+function getNextNodePosition(nodes: Node[]): { x: number; y: number } {
+  if (nodes.length === 0) return { ...NEW_NODE_ANCHOR };
+  if (!isPositionOccupied(nodes, NEW_NODE_ANCHOR)) return { ...NEW_NODE_ANCHOR };
+
+  const columns = Math.max(3, Math.ceil(Math.sqrt(nodes.length + 1)));
+  const maxAttempts = (nodes.length + 16) * 2;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const row = Math.floor(i / columns);
+    const col = i % columns;
+    const candidate = {
+      x: NEW_NODE_ANCHOR.x + col * NEW_NODE_STEP_X,
+      y: NEW_NODE_ANCHOR.y + row * NEW_NODE_STEP_Y,
+    };
+    if (!isPositionOccupied(nodes, candidate)) return candidate;
+  }
+
+  const maxX = nodes.reduce((m, n) => Math.max(m, n.position?.x ?? 0), 0);
+  const maxY = nodes.reduce((m, n) => Math.max(m, n.position?.y ?? 0), 0);
+  return { x: maxX + NEW_NODE_STEP_X, y: maxY + NEW_NODE_STEP_Y };
+}
+
 function detectOverlap(nodes: Node[]): boolean {
-  const NODE_W = 200;
-  const NODE_H = 80;
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i].position;
-      const b = nodes[j].position;
-      if (Math.abs(a.x - b.x) < NODE_W && Math.abs(a.y - b.y) < NODE_H) return true;
+      const a = nodes[i].position || { x: 0, y: 0 };
+      const b = nodes[j].position || { x: 0, y: 0 };
+      if (Math.abs(a.x - b.x) < NODE_COLLISION_W && Math.abs(a.y - b.y) < NODE_COLLISION_H) return true;
     }
   }
   return false;
@@ -939,7 +973,15 @@ export function OrgEditorView({
   const [viewMode, setViewMode] = useState<"canvas" | "projects" | "dashboard">("canvas");
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
   const [chatPanelNode, setChatPanelNode] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "node" | "edge" | "pane"; id: string | null } | null>(null);
+  const reactFlowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    type: "node" | "edge" | "pane";
+    id: string | null;
+    flowX?: number;
+    flowY?: number;
+  } | null>(null);
   const [clipboardNode, setClipboardNode] = useState<any>(null);
   useEffect(() => {
     if (!contextMenu) return;
@@ -1493,38 +1535,42 @@ export function OrgEditorView({
 
   const handleAddNode = useCallback(() => {
     if (!currentOrg || !newNodeTitle.trim()) return;
-    const newNode: OrgNodeData = {
-      id: `node_${Date.now().toString(36)}`,
-      role_title: newNodeTitle.trim(),
-      role_goal: "",
-      role_backstory: "",
-      agent_source: "local",
-      agent_profile_id: null,
-      position: { x: 250, y: 200 },
-      level: 0,
-      department: newNodeDept.trim(),
-      custom_prompt: "",
-      identity_dir: null,
-      mcp_servers: [],
-      skills: [],
-      skills_mode: "all",
-      preferred_endpoint: null,
-      max_concurrent_tasks: 1,
-      timeout_s: 300,
-      can_delegate: true,
-      can_escalate: true,
-      can_request_scaling: true,
-      is_clone: false,
-      clone_source: null,
-      external_tools: [],
-      ephemeral: false,
-      frozen_by: null,
-      frozen_reason: null,
-      frozen_at: null,
-      avatar: null,
-      status: "idle",
-    };
-    setNodes((prev) => [...prev, orgNodeToFlowNode(newNode)]);
+    const newId = `node_${Date.now().toString(36)}`;
+    setNodes((prev) => {
+      const newNode: OrgNodeData = {
+        id: newId,
+        role_title: newNodeTitle.trim(),
+        role_goal: "",
+        role_backstory: "",
+        agent_source: "local",
+        agent_profile_id: null,
+        position: getNextNodePosition(prev),
+        level: 0,
+        department: newNodeDept.trim(),
+        custom_prompt: "",
+        identity_dir: null,
+        mcp_servers: [],
+        skills: [],
+        skills_mode: "all",
+        preferred_endpoint: null,
+        max_concurrent_tasks: 1,
+        timeout_s: 300,
+        can_delegate: true,
+        can_escalate: true,
+        can_request_scaling: true,
+        is_clone: false,
+        clone_source: null,
+        external_tools: [],
+        ephemeral: false,
+        frozen_by: null,
+        frozen_reason: null,
+        frozen_at: null,
+        avatar: null,
+        status: "idle",
+      };
+      return [...prev, orgNodeToFlowNode(newNode)];
+    });
+    setSelectedNodeId(newId);
     setNewNodeTitle("");
     setNewNodeDept("");
     setShowNewNodeForm(false);
@@ -1807,9 +1853,12 @@ export function OrgEditorView({
 
   const ctxAddNodeAt = useCallback(() => {
     const newId = `node_${Date.now().toString(36)}`;
-    const maxX = nodes.reduce((m, n) => Math.max(m, n.position?.x ?? 0), 0);
-    const maxY = nodes.reduce((m, n) => Math.max(m, n.position?.y ?? 0), 0);
-    const pos = { x: maxX + 40 + Math.random() * 60, y: maxY + 40 + Math.random() * 60 };
+    const hasPanePosition = contextMenu?.type === "pane"
+      && typeof contextMenu.flowX === "number"
+      && typeof contextMenu.flowY === "number";
+    const pos = hasPanePosition
+      ? { x: contextMenu.flowX!, y: contextMenu.flowY! }
+      : getNextNodePosition(nodes);
     const newNode: OrgNodeData = {
       id: newId, role_title: "新节点", role_goal: "", role_backstory: "",
       agent_source: "local", agent_profile_id: null, position: pos, level: 0,
@@ -1822,7 +1871,7 @@ export function OrgEditorView({
     setNodes((prev) => [...prev, orgNodeToFlowNode(newNode)]);
     setSelectedNodeId(newId);
     setContextMenu(null);
-  }, [nodes, setNodes]);
+  }, [nodes, contextMenu, setNodes]);
 
   // ── Render ──
 
@@ -2193,6 +2242,9 @@ export function OrgEditorView({
           ) : (
           <div style={{ flex: 1, position: "relative" }} onContextMenu={(e) => e.preventDefault()}>
             <ReactFlow
+              onInit={(instance) => {
+                reactFlowRef.current = instance;
+              }}
               nodes={nodes}
               edges={edges.map((e) => {
                 const anim = edgeAnimations[e.id];
@@ -2217,7 +2269,19 @@ export function OrgEditorView({
               onNodeDragStop={onNodeDragStop}
               onNodeContextMenu={(e, node) => { e.preventDefault(); e.stopPropagation(); setSelectedNodeId(node.id); setSelectedEdgeId(null); setContextMenu({ x: e.clientX, y: e.clientY, type: "node", id: node.id }); }}
               onEdgeContextMenu={(e, edge) => { e.preventDefault(); e.stopPropagation(); setSelectedEdgeId(edge.id); setSelectedNodeId(null); setContextMenu({ x: e.clientX, y: e.clientY, type: "edge", id: edge.id }); }}
-              onPaneContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, type: "pane", id: null }); }}
+              onPaneContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const flow = reactFlowRef.current?.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+                setContextMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  type: "pane",
+                  id: null,
+                  flowX: flow?.x,
+                  flowY: flow?.y,
+                });
+              }}
               nodeTypes={nodeTypes}
               connectOnClick
               connectionLineStyle={{ stroke: "var(--primary)", strokeWidth: 2, strokeDasharray: "6 3" }}
