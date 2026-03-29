@@ -381,7 +381,30 @@ class PlanHandler:
                 steps = json.loads(steps)
             except (json.JSONDecodeError, TypeError):
                 return "❌ steps 参数格式错误，需要 JSON 数组"
-        for step in steps:
+        if not isinstance(steps, list):
+            return "❌ steps 参数格式错误，需要 JSON 数组"
+
+        normalized_steps: list[dict] = []
+        for index, raw_step in enumerate(steps):
+            if not isinstance(raw_step, dict):
+                return f"❌ steps[{index}] 格式错误，需要对象"
+
+            step = dict(raw_step)
+
+            # 兼容模型偶发输出：把字符串化数组字段还原为 list
+            for field_name in ("skills", "depends_on"):
+                field_value = step.get(field_name)
+                if isinstance(field_value, str):
+                    try:
+                        field_value = json.loads(field_value)
+                    except (json.JSONDecodeError, TypeError):
+                        return f"❌ steps[{index}].{field_name} 参数格式错误，需要 JSON 数组"
+                    if not isinstance(field_value, list):
+                        return f"❌ steps[{index}].{field_name} 参数格式错误，需要 JSON 数组"
+                    step[field_name] = field_value
+                elif field_value is not None and not isinstance(field_value, list):
+                    return f"❌ steps[{index}].{field_name} 参数格式错误，需要 JSON 数组"
+
             step["status"] = "pending"
             step["result"] = ""
             step["started_at"] = None
@@ -389,6 +412,9 @@ class PlanHandler:
             # skills: 每步必须可追溯到对应 skill（系统工具也有 system skill）
             step.setdefault("skills", [])
             step["skills"] = self._ensure_step_skills(step)
+            normalized_steps.append(step)
+
+        steps = normalized_steps
 
         _new_plan = {
             "id": plan_id,
