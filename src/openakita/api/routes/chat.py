@@ -254,7 +254,7 @@ async def _stream_chat(
             except (UnicodeEncodeError, OSError):
                 pass
         payload = {"type": event_type, **(data or {})}
-        if event_type == "text_delta" and data and "content" in data:
+        if event_type in ("text_delta", "chain_text") and data and "content" in data:
             chunk = data["content"]
             _reply_chars += len(chunk)
             _full_reply += chunk
@@ -520,8 +520,10 @@ async def _stream_chat(
         _save_done = True
         # ask_user 场景：_ask_user_question 已包含 LLM 文本 + 问题（由 reason_stream 拼接），
         # 优先使用它作为保存文本，确保下一轮 LLM 能看到完整的确认问题上下文。
-        if _ask_user_question:
-            parts = [_ask_user_question]
+        if _ask_user_question or _ask_user_questions:
+            parts = []
+            if _ask_user_question:
+                parts.append(_ask_user_question)
             if _ask_user_questions:
                 for q in _ask_user_questions:
                     q_prompt = q.get("prompt", "")
@@ -535,7 +537,8 @@ async def _stream_chat(
                 parts.append("\n选项：")
                 for o in _ask_user_options:
                     parts.append(f"  - {o.get('id', '')}: {o.get('label', '')}")
-            assistant_text_to_save = "\n".join(parts)
+            ask_text = "\n".join(parts)
+            assistant_text_to_save = ask_text if ask_text.strip() else _full_reply
         else:
             assistant_text_to_save = _full_reply
 
@@ -555,6 +558,15 @@ async def _stream_chat(
                 session.set_metadata("_last_chain_summary", None)
             except Exception:
                 pass
+
+        if not assistant_text_to_save:
+            _task = (
+                actual_agent.agent_state.current_task
+                if hasattr(actual_agent, "agent_state") and actual_agent.agent_state
+                else None
+            )
+            if _task and _task.cancelled:
+                assistant_text_to_save = "[任务已取消]"
 
         if session and assistant_text_to_save:
             try:

@@ -336,12 +336,13 @@ class Agent:
         self,
         name: str | None = None,
         api_key: str | None = None,
+        brain: Brain | None = None,
     ):
         self.name = name or settings.agent_name
 
         # 初始化核心组件
         self.identity = Identity()
-        self.brain = Brain(api_key=api_key)
+        self.brain = brain or Brain(api_key=api_key)
         self.ralph = RalphLoop(
             max_iterations=settings.max_iterations,
             on_iteration=self._on_iteration,
@@ -612,6 +613,16 @@ class Agent:
         "MCP",          # call_mcp_tool, list_mcp_servers — external integrations
     })
 
+    # Categories deferred from first few turns to reduce token overhead.
+    # These tools are included once intent hints or explicit user request is detected.
+    _DEFERRED_CATEGORIES: frozenset[str] = frozenset({
+        "IM Channel",      # IM platform tools — only needed for channel operations
+        "Scheduled",       # scheduler tools — only needed when setting up schedules
+        "Agent Package",   # agent packaging — rarely needed in normal conversation
+        "Persona",         # persona traits — deferred until personality discussion
+        "Config",          # config management — rarely needed
+    })
+
     @property
     def _effective_tools(self) -> list[dict]:
         """Tools available for the current call context.
@@ -619,11 +630,13 @@ class Agent:
         Filtering layers (applied in order):
         0. Sanity: drop entries without a valid name (e.g. malformed plugin defs)
         1. Sub-agent restriction: remove delegation tools
-        2. Intent-driven: filter by IntentResult.tool_hints (category-based),
+        2. Tiered loading: exclude _DEFERRED_CATEGORIES when no intent hints
+           request them (saves ~20 tool definitions on first turn)
+        3. Intent-driven: filter by IntentResult.tool_hints (category-based),
            but always keep infrastructure categories (System, Memory, Plan,
            Skills, Skill Store, MCP) so the LLM can recall context, orchestrate
            plans, invoke skills/MCP, and use meta tools regardless of intent.
-        3. Context window: reduce set for small models
+        4. Context window: reduce set for small models
         """
         tools = [t for t in self._tools if t.get("name")]
         dropped = len(self._tools) - len(tools)
@@ -637,21 +650,41 @@ class Agent:
             tools = [t for t in tools if t.get("name") not in self._agent_tool_names]
 
         intent = getattr(self, "_current_intent", None)
-        if intent and intent.tool_hints and hasattr(self, "tool_catalog"):
+        intent_hints = set(intent.tool_hints) if intent and intent.tool_hints else set()
+
+        if intent_hints and hasattr(self, "tool_catalog"):
             tool_groups = self.tool_catalog.get_tool_groups()
             allowed: set[str] = set()
             for cat in self._ALWAYS_KEEP_CATEGORIES:
                 allowed |= tool_groups.get(cat, set())
-            for hint in intent.tool_hints:
+            for hint in intent_hints:
                 allowed |= tool_groups.get(hint, set())
             tools = [t for t in tools if t.get("name") in allowed]
+        elif hasattr(self, "tool_catalog"):
+            deferred_cats = self._DEFERRED_CATEGORIES - intent_hints
+            if deferred_cats:
+                tool_groups = self.tool_catalog.get_tool_groups()
+                deferred_names: set[str] = set()
+                for cat in deferred_cats:
+                    deferred_names |= tool_groups.get(cat, set())
+                if deferred_names:
+                    before = len(tools)
+                    tools = [
+                        t for t in tools if t.get("name") not in deferred_names
+                    ]
+                    if len(tools) < before:
+                        logger.debug(
+                            "[Agent] tiered loading: deferred %d tools from %s",
+                            before - len(tools),
+                            sorted(deferred_cats),
+                        )
 
         ctx = self._get_raw_context_window()
         if 0 < ctx < 8000:
             tools = [t for t in tools if t.get("name") in SMALL_CTX_CORE_TOOLS]
         elif 0 < ctx < 32000:
-            allowed = SMALL_CTX_CORE_TOOLS | MEDIUM_CTX_EXTRA_TOOLS
-            tools = [t for t in tools if t.get("name") in allowed]
+            allowed_ctx = SMALL_CTX_CORE_TOOLS | MEDIUM_CTX_EXTRA_TOOLS
+            tools = [t for t in tools if t.get("name") in allowed_ctx]
 
         return tools
 

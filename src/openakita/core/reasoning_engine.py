@@ -2302,7 +2302,7 @@ class ReasoningEngine:
                                 logger.warning(
                                     f"[ModeGuard] Blocked '{t_name}' in {_effective_mode} mode"
                                 )
-                                yield {"type": "tool_call_start", "tool": t_name, "args": t_args, "id": t_id}
+                                yield {"type": "tool_call_start", "tool": t_name, "name": t_name, "args": t_args, "id": t_id}
                                 yield {
                                     "type": "tool_call_end", "tool": t_name,
                                     "result": _blocked_msg[:_SSE_RESULT_PREVIEW_CHARS],
@@ -2315,7 +2315,7 @@ class ReasoningEngine:
                                 continue
                             # chain_text: 工具描述
                             yield {"type": "chain_text", "content": self._describe_tool_call(t_name, t_args)}
-                            yield {"type": "tool_call_start", "tool": t_name, "args": t_args, "id": t_id}
+                            yield {"type": "tool_call_start", "tool": t_name, "name": t_name, "args": t_args, "id": t_id}
                             await broadcast_event("pet-status-update", {"status": "tool_execution", "tool_name": t_name})
                             # PolicyEngine 检查
                             from .policy import PolicyDecision, get_policy_engine
@@ -2434,7 +2434,7 @@ class ReasoningEngine:
                             logger.warning(
                                 f"[ModeGuard] Blocked '{tool_name}' in {_effective_mode} mode"
                             )
-                            yield {"type": "tool_call_start", "tool": tool_name, "args": tool_args, "id": tool_id}
+                            yield {"type": "tool_call_start", "tool": tool_name, "name": tool_name, "args": tool_args, "id": tool_id}
                             yield {
                                 "type": "tool_call_end", "tool": tool_name,
                                 "result": _blocked_msg[:_SSE_RESULT_PREVIEW_CHARS],
@@ -2449,7 +2449,7 @@ class ReasoningEngine:
                         _tool_desc = self._describe_tool_call(tool_name, tool_args)
                         yield {"type": "chain_text", "content": _tool_desc}
 
-                        yield {"type": "tool_call_start", "tool": tool_name, "args": tool_args, "id": tool_id}
+                        yield {"type": "tool_call_start", "tool": tool_name, "name": tool_name, "args": tool_args, "id": tool_id}
                         await broadcast_event("pet-status-update", {"status": "tool_execution", "tool_name": tool_name})
 
                         # PolicyEngine 检查（与 execute_batch 一致）
