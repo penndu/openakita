@@ -21,6 +21,7 @@ from typing import Any
 from ..config import settings
 from ..tools.errors import ToolError, classify_error
 from ..tools.handlers import SystemHandlerRegistry
+from ..tools.input_normalizer import normalize_tool_input
 from ..tracing.tracer import get_tracer
 from .agent_state import TaskState
 
@@ -237,6 +238,9 @@ class ToolExecutor:
         Returns:
             工具执行结果字符串
         """
+        if isinstance(tool_input, dict):
+            tool_input = normalize_tool_input(tool_name, tool_input)
+
         logger.info(f"Executing tool: {tool_name} with {tool_input}")
 
         # ★ 拦截 JSON 解析失败的工具调用（参数被 API 截断）

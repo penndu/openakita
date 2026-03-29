@@ -1,9 +1,10 @@
 """L2 Component Tests: ToolExecutor execution and truncation guard."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from openakita.core.tool_executor import ToolExecutor, OVERFLOW_MARKER
+import pytest
+
+from openakita.core.tool_executor import OVERFLOW_MARKER, ToolExecutor
 
 
 def _make_registry(*tool_names: str) -> MagicMock:
@@ -32,6 +33,32 @@ class TestExecuteTool:
     async def test_execute_unknown_tool(self, executor):
         result = await executor.execute_tool("nonexistent_tool", {})
         assert "error" in result.lower() or "not found" in result.lower() or isinstance(result, str)
+
+    async def test_execute_tool_normalizes_stringified_nested_fields(self):
+        registry = MagicMock()
+        captured = {}
+
+        async def _execute_by_tool(tool_name, params):
+            captured["tool_name"] = tool_name
+            captured["params"] = params
+            return "ok"
+
+        registry.has_tool.return_value = True
+        registry.execute_by_tool.side_effect = _execute_by_tool
+        registry.get_handler_name_for_tool.return_value = "plan"
+        executor = ToolExecutor(handler_registry=registry, max_parallel=1)
+
+        await executor.execute_tool(
+            "create_plan",
+            {
+                "task_summary": "demo",
+                "steps": '[{"id":"step_1","description":"first"}]',
+            },
+        )
+
+        assert captured["tool_name"] == "create_plan"
+        assert isinstance(captured["params"]["steps"], list)
+        assert captured["params"]["steps"][0]["id"] == "step_1"
 
 
 class TestGuardTruncate:
