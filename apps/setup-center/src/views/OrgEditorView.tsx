@@ -913,6 +913,7 @@ export function OrgEditorView({
   const [fullPromptPreview, setFullPromptPreview] = useState<string | null>(null);
   const [promptPreviewLoading, setPromptPreviewLoading] = useState(false);
   const [liveMode, setLiveMode] = useState(true);
+  const [layoutLocked, setLayoutLocked] = useState(false);
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, string>>({});
   const [inboxOpen, setInboxOpen] = useState(false);
   const [nodeEvents, setNodeEvents] = useState<any[]>([]);
@@ -983,6 +984,7 @@ export function OrgEditorView({
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768 || IS_CAPACITOR);
   const [showLeftPanel, setShowLeftPanel] = useState(() => !(window.innerWidth < 768 || IS_CAPACITOR));
   const [showRightPanel, setShowRightPanel] = useState(false);
+  const wasRunningRef = useRef(false);
 
   useLayoutEffect(() => {
     let prev = window.innerWidth < 768 || IS_CAPACITOR;
@@ -996,6 +998,18 @@ export function OrgEditorView({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    if (!currentOrg) {
+      wasRunningRef.current = false;
+      return;
+    }
+    const running = currentOrg.status === "active" || currentOrg.status === "running";
+    if (running !== wasRunningRef.current) {
+      setLayoutLocked(running);
+      wasRunningRef.current = running;
+    }
+  }, [currentOrg?.id, currentOrg?.status]);
 
   // ── Data fetching ──
 
@@ -1032,9 +1046,9 @@ export function OrgEditorView({
       setNodes(hasOverlap ? computeTreeLayout(flowNodes, flowEdges) : flowNodes);
       setEdges(flowEdges);
       setSelectedNodeId(null);
-      if (data.status === "active" || data.status === "running") {
-        setLiveMode(true);
-      }
+      const running = data.status === "active" || data.status === "running";
+      setLiveMode(running);
+      setLayoutLocked(running);
     } catch (e) {
       console.error("Failed to fetch org:", e);
     } finally {
@@ -1252,6 +1266,7 @@ export function OrgEditorView({
       await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/start`, { method: "POST" });
       setCurrentOrg({ ...currentOrg, status: "active" });
       setLiveMode(true);
+      setLayoutLocked(true);
       const mode = (currentOrg as any).operation_mode || "command";
       showToast(
         mode === "autonomous"
@@ -1268,6 +1283,7 @@ export function OrgEditorView({
       await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/stop`, { method: "POST" });
       setCurrentOrg({ ...currentOrg, status: "dormant" });
       setLiveMode(false);
+      setLayoutLocked(false);
     } catch (e) { console.error("Failed to stop org:", e); }
   }, [currentOrg, apiBaseUrl]);
 
@@ -1334,6 +1350,7 @@ export function OrgEditorView({
       const data = await res.json();
       setCurrentOrg(data);
       setLiveMode(false);
+      setLayoutLocked(false);
       setActivityFeed([]);
       setBbEntries([]);
       setNodeEvents([]);
@@ -1570,6 +1587,10 @@ export function OrgEditorView({
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setContextMenu(null);
+    autoSave();
+  }, [autoSave]);
+
+  const onNodeDragStop = useCallback(() => {
     autoSave();
   }, [autoSave]);
 
@@ -1883,10 +1904,21 @@ export function OrgEditorView({
             )}
             <button
               className={`org-tb-btn${liveMode ? " org-tb-btn--active" : ""}`}
-              onClick={() => setLiveMode(!liveMode)}
+              onClick={() => {
+                const next = !liveMode;
+                setLiveMode(next);
+                if (!next) setLayoutLocked(false);
+              }}
               title="实时模式"
             >
               <IconRadar size={13} /> {!isMobile && "实况"}
+            </button>
+            <button
+              className={`org-tb-btn${!layoutLocked ? " org-tb-btn--active" : ""}`}
+              onClick={() => setLayoutLocked((v) => !v)}
+              title={layoutLocked ? "解锁布局（可拖拽/连线）" : "锁定布局（防止误操作）"}
+            >
+              <IconSitemap size={13} /> {!isMobile && (layoutLocked ? "拖拽关" : "拖拽开")}
             </button>
             <button className="org-tb-btn" onClick={handleSave} disabled={saving} title="保存">
               <IconSave size={13} /> {saving ? "..." : (!isMobile && "保存")}
@@ -2182,6 +2214,7 @@ export function OrgEditorView({
               onNodeClick={onNodeClick}
               onEdgeClick={onEdgeClick}
               onPaneClick={onPaneClick}
+              onNodeDragStop={onNodeDragStop}
               onNodeContextMenu={(e, node) => { e.preventDefault(); e.stopPropagation(); setSelectedNodeId(node.id); setSelectedEdgeId(null); setContextMenu({ x: e.clientX, y: e.clientY, type: "node", id: node.id }); }}
               onEdgeContextMenu={(e, edge) => { e.preventDefault(); e.stopPropagation(); setSelectedEdgeId(edge.id); setSelectedNodeId(null); setContextMenu({ x: e.clientX, y: e.clientY, type: "edge", id: edge.id }); }}
               onPaneContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, type: "pane", id: null }); }}
@@ -2191,8 +2224,8 @@ export function OrgEditorView({
               fitView
               snapToGrid
               snapGrid={[20, 20]}
-              nodesDraggable={!liveMode}
-              nodesConnectable={!liveMode}
+              nodesDraggable={!layoutLocked}
+              nodesConnectable={!layoutLocked}
               defaultEdgeOptions={{
                 type: "default",
                 style: { strokeWidth: 2 },
@@ -2266,7 +2299,7 @@ export function OrgEditorView({
               document.body
             )}
             {/* ── Canvas bottom: live activity feed ── */}
-            {liveMode && orgStats && (() => {
+            {liveMode && layoutLocked && orgStats && (() => {
               const perNode: any[] = orgStats.per_node || [];
               const recentTasks: any[] = orgStats.recent_tasks || [];
               const anomalies: any[] = orgStats.anomalies || [];
