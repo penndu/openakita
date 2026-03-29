@@ -549,17 +549,22 @@ class ToolExecutor:
         )
         return truncated + hint
 
+    _PLAN_MANAGEMENT_TOOLS = frozenset({
+        "create_plan", "update_plan_step", "complete_plan", "get_plan_status",
+    })
+
     def _check_plan_required(self, tool_name: str, session_id: str | None) -> str | None:
         """
         检查是否需要先创建 Plan。
 
         如果当前 session 被标记为需要 Plan（compound 任务），
         但还没有创建 Plan，则拒绝执行其他工具。
+        计划管理工具始终放行，避免死锁。
 
         Returns:
             阻止消息字符串，或 None（允许执行）
         """
-        if tool_name == "create_plan":
+        if tool_name in self._PLAN_MANAGEMENT_TOOLS:
             return None
 
         try:

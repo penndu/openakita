@@ -224,6 +224,8 @@ class Agent:
         "中止",
         "终止",
         "不要了",
+        "/stop", "/停止", "/取消", "/cancel", "/abort",
+        "kill", "kill all",
     }
 
     SKIP_COMMANDS = {
@@ -236,6 +238,7 @@ class Agent:
         "skip this",
         "换个方法",
         "太慢了",
+        "/skip", "/跳过",
     }
 
     # ---- Task-local properties ----
@@ -3417,12 +3420,23 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 att_url = getattr(att, "url", None) or ""
                 att_name = getattr(att, "name", None) or "file"
                 att_mime = getattr(att, "mime_type", None) or att_type
-                if att_type == "image" and att_url:
+
+                is_image = (
+                    att_type == "image"
+                    or (att_mime or "").startswith("image/")
+                    or (att_url or "").startswith("data:image/")
+                )
+                is_video = (
+                    att_type == "video"
+                    or (att_mime or "").startswith("video/")
+                    or (att_url or "").startswith("data:video/")
+                )
+
+                if is_image and att_url:
                     content_blocks.append({"type": "image_url", "image_url": {"url": att_url}})
-                elif att_type == "video" and att_url:
+                elif is_video and att_url:
                     content_blocks.append({"type": "video_url", "video_url": {"url": att_url}})
                 elif att_type == "document" and att_url:
-                    # PDF 等文档 — 通过 URL 下载后交给后端处理
                     content_blocks.append({
                         "type": "text",
                         "text": f"[文档: {att_name} ({att_mime})] URL: {att_url}",
@@ -6254,8 +6268,10 @@ NEXT: 建议的下一步（如有）"""
         # Plan 模式强制检查
         # ============================================
         # 如果当前 session 被标记为需要 Plan（compound 任务），
-        # 但还没有创建 Plan，则拒绝执行其他工具
-        if tool_name != "create_plan":
+        # 但还没有创建 Plan，则拒绝执行其他工具。
+        # 计划管理工具始终放行，避免死锁。
+        _PLAN_TOOLS = {"create_plan", "update_plan_step", "complete_plan", "get_plan_status"}
+        if tool_name not in _PLAN_TOOLS:
             from ..tools.handlers.plan import has_active_plan, is_plan_required
 
             session_id = getattr(self, "_current_session_id", None)

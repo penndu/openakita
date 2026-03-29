@@ -1070,6 +1070,33 @@ class LLMClient:
                         await asyncio.sleep(0.5)
                         continue  # 用修正后的参数重试当前端点
 
+                    # ── 自愈: 端点不支持 thinking / reasoning_effort 参数 ──
+                    # NVIDIA NIM、部分 OpenAI 兼容端点不接受 OpenAI 风格的
+                    # thinking: {"type": "enabled"} 或 reasoning_effort 参数，
+                    # 会返回 400 (extra_forbidden / unsupported parameter)。
+                    # 运行时检测并自动关闭 thinking，避免维护端点黑名单。
+                    _thinking_reject_patterns = [
+                        "extra_forbidden",
+                        "extra inputs are not permitted",
+                        "unsupported parameter",
+                    ]
+                    _err_lower = error_str.lower()
+                    _is_thinking_rejected = (
+                        any(p in _err_lower for p in _thinking_reject_patterns)
+                        and ("thinking" in _err_lower or "reasoning_effort" in _err_lower)
+                    )
+                    if _is_thinking_rejected and not getattr(request, '_thinking_stripped', False):
+                        request._thinking_stripped = True  # type: ignore[attr-defined]
+                        request.enable_thinking = False
+                        request.thinking_depth = None
+                        provider._thinking_params_unsupported = True  # type: ignore[attr-defined]
+                        logger.info(
+                            f"[LLM] endpoint={provider.name} rejected thinking params, "
+                            f"self-healing: disabling thinking mode, retrying"
+                        )
+                        await asyncio.sleep(0.5)
+                        continue
+
                     # 检测不可重试的结构性错误（重试不会修复，浪费配额）
                     non_retryable_patterns = [
                         "invalid_request_error",
@@ -1083,6 +1110,10 @@ class LLMClient:
                         "missing 'reasoning_content'",
                         "data_inspection_failed",  # DashScope 内容审查拒绝
                         "inappropriate content",   # DashScope 审查的错误描述文本
+                        "(413)",                    # HTTP 413 Payload Too Large
+                        "payload too large",
+                        "request entity too large",
+                        "larger than allowed",      # kimi: "JSON payload ... is larger than allowed"
                     ]
                     is_non_retryable = any(
                         pattern in error_str.lower() for pattern in non_retryable_patterns
@@ -1098,6 +1129,8 @@ class LLMClient:
                             "payload too large",
                             "request entity too large",
                             "content too large",
+                            "larger than allowed",   # kimi: "JSON payload ... is larger than allowed"
+                            "(413)",                 # HTTP 413 状态码
                             "context length",
                             "too many tokens",
                             "string too long",
