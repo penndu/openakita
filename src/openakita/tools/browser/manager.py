@@ -245,6 +245,76 @@ class StartupStrategy(Enum):
     BUNDLED_CHROMIUM = "bundled_chromium"
 
 
+class _IsolatedBrowserContext:
+    """Lightweight wrapper around a dedicated BrowserContext for parallel sub-agents.
+
+    Implements the same minimal interface as BrowserManager so that
+    PlaywrightTools / BrowserUseRunner can work unchanged.
+    """
+
+    def __init__(self, parent: "BrowserManager", context: Any, page: Any):
+        self._parent = parent
+        self._context = context
+        self._page = page
+        self.state = BrowserState.READY
+        self.visible = parent.visible
+        self.using_user_chrome = parent.using_user_chrome
+
+    @property
+    def page(self) -> Any | None:
+        return self._page
+
+    @property
+    def context(self) -> Any | None:
+        return self._context
+
+    @property
+    def cdp_url(self) -> str | None:
+        return self._parent.cdp_url
+
+    @property
+    def is_ready(self) -> bool:
+        return self.state == BrowserState.READY
+
+    @property
+    def current_url(self) -> str | None:
+        return self._page.url if self._page else None
+
+    async def ensure_ready(self, visible: bool = True) -> bool:
+        return self.state == BrowserState.READY
+
+    async def start(self, visible: bool = True) -> bool:
+        return True
+
+    async def stop(self) -> None:
+        try:
+            if self._context:
+                await self._context.close()
+        except Exception:
+            pass
+        self._context = None
+        self._page = None
+        self.state = BrowserState.IDLE
+
+    async def get_status(self) -> dict:
+        if not self._page:
+            return {"is_open": False, "state": "idle"}
+        try:
+            return {
+                "is_open": True,
+                "state": "ready",
+                "visible": self.visible,
+                "tab_count": len(self._context.pages) if self._context else 0,
+                "current_tab": {
+                    "url": self._page.url,
+                    "title": await self._page.title(),
+                },
+                "isolated": True,
+            }
+        except Exception as e:
+            return {"is_open": True, "state": "ready", "error": str(e)}
+
+
 class BrowserManager:
     """浏览器生命周期管理（状态机 + 多策略启动 + 回退链）"""
 
@@ -452,6 +522,30 @@ class BrowserManager:
         except Exception as e:
             logger.error(f"Failed to get browser status: {e}")
             return {"is_open": True, "state": self.state.value, "error": str(e)}
+
+    async def create_isolated_context(self) -> "BrowserManager":
+        """Create a lightweight isolated browser context for parallel sub-agents.
+
+        Returns a new BrowserManager-like wrapper that has its own BrowserContext
+        and Page, avoiding tab/page crosstalk between concurrent agents.
+        Only works when the main browser is READY with a _browser object that
+        supports new_context() (CDP or standard launch — NOT persistent_context).
+        """
+        if self.state != BrowserState.READY:
+            await self.ensure_ready()
+
+        if self._browser and hasattr(self._browser, "new_context"):
+            new_ctx = await self._browser.new_context()
+            new_page = await new_ctx.new_page()
+
+            isolated = _IsolatedBrowserContext(
+                parent=self,
+                context=new_ctx,
+                page=new_page,
+            )
+            return isolated
+
+        return self
 
     async def reset_state(self) -> None:
         """只清除引用不关闭资源（用于检测到浏览器被外部关闭时）。"""

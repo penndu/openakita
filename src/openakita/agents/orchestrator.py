@@ -308,6 +308,7 @@ class AgentOrchestrator:
         agent_profile_id: str,
         depth: int,
         from_agent: str | None = None,
+        isolated_browser: Any = None,
     ) -> str:
         """Dispatch a message to a specific agent with progress-aware timeout."""
         if depth >= MAX_DELEGATION_DEPTH:
@@ -343,6 +344,7 @@ class AgentOrchestrator:
                 session, message, agent_profile_id,
                 pass_gateway=(depth == 0),
                 depth=depth,
+                isolated_browser=isolated_browser,
             )
             elapsed_ms = (time.monotonic() - start) * 1000
             health.successful += 1
@@ -455,6 +457,7 @@ class AgentOrchestrator:
         *,
         pass_gateway: bool = False,
         depth: int = 0,
+        isolated_browser: Any = None,
     ) -> str:
         """Run an agent with progress-aware timeout instead of a hard wall-clock limit.
 
@@ -482,6 +485,13 @@ class AgentOrchestrator:
             return f"⚠️ 无法找到 Agent Profile: {agent_profile_id}"
 
         agent = await self._pool.get_or_create(session.id, profile)
+
+        if isolated_browser and hasattr(agent, "browser_manager"):
+            from openakita.tools.browser import PlaywrightTools, BrowserUseRunner
+            agent.browser_manager = isolated_browser
+            agent.pw_tools = PlaywrightTools(isolated_browser)
+            agent.bu_runner = BrowserUseRunner(isolated_browser)
+
         gw = self._gateway if pass_gateway else None
 
         task = asyncio.create_task(
@@ -876,6 +886,7 @@ class AgentOrchestrator:
         message: str,
         depth: int = 0,
         reason: str = "",
+        isolated_browser: Any = None,
     ) -> str:
         """
         Delegate work from one agent to another.
@@ -942,7 +953,8 @@ class AgentOrchestrator:
             if len(session.context.handoff_events) > _MAX_HANDOFF_EVENTS:
                 session.context.handoff_events = session.context.handoff_events[-_MAX_HANDOFF_EVENTS:]
         return await self._dispatch(
-            session, message, to_agent, depth + 1, from_agent=from_agent
+            session, message, to_agent, depth + 1, from_agent=from_agent,
+            isolated_browser=isolated_browser,
         )
 
     # ------------------------------------------------------------------

@@ -1902,6 +1902,7 @@ class Agent:
         task_description: str = "",
         session_type: str = "cli",
         tools_enabled: bool = True,
+        session: "Session | None" = None,
     ) -> str:
         """
         使用编译管线构建系统提示词 (v2)
@@ -1913,6 +1914,7 @@ class Agent:
             task_description: 任务描述 (用于检索相关记忆)
             session_type: 会话类型 "cli" 或 "im"
             tools_enabled: 是否启用工具（CHAT 轻量路径传 False）
+            session: 当前 Session 实例（用于提取元数据）
 
         Returns:
             编译后的系统提示词
@@ -1925,11 +1927,38 @@ class Agent:
         ctx_window = self._get_raw_context_window()
         intent = getattr(self, "_current_intent", None)
         _mem_keywords = intent.memory_keywords if intent else None
+
+        model_display = ""
+        try:
+            conv_id = session.id if session else None
+            model_info = self.brain.get_current_model_info(conversation_id=conv_id)
+            if isinstance(model_info, dict) and "model" in model_info:
+                model_display = model_info["model"]
+        except Exception:
+            pass
+
+        session_context = None
+        if session:
+            try:
+                sub_records = getattr(session.context, "sub_agent_records", None) or []
+                session_context = {
+                    "session_id": session.id,
+                    "channel": getattr(session, "channel", "unknown"),
+                    "chat_type": getattr(session, "chat_type", "private"),
+                    "message_count": len(session.context.messages) if session.context else 0,
+                    "has_sub_agents": bool(sub_records),
+                    "sub_agent_count": len(sub_records),
+                }
+            except Exception:
+                pass
+
         prompt = await self.prompt_assembler.build_system_prompt_compiled(
             task_description, session_type=session_type, context_window=ctx_window,
             is_sub_agent=self._is_sub_agent_call,
             tools_enabled=tools_enabled,
             memory_keywords=_mem_keywords,
+            model_display_name=model_display,
+            session_context=session_context,
         )
         if self._custom_prompt_suffix:
             prompt += f"\n\n{self._custom_prompt_suffix}"
@@ -2759,22 +2788,62 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
             history_messages = history_messages[:-1]
 
         _STRIP_MARKERS = ["\n\n[子Agent工作总结]", "\n\n[执行摘要]"]
+        _RE_TIME_PREFIX = re.compile(r"^\[\d{1,2}:\d{2}\]\s")
 
         messages: list[dict] = []
         for msg in history_messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            ts = msg.get("timestamp", "")
             if role == "assistant":
                 for _marker in _STRIP_MARKERS:
-                    if _marker in content:
-                        content = content[:content.index(_marker)]
+                    while _marker in content:
+                        idx = content.index(_marker)
+                        before = content[:idx]
+                        after = content[idx + len(_marker):]
+                        next_section = -1
+                        for sep in ("\n\n[", "\n\n##", "\n\n---"):
+                            pos = after.find(sep)
+                            if pos != -1 and (next_section == -1 or pos < next_section):
+                                next_section = pos
+                        if next_section != -1:
+                            content = before + after[next_section:]
+                        else:
+                            content = before
                 if content.startswith("[执行摘要]") or content.startswith("[子Agent工作总结]"):
                     content = ""
             if role in ("user", "assistant") and content:
+                if ts and isinstance(content, str):
+                    try:
+                        t = datetime.fromisoformat(ts)
+                        time_prefix = f"[{t.strftime('%H:%M')}] "
+                        if not _RE_TIME_PREFIX.match(content):
+                            content = time_prefix + content
+                    except Exception:
+                        pass
                 if messages and messages[-1]["role"] == role:
                     messages[-1]["content"] += "\n" + content
                 else:
                     messages.append({"role": role, "content": content})
+
+        # 10.5 注入子 Agent 委派结果摘要到最后一条 assistant 消息
+        if session and hasattr(session, "context"):
+            sub_records = getattr(session.context, "sub_agent_records", None)
+            if sub_records and messages:
+                summary_parts = []
+                for r in sub_records:
+                    name = r.get("agent_name", "unknown")
+                    preview = r.get("result_preview", "")
+                    if preview:
+                        summary_parts.append(f"- {name}: {preview[:500]}")
+                if summary_parts:
+                    delegation_summary = (
+                        "\n\n[委派任务执行记录]\n" + "\n".join(summary_parts)
+                    )
+                    for i in range(len(messages) - 1, -1, -1):
+                        if messages[i]["role"] == "assistant":
+                            messages[i]["content"] += delegation_summary
+                            break
 
         # 上下文连续标记（合并到当前用户消息前缀，避免插入假 assistant 回复破坏对话连贯性）
         _has_history = bool(messages)
@@ -2878,13 +2947,8 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 # Tier 3: 本地 Whisper（已由 Gateway 处理，transcription 已在 input_text 中）
                 # 不需要额外操作
 
-        # 如果有历史消息，给当前用户消息加上连续提示前缀
-        if _has_history and compiled_message:
-            compiled_message = (
-                "[以上是之前的对话历史，仅供参考。"
-                "请直接回应我的最新消息，不要重复或重新执行历史中已完成的操作：]\n"
-                + compiled_message
-            )
+        if _has_history and compiled_message and isinstance(compiled_message, str):
+            compiled_message = f"[最新消息]\n{compiled_message}"
 
         # === 角色交替保护 ===
         # 如果历史末尾是 user 消息（通常由上下文边界标记产生），
@@ -3496,6 +3560,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
             system_prompt = await self._build_system_prompt_compiled(
                 task_description=task_description,
                 session_type=session_type,
+                session=session,
             )
 
             # 注入 TaskDefinition
@@ -3585,6 +3650,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 # Normal CHAT path (non-fast): uses main model, no tools
                 _chat_prompt = await self._build_system_prompt_compiled(
                     task_description="", session_type=session_type, tools_enabled=False,
+                    session=session,
                 )
                 try:
                     response = await self.brain.messages_create_async(
@@ -4556,6 +4622,7 @@ NEXT: 建议的下一步（如有）"""
             task_description="",
             session_type=session_type,
             tools_enabled=False,
+            session=self._current_session,
         )
 
         for attempt in range(1 + self._LIGHTWEIGHT_EMPTY_MAX_RETRIES):
@@ -4638,6 +4705,7 @@ NEXT: 建议的下一步（如有）"""
             system_prompt = await self._build_system_prompt_compiled(
                 task_description=task_description,
                 session_type=session_type,
+                session=session or self._current_session,
             )
         else:
             system_prompt = self._context.system
@@ -4719,12 +4787,10 @@ NEXT: 建议的下一步（如有）"""
 
         # 选择 System Prompt
         if use_session_prompt:
-            # 使用 Session 专用的 System Prompt，但仍需包含完整的工具信息
-            # 否则 LLM 不知道有哪些工具可用（MCP、Skill、Tools）
-            # 使用异步版本构建系统提示词，避免向量搜索阻塞事件循环
             system_prompt = await self._build_system_prompt_compiled(
                 task_description=task_description,
                 session_type=session_type,
+                session=session or self._current_session,
             )
         else:
             system_prompt = self._context.system
