@@ -1,10 +1,19 @@
+/* Override parent .content padding/overflow for full-bleed layout */
+.content:has(.poRoot) {
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
 /* ── Root layout ─────────────────────────────────────────── */
 .poRoot {
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
   min-height: 0;
-  background: var(--bg, #1a1a2e);
+  background: #16162a;
+  color: #d0d0d0;
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, sans-serif;
   overflow: hidden;
 }
 
@@ -12,10 +21,10 @@
 .poHeader {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  background: var(--bg-card, #1e1e30);
-  border-bottom: 1px solid var(--line, #2a2a40);
+  gap: 14px;
+  padding: 8px 18px;
+  background: #1c1c34;
+  border-bottom: 1px solid #2c2c48;
   flex-shrink: 0;
   min-height: 44px;
 }
@@ -24,39 +33,40 @@
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: var(--fg, #e0e0e0);
+  color: #e8e8f0;
   letter-spacing: 0.5px;
   white-space: nowrap;
 }
 
 .poOrgSelect {
   font-size: 13px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 6px;
-  border: 1px solid var(--line, #3a3a50);
-  background: var(--bg, #252538);
-  color: var(--fg, #ccc);
+  border: 1px solid #3a3a58;
+  background: #22223c;
+  color: #d0d0e0;
   outline: none;
   cursor: pointer;
   min-width: 140px;
 }
 
 .poOrgSelect:focus {
-  border-color: var(--accent, #4A90D9);
+  border-color: #5a9cf5;
 }
 
 .poHeaderInfo {
   font-size: 12px;
-  color: var(--muted, #777);
+  color: #8888a8;
   white-space: nowrap;
 }
 
 /* ── Canvas area ────────────────────────────────────────── */
 .poCanvas {
-  flex: 1;
-  min-height: 200px;
+  flex: 1 1 0;
+  min-height: 180px;
   position: relative;
   overflow: hidden;
+  background: #12122a;
 }
 
 .poCanvas canvas {
@@ -70,58 +80,57 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(20, 20, 35, 0.7);
+  background: rgba(18, 18, 42, 0.75);
   pointer-events: none;
 }
 
 .poCanvasLoading {
   font-size: 14px;
-  color: var(--muted, #888);
-  padding: 12px 24px;
+  color: #9999bb;
+  padding: 14px 28px;
   border-radius: 8px;
-  background: rgba(30, 30, 48, 0.9);
-  border: 1px solid var(--line, #333);
+  background: #1e1e38e6;
+  border: 1px solid #33335a;
 }
 
 /* ── Bottom bar ─────────────────────────────────────────── */
 .poBottom {
   display: flex;
-  height: 220px;
-  min-height: 160px;
-  max-height: 280px;
-  border-top: 1px solid var(--line, #2a2a40);
-  background: var(--bg-card, #1e1e30);
+  height: 200px;
+  min-height: 140px;
+  border-top: 2px solid #2c2c48;
+  background: #1a1a32;
   flex-shrink: 0;
 }
 
 /* ── Panel (shared) ─────────────────────────────────────── */
 .poPanel {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--line, #2a2a40);
 }
 
-.poPanel:last-child {
-  border-right: none;
+.poPanel + .poPanel {
+  border-left: 1px solid #2a2a48;
 }
 
 .poPanelHeader {
   font-size: 12px;
   font-weight: 700;
-  color: var(--fg, #bbb);
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid var(--line, #252540);
+  color: #aaaacc;
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid #262648;
   flex-shrink: 0;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .poPanelBody {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 10px;
+  padding: 4px 10px;
 }
 
 .poPanelBody::-webkit-scrollbar {
@@ -133,14 +142,14 @@
 }
 
 .poPanelBody::-webkit-scrollbar-thumb {
-  background: var(--muted, #444);
+  background: #444468;
   border-radius: 3px;
 }
 
 .poEmpty {
-  color: var(--muted, #666);
+  color: #666688;
   font-size: 12px;
-  padding: 16px 4px;
+  padding: 20px 4px;
   text-align: center;
 }
 
@@ -149,14 +158,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--line, #1e1e35);
+  padding: 3px 0;
+  border-bottom: 1px solid #1e1e3a;
 }
 
 .poLogTime {
-  color: var(--muted, #666);
+  color: #7777a0;
   font-size: 11px;
-  font-family: 'Consolas', 'SF Mono', monospace;
+  font-family: "Consolas", "SF Mono", monospace;
   white-space: nowrap;
   min-width: 56px;
   flex-shrink: 0;
@@ -165,18 +174,18 @@
 .poLogTag {
   display: inline-block;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   color: #fff;
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: 3px;
   white-space: nowrap;
   flex-shrink: 0;
-  min-width: 32px;
+  min-width: 36px;
   text-align: center;
 }
 
 .poLogMsg {
-  color: var(--fg, #bbb);
+  color: #c0c0d8;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -190,13 +199,13 @@
   align-items: center;
   gap: 8px;
   padding: 5px 6px;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .poAgentRow:hover {
-  background: var(--line, #282840);
+  background: #26264a;
 }
 
 .poAgentInfo {
@@ -204,12 +213,13 @@
   flex-direction: column;
   min-width: 0;
   flex: 1;
+  gap: 1px;
 }
 
 .poAgentName {
   font-size: 12px;
   font-weight: 600;
-  color: var(--fg, #ddd);
+  color: #e0e0f0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -217,7 +227,7 @@
 
 .poAgentDept {
   font-size: 10px;
-  color: var(--muted, #666);
+  color: #7777a0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -230,26 +240,27 @@
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  color: #aaaacc;
 }
 
 .poStatusDot {
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 /* ── Theme selector ─────────────────────────────────────── */
 .poThemePanel {
-  max-width: 260px;
-  min-width: 200px;
+  max-width: 240px;
+  min-width: 180px;
   flex: 0 0 auto;
 }
 
 .poThemeGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
   gap: 6px;
   align-content: flex-start;
 }
@@ -270,24 +281,24 @@
 }
 
 .poThemeCard:hover {
-  background: var(--line, #282840);
+  background: #26264a;
 }
 
 .poThemeCard.active {
-  border-color: var(--accent, #4A90D9);
-  background: var(--line, #282840);
+  border-color: #5a9cf5;
+  background: #26264a;
 }
 
 .poThemeSwatch {
   width: 36px;
   height: 28px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .poThemeName {
   font-size: 10px;
-  color: var(--fg, #bbb);
+  color: #bbbbd0;
   text-align: center;
   white-space: nowrap;
   line-height: 1.3;

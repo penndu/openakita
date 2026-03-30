@@ -1,5 +1,5 @@
 export interface PixelAppearance {
-  bodyType?: 'slim' | 'average' | 'stocky';
+  bodyType?: 'slim' | 'average' | 'stocky' | 'akita';
   skinTone?: number;
   hairStyle?: number;
   hairColor?: string;
@@ -28,9 +28,9 @@ export const HAIR_COLORS = [
 ];
 
 export const BODY_DIMS: Record<string, { w: number; h: number }> = {
-  slim: { w: 10, h: 16 },
-  average: { w: 12, h: 16 },
-  stocky: { w: 14, h: 15 },
+  slim: { w: 18, h: 30 },
+  average: { w: 22, h: 30 },
+  stocky: { w: 26, h: 28 },
 };
 
 export const ACCESSORY_LIST = [

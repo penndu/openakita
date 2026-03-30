@@ -73,12 +73,10 @@ export class OfficeScene extends Phaser.Scene {
 
     let dragStart: { x: number; y: number } | null = null;
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.middleButtonDown() || pointer.rightButtonDown()) {
-        dragStart = { x: pointer.x, y: pointer.y };
-      }
+      dragStart = { x: pointer.x, y: pointer.y };
     });
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (dragStart && (pointer.middleButtonDown() || pointer.rightButtonDown())) {
+      if (dragStart && pointer.isDown) {
         const dx = pointer.x - dragStart.x;
         const dy = pointer.y - dragStart.y;
         this.cameras.main.scrollX -= dx / this.cameras.main.zoom;
@@ -88,7 +86,13 @@ export class OfficeScene extends Phaser.Scene {
     });
     this.input.on('pointerup', () => { dragStart = null; });
 
+    EventBus.on('zoom-to-node', this.onZoomToNode, this);
+
     EventBus.emit('scene-ready', this);
+  }
+
+  private isAlive(): boolean {
+    return !!(this.sys?.game?.renderer && this.cameras?.main);
   }
 
   private onOrgDataUpdate = (data: OrgData) => {
@@ -98,12 +102,20 @@ export class OfficeScene extends Phaser.Scene {
 
   private onThemeChange = (themeId: string) => {
     this.currentTheme = getTheme(themeId);
+    if (!this.isAlive()) return;
     this.cameras.main.setBackgroundColor(this.currentTheme.palette.background);
     this.rebuildScene();
   };
 
+  private hasInitializedCamera = false;
+
   private rebuildScene() {
-    if (!this.orgData || !this.sys?.game?.renderer) return;
+    if (!this.orgData || !this.isAlive()) return;
+
+    const cam = this.cameras.main;
+    const prevZoom = this.hasInitializedCamera ? cam.zoom : 0;
+    const prevScrollX = this.hasInitializedCamera ? cam.scrollX : 0;
+    const prevScrollY = this.hasInitializedCamera ? cam.scrollY : 0;
 
     // Clean up
     this.agentSprites.forEach(s => s.destroy());
@@ -128,34 +140,30 @@ export class OfficeScene extends Phaser.Scene {
     }
     const departments = Array.from(deptMap.entries()).map(([name, nodeIds]) => ({ name, nodeIds }));
 
-    // Generate tileset
     this.tilesetManager.generateTileset(this.currentTheme);
-
-    // Generate layout
     this.layout = generateLayout(departments, this.currentTheme);
-
-    // Draw tilemap with Graphics
     this.renderTilemap();
-
-    // Draw room labels
     this.renderRoomLabels();
-
-    // Create activity system
     this.activitySystem = new ActivitySystem(this.layout.rooms);
-
-    // Spawn agents
     this.spawnAgents();
 
-    // Center camera
-    const worldW = this.layout.mapWidth * TILE_SIZE;
-    const worldH = this.layout.mapHeight * TILE_SIZE;
-    this.cameras.main.centerOn(worldW / 2, worldH / 2);
-    const camW = this.cameras.main.width || 800;
-    const camH = this.cameras.main.height || 600;
-    this.cameras.main.zoom = Math.max(
-      Math.min(camW / worldW, camH / worldH, 2),
-      0.15,
-    );
+    if (this.hasInitializedCamera && prevZoom > 0) {
+      cam.zoom = prevZoom;
+      cam.scrollX = prevScrollX;
+      cam.scrollY = prevScrollY;
+    } else {
+      const worldW = Math.max(this.layout.mapWidth * TILE_SIZE, 1);
+      const worldH = Math.max(this.layout.mapHeight * TILE_SIZE, 1);
+      cam.centerOn(worldW / 2, worldH / 2);
+      const camW = cam.width || 800;
+      const camH = cam.height || 600;
+      cam.zoom = Phaser.Math.Clamp(
+        Math.min(camW / worldW, camH / worldH) * 1.2,
+        0.3,
+        2,
+      );
+      this.hasInitializedCamera = true;
+    }
   }
 
   private renderTilemap() {
@@ -201,16 +209,15 @@ export class OfficeScene extends Phaser.Scene {
     for (const room of this.layout.rooms) {
       const label = this.add.text(
         (room.x + room.w / 2) * TILE_SIZE,
-        room.y * TILE_SIZE - 4,
+        room.y * TILE_SIZE - 6,
         room.label,
         {
-          fontSize: '13px',
-          fontFamily: '"Microsoft YaHei", "PingFang SC", monospace',
-          color: '#ffffff',
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          padding: { x: 6, y: 3 },
+          fontSize: '15px',
+          fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+          color: '#f0f0f0',
+          backgroundColor: '#000000cc',
+          padding: { x: 10, y: 5 },
           align: 'center',
-          shadow: { offsetX: 1, offsetY: 1, color: '#000', blur: 2, fill: true },
         },
       );
       label.setOrigin(0.5, 1);
@@ -224,6 +231,11 @@ export class OfficeScene extends Phaser.Scene {
 
     for (const node of this.orgData.nodes) {
       const profile = this.orgData.agentProfiles[node.agent_profile_id || node.id];
+      const isCeo = /ceo|首席|总裁|总经理/i.test(node.role_title ?? '');
+      let appearance = profile?.pixel_appearance ?? null;
+      if (isCeo && !appearance) {
+        appearance = { bodyType: 'akita', accessory: 'crown' };
+      }
       const config: AgentSpriteConfig = {
         nodeId: node.id,
         name: profile?.name ?? node.role_title,
@@ -231,7 +243,7 @@ export class OfficeScene extends Phaser.Scene {
         icon: profile?.icon,
         department: node.department,
         status: node.status,
-        pixelAppearance: profile?.pixel_appearance,
+        pixelAppearance: appearance,
       };
 
       // Find initial position based on status
@@ -470,6 +482,22 @@ export class OfficeScene extends Phaser.Scene {
     sprite.moveTo(pos.x, pos.y);
   }
 
+  private onZoomToNode = (nodeId: string) => {
+    if (!this.isAlive()) return;
+    const sprite = this.agentSprites.get(nodeId);
+    if (!sprite) return;
+    const pos = sprite.getPosition();
+    const cam = this.cameras.main;
+    this.tweens.add({
+      targets: cam,
+      scrollX: pos.x - cam.width / 2,
+      scrollY: pos.y - cam.height / 2,
+      zoom: 2.5,
+      duration: 500,
+      ease: 'Quad.easeInOut',
+    });
+  };
+
   // Public API for React bridge
   updateOrgData(data: OrgData) {
     EventBus.emit('update-org-data', data);
@@ -488,6 +516,7 @@ export class OfficeScene extends Phaser.Scene {
     EventBus.off('update-theme', this.onThemeChange, this);
     EventBus.off('activity-start', this.onActivityStart, this);
     EventBus.off('activity-end', this.onActivityEnd, this);
+    EventBus.off('zoom-to-node', this.onZoomToNode, this);
     this.activitySystem?.destroy();
     this.agentSprites.forEach(s => s.destroy());
     this.agentSprites.clear();
@@ -497,7 +526,7 @@ export class OfficeScene extends Phaser.Scene {
       this.tilemapImage.destroy();
       this.tilemapImage = null;
     }
-    if (this.textures.exists(this.tilemapTextureKey)) {
+    if (this.textures?.exists(this.tilemapTextureKey)) {
       this.textures.remove(this.tilemapTextureKey);
     }
   }

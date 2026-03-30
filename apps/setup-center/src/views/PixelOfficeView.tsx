@@ -191,7 +191,10 @@ export function PixelOfficeView({
       {/* Bottom bar */}
       <div className="poBottom">
         <PixelOfficeEventLog entries={eventLog} />
-        <PixelOfficeAgentList agents={agents} />
+        <PixelOfficeAgentList
+          agents={agents}
+          onAgentClick={(nodeId) => EventBus.emit('zoom-to-node', nodeId)}
+        />
         <PixelOfficeThemeSelector
           currentThemeId={themeId}
           onSelectTheme={setThemeId}

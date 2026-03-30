@@ -37,11 +37,12 @@ export const PhaserGame = forwardRef<GameRef, PhaserGameProps>(function PhaserGa
     const el = containerRef.current;
     if (!el) return;
 
-    let game: Phaser.Game | null = null;
     let destroyed = false;
+    let game: Phaser.Game | null = null;
+    let observer: ResizeObserver | null = null;
 
     const createGame = () => {
-      if (destroyed) return;
+      if (destroyed || gameRef.current) return;
       game = new Phaser.Game({
         type: Phaser.AUTO,
         parent: el,
@@ -63,7 +64,7 @@ export const PhaserGame = forwardRef<GameRef, PhaserGameProps>(function PhaserGa
       sceneRef.current = scene;
       onSceneReady?.(scene);
       if (orgDataRef.current) scene.updateOrgData(orgDataRef.current);
-      scene.changeTheme(themeIdRef.current);
+      if (themeIdRef.current !== 'office') scene.changeTheme(themeIdRef.current);
     };
 
     EventBus.on('scene-ready', onReady);
@@ -72,25 +73,28 @@ export const PhaserGame = forwardRef<GameRef, PhaserGameProps>(function PhaserGa
     if (el.clientWidth > 0 && el.clientHeight > 0) {
       createGame();
     } else {
-      const raf = requestAnimationFrame(() => {
-        if (!destroyed) createGame();
+      observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+            observer?.disconnect();
+            observer = null;
+            createGame();
+            break;
+          }
+        }
       });
-      return () => {
-        destroyed = true;
-        cancelAnimationFrame(raf);
-        EventBus.off('scene-ready', onReady);
-        if (onEventLog) EventBus.off('event-log', onEventLog);
-      };
+      observer.observe(el);
     }
 
     return () => {
       destroyed = true;
+      observer?.disconnect();
       EventBus.off('scene-ready', onReady);
       if (onEventLog) EventBus.off('event-log', onEventLog);
       sceneRef.current?.shutdown();
+      sceneRef.current = null;
       game?.destroy(true);
       gameRef.current = null;
-      sceneRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { PixelAvatar } from "../components/pixel-avatar";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { setThemePref } from "../theme";
@@ -1305,7 +1304,6 @@ const MessageBubble = memo(function MessageBubble({
   onSkipStep,
   onImagePreview,
   mdModules,
-  agentProfile,
 }: {
   msg: ChatMessage;
   onAskAnswer?: (msgId: string, answer: string) => void;
@@ -1314,26 +1312,15 @@ const MessageBubble = memo(function MessageBubble({
   onSkipStep?: () => void;
   onImagePreview?: (displayUrl: string, downloadUrl: string, name: string) => void;
   mdModules?: MdModules | null;
-  agentProfile?: { id: string; name: string; icon: string; color: string; pixel_appearance?: Record<string, unknown> | null } | null;
 }) {
   const { t } = useTranslation();
   const isUser = msg.role === "user";
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start", marginBottom: 16 }}>
-      {/* Agent name label with pixel avatar */}
+      {/* Agent name label */}
       {!isUser && msg.agentName && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, paddingLeft: 2 }}>
-          {agentProfile && (
-            <PixelAvatar
-              agentId={agentProfile.id}
-              profileColor={agentProfile.color}
-              profileIcon={agentProfile.icon}
-              profileName={agentProfile.name}
-              appearance={agentProfile.pixel_appearance as never}
-              size={22}
-            />
-          )}
-          <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.5 }}>{msg.agentName}</span>
+        <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.5, marginBottom: 2, paddingLeft: 2 }}>
+          {msg.agentName}
         </div>
       )}
       <div
@@ -1428,7 +1415,6 @@ const FlatMessageItem = memo(function FlatMessageItem({
   onSkipStep,
   onImagePreview,
   mdModules,
-  agentProfile,
 }: {
   msg: ChatMessage;
   onAskAnswer?: (msgId: string, answer: string) => void;
@@ -1437,7 +1423,6 @@ const FlatMessageItem = memo(function FlatMessageItem({
   onSkipStep?: () => void;
   onImagePreview?: (displayUrl: string, downloadUrl: string, name: string) => void;
   mdModules?: MdModules | null;
-  agentProfile?: { id: string; name: string; icon: string; color: string; pixel_appearance?: Record<string, unknown> | null } | null;
 }) {
   const { t } = useTranslation();
   const isUser = msg.role === "user";
@@ -1470,20 +1455,10 @@ const FlatMessageItem = memo(function FlatMessageItem({
       {/* Assistant message */}
       {!isUser && (
         <>
-          {/* Agent name with pixel avatar */}
+          {/* Agent name */}
           {msg.agentName && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-              {agentProfile && (
-                <PixelAvatar
-                  agentId={agentProfile.id}
-                  profileColor={agentProfile.color}
-                  profileIcon={agentProfile.icon}
-                  profileName={agentProfile.name}
-                  appearance={agentProfile.pixel_appearance as never}
-                  size={20}
-                />
-              )}
-              <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.4 }}>{msg.agentName}</span>
+            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.4, marginBottom: 4 }}>
+              {msg.agentName}
             </div>
           )}
 
@@ -4488,14 +4463,8 @@ export function ChatView({
         onClick={() => { if (renamingId !== conv.id) setActiveConvId(conv.id); }}
         onContextMenu={(e) => { e.preventDefault(); (e.nativeEvent as any)._handled = true; setCtxMenu({ x: e.clientX, y: e.clientY, convId: conv.id }); }}
       >
-        <div className="convItemIcon" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <PixelAvatar
-            agentId={profileId}
-            profileColor={agentProfile?.color}
-            profileIcon={agentProfile?.icon}
-            profileName={agentProfile?.name}
-            size={18}
-          />
+        <div className="convItemIcon">
+          <span title={agentProfile?.name || ""} style={{ fontSize: 16 }}>{agentProfile?.icon || "💬"}</span>
         </div>
         <div className="convItemBody">
           {renamingId === conv.id ? (
@@ -4641,7 +4610,7 @@ export function ChatView({
                       onMouseLeave={() => setOrbitTip(null)}
                     >
                       <span className="agentOrbitIcon">
-                        <PixelAvatar agentId={pid} profileColor={ap?.color} profileIcon={ap?.icon} profileName={ap?.name} size={20} />
+                        {ap?.icon || "💬"}
                       </span>
                       {isRunning && <span className="agentOrbitPulse" />}
                     </button>
@@ -4714,16 +4683,13 @@ export function ChatView({
               <div style={{ fontSize: 13, marginTop: 4 }}>{t("chat.emptyDesc")}</div>
             </div>
           )}
-          {messages.map((msg) => {
-            const matchedProfile = msg.agentName
-              ? agentProfiles.find((p) => p.name === msg.agentName || p.id === msg.agentName) ?? null
-              : null;
-            return displayMode === "flat" ? (
-              <FlatMessageItem key={msg.id} msg={msg} onAskAnswer={handleAskAnswer} apiBaseUrl={apiBaseUrl} showChain={showChain} onSkipStep={handleSkipStep} onImagePreview={handleImagePreview} mdModules={mdModules} agentProfile={matchedProfile as never} />
+          {messages.map((msg) =>
+            displayMode === "flat" ? (
+              <FlatMessageItem key={msg.id} msg={msg} onAskAnswer={handleAskAnswer} apiBaseUrl={apiBaseUrl} showChain={showChain} onSkipStep={handleSkipStep} onImagePreview={handleImagePreview} mdModules={mdModules} />
             ) : (
-              <MessageBubble key={msg.id} msg={msg} onAskAnswer={handleAskAnswer} apiBaseUrl={apiBaseUrl} showChain={showChain} onSkipStep={handleSkipStep} onImagePreview={handleImagePreview} mdModules={mdModules} agentProfile={matchedProfile as never} />
-            );
-          })}
+              <MessageBubble key={msg.id} msg={msg} onAskAnswer={handleAskAnswer} apiBaseUrl={apiBaseUrl} showChain={showChain} onSkipStep={handleSkipStep} onImagePreview={handleImagePreview} mdModules={mdModules} />
+            )
+          )}
 
           {/* Sub-agent progress cards */}
           {displaySubAgentTasks.length > 0 && (

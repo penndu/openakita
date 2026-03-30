@@ -27,9 +27,10 @@ interface DepartmentInfo {
 }
 
 const ROOM_PADDING = 1;
-const MIN_ROOM_W = 8;
-const MIN_ROOM_H = 7;
+const MIN_ROOM_W = 10;
+const MIN_ROOM_H = 8;
 const HALL_HEIGHT = 2;
+const DEPT_COLS = 3;
 
 function createEmptyMap(w: number, h: number): number[][] {
   return Array.from({ length: h }, () => new Array(w).fill(TILE.EMPTY));
@@ -44,20 +45,16 @@ function fillRect(map: number[][], x: number, y: number, w: number, h: number, t
 }
 
 function drawRoom(map: number[][], rx: number, ry: number, rw: number, rh: number) {
-  // Floor
   for (let row = ry + 1; row < ry + rh; row++) {
     for (let col = rx + 1; col < rx + rw - 1; col++) {
       map[row][col] = ((row + col) % 2 === 0) ? TILE.FLOOR : TILE.FLOOR_ALT;
     }
   }
-  // Walls top
   fillRect(map, rx, ry, rw, 1, TILE.WALL_TOP);
-  // Walls sides
   for (let row = ry + 1; row < ry + rh; row++) {
     map[row][rx] = TILE.WALL_SIDE;
     map[row][rx + rw - 1] = TILE.WALL_SIDE;
   }
-  // Corners
   map[ry][rx] = TILE.WALL_CORNER;
   map[ry][rx + rw - 1] = TILE.WALL_CORNER;
 }
@@ -81,69 +78,83 @@ export function generateLayout(
   const deptRoomW = Math.max(MIN_ROOM_W, Math.ceil(maxNodesInDept * 2.5) + 4);
   const deptRoomH = Math.max(MIN_ROOM_H, Math.ceil(maxNodesInDept / 2) + 5);
 
-  const meetingW = Math.max(MIN_ROOM_W + 2, Math.ceil(deptCount * 3) + 4);
-  const meetingH = 7;
+  const cols = Math.min(DEPT_COLS, deptCount);
+  const deptRows = Math.ceil(deptCount / cols);
 
-  const specialW = Math.max(MIN_ROOM_W, 8);
-  const specialH = 6;
+  const specialW = Math.max(MIN_ROOM_W, 10);
+  const specialH = 7;
 
-  // Layout grid: top row = entrance + break, middle = departments, bottom = meeting + debug
-  const deptRowW = deptCount * (deptRoomW + ROOM_PADDING) + ROOM_PADDING;
-  const totalW = Math.max(deptRowW, meetingW + specialW * 2 + ROOM_PADDING * 4) + 4;
+  const meetingW = Math.max(MIN_ROOM_W + 2, cols * (deptRoomW / 2) + 4);
+  const meetingH = 8;
 
-  const entranceRow = ROOM_PADDING;
-  const deptRow = entranceRow + specialH + HALL_HEIGHT + ROOM_PADDING;
-  const meetingRow = deptRow + deptRoomH + HALL_HEIGHT + ROOM_PADDING;
-  const totalH = meetingRow + meetingH + ROOM_PADDING + 2;
+  const deptRowW = cols * (deptRoomW + ROOM_PADDING) + ROOM_PADDING;
+  const totalW = Math.max(deptRowW, meetingW + specialW * 2 + ROOM_PADDING * 4, specialW * 2 + ROOM_PADDING * 4) + 4;
+
+  // Vertical sections
+  const entranceY = ROOM_PADDING;
+  let cursorY = entranceY + specialH + HALL_HEIGHT + ROOM_PADDING;
+
+  // Pre-calculate total height
+  const deptSectionH = deptRows * (deptRoomH + HALL_HEIGHT + ROOM_PADDING);
+  const meetingY = cursorY + deptSectionH;
+  const totalH = meetingY + meetingH + ROOM_PADDING + 2;
 
   const map = createEmptyMap(totalW, totalH);
 
-  // Hallways (floor between rows)
-  fillRect(map, 0, entranceRow + specialH, totalW, HALL_HEIGHT, TILE.FLOOR);
-  fillRect(map, 0, deptRow + deptRoomH, totalW, HALL_HEIGHT, TILE.FLOOR);
+  // Hallway below entrance row
+  fillRect(map, 0, entranceY + specialH, totalW, HALL_HEIGHT, TILE.FLOOR);
 
   // Entrance room (top-left)
   const entranceX = ROOM_PADDING + 1;
-  drawRoom(map, entranceX, entranceRow, specialW, specialH);
-  placeDoor(map, entranceX, entranceRow, specialW, specialH);
-  map[entranceRow + 3][entranceX + Math.floor(specialW / 2)] = TILE.DOOR;
+  drawRoom(map, entranceX, entranceY, specialW, specialH);
+  placeDoor(map, entranceX, entranceY, specialW, specialH);
   rooms.push({
     id: 'entrance',
     type: 'entrance',
     label: theme.roomLabels.entrance,
-    x: entranceX, y: entranceRow, w: specialW, h: specialH,
-    seats: [{ x: (entranceX + 2) * TILE_SIZE, y: (entranceRow + 3) * TILE_SIZE, id: 'entrance_0' }],
+    x: entranceX, y: entranceY, w: specialW, h: specialH,
+    seats: [
+      { x: (entranceX + 2) * TILE_SIZE, y: (entranceY + 3) * TILE_SIZE, id: 'entrance_0' },
+      { x: (entranceX + 4) * TILE_SIZE, y: (entranceY + 3) * TILE_SIZE, id: 'entrance_1' },
+    ],
   });
 
   // Break room (top-right)
   const breakX = totalW - specialW - ROOM_PADDING - 1;
-  drawRoom(map, breakX, entranceRow, specialW, specialH);
-  placeDoor(map, breakX, entranceRow, specialW, specialH);
-  map[entranceRow + 2][breakX + 2] = TILE.SOFA;
-  map[entranceRow + 2][breakX + specialW - 3] = TILE.COFFEE;
+  drawRoom(map, breakX, entranceY, specialW, specialH);
+  placeDoor(map, breakX, entranceY, specialW, specialH);
+  map[entranceY + 2][breakX + 2] = TILE.SOFA;
+  map[entranceY + 2][breakX + specialW - 3] = TILE.COFFEE;
   rooms.push({
     id: 'break',
     type: 'break',
     label: theme.roomLabels.breakRoom,
-    x: breakX, y: entranceRow, w: specialW, h: specialH,
+    x: breakX, y: entranceY, w: specialW, h: specialH,
     seats: Array.from({ length: 4 }, (_, i) => ({
       x: (breakX + 2 + i) * TILE_SIZE,
-      y: (entranceRow + 3) * TILE_SIZE,
+      y: (entranceY + 4) * TILE_SIZE,
       id: `break_${i}`,
     })),
   });
 
-  // Department rooms (middle row)
+  // Department rooms — grid layout
   departments.forEach((dept, idx) => {
-    const rx = ROOM_PADDING + 1 + idx * (deptRoomW + ROOM_PADDING);
-    const ry = deptRow;
+    const gridCol = idx % cols;
+    const gridRow = Math.floor(idx / cols);
+    const rx = ROOM_PADDING + 1 + gridCol * (deptRoomW + ROOM_PADDING);
+    const ry = cursorY + gridRow * (deptRoomH + HALL_HEIGHT + ROOM_PADDING);
+
     drawRoom(map, rx, ry, deptRoomW, deptRoomH);
     placeDoor(map, rx, ry, deptRoomW, deptRoomH);
 
+    // Hallway below each dept row
+    fillRect(map, 0, ry + deptRoomH, totalW, HALL_HEIGHT, TILE.FLOOR);
+
     const seats: RoomDef['seats'] = [];
+    const seatCols = Math.floor((deptRoomW - 3) / 2);
     dept.nodeIds.forEach((nid, si) => {
-      const seatCol = rx + 2 + (si % Math.floor((deptRoomW - 3) / 2)) * 2;
-      const seatRow = ry + 2 + Math.floor(si / Math.floor((deptRoomW - 3) / 2)) * 2;
+      const seatCol = rx + 2 + (si % seatCols) * 2;
+      const seatRow = ry + 2 + Math.floor(si / seatCols) * 2;
 
       if (seatRow < ry + deptRoomH - 1 && seatCol < rx + deptRoomW - 1) {
         map[seatRow][seatCol] = TILE.DESK;
@@ -154,11 +165,9 @@ export function generateLayout(
       }
     });
 
-    // Whiteboard on wall
     if (ry + 1 < map.length && rx + deptRoomW - 3 < map[0].length) {
       map[ry + 1][rx + deptRoomW - 3] = TILE.WHITEBOARD;
     }
-    // Plant in corner
     if (ry + 1 < map.length && rx + 1 < map[0].length) {
       map[ry + 1][rx + 1] = TILE.PLANT;
     }
@@ -175,50 +184,49 @@ export function generateLayout(
 
   // Meeting room (bottom center)
   const meetingX = Math.floor((totalW - meetingW) / 2);
-  drawRoom(map, meetingX, meetingRow, meetingW, meetingH);
-  placeDoor(map, meetingX, meetingRow, meetingW, meetingH);
+  drawRoom(map, meetingX, meetingY, meetingW, meetingH);
+  placeDoor(map, meetingX, meetingY, meetingW, meetingH);
+  fillRect(map, 0, meetingY - HALL_HEIGHT, totalW, HALL_HEIGHT, TILE.FLOOR);
 
-  // Meeting table in center
   const tableStartX = meetingX + Math.floor((meetingW - 4) / 2);
   for (let i = 0; i < 4; i++) {
-    map[meetingRow + 3][tableStartX + i] = TILE.MEETING_TABLE;
+    map[meetingY + 3][tableStartX + i] = TILE.MEETING_TABLE;
   }
-  map[meetingRow + 1][meetingX + meetingW - 3] = TILE.PROJECTOR;
+  map[meetingY + 1][meetingX + meetingW - 3] = TILE.PROJECTOR;
 
   const meetingSeats: RoomDef['seats'] = [];
   const seatCount = Math.min(deptCount * 3, meetingW - 4);
   for (let i = 0; i < seatCount; i++) {
     const sx = meetingX + 2 + i;
-    const sy = (i % 2 === 0) ? meetingRow + 2 : meetingRow + 4;
+    const sy = (i % 2 === 0) ? meetingY + 2 : meetingY + 5;
     meetingSeats.push({ x: sx * TILE_SIZE, y: sy * TILE_SIZE, id: `meeting_${i}` });
   }
   rooms.push({
     id: 'meeting',
     type: 'meeting',
     label: theme.roomLabels.meetingRoom,
-    x: meetingX, y: meetingRow, w: meetingW, h: meetingH,
+    x: meetingX, y: meetingY, w: meetingW, h: meetingH,
     seats: meetingSeats,
   });
 
-  // Debug/server room (bottom-right)
+  // Debug room (bottom-right)
   const debugX = totalW - specialW - ROOM_PADDING - 1;
-  drawRoom(map, debugX, meetingRow, specialW, specialH);
-  placeDoor(map, debugX, meetingRow, specialW, specialH);
-  map[meetingRow + 2][debugX + 2] = TILE.SERVER;
-  map[meetingRow + 2][debugX + 4] = TILE.SERVER;
+  drawRoom(map, debugX, meetingY, specialW, specialH);
+  placeDoor(map, debugX, meetingY, specialW, specialH);
+  map[meetingY + 2][debugX + 2] = TILE.SERVER;
+  map[meetingY + 2][debugX + 4] = TILE.SERVER;
   rooms.push({
     id: 'debug',
     type: 'debug',
     label: theme.roomLabels.debugArea,
-    x: debugX, y: meetingRow, w: specialW, h: specialH,
-    seats: [{ x: (debugX + 3) * TILE_SIZE, y: (meetingRow + 3) * TILE_SIZE, id: 'debug_0' }],
+    x: debugX, y: meetingY, w: specialW, h: specialH,
+    seats: [{ x: (debugX + 3) * TILE_SIZE, y: (meetingY + 3) * TILE_SIZE, id: 'debug_0' }],
   });
 
-  // Public area: fill remaining hallway with floor
+  // Fill remaining gaps with floor
   for (let row = 0; row < totalH; row++) {
     for (let col = 0; col < totalW; col++) {
       if (map[row][col] === TILE.EMPTY) {
-        // Leave outer border empty for visual margin
         if (row > 0 && row < totalH - 1 && col > 0 && col < totalW - 1) {
           map[row][col] = TILE.FLOOR;
         }
@@ -230,11 +238,11 @@ export function generateLayout(
     id: 'public',
     type: 'public',
     label: '公共区域',
-    x: ROOM_PADDING, y: entranceRow + specialH,
+    x: ROOM_PADDING, y: entranceY + specialH,
     w: totalW - ROOM_PADDING * 2, h: HALL_HEIGHT,
     seats: Array.from({ length: 6 }, (_, i) => ({
       x: (4 + i * 3) * TILE_SIZE,
-      y: (entranceRow + specialH + 1) * TILE_SIZE,
+      y: (entranceY + specialH + 1) * TILE_SIZE,
       id: `public_${i}`,
     })),
   });
