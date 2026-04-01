@@ -692,14 +692,12 @@ class SessionManager:
             # 3. 备份旧文件（如果存在）
             if sessions_file.exists():
                 try:
-                    if backup_file.exists():
-                        backup_file.unlink()
-                    sessions_file.rename(backup_file)
+                    sessions_file.replace(backup_file)
                 except Exception as e:
                     logger.warning(f"Failed to backup sessions file: {e}")
 
-            # 4. 原子重命名临时文件为正式文件
-            temp_file.rename(sessions_file)
+            # 4. 原子重命名临时文件为正式文件 (replace works on Windows too)
+            temp_file.replace(sessions_file)
 
             logger.debug(f"Saved {len(data)} sessions to storage (atomic)")
             return True

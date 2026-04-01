@@ -927,6 +927,8 @@ async def chat_insert(request: Request, body: ChatControlRequest):
         _conv_id = conv_id or getattr(actual_agent, "_current_conversation_id", None)
         logger.info(f"[Chat API] Insert -> STOP: reason={reason!r}, conv_id={_conv_id!r}")
         actual_agent.cancel_current_task(reason, session_id=_conv_id)
+        if _conv_id:
+            await get_lifecycle_manager().finish(_conv_id)
         logger.info("[Chat API] Insert -> STOP 执行完成")
         return {"status": "ok", "action": "cancel", "reason": reason}
 

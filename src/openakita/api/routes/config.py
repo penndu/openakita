@@ -264,7 +264,32 @@ async def write_env(body: EnvUpdateRequest):
         os.environ.pop(key, None)
     count = len([v for v in body.entries.values() if v]) + len(body.delete_keys)
     logger.info(f"[Config API] Updated .env with {count} entries")
-    return {"status": "ok", "updated_keys": list(body.entries.keys())}
+
+    # Determine if any changed keys require a service restart
+    _RESTART_REQUIRED_PREFIXES = (
+        "TELEGRAM_", "FEISHU_", "DINGTALK_", "WEWORK_", "ONEBOT_", "QQ_",
+        "WECHAT_", "IM_", "REDIS_", "DATABASE_", "SANDBOX_",
+    )
+    _HOT_RELOAD_PREFIXES = (
+        "OPENAI_", "ANTHROPIC_", "LLM_", "DEFAULT_MODEL", "TEMPERATURE",
+        "MAX_TOKENS", "OPENAKITA_THEME", "LANGUAGE",
+    )
+    changed_keys = set(k for k, v in body.entries.items() if v) | set(body.delete_keys)
+    restart_required = any(
+        any(k.upper().startswith(p) for p in _RESTART_REQUIRED_PREFIXES)
+        for k in changed_keys
+    )
+    hot_reloadable = all(
+        any(k.upper().startswith(p) for p in _HOT_RELOAD_PREFIXES) or k.upper().startswith("OPENAKITA_")
+        for k in changed_keys
+    ) if changed_keys else True
+
+    return {
+        "status": "ok",
+        "updated_keys": list(body.entries.keys()),
+        "restart_required": restart_required,
+        "hot_reloadable": hot_reloadable,
+    }
 
 
 @router.get("/api/config/endpoints")

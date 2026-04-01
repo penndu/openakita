@@ -3888,8 +3888,14 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
         Yields:
             SSE 事件字典 {"type": "...", ...}
         """
-        if not self._initialized:
-            await self.initialize()
+        try:
+            if not self._initialized:
+                await self.initialize()
+        except Exception as init_err:
+            logger.error(f"[Session:{session_id}] Initialization failed: {init_err}", exc_info=True)
+            yield {"type": "error", "message": f"初始化失败: {init_err}"}
+            yield {"type": "done"}
+            return
 
         endpoint_override = endpoint_override or self._preferred_endpoint
 
@@ -4189,6 +4195,17 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
             logger.error(f"chat_with_session_stream error: {e}", exc_info=True)
             yield {"type": "error", "message": str(e)[:500]}
             yield {"type": "done"}
+            _tm = locals().get("task_monitor")
+            if _tm is not None:
+                try:
+                    await self._finalize_session(
+                        response_text=_reply_text or "",
+                        session=session,
+                        session_id=session_id,
+                        task_monitor=_tm,
+                    )
+                except Exception:
+                    logger.debug(f"[Session:{session_id}] _finalize_session in except handler failed", exc_info=True)
         finally:
             self._cleanup_session_state(im_tokens)
 
