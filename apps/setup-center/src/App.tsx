@@ -1,30 +1,33 @@
-import { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke, listen, IS_TAURI, IS_WEB, IS_CAPACITOR, IS_LOCAL_WEB, getAppVersion, onWsEvent, reconnectWsNow, logger } from "./platform";
+import { invoke, listen, IS_TAURI, IS_WEB, IS_CAPACITOR, IS_LOCAL_WEB, getAppVersion, onWsEvent, reconnectWsNow, logger, registerGlobalShortcut } from "./platform";
 import { getActiveServer, getActiveServerId } from "./platform/servers";
 import { checkAuth, installFetchInterceptor, AUTH_EXPIRED_EVENT, isPasswordUserSet, clearAccessToken, setTauriRemoteMode, isTauriRemoteMode } from "./platform/auth";
 import { LoginView } from "./views/LoginView";
 import { ServerManagerView } from "./views/ServerManagerView";
 import { ChatView } from "./views/ChatView";
-import { SkillManager } from "./views/SkillManager";
-import { IMView } from "./views/IMView";
-import { TokenStatsView } from "./views/TokenStatsView";
-import { MCPView } from "./views/MCPView";
-import PluginManagerView from "./views/PluginManagerView";
-import { SchedulerView } from "./views/SchedulerView";
-import { MemoryView } from "./views/MemoryView";
-import { IdentityView } from "./views/IdentityView";
-import { AgentDashboardView } from "./views/AgentDashboardView";
-import { AgentManagerView } from "./views/AgentManagerView";
-import { OrgEditorView } from "./views/OrgEditorView";
-import { PixelOfficeView } from "./views/PixelOfficeView";
+
+// Lazy-loaded views — keeps first-screen bundle small (4.7 Code Splitting)
+const SkillManager = lazy(() => import("./views/SkillManager").then(m => ({ default: m.SkillManager })));
+const IMView = lazy(() => import("./views/IMView").then(m => ({ default: m.IMView })));
+const TokenStatsView = lazy(() => import("./views/TokenStatsView").then(m => ({ default: m.TokenStatsView })));
+const MCPView = lazy(() => import("./views/MCPView").then(m => ({ default: m.MCPView })));
+const PluginManagerView = lazy(() => import("./views/PluginManagerView"));
+const SchedulerView = lazy(() => import("./views/SchedulerView").then(m => ({ default: m.SchedulerView })));
+const MemoryView = lazy(() => import("./views/MemoryView").then(m => ({ default: m.MemoryView })));
+const IdentityView = lazy(() => import("./views/IdentityView").then(m => ({ default: m.IdentityView })));
+const AgentDashboardView = lazy(() => import("./views/AgentDashboardView").then(m => ({ default: m.AgentDashboardView })));
+const AgentManagerView = lazy(() => import("./views/AgentManagerView").then(m => ({ default: m.AgentManagerView })));
+const OrgEditorView = lazy(() => import("./views/OrgEditorView").then(m => ({ default: m.OrgEditorView })));
+const PixelOfficeView = lazy(() => import("./views/PixelOfficeView").then(m => ({ default: m.PixelOfficeView })));
+const AgentStoreView = lazy(() => import("./views/AgentStoreView").then(m => ({ default: m.AgentStoreView })));
+const SkillStoreView = lazy(() => import("./views/SkillStoreView").then(m => ({ default: m.SkillStoreView })));
+const SecurityView = lazy(() => import("./views/SecurityView"));
+const PetView = lazy(() => import("./views/PetView").then(m => ({ default: m.PetView })));
+
 import { FeedbackModal } from "./views/FeedbackModal";
 import { IMConfigView } from "./views/IMConfigView";
 import { AgentSystemView } from "./views/AgentSystemView";
-import { AgentStoreView } from "./views/AgentStoreView";
-import { SkillStoreView } from "./views/SkillStoreView";
-import SecurityView from "./views/SecurityView";
-import { PetView } from "./views/PetView";
 import { LLMView } from "./views/LLMView";
 import { StatusView } from "./views/StatusView";
 import type {
@@ -139,7 +142,7 @@ function _viewToHash(view: string, stepId?: string): string {
 
 export function App() {
   if (window.location.pathname === '/pet') {
-    return <PetView />;
+    return <Suspense fallback={null}><PetView /></Suspense>;
   }
 
   const { t, i18n } = useTranslation();
@@ -927,6 +930,23 @@ export function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWorkspaceId, venvDir]);
+
+  // ── Global shortcut: Ctrl+Shift+A to summon window ──
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    let unregister: (() => void) | null = null;
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const win = getCurrentWindow();
+        unregister = await registerGlobalShortcut("CmdOrCtrl+Shift+A", () => {
+          win.show().catch(() => {});
+          win.setFocus().catch(() => {});
+        });
+      } catch { /* global-shortcut not available */ }
+    })();
+    return () => { if (unregister) unregister(); };
+  }, []);
 
   // streaming pip logs (install step)
   useEffect(() => {
@@ -2728,8 +2748,21 @@ export function App() {
     if (!currentWorkspaceId) { notifyError(t("common.error")); return; }
     const _busyId = notifyLoading(t("common.loading"));
     try {
-      await saveEnvKeys(keys);
-      notifySuccess(successText);
+      const result = await saveEnvKeys(keys);
+      if (result.restartRequired) {
+        toast.warning(
+          t("config.savedNeedRestart", "已保存，需要重启服务才能生效"),
+          {
+            duration: 8000,
+            action: {
+              label: t("config.restartNow", "立即重启"),
+              onClick: () => restartService(),
+            },
+          },
+        );
+      } else {
+        notifySuccess(successText);
+      }
     } finally {
       dismissLoading(_busyId);
     }
@@ -4041,20 +4074,43 @@ export function App() {
     const obCurrentIdxRaw = obStepDots.indexOf(obStep);
     const obCurrentIdx = obCurrentIdxRaw >= 0 ? obCurrentIdxRaw : obStepDots.length - 1;
 
+    const obStepLabels: Record<string, string> = {
+      "ob-welcome": t("onboarding.step.welcome", "欢迎"),
+      "ob-agreement": t("onboarding.step.agreement", "协议"),
+      "ob-llm": t("onboarding.step.llm", "模型"),
+      "ob-im": t("onboarding.step.im", "通讯"),
+      "ob-cli": t("onboarding.step.cli", "完成"),
+    };
+
     const stepIndicator = (
-      <div className="flex gap-2 py-4">
-        {obStepDots.map((s, i) => (
-          <div
-            key={s}
-            className={`size-2 rounded-full transition-all duration-200 ${
-              i === obCurrentIdx
-                ? "bg-primary scale-[1.3]"
-                : i < obCurrentIdx
-                  ? "bg-emerald-500"
-                  : "bg-muted-foreground/25"
-            }`}
-          />
-        ))}
+      <div className="flex flex-col items-center gap-1 py-4">
+        <div className="flex items-center gap-3">
+          {obCurrentIdx > 0 && (
+            <button
+              onClick={() => setObStep(obStepDots[obCurrentIdx - 1])}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-0.5 rounded"
+              style={{ cursor: "pointer", background: "transparent", border: "none" }}
+            >
+              ← {t("common.back", "返回")}
+            </button>
+          )}
+          {obStepDots.map((s, i) => (
+            <div key={s} className="flex flex-col items-center gap-1" style={{ minWidth: 40 }}>
+              <div
+                className={`size-2 rounded-full transition-all duration-200 ${
+                  i === obCurrentIdx
+                    ? "bg-primary scale-[1.3]"
+                    : i < obCurrentIdx
+                      ? "bg-emerald-500"
+                      : "bg-muted-foreground/25"
+                }`}
+              />
+              <span className={`text-[10px] transition-opacity ${i === obCurrentIdx ? "text-foreground font-medium" : "text-muted-foreground/50"}`}>
+                {obStepLabels[s] || ""}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     );
 
@@ -5074,7 +5130,9 @@ export function App() {
             />
           </div>
           <div className="content" style={{ display: view !== "chat" ? undefined : "none", flex: 1, minHeight: 0 }}>
-            {renderStepContent()}
+            <Suspense fallback={<div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.5 }}><div className="spinner" style={{ width: 24, height: 24 }} /></div>}>
+              {renderStepContent()}
+            </Suspense>
           </div>
         </div>
 

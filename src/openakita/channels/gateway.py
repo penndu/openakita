@@ -1402,15 +1402,43 @@ class MessageGateway:
 
     @staticmethod
     def _format_group_context(items: list[dict]) -> str:
-        """将缓冲区条目格式化为可注入 prompt 的文本。"""
+        """将缓冲区条目格式化为可注入 prompt 的文本。
+
+        末尾附带条数元信息，AI 可自然地在回复中提及
+        "我注意到了最近 N 条群聊消息的上下文"。
+        """
         if not items:
             return ""
-        lines = ["[群聊近期上下文] 以下是本群中最近的未处理消息，供你理解上下文："]
+        n = len(items)
+        lines = [
+            f"[群聊近期上下文] 以下是本群中最近 {n} 条未处理消息，供你理解上下文。"
+            f"请在回复末尾简要注明 [基于最近 {n} 条群聊消息]："
+        ]
         for entry in items:
             user = entry.get("user") or entry.get("user_id", "?")
             text = entry.get("text", "")
             lines.append(f"  - {user}: {text}")
         return "\n".join(lines)
+
+    async def _try_smart_reaction(self, message: "UnifiedMessage") -> None:
+        """Smart 模式过滤消息时，尝试在原消息上添加 emoji 反应。
+
+        行为受 ``SMART_REACTION_ENABLED`` 环境变量控制（默认关闭以避免群内刷屏）。
+        仅当适配器声明 ``add_reaction`` 能力时执行。
+        """
+        import os
+        if os.environ.get("SMART_REACTION_ENABLED", "").lower() not in ("1", "true", "yes"):
+            return
+        adapter = self._adapters.get(message.channel)
+        if not adapter or not adapter.has_capability("add_reaction"):
+            return
+        msg_id = message.channel_message_id
+        if not msg_id:
+            return
+        try:
+            await adapter.add_reaction(message.chat_id, msg_id, emoji="✅")
+        except Exception as e:
+            logger.debug(f"[Smart] Failed to add reaction: {e}")
 
     def _apply_persisted_group_policy(self) -> None:
         """Load persisted group policy from JSON and apply to adapters."""
@@ -2476,6 +2504,8 @@ class MessageGateway:
                     if not self._smart_throttle.should_process(message.chat_id):
                         with contextlib.suppress(Exception):
                             self._buffer_group_context(message, text=user_text)
+                        # Smart 模式过滤时，尝试添加 emoji 反应表示"已收到"
+                        await self._try_smart_reaction(message)
                         logger.debug(f"[IM] Group message throttled (smart), buffered: {user_text[:50]}")
                         return
                     self._smart_throttle.record_process(message.chat_id)
@@ -3755,8 +3785,13 @@ class MessageGateway:
         max_length = self._CHANNEL_MAX_LENGTH.get(
             base_channel, self._DEFAULT_MAX_LENGTH
         )
-        from .text_splitter import chunk_markdown_text
-        messages = chunk_markdown_text(text_to_send, max_length) if text_to_send else []
+        from .text_splitter import chunk_markdown_text, add_fragment_numbers, estimate_number_prefix_len
+
+        # 预留分片序号长度：先做一次粗估（假设最多 10 片），分片后再精确添加
+        _est_prefix = estimate_number_prefix_len(10)
+        _effective_max = max(max_length - _est_prefix, max_length // 2) if max_length > 0 else max_length
+        messages = chunk_markdown_text(text_to_send, _effective_max) if text_to_send else []
+        messages = add_fragment_numbers(messages)
 
         interval = self._SPLIT_SEND_INTERVAL.get(
             base_channel, self._DEFAULT_SPLIT_INTERVAL
@@ -3830,10 +3865,16 @@ class MessageGateway:
                 logger.error(
                     f"Plain-text fallback also failed for part {failed_at + j + 1}: {e2}"
                 )
+                _sent_count = failed_at + j
+                _fail_hint = (
+                    f"消息发送失败（已送达 {_sent_count}/{len(messages)} 段），请稍后重试。"
+                    if _sent_count > 0
+                    else "消息发送失败，请稍后重试。"
+                )
                 with contextlib.suppress(Exception):
                     await adapter.send_text(
                         chat_id=original.chat_id,
-                        text="消息发送失败，请稍后重试。",
+                        text=_fail_hint,
                         reply_to=original.channel_message_id,
                         thread_id=original.thread_id,
                         metadata=outgoing_meta,

@@ -171,6 +171,7 @@ export type ChatMessage = {
   artifacts?: ChatArtifact[] | null;
   thinkingChain?: ChainGroup[] | null;
   errorInfo?: ChatErrorInfo | null;
+  usage?: { input_tokens: number; output_tokens: number; total_tokens?: number } | null;
   timestamp: number;
   streaming?: boolean;
 };
@@ -266,6 +267,8 @@ export type ChatAttachment = {
   previewUrl?: string;
   size?: number;
   mimeType?: string;
+  /** Transient upload tracking ID — not persisted to backend */
+  _uploadId?: string;
 };
 
 export type ConversationStatus = "idle" | "running" | "completed" | "error";
@@ -278,6 +281,7 @@ export type ChatConversation = {
   messageCount: number;
   pinned?: boolean;
   titleGenerated?: boolean;
+  titleManuallySet?: boolean;
   agentProfileId?: string;
   endpointId?: string;
   status?: ConversationStatus;

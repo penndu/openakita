@@ -33,6 +33,8 @@ import type {
   ChatDisplayMode,
 } from "../types";
 import { genId, formatTime, formatDate, timeAgo } from "../utils";
+import { notifyError } from "../utils/notify";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import {
   IconSend, IconPaperclip, IconMic, IconStopCircle,
   IconPlan, IconPlus, IconMenu, IconStop, IconX,
@@ -53,8 +55,8 @@ import {
 //   - 不支持的浏览器：回退为纯文本，app 正常运行
 type MdModules = {
   ReactMarkdown: typeof import("react-markdown").default;
-  remarkGfm: typeof import("remark-gfm").default;
-  rehypeHighlight: typeof import("rehype-highlight").default;
+  remarkPlugins: import("react-markdown").Options["remarkPlugins"];
+  rehypePlugins: import("react-markdown").Options["rehypePlugins"];
 };
 let _mdModules: MdModules | null = null;
 let _mdLoadAttempted = false;
@@ -76,8 +78,8 @@ function useMdModules(): MdModules | null {
     ]).then(([md, gfm, hl]) => {
       _mdModules = {
         ReactMarkdown: md.default,
-        remarkGfm: gfm.default,
-        rehypeHighlight: hl.default,
+        remarkPlugins: [gfm.default],
+        rehypePlugins: [hl.default],
       };
       setMods(_mdModules);
     }).catch((err) => {
@@ -88,6 +90,80 @@ function useMdModules(): MdModules | null {
 }
 
 let _artifactClickTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ─── 加载状态轮播提示 (6.6) ───
+const _spinnerTips = [
+  "💡 按 Ctrl+/ 查看所有快捷键",
+  "💡 输入 / 可以使用斜杠命令",
+  "💡 拖拽文件到输入框可以上传附件",
+  "💡 Ctrl+F 搜索聊天记录",
+  "💡 输入 @agent名 快速切换 Agent",
+  "💡 使用 /clear 清空当前会话上下文",
+  "💡 使用 /memory 管理 AI 记忆",
+  "💡 长按 Shift+Enter 可以换行输入",
+];
+let _tipShowCounts: number[] = new Array(_spinnerTips.length).fill(0);
+
+function getNextSpinnerTip(): string {
+  const minCount = Math.min(..._tipShowCounts);
+  const candidates = _tipShowCounts
+    .map((c, i) => (c === minCount ? i : -1))
+    .filter((i) => i >= 0);
+  const idx = candidates[Math.floor(Math.random() * candidates.length)];
+  _tipShowCounts[idx]++;
+  return _spinnerTips[idx];
+}
+
+// ─── 对话导出 (7.1) ───
+function exportConversation(msgs: ChatMessage[], title: string, format: "md" | "json") {
+  let content: string;
+  let mimeType: string;
+  let ext: string;
+  if (format === "json") {
+    content = JSON.stringify(msgs.map(({ streaming, ...rest }) => rest), null, 2);
+    mimeType = "application/json";
+    ext = "json";
+  } else {
+    const lines: string[] = [`# ${title}`, "", `> 导出时间: ${new Date().toLocaleString()}`, ""];
+    for (const msg of msgs) {
+      const role = msg.role === "user" ? "👤 用户" : msg.role === "assistant" ? "🤖 助手" : "📢 系统";
+      lines.push(`## ${role}`, "");
+      if (msg.content) lines.push(msg.content, "");
+      if (msg.toolCalls?.length) {
+        lines.push("**工具调用:**", "");
+        for (const tc of msg.toolCalls) {
+          lines.push(`- \`${tc.tool}\`: ${JSON.stringify(tc.args).slice(0, 200)}`);
+        }
+        lines.push("");
+      }
+      lines.push("---", "");
+    }
+    content = lines.join("\n");
+    mimeType = "text/markdown";
+    ext = "md";
+  }
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${title.replace(/[/\\?%*:|"<>]/g, "_").slice(0, 50)}.${ext}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+const IDLE_THRESHOLD_MS = 75 * 60 * 1000; // 75 minutes
+const IDLE_TOKEN_THRESHOLD = 50_000;
+const PASTE_CHAR_THRESHOLD = 800;
+const UNDO_MAX_STEPS = 50;
+
+const SpinnerTipDisplay = memo(function SpinnerTipDisplay() {
+  const [tip, setTip] = useState(() => getNextSpinnerTip());
+  useEffect(() => {
+    const iv = setInterval(() => setTip(getNextSpinnerTip()), 8000);
+    return () => clearInterval(iv);
+  }, []);
+  return <div style={{ fontSize: 11, opacity: 0.5, marginTop: 6, transition: "opacity 0.3s" }}>{tip}</div>;
+});
 
 function appendAuthToken(url: string): string {
   if (IS_TAURI) return url;
@@ -116,6 +192,39 @@ type QueuedMessage = {
   timestamp: number;
   convId: string;
 };
+
+/**
+ * Defensive deserialization pipeline: validate & sanitize messages loaded from localStorage.
+ * Filters out corrupted/incomplete messages that may result from mid-stream crashes.
+ */
+function sanitizeStoredMessages(raw: unknown): ChatMessage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((m): m is ChatMessage => {
+    if (!m || typeof m !== "object") return false;
+    if (typeof m.id !== "string" || !m.id) return false;
+    if (m.role !== "user" && m.role !== "assistant" && m.role !== "system") return false;
+    if (typeof m.content !== "string") return false;
+    if (typeof m.timestamp !== "number") return false;
+    return true;
+  }).map((m) => {
+    const cleaned = { ...m, streaming: undefined };
+    if (m.role === "assistant" && (!m.content || m.content.trim() === "") && !m.toolCalls?.length && !m.todo) {
+      return null;
+    }
+    return cleaned;
+  }).filter(Boolean) as ChatMessage[];
+}
+
+function loadMessagesFromStorage(key: string): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return sanitizeStoredMessages(parsed);
+  } catch {
+    return [];
+  }
+}
 
 /**
  * 将消息数组安全写入 localStorage。
@@ -1341,6 +1450,25 @@ function ErrorCard({ error, onRetry }: { error: ChatErrorInfo; onRetry?: () => v
   const { t } = useTranslation();
   const meta = ERROR_META[error.category] || ERROR_META.unknown;
   const [copied, setCopied] = useState(false);
+  const [countdown, setCountdown] = useState(() => (error.category === "quota" && onRetry) ? 30 : 0);
+  const countdownRef = useRef(countdown);
+  countdownRef.current = countdown;
+
+  useEffect(() => {
+    if (countdown <= 0 || error.category !== "quota") return;
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 0) return 0;
+        if (prev <= 1) {
+          clearInterval(timer);
+          onRetry?.();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [error.category, countdown > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCopy = useCallback(() => {
     const detail = error.raw || error.message;
@@ -1368,12 +1496,19 @@ function ErrorCard({ error, onRetry }: { error: ChatErrorInfo; onRetry?: () => v
         <span style={{ color: meta.color }}>{error.message}</span>
       </div>
       {meta.hint && (
-        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{meta.hint}</div>
+        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
+          {meta.hint}
+          {countdown > 0 && (
+            <span style={{ marginLeft: 8, fontWeight: 600 }}>
+              ({countdown}s {t("chat.autoRetry", "后自动重试")})
+            </span>
+          )}
+        </div>
       )}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         {onRetry && (
           <button
-            onClick={onRetry}
+            onClick={() => { setCountdown(0); onRetry(); }}
             style={{
               fontSize: 12, padding: "3px 10px", borderRadius: 4,
               border: `1px solid ${meta.color}`, background: "transparent",
@@ -1393,6 +1528,18 @@ function ErrorCard({ error, onRetry }: { error: ChatErrorInfo; onRetry?: () => v
         >
           {copied ? t("chat.copied", "已复制") : t("chat.copyError", "复制详情")}
         </button>
+        {countdown > 0 && (
+          <button
+            onClick={() => setCountdown(0)}
+            style={{
+              fontSize: 12, padding: "3px 10px", borderRadius: 4,
+              border: "1px solid var(--line)", background: "transparent",
+              color: "var(--text-secondary)", cursor: "pointer",
+            }}
+          >
+            {t("chat.cancelAutoRetry", "取消自动重试")}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1404,6 +1551,8 @@ const MessageBubble = memo(function MessageBubble({
   onRetry,
   onEdit,
   onRegenerate,
+  onRewind,
+  isLast,
   apiBaseUrl,
   showChain = true,
   onSkipStep,
@@ -1415,6 +1564,8 @@ const MessageBubble = memo(function MessageBubble({
   onRetry?: (msgId: string) => void;
   onEdit?: (msgId: string) => void;
   onRegenerate?: (msgId: string) => void;
+  onRewind?: (msgId: string) => void;
+  isLast?: boolean;
   apiBaseUrl?: string;
   showChain?: boolean;
   onSkipStep?: () => void;
@@ -1469,7 +1620,7 @@ const MessageBubble = memo(function MessageBubble({
         {msg.content && (isUser ? msg.content : stripLegacySummary(msg.content)) && (
           <div className={isUser ? "chatMdContent chatMdContentUser" : "chatMdContent"}>
             {mdModules ? (
-              <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]} rehypePlugins={[mdModules.rehypeHighlight]}>
+              <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>
                 {isUser ? msg.content : stripLegacySummary(msg.content)}
               </mdModules.ReactMarkdown>
             ) : (
@@ -1480,10 +1631,13 @@ const MessageBubble = memo(function MessageBubble({
 
         {/* Streaming indicator */}
         {msg.streaming && !msg.content && (
-          <div style={{ display: "flex", gap: 4, padding: "4px 0" }}>
-            <span className="dotBounce" style={{ animationDelay: "0s" }} />
-            <span className="dotBounce" style={{ animationDelay: "0.15s" }} />
-            <span className="dotBounce" style={{ animationDelay: "0.3s" }} />
+          <div style={{ padding: "4px 0" }}>
+            <div style={{ display: "flex", gap: 4 }}>
+              <span className="dotBounce" style={{ animationDelay: "0s" }} />
+              <span className="dotBounce" style={{ animationDelay: "0.15s" }} />
+              <span className="dotBounce" style={{ animationDelay: "0.3s" }} />
+            </div>
+            <SpinnerTipDisplay />
           </div>
         )}
 
@@ -1514,11 +1668,22 @@ const MessageBubble = memo(function MessageBubble({
       </div>
       <div className="msgActions" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, opacity: 0.35, marginTop: 2, paddingLeft: 2, paddingRight: 2 }}>
         <span>{formatTime(msg.timestamp)}</span>
+        {msg.usage && (
+          <span style={{ opacity: 0.7 }} title={`In: ${msg.usage.input_tokens} · Out: ${msg.usage.output_tokens}`}>
+            {msg.usage.total_tokens ?? (msg.usage.input_tokens + msg.usage.output_tokens)} tokens
+          </span>
+        )}
+        {!msg.streaming && msg.content && (
+          <button className="msgActionBtn" onClick={() => navigator.clipboard.writeText(msg.content).catch(() => {})} title={t("chat.copyMessage", "复制")}>📋</button>
+        )}
         {isUser && !msg.streaming && onEdit && (
           <button className="msgActionBtn" onClick={() => onEdit(msg.id)} title={t("chat.edit", "编辑")}>✏️</button>
         )}
         {isAssistant && !msg.streaming && onRegenerate && (
           <button className="msgActionBtn" onClick={() => onRegenerate(msg.id)} title={t("chat.regenerate", "重新生成")}>🔄</button>
+        )}
+        {!isLast && !msg.streaming && onRewind && (
+          <button className="msgActionBtn" onClick={() => onRewind(msg.id)} title={t("chat.rewind", "回到这里")}>⏪</button>
         )}
       </div>
     </div>
@@ -1533,6 +1698,8 @@ const FlatMessageItem = memo(function FlatMessageItem({
   onRetry,
   onEdit,
   onRegenerate,
+  onRewind,
+  isLast,
   apiBaseUrl,
   showChain = true,
   onSkipStep,
@@ -1544,6 +1711,8 @@ const FlatMessageItem = memo(function FlatMessageItem({
   onRetry?: (msgId: string) => void;
   onEdit?: (msgId: string) => void;
   onRegenerate?: (msgId: string) => void;
+  onRewind?: (msgId: string) => void;
+  isLast?: boolean;
   apiBaseUrl?: string;
   showChain?: boolean;
   onSkipStep?: () => void;
@@ -1577,7 +1746,7 @@ const FlatMessageItem = memo(function FlatMessageItem({
           )}
           <div className="chatMdContent">
             {mdModules ? (
-              <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]} rehypePlugins={[mdModules.rehypeHighlight]}>
+              <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>
                 {msg.content}
               </mdModules.ReactMarkdown>
             ) : (
@@ -1609,10 +1778,13 @@ const FlatMessageItem = memo(function FlatMessageItem({
 
           {/* Streaming indicator */}
           {msg.streaming && !msg.content && (
-            <div style={{ display: "flex", gap: 4, padding: "4px 0" }}>
-              <span className="dotBounce" style={{ animationDelay: "0s" }} />
-              <span className="dotBounce" style={{ animationDelay: "0.15s" }} />
-              <span className="dotBounce" style={{ animationDelay: "0.3s" }} />
+            <div style={{ padding: "4px 0" }}>
+              <div style={{ display: "flex", gap: 4 }}>
+                <span className="dotBounce" style={{ animationDelay: "0s" }} />
+                <span className="dotBounce" style={{ animationDelay: "0.15s" }} />
+                <span className="dotBounce" style={{ animationDelay: "0.3s" }} />
+              </div>
+              <SpinnerTipDisplay />
             </div>
           )}
 
@@ -1620,7 +1792,7 @@ const FlatMessageItem = memo(function FlatMessageItem({
           {msg.content && stripLegacySummary(msg.content) && (
             <div className="chatMdContent">
               {mdModules ? (
-                <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]} rehypePlugins={[mdModules.rehypeHighlight]}>
+                <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>
                   {stripLegacySummary(msg.content)}
                 </mdModules.ReactMarkdown>
               ) : (
@@ -1659,11 +1831,22 @@ const FlatMessageItem = memo(function FlatMessageItem({
       {/* Timestamp + actions */}
       <div className="msgActions" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, opacity: 0.25, marginTop: 2 }}>
         <span>{formatTime(msg.timestamp)}</span>
+        {msg.usage && (
+          <span style={{ opacity: 0.7 }} title={`In: ${msg.usage.input_tokens} · Out: ${msg.usage.output_tokens}`}>
+            {msg.usage.total_tokens ?? (msg.usage.input_tokens + msg.usage.output_tokens)} tokens
+          </span>
+        )}
+        {!msg.streaming && msg.content && (
+          <button className="msgActionBtn" onClick={() => navigator.clipboard.writeText(msg.content).catch(() => {})} title={t("chat.copyMessage", "复制")}>📋</button>
+        )}
         {isUser && !msg.streaming && onEdit && (
           <button className="msgActionBtn" onClick={() => onEdit(msg.id)} title={t("chat.edit", "编辑")}>✏️</button>
         )}
         {isAssistant && !msg.streaming && onRegenerate && (
           <button className="msgActionBtn" onClick={() => onRegenerate(msg.id)} title={t("chat.regenerate", "重新生成")}>🔄</button>
+        )}
+        {!isLast && !msg.streaming && onRewind && (
+          <button className="msgActionBtn" onClick={() => onRewind(msg.id)} title={t("chat.rewind", "回到这里")}>⏪</button>
         )}
       </div>
     </div>
@@ -1924,6 +2107,189 @@ function SecurityConfirmModal({
   );
 }
 
+// ─── 右键菜单组件 (2.8) - 键盘导航 + 视口钳制 ───
+
+function ContextMenuInner({ ctxMenu, setCtxMenu, children }: {
+  ctxMenu: { x: number; y: number; convId: string };
+  setCtxMenu: (v: null) => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const focusIdxRef = useRef(-1);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (rect.right > vw) el.style.left = `${Math.max(4, ctxMenu.x - rect.width)}px`;
+    if (rect.bottom > vh) el.style.top = `${Math.max(4, ctxMenu.y - rect.height)}px`;
+  }, [ctxMenu.x, ctxMenu.y]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const items = ref.current?.querySelectorAll<HTMLElement>(":scope > div");
+    if (!items?.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const dir = e.key === "ArrowDown" ? 1 : -1;
+      const next = Math.max(0, Math.min(focusIdxRef.current + dir, items.length - 1));
+      focusIdxRef.current = next;
+      items.forEach((it, i) => {
+        it.style.background = i === next ? "rgba(37,99,235,0.08)" : "";
+      });
+    } else if (e.key === "Enter" && focusIdxRef.current >= 0) {
+      e.preventDefault();
+      items[focusIdxRef.current]?.click();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setCtxMenu(null);
+    }
+  }, [setCtxMenu]);
+
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={handleKeyDown}
+      style={{
+        position: "fixed",
+        left: ctxMenu.x,
+        top: ctxMenu.y,
+        background: "var(--panel)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        border: "1px solid var(--line)",
+        borderRadius: 10,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+        padding: "4px 0",
+        minWidth: 140,
+        fontSize: 13,
+        zIndex: 10000,
+        outline: "none",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ─── Lightbox 增强组件 (2.7) - 滚轮缩放 + 拖拽 + 键盘 ───
+
+function LightboxOverlay({ lightbox, onClose, downloadFile: dlFile, showInFolder: showFolder, t }: {
+  lightbox: { url: string; downloadUrl: string; name: string };
+  onClose: () => void;
+  downloadFile: (url: string, name: string) => Promise<string>;
+  showInFolder: (path: string) => Promise<void>;
+  t: (k: string, d?: string) => string;
+}) {
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const dragging = useRef(false);
+  const lastMouse = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "+" || e.key === "=") setZoom(z => Math.min(z * 1.25, 10));
+      else if (e.key === "-") setZoom(z => Math.max(z / 1.25, 0.2));
+      else if (e.key === "0") { setZoom(1); setPan({ x: 0, y: 0 }); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.stopPropagation();
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    setZoom(z => Math.max(0.2, Math.min(z * factor, 10)));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom <= 1) return;
+    e.preventDefault();
+    dragging.current = true;
+    lastMouse.current = { x: e.clientX, y: e.clientY };
+  }, [zoom]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragging.current) return;
+    const dx = e.clientX - lastMouse.current.x;
+    const dy = e.clientY - lastMouse.current.y;
+    lastMouse.current = { x: e.clientX, y: e.clientY };
+    setPan(p => ({ x: p.x + dx, y: p.y + dy }));
+  }, []);
+
+  const handleMouseUp = useCallback(() => { dragging.current = false; }, []);
+
+  const lbBtnStyle: React.CSSProperties = {
+    background: "rgba(255,255,255,0.25)", color: "#fff",
+    border: "1px solid rgba(255,255,255,0.35)", borderRadius: 8,
+    backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+    width: 40, height: 40,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer", transition: "background 0.15s",
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 99999,
+        background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        cursor: zoom > 1 ? (dragging.current ? "grabbing" : "grab") : "zoom-out",
+      }}
+      onClick={() => { if (!dragging.current) onClose(); }}
+      onWheel={handleWheel}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      <img
+        src={lightbox.url}
+        alt={lightbox.name}
+        draggable={false}
+        style={{
+          maxWidth: "90vw", maxHeight: "90vh",
+          borderRadius: 8, objectFit: "contain",
+          boxShadow: "0 8px 48px rgba(0,0,0,0.5)",
+          cursor: zoom > 1 ? "inherit" : "default",
+          transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+          transition: dragging.current ? "none" : "transform 0.15s ease",
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={handleMouseDown}
+      />
+      <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 8 }}>
+        {zoom !== 1 && (
+          <button style={lbBtnStyle} title="Reset zoom (0)" onClick={(e) => { e.stopPropagation(); setZoom(1); setPan({ x: 0, y: 0 }); }}>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>{Math.round(zoom * 100)}%</span>
+          </button>
+        )}
+        <button
+          title={t("chat.downloadImage", "保存图片")}
+          style={lbBtnStyle}
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              const saved = await dlFile(lightbox.downloadUrl, lightbox.name || `image-${Date.now()}.png`);
+              await showFolder(saved);
+            } catch (err) {
+              logger.error("Chat", "图片下载失败", { error: String(err) });
+            }
+          }}
+        >
+          <IconDownload size={18} />
+        </button>
+        <button style={lbBtnStyle} onClick={(e) => { e.stopPropagation(); onClose(); }}>
+          <IconX size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── 主组件 ───
 
 export function ChatView({
@@ -1964,10 +2330,10 @@ export function ChatView({
     try {
       const convId = localStorage.getItem(STORAGE_KEY_ACTIVE);
       if (!convId) return [];
-      const raw = localStorage.getItem(STORAGE_KEY_MSGS_PREFIX + convId);
-      return raw ? JSON.parse(raw) : [];
+      return loadMessagesFromStorage(STORAGE_KEY_MSGS_PREFIX + convId);
     } catch { return []; }
   });
+  const [hydrating, setHydrating] = useState(false);
   const inputTextRef = useRef("");
   const [hasInputText, setHasInputText] = useState(false);
   const [selectedEndpoint, setSelectedEndpoint] = useState("auto");
@@ -1984,6 +2350,10 @@ export function ChatView({
   const [slashFilter, setSlashFilter] = useState("");
   const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [msgSearchOpen, setMsgSearchOpen] = useState(false);
+  const [msgSearchQuery, setMsgSearchQuery] = useState("");
+  const [msgSearchIdx, setMsgSearchIdx] = useState(0);
+  const msgSearchRef = useRef<HTMLInputElement | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [lightbox, setLightbox] = useState<{ url: string; downloadUrl: string; name: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
@@ -2042,6 +2412,11 @@ export function ChatView({
   const orgMenuRef = useRef<HTMLDivElement | null>(null);
   const [orgCommandPending, setOrgCommandPending] = useState(false);
   const orgCommandPendingRef = useRef(false);
+
+  // Org 协调可视化面板状态
+  const [orgNodeStates, setOrgNodeStates] = useState<Map<string, { status: string; task?: string; ts: number }>>(new Map());
+  const [orgFlowPanelOpen, setOrgFlowPanelOpen] = useState(true);
+  const [orgDelegations, setOrgDelegations] = useState<{ from: string; to: string; task: string; ts: number }[]>([]);
 
   useEffect(() => {
     if (!orgMenuOpen) return;
@@ -2116,6 +2491,9 @@ export function ChatView({
   const busyConvRef = useRef(busyConversations);
   busyConvRef.current = busyConversations;
 
+  // ── IM 通道状态告警 ──
+  const [imChannelAlerts, setImChannelAlerts] = useState<{ channel: string; status: string; ts: number }[]>([]);
+
   const isConvBusyOnOtherDevice = useCallback((convId: string) => {
     const busyClientId = busyConvRef.current.get(convId);
     return !!busyClientId && busyClientId !== getClientId();
@@ -2159,6 +2537,27 @@ export function ChatView({
   const [contextLimit, setContextLimit] = useState(0);
   const [contextTooltipVisible, setContextTooltipVisible] = useState(false);
 
+  // ── 长闲置回归检测 (6.7) ──
+  const lastActivityRef = useRef(Date.now());
+  const [idleReturnPrompt, setIdleReturnPrompt] = useState(false);
+  const contextTokensRef = useRef(contextTokens);
+  contextTokensRef.current = contextTokens;
+
+  useEffect(() => {
+    lastActivityRef.current = Date.now();
+    setIdleReturnPrompt(false);
+  }, [messages.length, activeConvId]);
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const idle = Date.now() - lastActivityRef.current;
+      if (idle >= IDLE_THRESHOLD_MS && contextTokensRef.current >= IDLE_TOKEN_THRESHOLD) {
+        setIdleReturnPrompt(true);
+      }
+    }, 60_000);
+    return () => clearInterval(iv);
+  }, []);
+
   // ── 持久化会话列表 & 当前对话 ID ──
   useEffect(() => {
     try {
@@ -2198,7 +2597,8 @@ export function ChatView({
     if (!activeConvId) return;
     if (streamContexts.current.get(activeConvId)?.isStreaming) return;
     if (saveMessagesTimerRef.current) clearTimeout(saveMessagesTimerRef.current);
-    saveMessagesTimerRef.current = setTimeout(() => {
+
+    const doSave = () => {
       if (!saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + activeConvId, messages)) {
         try {
           const convs: ChatConversation[] = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || "[]");
@@ -2209,7 +2609,16 @@ export function ChatView({
           }
         } catch { /* give up */ }
       }
-    }, 300);
+    };
+
+    const ric = typeof requestIdleCallback === "function" ? requestIdleCallback : null;
+    if (ric) {
+      saveMessagesTimerRef.current = setTimeout(() => {
+        ric(doSave, { timeout: 2000 });
+      }, 150) as unknown as number;
+    } else {
+      saveMessagesTimerRef.current = setTimeout(doSave, 300) as unknown as number;
+    }
     return () => { if (saveMessagesTimerRef.current) clearTimeout(saveMessagesTimerRef.current); };
   }, [messages, activeConvId, streamingTick]);
 
@@ -2275,19 +2684,14 @@ export function ChatView({
 
   const hydrateConversationMessages = useCallback(async (convId: string, expectedCount = 0) => {
     const seq = ++hydrateSeqRef.current;
-    let localMsgs: ChatMessage[] = [];
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_MSGS_PREFIX + convId);
-      localMsgs = raw ? JSON.parse(raw) : [];
-    } catch {
-      localMsgs = [];
-    }
+    setHydrating(true);
+    const localMsgs = loadMessagesFromStorage(STORAGE_KEY_MSGS_PREFIX + convId);
 
     const localCount = Array.isArray(localMsgs) ? localMsgs.length : 0;
     const shouldSyncBackend = serviceRunning && (localCount === 0 || (expectedCount > 0 && localCount < expectedCount));
 
     if (!shouldSyncBackend) {
-      if (seq === hydrateSeqRef.current) setMessages(localMsgs);
+      if (seq === hydrateSeqRef.current) { setMessages(localMsgs); setHydrating(false); }
       return;
     }
 
@@ -2297,13 +2701,13 @@ export function ChatView({
       const backendMsgs = Array.isArray(data?.messages) ? mapBackendHistoryToMessages(data.messages) : [];
 
       const chosen = backendMsgs.length >= localCount ? backendMsgs : localMsgs;
-      if (seq === hydrateSeqRef.current) setMessages(chosen);
+      if (seq === hydrateSeqRef.current) { setMessages(chosen); setHydrating(false); }
 
       if (backendMsgs.length >= localCount) {
         saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + convId, backendMsgs);
       }
     } catch {
-      if (seq === hydrateSeqRef.current) setMessages(localMsgs);
+      if (seq === hydrateSeqRef.current) { setMessages(localMsgs); setHydrating(false); }
     }
   }, [serviceRunning, apiBaseUrl, mapBackendHistoryToMessages, STORAGE_KEY_MSGS_PREFIX]);
 
@@ -2362,6 +2766,26 @@ export function ChatView({
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // ── 输入框 Undo/Redo 栈 (6.2) ──
+  const undoStackRef = useRef<string[]>([""]);
+  const undoIdxRef = useRef(0);
+  const undoDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+
+  const pushUndoSnapshot = useCallback((val: string) => {
+    if (undoDebounceRef.current) clearTimeout(undoDebounceRef.current);
+    undoDebounceRef.current = setTimeout(() => {
+      const stack = undoStackRef.current;
+      const idx = undoIdxRef.current;
+      if (stack[idx] === val) return;
+      const trimmed = stack.slice(0, idx + 1);
+      trimmed.push(val);
+      if (trimmed.length > UNDO_MAX_STEPS) trimmed.shift();
+      undoStackRef.current = trimmed;
+      undoIdxRef.current = trimmed.length - 1;
+    }, 1000);
   }, []);
 
   const setInputValue = useCallback((val: string) => {
@@ -2628,8 +3052,8 @@ export function ChatView({
       if (!convId) return;
 
       if (event === "chat:busy") {
-        const clientId = d.client_id as string;
-        if (clientId !== myId) {
+        const clientId = d.client_id as string | undefined;
+        if (clientId && clientId !== myId) {
           setBusyConversations((prev) => { const m = new Map(prev); m.set(convId, clientId); return m; });
         }
       } else if (event === "chat:idle") {
@@ -2669,14 +3093,45 @@ export function ChatView({
       } else if (event === "chat:title_update") {
         const title = d.title as string;
         if (title) {
-          setConversations((prev) => prev.map(c =>
-            c.id === convId ? { ...c, title, titleGenerated: true } : c
-          ));
+          setConversations((prev) => prev.map(c => {
+            if (c.id !== convId) return c;
+            if (c.titleManuallySet) return c;
+            return { ...c, title, titleGenerated: true };
+          }));
         }
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBaseUrl, getClientId]);
+
+  // ── IM 通道掉线主动告警：监听 im:channel_status 事件 ──
+  useEffect(() => {
+    return onWsEvent((event, raw) => {
+      if (event !== "im:channel_status") return;
+      const d = raw as Record<string, unknown> | null;
+      if (!d) return;
+      const channel = (d.channel || d.adapter || "") as string;
+      const status = (d.status || "") as string;
+      if (!channel || !status) return;
+      const isOffline = status === "offline" || status === "error" || status === "stopped";
+      const isOnline = status === "online" || status === "running";
+      if (isOffline || isOnline) {
+        const alert = { channel, status: isOffline ? "offline" : "online", ts: Date.now() };
+        setImChannelAlerts((prev) => {
+          const filtered = prev.filter((a) => a.channel !== channel);
+          return [...filtered, alert];
+        });
+        if (isOffline) {
+          notifyError(t("chat.imChannelOffline", { channel, defaultValue: `IM 通道 ${channel} 已断开连接` }));
+        }
+        if (isOnline) {
+          setTimeout(() => {
+            setImChannelAlerts((prev) => prev.filter((a) => !(a.channel === channel && a.status === "online")));
+          }, 8000);
+        }
+      }
+    });
+  }, [t]);
 
   // ── 消息补全：用后端数据修复 localStorage 中不完整的消息（中断的流式传输等）──
   const patchedConvsRef = useRef<Set<string>>(new Set());
@@ -2699,18 +3154,22 @@ export function ChatView({
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const blobUrlsRef = useRef<string[]>([]);
 
-  // ── API base URL ──
+  // ── API base URL (ref for stable closure access) ──
   const apiBase = apiBaseUrl;
+  const apiBaseRef = useRef(apiBase);
+  useEffect(() => { apiBaseRef.current = apiBase; }, [apiBase]);
 
   // ── 文件上传辅助函数：上传文件到 /api/upload 并返回访问 URL ──
   const uploadFile = useCallback(async (file: Blob, filename: string): Promise<string> => {
     const form = new FormData();
     form.append("file", file, filename);
-    const res = await safeFetch(`${apiBase}/api/upload`, { method: "POST", body: form });
+    const res = await safeFetch(`${apiBaseRef.current}/api/upload`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
     const data = await res.json();
-    return data.url as string;  // 后端返回 { url: "/api/uploads/<filename>" }
-  }, [apiBase]);
+    return data.url as string;
+  }, []);
 
   // ── 组件卸载清理：abort 所有流式请求 + 停止麦克风 ──
   useEffect(() => {
@@ -2725,6 +3184,11 @@ export function ChatView({
         try { mediaRecorderRef.current.stop(); } catch { /* ignore */ }
       }
       mediaRecorderRef.current = null;
+      if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+      for (const url of blobUrlsRef.current) {
+        try { URL.revokeObjectURL(url); } catch {}
+      }
+      blobUrlsRef.current = [];
     };
   }, []);
 
@@ -2809,22 +3273,35 @@ export function ChatView({
     return () => document.removeEventListener("mousedown", handler);
   }, [modeMenuOpen]);
 
-  // ── Ctrl+/ 快捷键面板 ──
+  // ── Ctrl+/ 快捷键面板 + Ctrl+F 消息搜索 ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "/") {
         e.preventDefault();
         setShortcutsOpen((v) => !v);
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setMsgSearchOpen((v) => {
+          if (!v) setTimeout(() => msgSearchRef.current?.focus(), 50);
+          else setMsgSearchQuery("");
+          return !v;
+        });
+      }
       if (e.key === "Escape" && shortcutsOpen) {
         e.preventDefault();
         e.stopPropagation();
         setShortcutsOpen(false);
       }
+      if (e.key === "Escape" && msgSearchOpen) {
+        e.preventDefault();
+        setMsgSearchOpen(false);
+        setMsgSearchQuery("");
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [shortcutsOpen]);
+  }, [shortcutsOpen, msgSearchOpen]);
 
   // ── 斜杠命令定义 ──
   const slashCommands: SlashCommand[] = useMemo(() => {
@@ -2918,6 +3395,42 @@ export function ChatView({
         setMessages((prev) => [...prev, { id: genId(), role: "system", content: `当前思考程度: ${currentLabel}\n用法: /thinking_depth low|medium|high`, timestamp: Date.now() }]);
       }
     }},
+    { id: "export", label: t("chat.exportLabel", "导出会话"), description: t("chat.exportDesc", "导出当前对话 (md/json)"), action: (args) => {
+      const fmt = args?.trim().toLowerCase() === "json" ? "json" : "md";
+      const conv = conversations.find((c) => c.id === activeConvId);
+      exportConversation(messages, conv?.title || t("chat.conversation", "对话"), fmt as "md" | "json");
+      setMessages((prev) => [...prev, { id: genId(), role: "system", content: t("chat.exportDone", { format: fmt.toUpperCase(), defaultValue: `已导出为 ${fmt.toUpperCase()} 格式` }), timestamp: Date.now() }]);
+    }},
+    { id: "memory", label: t("chat.memoryCmd", "记忆管理"), description: t("chat.memoryCmdDesc", "查看/管理 AI 记忆条目"), action: (args) => {
+      if (args === "list" || !args) {
+        safeFetch(`${apiBase}/api/memory/entries?limit=20`).then(r => r.json()).then(data => {
+          const entries = data?.entries || data?.memories || [];
+          if (!entries.length) {
+            setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.memoryEmpty", "暂无记忆条目。AI 会在对话中自动学习和记忆。"), timestamp: Date.now() }]);
+          } else {
+            const lines = entries.slice(0, 15).map((e: any, i: number) => `${i + 1}. ${(e.content || e.text || "").slice(0, 100)}`);
+            setMessages(prev => [...prev, { id: genId(), role: "system", content: `**记忆条目** (${entries.length} 条)：\n${lines.join("\n")}`, timestamp: Date.now() }]);
+          }
+        }).catch(() => {
+          setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.memoryLoadFail", "无法加载记忆条目，请确认服务已启动。"), timestamp: Date.now() }]);
+        });
+      } else {
+        setMessages(prev => [...prev, { id: genId(), role: "system", content: "用法: /memory [list]", timestamp: Date.now() }]);
+      }
+    }},
+    { id: "skills", label: t("chat.skillsCmd", "技能管理"), description: t("chat.skillsCmdDesc", "查看已安装的技能列表"), action: () => {
+      safeFetch(`${apiBase}/api/config/skills`).then(r => r.json()).then(data => {
+        const skills = data?.skills || [];
+        if (!skills.length) {
+          setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.skillsEmpty", "暂无已安装技能。可在「技能商店」中浏览安装。"), timestamp: Date.now() }]);
+        } else {
+          const lines = skills.map((s: any) => `- **${s.name || s.id}**: ${s.description || "无描述"} ${s.enabled === false ? "(已禁用)" : ""}`);
+          setMessages(prev => [...prev, { id: genId(), role: "system", content: `**已安装技能** (${skills.length})：\n${lines.join("\n")}`, timestamp: Date.now() }]);
+        }
+      }).catch(() => {
+        setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.skillsLoadFail", "无法加载技能列表。"), timestamp: Date.now() }]);
+      });
+    }},
     { id: "help", label: "帮助", description: "显示可用命令列表", action: () => {} },
   ];
     const helpCmd = cmds.find((c) => c.id === "help");
@@ -2959,9 +3472,8 @@ export function ChatView({
   }, [activeConvId, messages, multiAgentEnabled, selectedAgent]);
 
   // ── 删除对话（实际执行） ──
-  const doDeleteConversation = useCallback((convId: string) => {
-    try { localStorage.removeItem(STORAGE_KEY_MSGS_PREFIX + convId); } catch {}
-    setMessageQueue(prev => prev.filter(m => m.convId !== convId));
+  const doDeleteConversation = useCallback(async (convId: string) => {
+    // Stop any active streams for this conversation first
     const ctx = streamContexts.current.get(convId);
     if (ctx) {
       ctx.userStopped = true;
@@ -2972,23 +3484,33 @@ export function ChatView({
       setStreamingTick(t => t + 1);
     }
 
-    setBusyConversations((prev) => { const m = new Map(prev); m.delete(convId); return m; });
-
+    // Atomic delete: call backend first, only clean local data on success
     if (serviceRunning) {
-      safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}`, {
-        method: "DELETE",
-      }).catch(() => {});
+      try {
+        const res = await safeFetch(`${apiBaseRef.current}/api/sessions/${encodeURIComponent(convId)}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) {
+          notifyError(t("chat.deleteConvFailed", "删除会话失败，请重试"));
+          return;
+        }
+      } catch {
+        notifyError(t("chat.deleteConvNetworkFailed", "删除会话失败，请检查网络连接"));
+        return;
+      }
     }
 
-    if (convId === activeConvId) {
+    try { localStorage.removeItem(STORAGE_KEY_MSGS_PREFIX + convId); } catch {}
+    setMessageQueue(prev => prev.filter(m => m.convId !== convId));
+    setBusyConversations((prev) => { const m = new Map(prev); m.delete(convId); return m; });
+
+    const curActiveId = activeConvIdRef.current;
+    if (convId === curActiveId) {
       setConversations((prev) => {
         const remaining = prev.filter((c) => c.id !== convId);
         if (remaining.length > 0) {
           setActiveConvId(remaining[0].id);
-          try {
-            const raw = localStorage.getItem(STORAGE_KEY_MSGS_PREFIX + remaining[0].id);
-            setMessages(raw ? JSON.parse(raw) : []);
-          } catch { setMessages([]); }
+          setMessages(loadMessagesFromStorage(STORAGE_KEY_MSGS_PREFIX + remaining[0].id));
         } else {
           setActiveConvId(null);
           setMessages([]);
@@ -2998,7 +3520,7 @@ export function ChatView({
     } else {
       setConversations((prev) => prev.filter((c) => c.id !== convId));
     }
-  }, [activeConvId, serviceRunning, apiBaseUrl]);
+  }, [serviceRunning]);
 
   // ── 删除对话（弹窗确认） ──
   const deleteConversation = useCallback((convId: string, e?: React.MouseEvent) => {
@@ -3024,7 +3546,7 @@ export function ChatView({
     const title = newTitle.trim();
     if (title) {
       setConversations((prev) => prev.map((c) =>
-        c.id === convId ? { ...c, title, titleGenerated: true } : c
+        c.id === convId ? { ...c, title, titleManuallySet: true } : c
       ));
     }
     setRenamingId(null);
@@ -3068,7 +3590,12 @@ export function ChatView({
         targetNodeId = orgPrefixMatch[2] || null;
         msgContent = orgPrefixMatch[3];
         const match = orgList.find(o => o.name.includes(orgRef) || o.id === orgRef);
-        if (match) targetOrgId = match.id;
+        if (match) {
+          targetOrgId = match.id;
+        } else {
+          notifyError(`未找到组织「${orgRef}」，请检查名称是否正确`);
+          return;
+        }
       }
       if (targetOrgId) {
         const orgUserMsg: ChatMessage = { id: genId(), role: "user", content: text, timestamp: Date.now() };
@@ -3102,6 +3629,11 @@ export function ChatView({
           ));
         };
 
+        // Reset org flow panel for new command
+        setOrgNodeStates(new Map());
+        setOrgDelegations([]);
+        setOrgFlowPanelOpen(true);
+
         const unsub = onWsEvent((event, raw) => {
           const d = raw as Record<string, unknown> | null;
           if (!d || d.org_id !== targetOrgId) return;
@@ -3109,8 +3641,14 @@ export function ChatView({
           const toNode = (d.to_node || "") as string;
           if (event === "org:node_status") {
             const st = d.status as string;
+            const task = (d.current_task || "") as string;
+            // Update node state for flow panel
+            setOrgNodeStates(prev => {
+              const m = new Map(prev);
+              m.set(nodeId, { status: st, task: task || undefined, ts: Date.now() });
+              return m;
+            });
             if (st === "busy") {
-              const task = (d.current_task || "") as string;
               pushProgress(`🟢 **${nodeId}** 开始处理${task ? `：${task.slice(0, 60)}` : ""}`);
             } else if (st === "idle") {
               pushProgress(`✅ **${nodeId}** 完成`);
@@ -3119,6 +3657,7 @@ export function ChatView({
             }
           } else if (event === "org:task_delegated") {
             const task = (d.task || "") as string;
+            setOrgDelegations(prev => [...prev.slice(-20), { from: nodeId, to: toNode, task, ts: Date.now() }]);
             pushProgress(`📋 **${nodeId}** → **${toNode}** 分配任务：${(task as string).slice(0, 50)}`);
           } else if (event === "org:message") {
             const msgType = d.msg_type as string || "消息";
@@ -3128,8 +3667,18 @@ export function ChatView({
           } else if (event === "org:blackboard_update") {
             pushProgress(`📝 **${nodeId}** 更新黑板`);
           } else if (event === "org:task_complete") {
+            setOrgNodeStates(prev => {
+              const m = new Map(prev);
+              m.set(nodeId, { status: "done", ts: Date.now() });
+              return m;
+            });
             pushProgress(`🎯 **${nodeId}** 任务完成`);
           } else if (event === "org:task_timeout") {
+            setOrgNodeStates(prev => {
+              const m = new Map(prev);
+              m.set(nodeId, { status: "timeout", ts: Date.now() });
+              return m;
+            });
             pushProgress(`⏰ **${nodeId}** 任务超时`);
           }
         });
@@ -3235,7 +3784,7 @@ export function ChatView({
       id: genId(),
       role: "user",
       content: displayContent || text,
-      attachments: pendingAttachments.length > 0 ? [...pendingAttachments] : undefined,
+      attachments: pendingAttachments.length > 0 ? pendingAttachments.map(({ _uploadId, ...rest }) => rest) : undefined,
       timestamp: Date.now(),
     };
 
@@ -3277,12 +3826,8 @@ export function ChatView({
     const abort = new AbortController();
 
     // Build per-session StreamContext with initial messages
-    const fallbackMessages = thisConvId === activeConvId ? [...messages] : (() => {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY_MSGS_PREFIX + thisConvId);
-        return raw ? JSON.parse(raw) as ChatMessage[] : [];
-      } catch { return []; }
-    })();
+    const fallbackMessages = thisConvId === activeConvId ? [...messages]
+      : loadMessagesFromStorage(STORAGE_KEY_MSGS_PREFIX + thisConvId);
     const sctx: StreamContext = {
       abort,
       reader: null,
@@ -3378,8 +3923,10 @@ export function ChatView({
       };
 
       const poll = () => {
+        const ctx = streamContexts.current.get(thisConvId);
+        if (!ctx || ctx.userStopped) return;
         attempts++;
-        safeFetch(`${apiBase}/api/sessions/${encodeURIComponent(convId)}/history`)
+        safeFetch(`${apiBaseRef.current}/api/sessions/${encodeURIComponent(convId)}/history`)
           .then((r) => r.ok ? r.json() : null)
           .then((data) => {
             if (!data) {
@@ -3521,6 +4068,7 @@ export function ChatView({
       let thinkingStartTime = 0;
       let currentThinkingContent = "";
       let pendingCompressedInfo: { beforeTokens: number; afterTokens: number } | null = null;
+      let sseParseFailures = 0;
 
       while (true) {
         // ── 1. 每次循环检查 abort 状态 ──
@@ -3560,6 +4108,7 @@ export function ChatView({
 
           try {
             const event: StreamEvent = JSON.parse(data);
+            sseParseFailures = 0;
 
             switch (event.type) {
               case "heartbeat":
@@ -3963,12 +4512,14 @@ export function ChatView({
                 break;
               case "done":
                 gracefulDone = true;
-                // 更新上下文用量
                 if (event.usage) {
                   if (typeof event.usage.context_tokens === "number") setContextTokens(event.usage.context_tokens);
                   if (typeof event.usage.context_limit === "number") setContextLimit(event.usage.context_limit);
+                  const { input_tokens, output_tokens, total_tokens } = event.usage;
+                  if (typeof input_tokens === "number" && typeof output_tokens === "number") {
+                    assistantMsg.usage = { input_tokens, output_tokens, total_tokens: total_tokens ?? input_tokens + output_tokens };
+                  }
                 }
-                // 任务结束时，如果当前 Plan 仍在进行中，自动标记为 completed
                 if (currentPlan && currentPlan.status === "in_progress") {
                   currentPlan = { ...(currentPlan as ChatTodo), status: "completed" as const };
                 }
@@ -4000,6 +4551,7 @@ export function ChatView({
                     errorInfo: currentError,
                     artifacts: currentArtifacts.length > 0 ? [...currentArtifacts] : null,
                     thinkingChain: chainGroups.length > 0 ? chainGroups.map(g => ({ ...g })) : null,
+                    usage: assistantMsg.usage ?? m.usage,
                     streaming: event.type !== "done",
                   }
                 : m
@@ -4007,7 +4559,11 @@ export function ChatView({
 
             if (event.type === "done") break;
           } catch {
-            // ignore malformed SSE
+            sseParseFailures++;
+            if (sseParseFailures >= 5) {
+              notifyError(t("chat.sseParseError", "SSE 数据解析异常频繁，可能存在通信问题"));
+              sseParseFailures = 0;
+            }
           }
         }
 
@@ -4130,7 +4686,7 @@ export function ChatView({
                       setDisplaySubAgentTasks([]);
                       setDisplayActiveSubAgents([]);
                     }
-                  }, 5000);
+                  }, 30_000);
                 }
               })
               .catch(() => {});
@@ -4146,7 +4702,7 @@ export function ChatView({
             setTimeout(() => {
               setDisplayActiveSubAgents([]);
               setDisplaySubAgentTasks([]);
-            }, 5000);
+            }, 30_000);
           }
         } else {
           if (ctx.pollingTimer) { clearInterval(ctx.pollingTimer); ctx.pollingTimer = null; }
@@ -4212,7 +4768,7 @@ export function ChatView({
 
   // ── 停止生成 ──
   const stopStreaming = useCallback((targetConvId?: string) => {
-    const id = targetConvId ?? activeConvId;
+    const id = targetConvId ?? activeConvIdRef.current;
     if (!id) return;
     const ctx = streamContexts.current.get(id);
     if (ctx) {
@@ -4221,7 +4777,7 @@ export function ChatView({
       try { ctx.reader?.cancel().catch(() => {}); } catch {}
       ctx.reader = null;
     }
-  }, [activeConvId]);
+  }, []);
 
   // ── 消息排队系统 ──
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
@@ -4252,6 +4808,13 @@ export function ChatView({
     setTimeout(() => sendMessage(textToResend), 50);
   }, [sendMessage]);
 
+  const handleRewind = useCallback((msgId: string) => {
+    const msgs = latestMessagesRef.current;
+    const idx = msgs.findIndex((m) => m.id === msgId);
+    if (idx < 0 || idx >= msgs.length - 1) return;
+    setMessages((prev) => prev.slice(0, idx + 1));
+  }, []);
+
   const handleSkipStep = useCallback(() => {
     safeFetch(`${apiBase}/api/chat/skip`, {
       method: "POST",
@@ -4263,6 +4826,8 @@ export function ChatView({
   const handleImagePreview = useCallback((displayUrl: string, downloadUrl: string, name: string) => {
     setLightbox({ url: displayUrl, downloadUrl, name });
   }, []);
+
+  const closeLightbox = useCallback(() => setLightbox(null), []);
 
   const handleCancelTask = useCallback(() => {
     safeFetch(`${apiBase}/api/chat/cancel`, {
@@ -4281,6 +4846,7 @@ export function ChatView({
 
   const handleInsertMessage = useCallback((text: string) => {
     if (!text.trim()) return;
+    const convId = activeConvIdRef.current;
     const inserter = (prev: ChatMessage[]) => {
       const uMsg = { id: genId(), role: "user" as const, content: text.trim(), timestamp: Date.now() };
       const streamingIdx = prev.findIndex((m) => m.role === "assistant" && m.streaming);
@@ -4291,15 +4857,20 @@ export function ChatView({
       }
       return [...prev, uMsg];
     };
-    const ctx = activeConvId ? streamContexts.current.get(activeConvId) : null;
+    const ctx = convId ? streamContexts.current.get(convId) : null;
     if (ctx) ctx.messages = inserter(ctx.messages);
     setMessages(inserter);
-    safeFetch(`${apiBase}/api/chat/insert`, {
+    if (convId) {
+      setConversations((prev) => prev.map((c) =>
+        c.id === convId ? { ...c, messageCount: (c.messageCount || 0) + 1 } : c
+      ));
+    }
+    safeFetch(`${apiBaseRef.current}/api/chat/insert`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: activeConvId, message: text }),
+      body: JSON.stringify({ conversation_id: convId, message: text }),
     }).catch(() => {});
-  }, [apiBase, activeConvId]);
+  }, []);
 
   const handleQueueMessage = useCallback(() => {
     const text = inputTextRef.current.trim();
@@ -4376,14 +4947,16 @@ export function ChatView({
     const files = e.target.files;
     if (!files) return;
     for (const file of Array.from(files)) {
+      const uploadId = genId();
       const att: ChatAttachment = {
         type: file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "voice" : file.type === "application/pdf" ? "document" : "file",
         name: file.name,
         size: file.size,
         mimeType: file.type,
+        _uploadId: uploadId,
       };
       if (att.type === "video" && file.size > 7 * 1024 * 1024) {
-        alert(`视频文件过大 (${(file.size / 1024 / 1024).toFixed(1)}MB)，桌面端最大支持 7MB（base64 编码后需 < 10MB）`);
+        notifyError(`视频文件过大 (${(file.size / 1024 / 1024).toFixed(1)}MB)，桌面端最大支持 7MB（base64 编码后需 < 10MB）`);
         continue;
       }
       if (att.type === "image" || att.type === "video") {
@@ -4393,29 +4966,46 @@ export function ChatView({
           att.url = reader.result as string;
           setPendingAttachments((prev) => [...prev, att]);
         };
+        reader.onerror = () => {
+          notifyError(`文件读取失败: ${file.name}`);
+        };
         reader.readAsDataURL(file);
       } else {
         setPendingAttachments((prev) => [...prev, att]);
         uploadFile(file, file.name)
           .then((serverUrl) => {
             setPendingAttachments((prev) =>
-              prev.map((a) => a.name === att.name && a.type === att.type && !a.url
-                ? { ...a, url: `${apiBase}${serverUrl}` } : a)
+              prev.map((a) => a._uploadId === uploadId
+                ? { ...a, url: `${apiBaseRef.current}${serverUrl}` } : a)
             );
           })
           .catch(() => {
+            notifyError(`文件上传失败: ${file.name}`);
             setPendingAttachments((prev) =>
-              prev.filter((a) => !(a.name === att.name && a.type === att.type && !a.url)));
+              prev.filter((a) => a._uploadId !== uploadId || a.url));
           });
       }
     }
     e.target.value = "";
-  }, []);
+  }, [uploadFile]);
 
-  // ── 粘贴图片 ──
+  // ── 粘贴处理 ──
+  const [pastedLargeText, setPastedLargeText] = useState<{ text: string; lines: number } | null>(null);
+  useEffect(() => { setPastedLargeText(null); }, [activeConvId]);
+
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+
+    // Large text paste detection (6.4)
+    const plainText = e.clipboardData?.getData("text/plain") || "";
+    if (plainText.length > PASTE_CHAR_THRESHOLD) {
+      e.preventDefault();
+      const lineCount = plainText.split("\n").length;
+      setPastedLargeText({ text: plainText, lines: lineCount });
+      return;
+    }
+
     for (const item of Array.from(items)) {
       if (item.type.startsWith("image/")) {
         e.preventDefault();
@@ -4469,7 +5059,7 @@ export function ChatView({
               const estimatedSize = base64Len * 3 / 4;
               const VIDEO_MAX_SIZE = 7 * 1024 * 1024;
               if (estimatedSize > VIDEO_MAX_SIZE) {
-                alert(`视频文件过大 (${(estimatedSize / 1024 / 1024).toFixed(1)}MB)，最大支持 7MB（base64 编码后需 < 10MB）`);
+                notifyError(`视频文件过大 (${(estimatedSize / 1024 / 1024).toFixed(1)}MB)，最大支持 7MB（base64 编码后需 < 10MB）`);
                 return;
               }
             }
@@ -4503,51 +5093,66 @@ export function ChatView({
   }, []);
 
   // ── 语音录制 ──
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const toggleRecording = useCallback(async () => {
     if (isRecording) {
-      // 停止录制
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
+      if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+      setRecordingDuration(0);
       return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4"
+        : MediaRecorder.isTypeSupported("audio/ogg") ? "audio/ogg" : "";
+      const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
+      const opts: MediaRecorderOptions = mimeType ? { mimeType } : {};
+      const mediaRecorder = new MediaRecorder(stream, opts);
+      const uploadId = genId();
       audioChunksRef.current = [];
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
       mediaRecorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const blob = new Blob(audioChunksRef.current, { type: mimeType || "audio/webm" });
         const localPreview = URL.createObjectURL(blob);
-        const filename = `voice-${Date.now()}.webm`;
-        // 立即添加为"上传中"状态（有预览但无 url）
+        blobUrlsRef.current.push(localPreview);
+        const filename = `voice-${Date.now()}.${ext}`;
         const tempAtt: ChatAttachment = {
-          type: "voice",
-          name: filename,
-          previewUrl: localPreview,
-          size: blob.size,
-          mimeType: "audio/webm",
+          type: "voice", name: filename, previewUrl: localPreview,
+          size: blob.size, mimeType: mimeType || "audio/webm", _uploadId: uploadId,
         };
         setPendingAttachments((prev) => [...prev, tempAtt]);
-        // 异步上传到后端
         uploadFile(blob, filename)
           .then((serverUrl) => {
             setPendingAttachments((prev) =>
-              prev.map((a) => a.name === filename && a.type === "voice"
-                ? { ...a, url: `${apiBase}${serverUrl}` } : a)
+              prev.map((a) => a._uploadId === uploadId ? { ...a, url: `${apiBaseRef.current}${serverUrl}` } : a)
             );
           })
           .catch(() => {
-            setPendingAttachments((prev) => prev.filter((a) => !(a.name === filename && a.type === "voice")));
+            notifyError(t("chat.voiceUploadFailed", "语音上传失败"));
+            setPendingAttachments((prev) => prev.filter((a) => a._uploadId !== uploadId || a.url));
           });
         stream.getTracks().forEach((t) => t.stop());
       };
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start();
       setIsRecording(true);
-    } catch {
-      setMessages((prev) => [...prev, { id: genId(), role: "system", content: "无法访问麦克风，请检查浏览器权限设置。", timestamp: Date.now() }]);
+      setRecordingDuration(0);
+      recordingTimerRef.current = setInterval(() => setRecordingDuration(d => d + 1), 1000);
+    } catch (err: any) {
+      const name = err?.name || "";
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        notifyError(t("chat.micPermissionDenied", "麦克风权限被拒绝，请在浏览器/系统设置中允许访问"));
+      } else if (name === "NotFoundError") {
+        notifyError(t("chat.micNotFound", "未检测到麦克风设备"));
+      } else {
+        notifyError(t("chat.micError", "无法访问麦克风，请检查浏览器权限设置"));
+      }
     }
   }, [isRecording]);
 
@@ -4556,8 +5161,47 @@ export function ChatView({
     // macOS 中文输入法按回车选字时 isComposing=true，此时不应触发发送
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 
+    // Undo/Redo (6.2)
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+      e.preventDefault();
+      if (undoIdxRef.current > 0) {
+        undoIdxRef.current--;
+        setInputValue(undoStackRef.current[undoIdxRef.current]);
+      }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === "Z" || (e.key === "z" && e.shiftKey))) {
+      e.preventDefault();
+      if (undoIdxRef.current < undoStackRef.current.length - 1) {
+        undoIdxRef.current++;
+        setInputValue(undoStackRef.current[undoIdxRef.current]);
+      }
+      return;
+    }
+
+    if (atAgentOpen) {
+      const q = atAgentFilter;
+      const agents = agentProfiles.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
+      if (e.key === "ArrowDown") { e.preventDefault(); setAtAgentIdx((i) => Math.min(i + 1, agents.length - 1)); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setAtAgentIdx((i) => Math.max(0, i - 1)); return; }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const agent = agents[atAgentIdx];
+        if (agent) {
+          setSelectedAgent(agent.id);
+          const ta = e.target as HTMLTextAreaElement;
+          const val = ta.value;
+          const cursor = ta.selectionStart ?? val.length;
+          const before = val.slice(0, cursor).replace(/@\w*$/, "");
+          setInputValue(before + val.slice(cursor));
+        }
+        setAtAgentOpen(false);
+        return;
+      }
+      if (e.key === "Escape") { setAtAgentOpen(false); return; }
+    }
+
     if (slashOpen) {
-      // 与 SlashCommandPanel 保持一致的过滤逻辑（包含 description）
       const q = slashFilter.toLowerCase();
       const filtered = slashCommands.filter((c) =>
         c.id.includes(q) || c.label.includes(q) || c.description.includes(q),
@@ -4622,7 +5266,11 @@ export function ChatView({
         sendMessage();
       }
     }
-  }, [slashOpen, slashFilter, slashCommands, slashSelectedIdx, sendMessage, isCurrentConvStreaming, handleInsertMessage, handleQueueMessage, messageQueue, activeConvId, setInputValue, shortcutsOpen, handleCancelTask]);
+  }, [atAgentOpen, atAgentFilter, atAgentIdx, agentProfiles, slashOpen, slashFilter, slashCommands, slashSelectedIdx, sendMessage, isCurrentConvStreaming, handleInsertMessage, handleQueueMessage, messageQueue, activeConvId, setInputValue, shortcutsOpen, handleCancelTask]);
+
+  const [atAgentOpen, setAtAgentOpen] = useState(false);
+  const [atAgentFilter, setAtAgentFilter] = useState("");
+  const [atAgentIdx, setAtAgentIdx] = useState(0);
 
   // ── 输入变化处理（非受控模式：仅更新 ref，不触发全局重渲染） ──
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -4630,6 +5278,7 @@ export function ChatView({
     inputTextRef.current = val;
     const has = val.trim().length > 0;
     setHasInputText(prev => prev !== has ? has : prev);
+    pushUndoSnapshot(val);
 
     // @org: 前缀检测 — 自动切换到组织模式
     const orgMatch = val.match(/^@org:(\S+)\s/);
@@ -4642,6 +5291,18 @@ export function ChatView({
       }
     }
 
+    // @agent 联想
+    const cursor = e.target.selectionStart ?? val.length;
+    const beforeCursor = val.slice(0, cursor);
+    const atMatch = beforeCursor.match(/@(\w*)$/);
+    if (atMatch && multiAgentEnabled && agentProfiles.length > 0) {
+      setAtAgentOpen(true);
+      setAtAgentFilter(atMatch[1].toLowerCase());
+      setAtAgentIdx(0);
+    } else {
+      setAtAgentOpen(false);
+    }
+
     if (val.startsWith("/") && !val.includes(" ")) {
       setSlashOpen(true);
       setSlashFilter(val.slice(1));
@@ -4649,7 +5310,7 @@ export function ChatView({
     } else {
       setSlashOpen(false);
     }
-  }, [orgMode, orgList]);
+  }, [orgMode, orgList, multiAgentEnabled, agentProfiles.length, pushUndoSnapshot]);
 
   // ── Filtered + grouped conversations for Cursor-style sidebar ──
   const filteredConversations = useMemo(() => {
@@ -4676,7 +5337,7 @@ export function ChatView({
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
         <IconMessageCircle size={48} />
         <div className="mt-3 font-semibold">{t("chat.title")}</div>
-        <div className="mt-1 text-xs opacity-50">后端服务未启动，请启动后再进行使用</div>
+        <div className="mt-1 text-xs opacity-50">{t("chat.serviceNotRunning", "后端服务未启动，请启动后再进行使用")}</div>
       </div>
     );
   }
@@ -4753,31 +5414,14 @@ export function ChatView({
           onClick={() => setCtxMenu(null)}
           onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: "fixed",
-              left: ctxMenu.x,
-              top: ctxMenu.y,
-              background: "var(--panel)",
-              backdropFilter: "blur(16px)",
-              WebkitBackdropFilter: "blur(16px)",
-              border: "1px solid var(--line)",
-              borderRadius: 10,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
-              padding: "4px 0",
-              minWidth: 140,
-              fontSize: 13,
-              zIndex: 10000,
-            }}
-          >
+          <ContextMenuInner ctxMenu={ctxMenu} setCtxMenu={setCtxMenu}>
             {([
               {
                 label: conversations.find((c) => c.id === ctxMenu.convId)?.pinned
                   ? t("chat.unpinConversation") : t("chat.pinConversation"),
                 icon: <IconPin size={13} />,
                 danger: false,
-                action: () => togglePinConversation(ctxMenu.convId),
+                action: () => { togglePinConversation(ctxMenu.convId); setCtxMenu(null); },
               },
               {
                 label: t("chat.renameConversation"),
@@ -4786,6 +5430,19 @@ export function ChatView({
                 action: () => {
                   const conv = conversations.find((c) => c.id === ctxMenu.convId);
                   if (conv) { setRenamingId(conv.id); setRenameText(conv.title); }
+                  setCtxMenu(null);
+                },
+              },
+              {
+                label: t("chat.exportConversation", "导出会话"),
+                icon: <IconDownload size={13} />,
+                danger: false,
+                action: () => {
+                  const conv = conversations.find((c) => c.id === ctxMenu.convId);
+                  const convMsgs = ctxMenu.convId === activeConvId
+                    ? messages
+                    : loadMessagesFromStorage(STORAGE_KEY_MSGS_PREFIX + ctxMenu.convId);
+                  exportConversation(convMsgs, conv?.title || t("chat.conversation", "对话"), "md");
                   setCtxMenu(null);
                 },
               },
@@ -4815,7 +5472,7 @@ export function ChatView({
                 {item.label}
               </div>
             ))}
-          </div>
+          </ContextMenuInner>
         </div>,
         document.body,
       )}
@@ -4824,7 +5481,7 @@ export function ChatView({
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }} onMouseDown={() => { if (sidebarOpen && !sidebarPinned) setSidebarOpen(false); }}>
         {/* Chat top bar */}
         <div className="chatTopBar">
-          <button onClick={newConversation} className="chatTopBarBtn">
+          <button onClick={newConversation} className="chatTopBarBtn" aria-label={t("chat.newConversation", "新建会话")}>
             <IconPlus size={14} />
           </button>
 
@@ -4864,7 +5521,7 @@ export function ChatView({
           {/* Active sub-agents in current conversation */}
           {displayActiveSubAgents.length > 0 && (
             <div className="subAgentStrip">
-              <span className="subAgentLabel">协作中</span>
+              <span className="subAgentLabel">{t("chat.collaborating", "协作中")}</span>
               {displayActiveSubAgents.map((sub) => {
                 const sp = agentProfiles.find((p) => p.id === sub.agentId);
                 return (
@@ -4916,9 +5573,84 @@ export function ChatView({
           </button>
         </div>
 
+        {/* 消息搜索栏 */}
+        {msgSearchOpen && (() => {
+          const q = msgSearchQuery.trim().toLowerCase();
+          const matches = q ? messages.reduce<number[]>((acc, m, idx) => {
+            if (m.content.toLowerCase().includes(q)) acc.push(idx);
+            return acc;
+          }, []) : [];
+          const total = matches.length;
+          return (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "6px 12px", background: "var(--panel)",
+              borderBottom: "1px solid var(--line)", fontSize: 13,
+            }}>
+              <input
+                ref={msgSearchRef}
+                value={msgSearchQuery}
+                onChange={(e) => { setMsgSearchQuery(e.target.value); setMsgSearchIdx(0); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (total > 0) {
+                      const curEl = scrollContainerRef.current?.querySelector(`[data-msg-idx="${matches[msgSearchIdx]}"]`);
+                      const isVisible = curEl && curEl.getBoundingClientRect().top >= 0;
+                      const nextIdx = isVisible
+                        ? (e.shiftKey ? (msgSearchIdx - 1 + total) % total : (msgSearchIdx + 1) % total)
+                        : msgSearchIdx;
+                      setMsgSearchIdx(nextIdx);
+                      const msgEl = scrollContainerRef.current?.querySelector(`[data-msg-idx="${matches[nextIdx]}"]`);
+                      msgEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }
+                  if (e.key === "Escape") { setMsgSearchOpen(false); setMsgSearchQuery(""); }
+                }}
+                placeholder={t("chat.searchMessages", "搜索消息...")}
+                style={{
+                  flex: 1, background: "var(--bg)", border: "1px solid var(--line)",
+                  borderRadius: 6, padding: "4px 8px", fontSize: 13, outline: "none",
+                  color: "var(--fg)",
+                }}
+              />
+              {q && <span style={{ opacity: 0.5, fontSize: 11, whiteSpace: "nowrap" }}>{total > 0 ? `${msgSearchIdx + 1}/${total}` : t("common.noResults", "无结果")}</span>}
+              <button onClick={() => { setMsgSearchOpen(false); setMsgSearchQuery(""); }} style={{ background: "none", border: "none", cursor: "pointer", opacity: 0.5, padding: 2 }}>
+                <IconX size={14} />
+              </button>
+            </div>
+          );
+        })()}
+
+        {/* 离线横幅 */}
+        {!serviceRunning && (
+          <div style={{
+            background: "rgba(245,158,11,0.1)", borderBottom: "1px solid rgba(245,158,11,0.2)",
+            padding: "6px 16px", fontSize: 12, color: "#f59e0b",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <span style={{ fontSize: 14 }}>⚠️</span>
+            {t("chat.offline", "后端服务未连接，部分功能暂不可用")}
+          </div>
+        )}
+
         {/* 消息列表 */}
-        <div ref={scrollContainerRef} style={{ flex: 1, overflow: "auto", padding: "16px 20px", minHeight: 0 }}>
-          {messages.length === 0 && (
+        <div ref={scrollContainerRef} role="log" aria-live="polite" aria-label={t("chat.messageList", "消息列表")} style={{ flex: 1, overflow: "auto", padding: "16px 20px", minHeight: 0 }}>
+          {hydrating && messages.length === 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 20, padding: "20px 0", animation: "pulse 1.5s ease-in-out infinite" }}>
+              {[0.6, 0.85, 0.45].map((w, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, flexDirection: i % 2 === 0 ? "row" : "row-reverse" }}>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
+                  <div style={{ flex: 1, maxWidth: `${w * 100}%` }}>
+                    <div style={{ height: 12, borderRadius: 6, background: "var(--line)", marginBottom: 8, width: "70%" }} />
+                    <div style={{ height: 12, borderRadius: 6, background: "var(--line)", width: "90%" }} />
+                    <div style={{ height: 12, borderRadius: 6, background: "var(--line)", marginTop: 8, width: "50%" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!hydrating && messages.length === 0 && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 24 }}>
               <div style={{ opacity: 0.4, textAlign: "center" }}>
                 <div style={{ marginBottom: 12 }}><IconMessageCircle size={48} /></div>
@@ -4951,13 +5683,17 @@ export function ChatView({
               </div>
             </div>
           )}
-          {messages.map((msg) =>
-            displayMode === "flat" ? (
-              <FlatMessageItem key={msg.id} msg={msg} onAskAnswer={handleAskAnswer} onRetry={handleRegenerate} onEdit={handleEditMessage} onRegenerate={handleRegenerate} apiBaseUrl={apiBaseUrl} showChain={showChain} onSkipStep={handleSkipStep} onImagePreview={handleImagePreview} mdModules={mdModules} />
-            ) : (
-              <MessageBubble key={msg.id} msg={msg} onAskAnswer={handleAskAnswer} onRetry={handleRegenerate} onEdit={handleEditMessage} onRegenerate={handleRegenerate} apiBaseUrl={apiBaseUrl} showChain={showChain} onSkipStep={handleSkipStep} onImagePreview={handleImagePreview} mdModules={mdModules} />
-            )
+          <ErrorBoundary>
+          {messages.map((msg, i) =>
+            <div key={msg.id} data-msg-idx={i}>
+              {displayMode === "flat" ? (
+                <FlatMessageItem msg={msg} onAskAnswer={handleAskAnswer} onRetry={handleRegenerate} onEdit={handleEditMessage} onRegenerate={handleRegenerate} onRewind={handleRewind} isLast={i === messages.length - 1} apiBaseUrl={apiBaseUrl} showChain={showChain} onSkipStep={handleSkipStep} onImagePreview={handleImagePreview} mdModules={mdModules} />
+              ) : (
+                <MessageBubble msg={msg} onAskAnswer={handleAskAnswer} onRetry={handleRegenerate} onEdit={handleEditMessage} onRegenerate={handleRegenerate} onRewind={handleRewind} isLast={i === messages.length - 1} apiBaseUrl={apiBaseUrl} showChain={showChain} onSkipStep={handleSkipStep} onImagePreview={handleImagePreview} mdModules={mdModules} />
+              )}
+            </div>
           )}
+          </ErrorBoundary>
 
           {/* Sub-agent progress cards */}
           {displaySubAgentTasks.length > 0 && (
@@ -4973,6 +5709,68 @@ export function ChatView({
           return activePlan ? <FloatingPlanBar plan={activePlan} /> : null;
         })()}
 
+        {/* 长闲置回归提示 (6.7) */}
+        {idleReturnPrompt && (
+          <div style={{
+            padding: "10px 16px", borderTop: "1px solid var(--line)", background: "rgba(234,179,8,0.08)",
+            display: "flex", alignItems: "center", gap: 10, fontSize: 13,
+          }}>
+            <span>⏰</span>
+            <span style={{ flex: 1 }}>{t("chat.idleReturnHint", "你已离开较长时间，当前会话上下文较长。建议使用 /clear 节省 token 或新建会话。")}</span>
+            <button
+              onClick={() => { setIdleReturnPrompt(false); newConversation(); }}
+              style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}
+            >{t("chat.newConversation", "新建会话")}</button>
+            <button
+              onClick={() => setIdleReturnPrompt(false)}
+              style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}
+            >{t("common.dismiss", "忽略")}</button>
+          </div>
+        )}
+
+        {/* 大文本粘贴预览 (6.4) */}
+        {pastedLargeText && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid var(--line)", background: "var(--panel)", fontSize: 13 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ opacity: 0.7 }}>
+                {t("chat.largePaste", "粘贴文本")} — {pastedLargeText.text.length} {t("common.chars", "字符")} / {pastedLargeText.lines} {t("common.lines", "行")}
+              </span>
+              <span style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => {
+                    const newVal = inputTextRef.current + pastedLargeText.text;
+                    setInputValue(newVal);
+                    // Immediate undo snapshot (bypass debounce for explicit actions)
+                    if (undoDebounceRef.current) clearTimeout(undoDebounceRef.current);
+                    const stack = undoStackRef.current;
+                    const idx = undoIdxRef.current;
+                    if (stack[idx] !== newVal) {
+                      const trimmed = stack.slice(0, idx + 1);
+                      trimmed.push(newVal);
+                      if (trimmed.length > UNDO_MAX_STEPS) trimmed.shift();
+                      undoStackRef.current = trimmed;
+                      undoIdxRef.current = trimmed.length - 1;
+                    }
+                    setPastedLargeText(null);
+                  }}
+                  style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 12 }}
+                >
+                  {t("common.insert", "插入")}
+                </button>
+                <button
+                  onClick={() => setPastedLargeText(null)}
+                  style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 12 }}
+                >
+                  {t("common.discard", "丢弃")}
+                </button>
+              </span>
+            </div>
+            <pre style={{ maxHeight: 80, overflow: "auto", padding: 8, background: "var(--bg)", borderRadius: 6, fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}>
+              {pastedLargeText.text.slice(0, 500)}{pastedLargeText.text.length > 500 ? "\n..." : ""}
+            </pre>
+          </div>
+        )}
+
         {/* 附件预览栏 */}
         {pendingAttachments.length > 0 && (
           <div style={{ padding: "12px 16px 8px", borderTop: "1px solid var(--line)", display: "flex", flexWrap: "wrap", gap: 12, background: "var(--panel)", maxHeight: 140, overflowY: "auto" }}>
@@ -4985,6 +5783,93 @@ export function ChatView({
             ))}
           </div>
         )}
+
+        {/* Org Flow Status Panel */}
+        {orgCommandPending && orgNodeStates.size > 0 && (
+          <div style={{
+            margin: "0 16px 8px", borderRadius: 12,
+            border: "1px solid var(--border, rgba(255,255,255,0.1))",
+            background: "var(--card, rgba(0,0,0,0.03))",
+            overflow: "hidden", transition: "all 0.3s ease",
+          }}>
+            <button
+              onClick={() => setOrgFlowPanelOpen(p => !p)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 14px", border: "none", background: "transparent",
+                color: "var(--text)", cursor: "pointer", fontSize: 13, fontWeight: 600,
+              }}
+            >
+              <span>{orgFlowPanelOpen ? "▼" : "▶"}</span>
+              <span>{t("chat.orgFlowPanel", "组织协调状态")}</span>
+              <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>
+                {orgNodeStates.size} {t("chat.orgNodes", "节点")}
+              </span>
+            </button>
+            {orgFlowPanelOpen && (
+              <div style={{ padding: "4px 14px 12px", display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {Array.from(orgNodeStates.entries()).map(([nid, ns]) => {
+                  const color = ns.status === "busy" ? "#22c55e" : ns.status === "done" || ns.status === "idle" ? "#3b82f6" : ns.status === "error" ? "#ef4444" : ns.status === "timeout" ? "#f59e0b" : "#6b7280";
+                  const icon = ns.status === "busy" ? "🟢" : ns.status === "done" || ns.status === "idle" ? "🔵" : ns.status === "error" ? "🔴" : ns.status === "timeout" ? "🟡" : "⚪";
+                  return (
+                    <div key={nid} style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "4px 10px", borderRadius: 8, fontSize: 12,
+                      background: `${color}15`, border: `1px solid ${color}30`,
+                    }}>
+                      <span>{icon}</span>
+                      <span style={{ fontWeight: 600 }}>{nid}</span>
+                      {ns.task && <span style={{ opacity: 0.7, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ns.task}</span>}
+                    </div>
+                  );
+                })}
+                {orgDelegations.length > 0 && (
+                  <div style={{ width: "100%", marginTop: 4, fontSize: 11, opacity: 0.6 }}>
+                    {orgDelegations.slice(-5).map((d, i) => (
+                      <div key={i}>📋 {d.from} → {d.to}: {d.task.slice(0, 40)}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* IM channel alert banners */}
+        {imChannelAlerts.filter((a) => a.status === "offline").map((a) => (
+          <div key={a.channel} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "8px 16px", margin: "0 16px 6px",
+            borderRadius: 10, fontSize: 13,
+            background: "rgba(239,68,68,0.10)", color: "var(--text)",
+            border: "1px solid rgba(239,68,68,0.25)",
+          }}>
+            <span style={{ fontSize: 16 }}>🔌</span>
+            <span style={{ flex: 1 }}>
+              {t("chat.imChannelDisconnected", { channel: a.channel, defaultValue: `IM 通道 "${a.channel}" 已断开` })}
+            </span>
+            <button
+              onClick={() => setImChannelAlerts((prev) => prev.filter((x) => x.channel !== a.channel))}
+              style={{
+                padding: "2px 8px", borderRadius: 4, border: "none",
+                background: "transparent", color: "var(--muted-foreground)",
+                cursor: "pointer", fontSize: 11,
+              }}
+            >✕</button>
+          </div>
+        ))}
+        {imChannelAlerts.filter((a) => a.status === "online").map((a) => (
+          <div key={`${a.channel}-online`} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "6px 16px", margin: "0 16px 4px",
+            borderRadius: 10, fontSize: 12,
+            background: "rgba(34,197,94,0.10)", color: "var(--text)",
+            border: "1px solid rgba(34,197,94,0.25)",
+          }}>
+            <span style={{ fontSize: 14 }}>✅</span>
+            <span>{t("chat.imChannelReconnected", { channel: a.channel, defaultValue: `IM 通道 "${a.channel}" 已重连` })}</span>
+          </div>
+        ))}
 
         {/* Busy-on-other-device banner */}
         {activeConvId && isConvBusyOnOtherDevice(activeConvId) && (
@@ -5026,6 +5911,54 @@ export function ChatView({
               selectedIdx={slashSelectedIdx}
             />
           )}
+
+          {/* @Agent 联想面板 */}
+          {atAgentOpen && (() => {
+            const agents = agentProfiles.filter((a) =>
+              a.name.toLowerCase().includes(atAgentFilter) || a.id.toLowerCase().includes(atAgentFilter),
+            );
+            if (agents.length === 0) return null;
+            return (
+              <div style={{
+                position: "absolute", bottom: "100%", left: 0, right: 0,
+                background: "var(--panel)", border: "1px solid var(--line)",
+                borderRadius: 10, boxShadow: "0 -4px 16px rgba(0,0,0,0.12)",
+                maxHeight: 200, overflow: "auto", zIndex: 100,
+                padding: "4px 0", marginBottom: 4,
+              }}>
+                {agents.map((a, i) => (
+                  <div
+                    key={a.id}
+                    onClick={() => {
+                      setSelectedAgent(a.id);
+                      const ta = inputRef.current;
+                      if (ta) {
+                        const val = ta.value;
+                        const cursor = ta.selectionStart ?? val.length;
+                        const before = val.slice(0, cursor).replace(/@\w*$/, "");
+                        setInputValue(before + val.slice(cursor));
+                      }
+                      setAtAgentOpen(false);
+                      inputRef.current?.focus();
+                    }}
+                    style={{
+                      padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+                      background: i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(37,99,235,0.08)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent"; }}
+                  >
+                    <span style={{ fontSize: 16 }}>{a.icon || "🤖"}</span>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{a.name}</div>
+                      {a.description && <div style={{ fontSize: 11, opacity: 0.5 }}>{a.description}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
 
           {/* Queued messages list — Cursor style, per-session */}
           {(() => {
@@ -5264,6 +6197,7 @@ export function ChatView({
             {/* Textarea */}
             <textarea
               ref={inputRef}
+              aria-label={t("chat.inputAriaLabel", "输入消息")}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
               onPaste={handlePaste}
@@ -5292,8 +6226,13 @@ export function ChatView({
 
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button data-slot="toolbar" onClick={toggleRecording} className={`chatInputIconBtn ${isRecording ? "chatInputIconBtnDanger" : ""}`}>
+                    <button data-slot="toolbar" onClick={toggleRecording} className={`chatInputIconBtn ${isRecording ? "chatInputIconBtnDanger" : ""}`} style={isRecording ? { animation: "pulse 1.5s ease-in-out infinite" } : undefined}>
                       {isRecording ? <IconStopCircle size={16} /> : <IconMic size={16} />}
+                      {isRecording && recordingDuration > 0 && (
+                        <span style={{ fontSize: 10, marginLeft: 2, fontWeight: 600 }}>
+                          {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, "0")}
+                        </span>
+                      )}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">{isRecording ? t("chat.stopRecording") : t("chat.voice")}</TooltipContent>
@@ -5314,7 +6253,7 @@ export function ChatView({
                   </button>
                   {modeMenuOpen && (
                     <div className="chatModeMenu">
-                      <div className="chatModeMenuSection">执行模式</div>
+                      <div className="chatModeMenuSection">{t("chat.executionMode", "执行模式")}</div>
                       {([
                         { key: "agent" as const, icon: <IconBot size={14} />, label: "Agent", desc: "直接执行任务" },
                         { key: "plan" as const, icon: <IconPlan size={14} />, label: "Plan", desc: "先规划再执行" },
@@ -5455,6 +6394,7 @@ export function ChatView({
                     className="chatInputSendBtn"
                     disabled={!hasInputText && pendingAttachments.length === 0}
                     title={t("chat.send")}
+                    aria-label={t("chat.send", "发送")}
                   >
                     <IconSend size={14} />
                   </button>
@@ -5471,7 +6411,7 @@ export function ChatView({
         {typeof window !== "undefined" && window.innerWidth <= 768 && (
           <div className="sidebarOverlay" style={{ zIndex: 1000 }} onClick={() => setSidebarOpen(false)} />
         )}
-        <div className={`convSidebar${typeof window !== "undefined" && window.innerWidth <= 768 ? " convSidebarMobileOpen" : ""}`}>
+        <nav className={`convSidebar${typeof window !== "undefined" && window.innerWidth <= 768 ? " convSidebarMobileOpen" : ""}`} aria-label={t("chat.conversationList", "会话列表")}>
           <div className="convSidebarHeader">
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div className="convSearchBox" style={{ flex: 1 }}>
@@ -5529,7 +6469,7 @@ export function ChatView({
               </div>
             )}
           </div>
-        </div>
+        </nav>
         </>
       )}
 
@@ -5542,76 +6482,14 @@ export function ChatView({
         document.body,
       )}
 
-      {/* Image lightbox overlay */}
-      {lightbox && (
-        <div
-          style={{
-            position: "fixed", inset: 0, zIndex: 99999,
-            background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "zoom-out",
-          }}
-          onClick={() => setLightbox(null)}
-        >
-          <img
-            src={lightbox.url}
-            alt={lightbox.name}
-            style={{
-              maxWidth: Math.max(winSize.w - 80, 200),
-              maxHeight: Math.max(winSize.h - 80, 200),
-              borderRadius: 8, objectFit: "contain",
-              boxShadow: "0 8px 48px rgba(0,0,0,0.5)",
-              cursor: "default",
-              transition: "max-width 0.2s, max-height 0.2s",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          />
-          <div style={{
-            position: "absolute", top: 16, right: 16,
-            display: "flex", gap: 8,
-          }}>
-            <button
-              title={t("chat.downloadImage") || "保存图片"}
-              style={{
-                background: "rgba(255,255,255,0.25)", color: "#fff",
-                border: "1px solid rgba(255,255,255,0.35)", borderRadius: 8,
-                backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-                width: 40, height: 40,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", transition: "background 0.15s",
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.4)"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.25)"; }}
-              onClick={async (e) => {
-                e.stopPropagation();
-                try {
-                  const savedPath = await downloadFile(lightbox.downloadUrl, lightbox.name || `image-${Date.now()}.png`);
-                  await showInFolder(savedPath);
-                } catch (err) {
-                  logger.error("Chat", "图片下载失败", { error: String(err) });
-                }
-              }}
-            >
-              <IconDownload size={18} />
-            </button>
-            <button
-              style={{
-                background: "rgba(255,255,255,0.25)", color: "#fff",
-                border: "1px solid rgba(255,255,255,0.35)", borderRadius: 8,
-                backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-                width: 40, height: 40,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", transition: "background 0.15s",
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.4)"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.25)"; }}
-              onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
-            >
-              <IconX size={18} />
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Enhanced image lightbox — zoom/drag/keyboard (2.7) */}
+      {lightbox && <LightboxOverlay
+        lightbox={lightbox}
+        onClose={closeLightbox}
+        downloadFile={downloadFile}
+        showInFolder={showInFolder}
+        t={t}
+      />}
       <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
 
       {/* Keyboard shortcuts panel */}

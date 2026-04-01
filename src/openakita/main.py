@@ -1539,6 +1539,7 @@ def main(
 @app.command()
 def init(
     project_dir: str | None = typer.Argument(None, help="项目目录（默认当前目录）"),
+    quick: bool = typer.Option(False, "--quick", "-q", help="快速模式：仅配置 Provider + API Key + Model"),
 ):
     """
     初始化 OpenAkita - 交互式配置向导
@@ -1551,12 +1552,13 @@ def init(
 
     示例:
         openakita init
+        openakita init --quick
         openakita init ./my-project
     """
     from .setup import SetupWizard
 
     wizard = SetupWizard(project_dir)
-    success = wizard.run()
+    success = wizard.run(quick=quick)
 
     if success:
         raise typer.Exit(0)

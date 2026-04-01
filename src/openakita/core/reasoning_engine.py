@@ -2484,7 +2484,7 @@ class ReasoningEngine:
                         if _pr.decision == PolicyDecision.CONFIRM:
                             _risk = _pr.metadata.get("risk_level", "HIGH")
                             _needs_sb = _pr.metadata.get("needs_sandbox", False)
-                            _pe.store_ui_pending(tool_id, tool_name, _tool_args_dict)
+                            _pe.store_ui_pending(tool_id, tool_name, _tool_args_dict, session_id=conversation_id or "")
                             yield {
                                 "type": "security_confirm",
                                 "tool": tool_name,

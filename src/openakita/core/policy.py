@@ -958,13 +958,39 @@ class PolicyEngine:
         return False
 
     def store_ui_pending(
-        self, tool_id: str, tool_name: str, params: dict[str, Any]
+        self, tool_id: str, tool_name: str, params: dict[str, Any],
+        *, session_id: str = "",
     ) -> None:
         """Store a pending UI confirmation (SSE security_confirm sent)."""
+        import time
+        self._cleanup_expired_confirms()
         self._pending_ui_confirms[tool_id] = {
             "tool_name": tool_name,
             "params": params,
+            "created_at": time.time(),
+            "session_id": session_id,
         }
+
+    def _cleanup_expired_confirms(self, ttl: float = 120.0) -> None:
+        """Remove pending confirmations older than TTL seconds."""
+        import time
+        now = time.time()
+        expired = [
+            k for k, v in self._pending_ui_confirms.items()
+            if now - v.get("created_at", 0) > ttl
+        ]
+        for k in expired:
+            self._pending_ui_confirms.pop(k, None)
+
+    def cleanup_session(self, session_id: str) -> None:
+        """Remove all pending confirmations associated with a session.
+        Call this when a session ends or is closed."""
+        to_remove = [
+            k for k, v in self._pending_ui_confirms.items()
+            if v.get("session_id") == session_id
+        ]
+        for k in to_remove:
+            self._pending_ui_confirms.pop(k, None)
 
     def resolve_ui_confirm(self, confirm_id: str, decision: str) -> bool:
         """Called by the /api/chat/security-confirm endpoint.
