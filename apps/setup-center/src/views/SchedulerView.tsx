@@ -349,9 +349,11 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   const [searchQuery, setSearchQuery] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [expandedHistory, setExpandedHistory] = useState<Record<string, TaskExecution[]>>({});
+  const expandedHistoryRef = React.useRef(expandedHistory);
+  expandedHistoryRef.current = expandedHistory;
 
   const toggleHistory = useCallback(async (taskId: string) => {
-    if (expandedHistory[taskId]) {
+    if (expandedHistoryRef.current[taskId]) {
       setExpandedHistory(prev => { const n = { ...prev }; delete n[taskId]; return n; });
       return;
     }
@@ -362,7 +364,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
     } catch {
       setExpandedHistory(prev => ({ ...prev, [taskId]: [] }));
     }
-  }, [API_BASE, expandedHistory]);
+  }, [API_BASE]);
 
   const fetchTasks = useCallback(async (showLoading = true) => {
     if (!serviceRunning) return;

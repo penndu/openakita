@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ..utils.atomic_io import safe_json_write
+from ..utils.atomic_io import safe_json_write, safe_write
 from .task import ScheduledTask, TaskExecution, TaskStatus, TriggerType
 from .triggers import Trigger
 

@@ -6208,8 +6208,8 @@ NEXT: 建议的下一步（如有）"""
                 if cancel_todo(session_id):
                     logger.info(f"[StopTask] Cancelled active todo for session {session_id}")
             else:
-                from ..tools.handlers.plan import _session_active_todos
-                for sid in list(_session_active_todos.keys()):
+                from ..tools.handlers.plan import iter_active_todo_sessions
+                for sid in list(iter_active_todo_sessions().keys()):
                     if cancel_todo(sid):
                         logger.info(f"[StopTask] Cancelled active todo for session {sid}")
         except Exception as e:
