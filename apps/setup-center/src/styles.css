@@ -1025,6 +1025,22 @@ button.btnApplyRestart:hover {
   40% { transform: scale(1); opacity: 1; }
 }
 
+/* Streaming cursor (blinking caret while assistant is typing) */
+.streamingCursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--foreground);
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: cursorBlink 0.8s steps(2) infinite;
+}
+
+@keyframes cursorBlink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* Health status dot */
 .healthDot {
   display: inline-block;
@@ -3104,6 +3120,18 @@ button.btnApplyRestart:hover {
   opacity: 0.4;
   padding: 4px 0;
   margin-bottom: 8px;
+}
+
+.flatMsgSystemRich {
+  font-size: 13px;
+  opacity: 0.85;
+  padding: 8px 16px;
+  margin-bottom: 8px;
+  background: var(--muted);
+  border-radius: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  text-align: left;
 }
 
 /* 思考模式关闭状态 */

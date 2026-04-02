@@ -43,6 +43,16 @@ export const FlatMessageItem = memo(function FlatMessageItem({
   const isSystem = msg.role === "system";
 
   if (isSystem) {
+    const isRichContent = msg.content && (msg.content.includes("**") || msg.content.includes("\n") || msg.content.length > 80);
+    if (isRichContent && mdModules) {
+      return (
+        <div className="flatMsgSystemRich">
+          <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]} rehypePlugins={[mdModules.rehypeRaw]}>
+            {msg.content || ""}
+          </mdModules.ReactMarkdown>
+        </div>
+      );
+    }
     return (
       <div className="flatMsgSystem">
         <span>{msg.content}</span>

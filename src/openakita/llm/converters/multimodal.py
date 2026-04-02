@@ -17,6 +17,7 @@ from ..types import (
     ImageBlock,
     ImageContent,
     TextBlock,
+    ThinkingBlock,
     VideoBlock,
     VideoContent,
 )
@@ -412,6 +413,12 @@ def convert_content_blocks(
                 result.append(converter(block.document))
             else:
                 result.append(_degrade_document(block))
+
+        elif isinstance(block, ThinkingBlock):
+            pass
+
+    if not result:
+        return ""
 
     return result
 

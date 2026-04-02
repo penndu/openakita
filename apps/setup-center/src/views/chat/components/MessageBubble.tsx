@@ -99,6 +99,9 @@ export const MessageBubble = memo(function MessageBubble({
             <SpinnerTipDisplay />
           </div>
         )}
+        {msg.streaming && msg.content && (
+          <span className="streamingCursor" />
+        )}
 
         {msg.toolCalls && msg.toolCalls.length > 0 && (!msg.thinkingChain || msg.thinkingChain.length === 0) && (
           <ToolCallsGroup toolCalls={msg.toolCalls} />

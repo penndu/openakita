@@ -192,7 +192,7 @@ def _convert_single_message_to_openai(
             elif msg.reasoning_content:
                 assistant_msg["reasoning_content"] = msg.reasoning_content
 
-            assistant_msg["content"] = text_content if text_content else None
+            assistant_msg["content"] = text_content if text_content else ""
 
             # 工具调用
             if tool_uses:

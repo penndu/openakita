@@ -11,7 +11,7 @@ import type {
   ChainToolCall,
   ChainSummaryItem,
 } from "./chatTypes";
-import { IS_TAURI } from "../../../platform";
+import { IS_TAURI, saveFileDialog, writeTextFile } from "../../../platform";
 import { getAccessToken } from "../../../platform/auth";
 
 // ── 持久化 Key 常量 ──
@@ -87,13 +87,11 @@ export const SVG_PATHS: Record<string, string> = {
 
 // ── 对话导出 ──
 
-export function exportConversation(msgs: ChatMessage[], title: string, format: "md" | "json") {
+export async function exportConversation(msgs: ChatMessage[], title: string, format: "md" | "json") {
   let content: string;
-  let mimeType: string;
   let ext: string;
   if (format === "json") {
     content = JSON.stringify(msgs.map(({ streaming, ...rest }) => rest), null, 2);
-    mimeType = "application/json";
     ext = "json";
   } else {
     const lines: string[] = [`# ${title}`, "", `> 导出时间: ${new Date().toLocaleString()}`, ""];
@@ -111,16 +109,36 @@ export function exportConversation(msgs: ChatMessage[], title: string, format: "
       lines.push("---", "");
     }
     content = lines.join("\n");
-    mimeType = "text/markdown";
     ext = "md";
   }
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${title.replace(/[/\\?%*:|"<>]/g, "_").slice(0, 50)}.${ext}`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+  const sanitizedTitle = title.replace(/[/\\?%*:|"<>]/g, "_").slice(0, 50);
+
+  if (IS_TAURI) {
+    try {
+      const savePath = await saveFileDialog({
+        title: "导出对话",
+        defaultPath: `${sanitizedTitle}.${ext}`,
+        filters: [{ name: ext === "json" ? "JSON" : "Markdown", extensions: [ext] }],
+      });
+      if (savePath) {
+        await writeTextFile(savePath, content);
+      }
+    } catch (e) {
+      console.error("Export failed:", e);
+    }
+  } else {
+    const mimeType = ext === "json" ? "application/json" : "text/markdown";
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${sanitizedTitle}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
 }
 
 // ── Auth token helper ──

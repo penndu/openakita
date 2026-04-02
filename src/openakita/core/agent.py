@@ -4107,7 +4107,10 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                     _raw_text = "".join(_raw_parts)
                     _reply_text = clean_llm_response(_raw_text)
                     if _reply_text:
-                        yield {"type": "text_delta", "content": _reply_text}
+                        _chunk_size = 20
+                        for _ci in range(0, len(_reply_text), _chunk_size):
+                            yield {"type": "text_delta", "content": _reply_text[_ci:_ci + _chunk_size]}
+                            await asyncio.sleep(0.01)
                     elif _has_tool_use:
                         _reply_text = "好的，已收到你的信息。"
                         yield {"type": "text_delta", "content": _reply_text}
@@ -6635,6 +6638,16 @@ NEXT: 建议的下一步（如有）"""
 
         start_time = time.time()
 
+        def _fail_result(error_msg: str) -> TaskResult:
+            return TaskResult(
+                success=False,
+                error=error_msg,
+                iterations=iteration,
+                duration_seconds=time.time() - start_time,
+            )
+
+        iteration = 0
+
         if not self._initialized:
             await self.initialize()
 
@@ -6690,7 +6703,7 @@ NEXT: 建议的下一步（如有）"""
         messages = [original_task_message.copy()]
 
         max_tool_iterations = settings.max_iterations  # Ralph Wiggum 模式：永不放弃
-        iteration = 0
+        # iteration 已在 _fail_result 辅助函数之前初始化
         final_response = ""
         current_model = self.brain.model
         conversation_id = task.session_id or f"task:{task.id}"
@@ -6738,7 +6751,7 @@ NEXT: 建议的下一步（如有）"""
                     logger.info(
                         f"[StopTask] Task cancelled in execute_task: {self._cancel_reason}"
                     )
-                    return "✅ 任务已停止。"
+                    return _fail_result("✅ 任务已停止。")
 
                 iteration += 1
                 logger.info(f"Task iteration {iteration}")
@@ -6756,7 +6769,7 @@ NEXT: 建议的下一步（如有）"""
                             f"[Task:{task.id}] Exceeded max model switches "
                             f"({MAX_TASK_MODEL_SWITCHES}), aborting task"
                         )
-                        return (
+                        return _fail_result(
                             "❌ 任务执行失败，已尝试多个模型仍无法恢复。\n"
                             "💡 你可以直接重新发送来重试。"
                         )
@@ -6764,7 +6777,7 @@ NEXT: 建议的下一步（如有）"""
                     new_model = task_monitor.fallback_model
                     if not new_model:
                         logger.warning("[ModelSwitch] No fallback model available for sub-agent timeout")
-                        return "任务失败：所有模型端点均不可用，请检查网络连接。"
+                        return _fail_result("任务失败：所有模型端点均不可用，请检查网络连接。")
                     task_monitor.switch_model(
                         new_model,
                         f"任务执行超过 {task_monitor.timeout_seconds} 秒，重试 {task_monitor.retry_count} 次后切换",
@@ -6784,7 +6797,7 @@ NEXT: 建议的下一步（如有）"""
                                 f"[ModelSwitch] switch_model failed: {msg}. "
                                 f"Aborting task (no healthy endpoint)."
                             )
-                            return (
+                            return _fail_result(
                                 f"❌ 任务失败：模型切换失败（{msg}），无法继续执行。\n"
                                 "💡 建议：请检查网络连接，或在设置中心确认至少有一个模型配置正确。"
                             )
@@ -6837,9 +6850,10 @@ NEXT: 建议的下一步（如有）"""
 
                 except UserCancelledError:
                     logger.info(f"[StopTask] LLM call interrupted by user cancel in execute_task {task.id}")
-                    return await self._handle_cancel_farewell(
+                    farewell = await self._handle_cancel_farewell(
                         messages, _build_effective_system_prompt_task(), current_model
                     )
+                    return _fail_result(farewell)
 
                 except Exception as e:
                     logger.error(f"[LLM] Brain call failed in task {task.id}: {e}")
@@ -6851,7 +6865,7 @@ NEXT: 建议的下一步（如有）"""
                             f"[Task:{task.id}] Global retry limit reached "
                             f"({_total_llm_retries}/{MAX_TOTAL_LLM_RETRIES}), aborting"
                         )
-                        return (
+                        return _fail_result(
                             f"❌ 任务执行失败，已重试 {MAX_TOTAL_LLM_RETRIES} 次仍无法恢复。\n"
                             f"错误: {str(e)[:200]}\n"
                             "💡 你可以直接重新发送来重试。"
@@ -6874,7 +6888,7 @@ NEXT: 建议的下一步（如有）"""
                                     llm_client.reset_all_cooldowns(include_structural=True)
                                 continue
                         logger.error(f"[Task:{task.id}] Structural error, aborting: {str(e)[:200]}")
-                        return (
+                        return _fail_result(
                             f"❌ API 请求格式错误，无法恢复。\n"
                             f"错误: {str(e)[:200]}\n"
                             "💡 你可以直接重新发送来重试。"
@@ -6891,9 +6905,10 @@ NEXT: 建议的下一步（如有）"""
                         try:
                             await self._cancellable_await(asyncio.sleep(2), _cancel_event)
                         except UserCancelledError:
-                            return await self._handle_cancel_farewell(
+                            farewell = await self._handle_cancel_farewell(
                                 messages, _build_effective_system_prompt_task(), current_model
                             )
+                            return _fail_result(farewell)
                         continue
                     else:
                         _task_switch_count += 1
@@ -6902,7 +6917,7 @@ NEXT: 建议的下一步（如有）"""
                                 f"[Task:{task.id}] Exceeded max model switches "
                                 f"({MAX_TASK_MODEL_SWITCHES}), aborting task"
                             )
-                            return (
+                            return _fail_result(
                                 f"❌ 任务执行失败，已尝试多个模型仍无法恢复。\n"
                                 f"错误: {str(e)[:200]}\n"
                                 "💡 你可以直接重新发送来重试。"
@@ -6911,7 +6926,7 @@ NEXT: 建议的下一步（如有）"""
                         new_model = task_monitor.fallback_model
                         if not new_model:
                             logger.warning("[ModelSwitch] No fallback model available for sub-agent error")
-                            return "任务失败：所有模型端点均不可用，请检查网络连接。"
+                            return _fail_result("任务失败：所有模型端点均不可用，请检查网络连接。")
                         task_monitor.switch_model(
                             new_model,
                             f"LLM 调用失败，重试 {task_monitor.retry_count} 次后切换: {e}",
@@ -6932,7 +6947,7 @@ NEXT: 建议的下一步（如有）"""
                                 )
                                 # switch_model 失败（目标在冷静期），不重置 retry_count
                                 # 直接 break，避免无限重试
-                                return (
+                                return _fail_result(
                                     f"❌ 任务失败：模型切换失败（{msg}），无法继续执行。\n"
                                     "💡 建议：请检查网络连接，或在设置中心确认至少有一个模型配置正确。"
                                 )

@@ -51,12 +51,14 @@ async def clear_chat(request: Request):
     if not conversation_id:
         return {"ok": False, "error": "missing conversation_id"}
 
-    from .conversation_lifecycle import get_lifecycle_manager
-    lm = get_lifecycle_manager()
-    if lm and hasattr(lm, "session_manager") and lm.session_manager:
-        session = lm.session_manager.get_session_by_conversation(conversation_id)
-        if session:
-            session.context.clear_messages()
+    session_manager = getattr(request.app.state, "session_manager", None)
+    if session_manager:
+        cleared = session_manager.clear_history(
+            channel="desktop",
+            chat_id=conversation_id,
+            user_id="desktop_user",
+        )
+        if cleared:
             return {"ok": True}
     return {"ok": False, "error": "session not found"}
 

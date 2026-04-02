@@ -198,11 +198,11 @@ class OpenAIProvider(LLMProvider):
             body_chars += sum(len(str(t)) for t in tools)
 
         est_tokens = body_chars // 2  # 中文约 2 字符/token
-        if est_tokens < 60_000:
+        if est_tokens < 30_000:
             return None
 
         base_timeout = self.config.timeout or 180
-        scale = min(est_tokens / 60_000, 3.0)  # 最多 3 倍
+        scale = min(est_tokens / 30_000, 3.0)  # 最多 3 倍
         new_read = base_timeout * scale
         new_read = min(new_read, 540.0)  # 上限 9 分钟
         if new_read <= base_timeout * 1.1:

@@ -947,7 +947,10 @@ export function ChatView({
 
   useEffect(() => {
     if (convSwitchScrollRef.current && messages.length > 0) {
-      requestAnimationFrame(() => messageListRef.current?.scrollToBottom("auto"));
+      messageListRef.current?.forceFollow();
+      requestAnimationFrame(() => {
+        setTimeout(() => messageListRef.current?.scrollToBottom("auto"), 50);
+      });
       convSwitchScrollRef.current = false;
     }
   }, [messages]);
@@ -958,8 +961,9 @@ export function ChatView({
       return;
     }
     if (needsScrollOnVisible.current) {
+      messageListRef.current?.forceFollow();
       requestAnimationFrame(() => {
-        messageListRef.current?.scrollToBottom("auto");
+        setTimeout(() => messageListRef.current?.scrollToBottom("auto"), 50);
       });
       needsScrollOnVisible.current = false;
     }
@@ -1133,8 +1137,8 @@ export function ChatView({
     }},
     { id: "memory", label: t("chat.memoryCmd", "记忆管理"), description: t("chat.memoryCmdDesc", "查看/管理 AI 记忆条目"), action: (args) => {
       if (args === "list" || !args) {
-        safeFetch(`${apiBase}/api/memory/entries?limit=20`).then(r => r.json()).then(data => {
-          const entries = data?.entries || data?.memories || [];
+        safeFetch(`${apiBase}/api/memories?limit=20`).then(r => r.json()).then(data => {
+          const entries = data?.memories || data?.entries || [];
           if (!entries.length) {
             setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.memoryEmpty", "暂无记忆条目。AI 会在对话中自动学习和记忆。"), timestamp: Date.now() }]);
           } else {
@@ -1149,8 +1153,8 @@ export function ChatView({
       }
     }},
     { id: "skills", label: t("chat.skillsCmd", "技能管理"), description: t("chat.skillsCmdDesc", "查看已安装的技能列表"), action: () => {
-      safeFetch(`${apiBase}/api/config/skills`).then(r => r.json()).then(data => {
-        const skills = data?.skills || [];
+      safeFetch(`${apiBase}/api/skills`).then(r => r.json()).then(data => {
+        const skills = data?.skills || (Array.isArray(data) ? data : []);
         if (!skills.length) {
           setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.skillsEmpty", "暂无已安装技能。可在「技能商店」中浏览安装。"), timestamp: Date.now() }]);
         } else {
@@ -2545,6 +2549,8 @@ export function ChatView({
     const msgs = latestMessagesRef.current;
     const idx = msgs.findIndex((m) => m.id === msgId);
     if (idx < 0 || idx >= msgs.length - 1) return;
+    const deleteCount = msgs.length - idx - 1;
+    if (!window.confirm(`确定要回退到这条消息吗？之后的 ${deleteCount} 条消息将被删除。`)) return;
     setMessages((prev) => prev.slice(0, idx + 1));
   }, []);
 
@@ -2776,6 +2782,8 @@ export function ChatView({
       json: "application/json", csv: "text/csv",
     };
 
+    const FILE_MAX_SIZE = 50 * 1024 * 1024; // 50MB
+
     const handleDroppedPaths = (paths: string[]) => {
       for (const filePath of paths) {
         const name = filePath.split(/[\\/]/).pop() || "file";
@@ -2786,10 +2794,14 @@ export function ChatView({
         readFileBase64(filePath)
           .then((dataUrl) => {
             if (cancelled) return;
+            const commaIdx = dataUrl.indexOf(",");
+            const base64Len = commaIdx >= 0 ? dataUrl.length - commaIdx - 1 : dataUrl.length;
+            const estimatedSize = base64Len * 3 / 4;
+            if (estimatedSize > FILE_MAX_SIZE) {
+              notifyError(`文件过大 (${(estimatedSize / 1024 / 1024).toFixed(1)}MB)，最大支持 50MB`);
+              return;
+            }
             if (isVideo) {
-              const commaIdx = dataUrl.indexOf(",");
-              const base64Len = commaIdx >= 0 ? dataUrl.length - commaIdx - 1 : dataUrl.length;
-              const estimatedSize = base64Len * 3 / 4;
               const VIDEO_MAX_SIZE = 7 * 1024 * 1024;
               if (estimatedSize > VIDEO_MAX_SIZE) {
                 notifyError(`视频文件过大 (${(estimatedSize / 1024 / 1024).toFixed(1)}MB)，最大支持 7MB（base64 编码后需 < 10MB）`);
@@ -2804,7 +2816,10 @@ export function ChatView({
               mimeType,
             }]);
           })
-          .catch((err) => logger.error("Chat", "DragDrop read_file_base64 failed", { name, error: String(err) }));
+          .catch((err) => {
+            notifyError(`文件读取失败: ${name}`);
+            logger.error("Chat", "DragDrop read_file_base64 failed", { name, error: String(err) });
+          });
       }
     };
 
@@ -2918,7 +2933,7 @@ export function ChatView({
 
     if (atAgentOpen) {
       const q = atAgentFilter;
-      const agents = agentProfiles.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
+      const agents = agentProfiles.filter((a) => a.name.includes(q) || a.name.toLowerCase().includes(q.toLowerCase()) || a.id.toLowerCase().includes(q.toLowerCase()));
       if (e.key === "ArrowDown") { e.preventDefault(); setAtAgentIdx((i) => Math.min(i + 1, agents.length - 1)); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setAtAgentIdx((i) => Math.max(0, i - 1)); return; }
       if (e.key === "Enter" || e.key === "Tab") {
@@ -3651,7 +3666,7 @@ export function ChatView({
           {/* @Agent 联想面板 */}
           {atAgentOpen && (() => {
             const agents = agentProfiles.filter((a) =>
-              a.name.toLowerCase().includes(atAgentFilter) || a.id.toLowerCase().includes(atAgentFilter),
+              a.name.includes(atAgentFilter) || a.name.toLowerCase().includes(atAgentFilter.toLowerCase()) || a.id.toLowerCase().includes(atAgentFilter.toLowerCase()),
             );
             if (agents.length === 0) return null;
             return (
@@ -3677,6 +3692,7 @@ export function ChatView({
                       setAtAgentOpen(false);
                       inputRef.current?.focus();
                     }}
+                    ref={(el) => { if (i === atAgentIdx && el) el.scrollIntoView({ block: "nearest" }); }}
                     style={{
                       padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
                       background: i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent",
@@ -3685,10 +3701,10 @@ export function ChatView({
                     onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(37,99,235,0.08)"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent"; }}
                   >
-                    <span style={{ fontSize: 16 }}>{a.icon || "🤖"}</span>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{a.name}</div>
-                      {a.description && <div style={{ fontSize: 11, opacity: 0.5 }}>{a.description}</div>}
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>{a.icon || "🤖"}</span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap" }}>{a.name}</div>
+                      {a.description && <div style={{ fontSize: 11, opacity: 0.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.description}</div>}
                     </div>
                   </div>
                 ))}
@@ -3827,15 +3843,18 @@ export function ChatView({
                     <IconChevronDown size={12} />
                   </button>
                   {agentMenuOpen && (
-                    <div className="chatModelMenu" style={{ minWidth: 220 }}>
+                    <div className="chatModelMenu" style={{ minWidth: 280 }}>
                       {!agentProfiles.some(p => p.id === "default") && (
                         <div
                           key="__default__"
                           className={`chatModelMenuItem ${selectedAgent === "default" ? "chatModelMenuItemActive" : ""}`}
                           onClick={() => { setSelectedAgent("default"); setAgentMenuOpen(false); }}
+                          style={{ alignItems: "flex-start", gap: 8 }}
                         >
-                          <span style={{ marginRight: 6 }}>🎯</span>
-                          <span style={{ fontWeight: 600 }}>{t("chat.agentDefault")}</span>
+                          <span style={{ fontSize: 16, flexShrink: 0, lineHeight: "20px" }}>🎯</span>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap" }}>{t("chat.agentDefault")}</div>
+                          </div>
                         </div>
                       )}
                       {agentProfiles.map((ap) => (
@@ -3843,10 +3862,13 @@ export function ChatView({
                           key={ap.id}
                           className={`chatModelMenuItem ${selectedAgent === ap.id ? "chatModelMenuItemActive" : ""}`}
                           onClick={() => { setSelectedAgent(ap.id); setAgentMenuOpen(false); }}
+                          style={{ alignItems: "flex-start", gap: 8 }}
                         >
-                          <span style={{ marginRight: 6 }}>{ap.icon}</span>
-                          <span style={{ fontWeight: 600 }}>{ap.name}</span>
-                          <span style={{ fontSize: 11, opacity: 0.5, marginLeft: 6 }}>{ap.description}</span>
+                          <span style={{ fontSize: 16, flexShrink: 0, lineHeight: "20px" }}>{ap.icon}</span>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap" }}>{ap.name}</div>
+                            {ap.description && <div style={{ fontSize: 11, opacity: 0.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ap.description}</div>}
+                          </div>
                         </div>
                       ))}
                     </div>
