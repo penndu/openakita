@@ -260,7 +260,30 @@ export function basename(path: string): string {
   return path.replace(/\\/g, "/").split("/").pop() || path;
 }
 
-export function formatToolDescription(tool: string, args: Record<string, unknown>): string {
+const SKILL_TOOL_NAMES: Record<string, string> = {
+  list_skills: "chat.toolListSkills",
+  get_skill_info: "chat.toolGetSkillInfo",
+  run_skill_script: "chat.toolRunSkillScript",
+  get_skill_reference: "chat.toolGetSkillRef",
+  install_skill: "chat.toolInstallSkill",
+  load_skill: "chat.toolLoadSkill",
+  reload_skill: "chat.toolReloadSkill",
+  manage_skill_enabled: "chat.toolManageEnabled",
+  execute_skill: "chat.toolExecuteSkill",
+  uninstall_skill: "chat.toolUninstallSkill",
+};
+
+export function formatToolDescription(tool: string, args: Record<string, unknown>, t?: (k: string, fb?: string) => string): string {
+  const _t = t || ((_k: string, fb?: string) => fb || _k);
+
+  // Skill tools: use friendly names
+  const skillKey = SKILL_TOOL_NAMES[tool];
+  if (skillKey) {
+    const friendly = _t(skillKey, tool);
+    const skillName = String(args.skill_name || args.name || "").slice(0, 30);
+    return skillName ? `${friendly}: ${skillName}` : friendly;
+  }
+
   switch (tool) {
     case "read_file":
       return `Read ${basename(String(args.path || args.file || ""))}`;
@@ -302,6 +325,21 @@ export function summarizeToolResult(tool: string, result: string | undefined, is
   }
   const r = result.trim();
   if (r.length <= 60) return r;
+
+  // Skill tools: extract meaningful summary
+  if (tool in SKILL_TOOL_NAMES) {
+    if (tool === "list_skills") {
+      const countMatch = r.match(/\((\d+)\)/);
+      if (countMatch) return _t("chat.toolSkillCount", { count: countMatch[1], defaultValue: `${countMatch[1]} skills total` } as unknown as string);
+      const lineCount = r.split("\n").filter((l: string) => l.trim().startsWith("-")).length;
+      if (lineCount > 0) return _t("chat.toolSkillCount", { count: lineCount, defaultValue: `${lineCount} skills total` } as unknown as string);
+    }
+    // For other skill tools, extract first meaningful line
+    const firstLine = r.split("\n").find((l: string) => l.trim() && !l.startsWith("─") && !l.startsWith("==="));
+    if (firstLine) return firstLine.replace(/^[✅❌🔧⚙️]+\s*/, "").slice(0, 60);
+    return _t("chat.toolSkillResult", "Skill operation done");
+  }
+
   switch (tool) {
     case "read_file":
       return _t("chat.toolReadLines", { count: r.split("\n").length, defaultValue: `Read ${r.split("\n").length} lines` } as unknown as string);

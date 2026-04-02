@@ -102,6 +102,8 @@ class TaskScheduler:
         self._running = True
         self._semaphore = asyncio.Semaphore(self.max_concurrent)
 
+        self._trim_executions_file()
+
         # 更新任务的下一次运行时间
         # 注意：只有 next_run 为空或已严重过期的任务才重新计算
         # 避免程序重启导致任务立即执行
@@ -455,7 +457,7 @@ class TaskScheduler:
         async with self._lock:
             self._executions.append(execution)
             self._save_tasks()
-            self._save_executions()
+            self._append_execution(execution)
 
         return execution
 
@@ -606,7 +608,7 @@ class TaskScheduler:
             logger.error(f"Failed to load tasks: {e}")
 
     def _load_executions(self) -> None:
-        """加载执行记录（可选）"""
+        """加载执行记录，同时支持旧 JSON 数组和新 JSONL 格式。"""
         executions_file = self.storage_path / "executions.json"
 
         if not executions_file.exists():
@@ -615,17 +617,46 @@ class TaskScheduler:
             return
 
         try:
-            with open(executions_file, encoding="utf-8") as f:
-                data = json.load(f)
             loaded = []
-            for item in data or []:
-                with contextlib.suppress(Exception):
-                    loaded.append(TaskExecution.from_dict(item))
-            # 只保留最近 1000 条
-            self._executions = loaded[-1000:]
+            with open(executions_file, encoding="utf-8") as f:
+                first_char = f.read(1)
+                if not first_char:
+                    return
+                f.seek(0)
+
+                if first_char == "[":
+                    data = json.load(f)
+                    for item in data or []:
+                        with contextlib.suppress(Exception):
+                            loaded.append(TaskExecution.from_dict(item))
+                    self._executions = loaded[-1000:]
+                    self._migrate_to_jsonl(executions_file)
+                else:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            loaded.append(TaskExecution.from_dict(json.loads(line)))
+                        except Exception:
+                            logger.debug(f"Skipping corrupt execution line {line_num}")
+                    self._executions = loaded[-1000:]
+
             logger.info(f"Loaded {len(self._executions)} executions from storage")
         except Exception as e:
             logger.warning(f"Failed to load executions: {e}")
+
+    def _migrate_to_jsonl(self, executions_file: Path) -> None:
+        """一次性将旧 JSON 数组格式迁移为 JSONL。"""
+        try:
+            lines = []
+            for e in self._executions:
+                lines.append(json.dumps(e.to_dict(), ensure_ascii=False, default=str))
+            content = "\n".join(lines) + "\n" if lines else ""
+            safe_write(executions_file, content, backup=True, fsync=True)
+            logger.info(f"Migrated executions.json to JSONL format ({len(lines)} records)")
+        except Exception as e:
+            logger.warning(f"Failed to migrate executions to JSONL: {e}")
 
     def _save_tasks(self) -> None:
         """保存任务"""
@@ -638,20 +669,31 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"Failed to save tasks: {e}")
 
-    def _save_executions(self) -> None:
-        """保存执行记录"""
+    def _append_execution(self, execution: TaskExecution) -> None:
+        """追加单条执行记录到 JSONL 文件。"""
+        from ..utils.atomic_io import append_jsonl
         executions_file = self.storage_path / "executions.json"
-
         try:
-            # 只保留最近 1000 条记录
-            recent = self._executions[-1000:]
-            data = [e.to_dict() for e in recent]
-            # 同步裁剪内存，避免长期运行无限增长
-            self._executions = recent
-            safe_json_write(executions_file, data, fsync=True)
-
+            append_jsonl(executions_file, execution.to_dict(), fsync=True)
         except Exception as e:
-            logger.error(f"Failed to save executions: {e}")
+            logger.error(f"Failed to append execution: {e}")
+
+    def _trim_executions_file(self) -> None:
+        """启动时裁剪 JSONL 文件，防止无限增长。保留最近 1000 行。"""
+        executions_file = self.storage_path / "executions.json"
+        if not executions_file.exists():
+            return
+        try:
+            with open(executions_file, encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) <= 2000:
+                return
+            recent = lines[-1000:]
+            safe_write(executions_file, "".join(recent), backup=True, fsync=True)
+            self._executions = self._executions[-1000:]
+            logger.info(f"Trimmed executions file: {len(lines)} -> {len(recent)} lines")
+        except Exception as e:
+            logger.warning(f"Failed to trim executions file: {e}")
 
     # ==================== 统计 ====================
 

@@ -204,4 +204,30 @@ reminder 任务的唯一作用就是发送提醒消息。
             "required": ["task_id"],
         },
     },
+    {
+        "name": "query_task_executions",
+        "category": "Scheduled",
+        "description": "Query execution history of scheduled tasks. View recent execution times, status, duration and error messages.",
+        "detail": """查询定时任务的执行历史记录。
+
+**适用场景**：
+- 查看任务最近的执行结果
+- 排查任务失败原因
+- 了解任务执行频率和耗时""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "任务 ID（可选，不指定则查询所有任务的执行记录）",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回记录数量，默认 10",
+                    "default": 10,
+                },
+            },
+            "required": [],
+        },
+    },
 ]

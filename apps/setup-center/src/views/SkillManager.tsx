@@ -345,7 +345,8 @@ function SkillDetailModal({
   onUninstall?: () => void;
   uninstalling?: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language || "zh";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -375,8 +376,8 @@ function SkillDetailModal({
               {isSystem ? <IconGear size={16} /> : <IconZap size={16} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 15 }}>{skill.name}</div>
-              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }}>{skill.description}</div>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>{getSkillDisplayName(skill, lang)}</div>
+              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }}>{getSkillDisplayDesc(skill, lang)}</div>
             </div>
             <Button
               variant="ghost"
@@ -512,10 +513,12 @@ function MarketplaceSkillCard({
   skill,
   onInstall,
   installing,
+  installStatus,
 }: {
   skill: MarketplaceSkill;
   onInstall: () => void;
   installing: boolean;
+  installStatus?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -535,9 +538,9 @@ function MarketplaceSkillCard({
             )}
             {skill.stars != null && skill.stars > 0 && <span style={{ fontSize: 11, opacity: 0.5, display: "inline-flex", alignItems: "center", gap: 4 }}><IconStar size={11} />{skill.stars}</span>}
           </div>
-          {skill.description && (
-            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{skill.description}</div>
-          )}
+          <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {skill.description || t("skills.marketplaceNoDesc", "暂无描述，安装后可在技能详情中查看")}
+          </div>
           <div style={{ fontSize: 11, opacity: 0.4, marginTop: 2 }}>
             {skill.url && <span style={{ fontFamily: "monospace" }}>{skill.url}</span>}
           </div>
@@ -558,7 +561,7 @@ function MarketplaceSkillCard({
           disabled={skill.installed || installing}
         >
           {installing && <Loader2 className="animate-spin" />}
-          {skill.installed ? t("skills.installed") : t("skills.install")}
+          {skill.installed ? t("skills.installed") : installing && installStatus ? installStatus : t("skills.install")}
         </Button>
       </div>
     </div>
@@ -614,6 +617,7 @@ export function SkillManager({
   const [detailEditContent, setDetailEditContent] = useState("");
   const [detailSaving, setDetailSaving] = useState(false);
   const [uninstallingSet, setUninstallingSet] = useState<Set<string>>(new Set());
+  const [installStatus, setInstallStatus] = useState<string>("");
   const [uninstallConfirm, setUninstallConfirm] = useState<SkillInfo | null>(null);
   const marketRequestId = useRef(0);
   const detailRequestNameRef = useRef<string | null>(null);
@@ -1173,12 +1177,14 @@ export function SkillManager({
     }
     const uniqueKey = skill.url || skill.id || skill.name;
     setInstallingSet(prev => new Set(prev).add(uniqueKey));
+    setInstallStatus(t("skills.installDownloading", "正在下载技能..."));
     setError(null);
     try {
       let installed = false;
 
-      // 方式1：服务运行中 → HTTP API 安装（首选，不回退 Tauri 避免 venv 缺失报错）
+      // 方式1：服务运行中 → HTTP API 安装
       if (serviceRunning && apiBaseUrl != null) {
+        setInstallStatus(t("skills.installDownloading", "正在下载技能..."));
         const res = await safeFetch(`${apiBaseUrl}/api/skills/install`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1188,6 +1194,7 @@ export function SkillManager({
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         installed = true;
+        setInstallStatus(t("skills.installParsing", "正在解析技能..."));
         try {
           await safeFetch(`${apiBaseUrl}/api/skills/reload`, {
             method: "POST",
@@ -1195,7 +1202,7 @@ export function SkillManager({
             body: JSON.stringify({}),
             signal: AbortSignal.timeout(10_000),
           });
-        } catch { /* reload 失败不阻塞，技能下次重启时自动加载 */ }
+        } catch { /* reload 失败不阻塞 */ }
       }
 
       // 方式2：服务未运行 → Tauri invoke（本地模式）
@@ -1207,6 +1214,7 @@ export function SkillManager({
         });
       }
 
+      setInstallStatus(t("skills.installDone", "安装完成"));
       setMarketplace((prev) => prev.map((s) =>
         s.url === skill.url ? { ...s, installed: true } : s
       ));
@@ -1233,6 +1241,7 @@ export function SkillManager({
       }
     } finally {
       setInstallingSet(prev => { const next = new Set(prev); next.delete(uniqueKey); return next; });
+      setInstallStatus("");
     }
   }, [loadSkills, venvDir, currentWorkspaceId, dataMode, serviceRunning, apiBaseUrl, t]);
 
@@ -1530,6 +1539,7 @@ export function SkillManager({
                   skill={skill}
                   onInstall={() => handleInstall(skill)}
                   installing={installingSet.has(uk)}
+                  installStatus={installingSet.has(uk) ? installStatus : undefined}
                 />
               );
             })}

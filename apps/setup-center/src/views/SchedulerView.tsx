@@ -17,7 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Loader2, RefreshCw, Plus, Trash2, Pencil, Power, PowerOff, Zap, Search, CalendarX2, SearchX, Info, AlertTriangle } from "lucide-react";
+import { Loader2, RefreshCw, Plus, Trash2, Pencil, Power, PowerOff, Zap, Search, CalendarX2, SearchX, Info, AlertTriangle, History } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 
@@ -42,6 +42,17 @@ type ScheduledTask = {
   created_at: string;
   updated_at: string;
   metadata: Record<string, any>;
+};
+
+type TaskExecution = {
+  id: string;
+  task_id: string;
+  started_at: string | null;
+  finished_at: string | null;
+  status: string;
+  result: string | null;
+  error: string | null;
+  duration_seconds: number | null;
 };
 
 type IMChannel = {
@@ -320,7 +331,7 @@ const dayOptions = Array.from({ length: 31 }, (_, i) => i + 1);
 
 type TaskTab = "active" | "completed" | "all";
 
-const ACTIVE_STATUSES = new Set(["pending", "scheduled", "running"]);
+const ACTIVE_STATUSES = new Set(["pending", "scheduled", "running", "missed"]);
 const COMPLETED_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunning: boolean; apiBaseUrl?: string }) {
@@ -337,6 +348,21 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   const [activeTab, setActiveTab] = useState<TaskTab>("active");
   const [searchQuery, setSearchQuery] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
+  const [expandedHistory, setExpandedHistory] = useState<Record<string, TaskExecution[]>>({});
+
+  const toggleHistory = useCallback(async (taskId: string) => {
+    if (expandedHistory[taskId]) {
+      setExpandedHistory(prev => { const n = { ...prev }; delete n[taskId]; return n; });
+      return;
+    }
+    try {
+      const res = await safeFetch(`${API_BASE}/api/scheduler/tasks/${taskId}/executions?limit=10`);
+      const data = await res.json();
+      setExpandedHistory(prev => ({ ...prev, [taskId]: data.executions || [] }));
+    } catch {
+      setExpandedHistory(prev => ({ ...prev, [taskId]: [] }));
+    }
+  }, [API_BASE, expandedHistory]);
 
   const fetchTasks = useCallback(async (showLoading = true) => {
     if (!serviceRunning) return;
@@ -345,9 +371,11 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
       const res = await safeFetch(`${API_BASE}/api/scheduler/tasks`);
       const data = await res.json();
       setTasks(data.tasks || []);
-    } catch { /* ignore */ }
+    } catch {
+      if (showLoading) toast.error(t("scheduler.loadError"));
+    }
     if (showLoading) setLoading(false);
-  }, [serviceRunning]);
+  }, [serviceRunning, t]);
 
   const fetchChannels = useCallback(async () => {
     if (!serviceRunning) return;
@@ -355,8 +383,10 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
       const res = await safeFetch(`${API_BASE}/api/scheduler/channels`);
       const data = await res.json();
       setChannels(data.channels || []);
-    } catch { /* ignore */ }
-  }, [serviceRunning]);
+    } catch {
+      toast.error(t("scheduler.loadChannelError"));
+    }
+  }, [serviceRunning, t]);
 
   useEffect(() => { fetchTasks(); fetchChannels(); }, [fetchTasks, fetchChannels]);
 
@@ -397,7 +427,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   };
 
   const saveTask = async () => {
-    if (!form.name.trim()) { showMsg(t("scheduler.namePlaceholder"), false); return; }
+    if (!form.name.trim()) { showMsg(t("scheduler.nameRequired"), false); return; }
 
     if (form.scheduleMode === "once" && !form.runAt) {
       showMsg(t("scheduler.runAt"), false); return;
@@ -483,8 +513,13 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
     try {
       const res = await safeFetch(`${API_BASE}/api/scheduler/tasks/${task.id}/toggle`, { method: "POST" });
       const data = await res.json();
-      if (!data.error) await fetchTasks();
-    } catch { /* ignore */ }
+      if (data.error) {
+        showMsg(data.error, false);
+      } else {
+        showMsg(task.enabled ? t("scheduler.disableSuccess") : t("scheduler.enableSuccess"), true);
+        await fetchTasks();
+      }
+    } catch (e) { showMsg(String(e), false); }
   };
 
   const triggerTask = async (task: ScheduledTask) => {
@@ -530,6 +565,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
       case "running": return <DotBlueProcessing />;
       case "completed": return <DotGray />;
       case "failed": return <DotRed />;
+      case "missed": return <DotYellow />;
       case "disabled": case "cancelled": return <DotGray />;
       default: return <DotGray />;
     }
@@ -539,6 +575,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
     const map: Record<string, string> = {
       pending: t("scheduler.statusPending"), scheduled: t("scheduler.statusScheduled"), running: t("scheduler.statusRunning"),
       completed: t("scheduler.statusCompleted"), failed: t("scheduler.statusFailed"), disabled: t("scheduler.statusDisabled"), cancelled: t("scheduler.statusCancelled"),
+      missed: t("scheduler.statusMissed"),
     };
     return map[status] || status;
   };
@@ -565,6 +602,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
       failed: t("scheduler.statusFailed"),
       disabled: t("scheduler.statusDisabled"),
       cancelled: t("scheduler.statusCancelled"),
+      missed: t("scheduler.statusMissed"),
     };
     return map[status] || status;
   };
@@ -1047,6 +1085,15 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    onClick={() => toggleHistory(task.id)}
+                    title={expandedHistory[task.id] ? t("scheduler.hideHistory") : t("scheduler.viewHistory")}
+                    className={cn("text-muted-foreground hover:text-foreground", expandedHistory[task.id] && "text-primary")}
+                  >
+                    <History size={13} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => openEdit(task)}
                     title={t("scheduler.editTask")}
                     className="text-muted-foreground hover:text-foreground"
@@ -1097,12 +1144,38 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
                   <span style={{ opacity: 0.7 }}>{t("scheduler.runCount")}:</span>{" "}
                   <span style={{ color: "var(--text)" }}>{task.run_count}</span>
                   {task.fail_count > 0 && (
-                    <span style={{ color: "var(--err-text, #991b1b)", marginLeft: 8 }}>
-                      {t("scheduler.failCount")}: {task.fail_count}
-                    </span>
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span style={{ color: "var(--err-text, #991b1b)", marginLeft: 8, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                            <AlertTriangle size={11} />
+                            {t("scheduler.failCount")}: {task.fail_count}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs px-2 py-1 max-w-[240px]">
+                          {task.fail_count >= 3
+                            ? t("scheduler.failWarning", { count: task.fail_count })
+                            : `${t("scheduler.failCount")}: ${task.fail_count}`}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   )}
                 </div>
               </div>
+
+              {/* Auto-disabled warning */}
+              {task.status === "failed" && !task.enabled && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  marginTop: 6, padding: "6px 10px", borderRadius: 6,
+                  background: "var(--warn-bg, rgba(234,179,8,0.1))",
+                  border: "1px solid var(--warn-border, rgba(234,179,8,0.3))",
+                  fontSize: 12, color: "var(--warn-text, #a16207)",
+                }}>
+                  <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+                  <span>{t("scheduler.autoDisabledWarning")}</span>
+                </div>
+              )}
 
               {/* Content preview */}
               {(task.reminder_message || task.prompt) && (
@@ -1113,6 +1186,56 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
                   maxHeight: 60, overflow: "hidden",
                 }}>
                   {task.reminder_message || task.prompt}
+                </div>
+              )}
+
+              {/* Execution history */}
+              {expandedHistory[task.id] && (
+                <div style={{
+                  marginTop: 8, padding: "8px 10px", borderRadius: 6,
+                  background: "var(--bg-elevated, rgba(0,0,0,0.03))",
+                  fontSize: 12, color: "var(--muted)",
+                }}>
+                  <div style={{ fontWeight: 500, marginBottom: 6, color: "var(--text)" }}>
+                    {t("scheduler.executionHistory")}
+                  </div>
+                  {expandedHistory[task.id].length === 0 ? (
+                    <div style={{ padding: "8px 0", textAlign: "center" }}>{t("scheduler.noExecutions")}</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {expandedHistory[task.id].map((exec) => (
+                        <div key={exec.id} style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "4px 6px", borderRadius: 4,
+                          background: "var(--bg, rgba(255,255,255,0.5))",
+                        }}>
+                          <Badge variant={exec.status === "success" ? "secondary" : "destructive"} className="text-[10px] px-1.5 py-0">
+                            {exec.status === "success" ? t("scheduler.executionSuccess") : t("scheduler.executionFailed")}
+                          </Badge>
+                          <span style={{ flex: 1, color: "var(--text)" }}>
+                            {exec.started_at ? formatDateTime(exec.started_at) : "-"}
+                          </span>
+                          {exec.duration_seconds != null && (
+                            <span>{t("scheduler.duration")}: {exec.duration_seconds.toFixed(1)}s</span>
+                          )}
+                          {exec.error && (
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span style={{ color: "var(--err-text, #991b1b)", cursor: "pointer", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {exec.error}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="text-xs px-2 py-1 max-w-[320px]">
+                                  {exec.error}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1128,6 +1251,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
       }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><DotGreen size={7} /> {t("scheduler.statusScheduled")}</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><DotBlueProcessing size={7} /> {t("scheduler.statusRunning")}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><DotYellow size={7} /> {t("scheduler.statusMissed")}</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><DotRed size={7} /> {t("scheduler.statusFailed")}</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><DotGray size={7} /> {t("scheduler.statusCompleted")} / {t("scheduler.statusDisabled")}</span>
       </div>
