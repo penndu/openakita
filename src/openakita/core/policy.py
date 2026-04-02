@@ -583,15 +583,6 @@ class PolicyEngine:
         if not self._config.enabled:
             return PolicyResult(decision=PolicyDecision.ALLOW, reason="Security disabled")
 
-        # F7: Skill-granted temporary allowlist bypass
-        if self._is_skill_allowed(tool_name):
-            self._on_allow(tool_name)
-            return PolicyResult(
-                decision=PolicyDecision.ALLOW,
-                reason="Allowed by skill temporary allowlist",
-                metadata={"skill_allowlist": True},
-            )
-
         # Bypass CONFIRM if user recently approved an identical action
         if self._is_recently_confirmed(tool_name, params):
             return PolicyResult(
@@ -600,7 +591,7 @@ class PolicyEngine:
                 metadata={"confirmed_bypass": True},
             )
 
-        # Death switch: readonly mode
+        # Death switch: readonly mode (NOT bypassable by skill allowlists)
         if self._readonly_mode:
             op = _tool_to_optype(tool_name, params)
             if op != OpType.READ:
@@ -610,10 +601,20 @@ class PolicyEngine:
                     policy_name="DeathSwitch",
                 )
 
-        # L5: Self-protection check
+        # L5: Self-protection check (NOT bypassable by skill allowlists)
         sp_result = self._check_self_protection(tool_name, params)
         if sp_result:
             return sp_result
+
+        # F7: Skill-granted temporary allowlist — bypasses L1/L3 and legacy
+        # policies but NOT death switch or self-protection
+        if self._is_skill_allowed(tool_name):
+            self._on_allow(tool_name)
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason="Allowed by skill temporary allowlist",
+                metadata={"skill_allowlist": True},
+            )
 
         # Legacy tool-level policy (blocked_patterns, require_confirmation)
         legacy_result = self._check_legacy_tool_policy(tool_name, params)

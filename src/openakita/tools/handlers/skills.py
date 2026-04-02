@@ -246,8 +246,8 @@ class SkillsHandler:
             try:
                 from openakita.core.policy import get_policy_engine
                 get_policy_engine().add_skill_allowlist(skill.skill_id, skill.allowed_tools)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to inject skill allowlist for %s: %s", skill.skill_id, e)
 
         exposed = build_skill_exposure(skill)
         body = skill.get_body() or "(无详细指令)"

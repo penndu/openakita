@@ -1369,6 +1369,14 @@ class Agent:
             self.skill_catalog.invalidate_cache()
             self._skill_catalog_text = self.skill_catalog.generate_catalog()
             self._update_skill_tools()
+
+            # F8: refresh conditional activation registry
+            if hasattr(self, "_skill_activation"):
+                self._skill_activation.clear()
+                for skill in self.skill_registry.list_enabled():
+                    if skill.paths:
+                        self._skill_activation.register_conditional(skill)
+
             from ..skills.events import notify_skills_changed, SkillEvent
             notify_skills_changed(SkillEvent.HOT_RELOAD)
             logger.info("Hot-reloaded %d skills after file change", loaded)

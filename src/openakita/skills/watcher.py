@@ -2,11 +2,11 @@
 技能文件热更新监视器
 
 监视技能目录的文件变更，触发自动重新加载。
-使用 watchdog 库（可选），不可用时回退到轮询模式。
+使用 watchdog 库（可选依赖），不可用时热更新功能静默禁用。
 
 特性:
 - 500ms 防抖：合并短时间内的多次变更
-- Graceful 降级：watchdog 不可用时使用 polling
+- Graceful 降级：watchdog 不可用时静默禁用（不阻塞启动）
 - 资源清理：stop() 方法释放所有资源
 """
 
@@ -52,7 +52,9 @@ class SkillWatcher:
                     self._watcher = watcher
 
                 def on_any_event(self, event):
-                    if event.src_path and event.src_path.endswith((".md", ".py", ".yaml", ".json")):
+                    if event.src_path and event.src_path.lower().endswith(
+                        (".md", ".py", ".yaml", ".json", ".yml")
+                    ):
                         self._watcher._schedule_reload()
 
             observer = Observer()
@@ -123,7 +125,11 @@ def clear_all_skill_caches() -> None:
     Utility function called by the watcher callback and
     other cache invalidation paths.
     """
-    from .catalog import SkillCatalog
-    from .registry import default_registry
-
     logger.debug("Clearing all skill caches")
+
+    try:
+        from .loader import SkillLoader
+        if hasattr(SkillLoader, "_load_cache"):
+            SkillLoader._load_cache = {}
+    except Exception:
+        pass
