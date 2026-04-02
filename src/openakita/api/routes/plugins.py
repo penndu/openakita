@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from ...config import settings
 from ...plugins import installer
+from ...plugins.errors import PluginErrorCode, make_error_response
 from ...plugins.installer import PluginInstallError
 from ...plugins.manifest import ManifestError, parse_manifest
 from ...plugins.state import PluginState
@@ -46,9 +48,18 @@ def _require_manager(request: Request):
     if pm is None:
         raise HTTPException(
             status_code=503,
-            detail="Plugin manager is not available",
+            detail=make_error_response(PluginErrorCode.MANAGER_UNAVAILABLE),
         )
     return pm
+
+
+_SAFE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9\-_.]{0,128}$")
+
+
+def _check_plugin_id(plugin_id: str) -> None:
+    """Validate plugin_id to prevent path traversal."""
+    if not _SAFE_ID_RE.match(plugin_id):
+        raise HTTPException(status_code=400, detail="Invalid plugin ID")
 
 
 class InstallBody(BaseModel):
@@ -231,7 +242,10 @@ async def list_plugins(request: Request) -> dict[str, Any]:
         return {"plugins": plugins, "failed": failed}
     except Exception as e:
         logger.exception("Failed to list plugins")
-        raise HTTPException(status_code=500, detail="Failed to list plugins") from e
+        raise HTTPException(
+            status_code=500,
+            detail=make_error_response(PluginErrorCode.INTERNAL_ERROR, detail=str(e)),
+        ) from e
 
 
 @router.post("/install")
@@ -246,24 +260,49 @@ async def install_plugin(body: InstallBody, request: Request) -> dict[str, str]:
                 plugin_id = await asyncio.to_thread(
                     installer.install_from_path, Path(src), plugins_dir
                 )
-        except (PluginInstallError, ValueError, OSError, FileNotFoundError) as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+        except PluginInstallError as e:
+            err_str = str(e)
+            if "not a valid zip" in err_str.lower():
+                code = PluginErrorCode.ZIP_INVALID
+            elif "size limit" in err_str.lower() or "file count limit" in err_str.lower():
+                code = PluginErrorCode.ZIP_BOMB
+            elif "plugin.json" in err_str.lower():
+                code = PluginErrorCode.MANIFEST_NOT_FOUND
+            elif "network" in err_str.lower() or "http" in err_str.lower():
+                code = PluginErrorCode.NETWORK_ERROR
+            else:
+                code = PluginErrorCode.INSTALL_FAILED
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response(code, detail=err_str),
+            ) from e
+        except (ValueError, OSError, FileNotFoundError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response(PluginErrorCode.INSTALL_FAILED, detail=str(e)),
+            ) from e
         except Exception as e:
             logger.exception("Unexpected error installing plugin from %s", src)
-            raise HTTPException(status_code=500, detail="Plugin installation failed") from e
+            raise HTTPException(
+                status_code=500,
+                detail=make_error_response(PluginErrorCode.INTERNAL_ERROR),
+            ) from e
 
         pm = _get_plugin_manager(request)
+        hot_loaded = False
         if pm is not None:
             try:
                 await pm.reload_plugin(plugin_id)
+                hot_loaded = True
             except Exception as e:
                 logger.warning("Plugin '%s' installed but failed to hot-load: %s", plugin_id, e)
 
-        return {"plugin_id": plugin_id}
+        return {"ok": True, "data": {"plugin_id": plugin_id, "hot_loaded": hot_loaded}}
 
 
 @router.delete("/{plugin_id}")
 async def uninstall_plugin(plugin_id: str, request: Request) -> dict[str, Any]:
+    _check_plugin_id(plugin_id)
     async with _plugin_op_lock:
         plugins_dir = _plugins_dir()
         state_path = _plugin_state_path()
@@ -278,21 +317,23 @@ async def uninstall_plugin(plugin_id: str, request: Request) -> dict[str, Any]:
             state.save(state_path)
 
         await asyncio.to_thread(installer.uninstall, plugin_id, plugins_dir)
-        return {"ok": True}
+        return {"ok": True, "data": {"plugin_id": plugin_id}}
 
 
 @router.post("/{plugin_id}/enable")
 async def enable_plugin(plugin_id: str, request: Request) -> dict[str, Any]:
+    _check_plugin_id(plugin_id)
     pm = _require_manager(request)
     await pm.enable_plugin(plugin_id)
-    return {"ok": True}
+    return {"ok": True, "data": {"plugin_id": plugin_id, "enabled": True}}
 
 
 @router.post("/{plugin_id}/disable")
 async def disable_plugin(plugin_id: str, request: Request) -> dict[str, Any]:
+    _check_plugin_id(plugin_id)
     pm = _require_manager(request)
     await pm.disable_plugin(plugin_id)
-    return {"ok": True}
+    return {"ok": True, "data": {"plugin_id": plugin_id, "enabled": False}}
 
 
 def _plugin_config_path(plugin_id: str) -> Path:
@@ -301,6 +342,7 @@ def _plugin_config_path(plugin_id: str) -> Path:
 
 @router.get("/{plugin_id}/config")
 async def get_plugin_config(plugin_id: str) -> dict[str, Any]:
+    _check_plugin_id(plugin_id)
     path = _plugin_config_path(plugin_id)
     if not path.is_file():
         return {}
@@ -435,7 +477,7 @@ async def reload_plugin(plugin_id: str, request: Request) -> dict[str, Any]:
     async with _plugin_op_lock:
         pm = _require_manager(request)
         await pm.reload_plugin(plugin_id)
-        return {"ok": True}
+        return {"ok": True, "data": {"plugin_id": plugin_id}}
 
 
 @router.get("/{plugin_id}/logs")
@@ -476,6 +518,7 @@ async def get_plugin_icon(plugin_id: str) -> Response:
 @router.post("/{plugin_id}/open-folder")
 async def open_plugin_folder(plugin_id: str) -> dict[str, str]:
     """Return the absolute path so frontend can open it via Tauri/OS."""
+    _check_plugin_id(plugin_id)
     plugin_dir = _plugins_dir() / plugin_id
     if not plugin_dir.is_dir():
         raise HTTPException(status_code=404, detail="Plugin not found")
@@ -485,6 +528,7 @@ async def open_plugin_folder(plugin_id: str) -> dict[str, str]:
 @router.get("/{plugin_id}/export")
 async def export_plugin(plugin_id: str) -> Response:
     """Export a plugin as a .zip file for sharing."""
+    _check_plugin_id(plugin_id)
     plugin_dir = _plugins_dir() / plugin_id
     if not plugin_dir.is_dir():
         raise HTTPException(status_code=404, detail="Plugin not found")

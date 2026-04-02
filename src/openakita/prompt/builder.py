@@ -48,40 +48,13 @@ def set_prompt_hook_registry(hook_registry) -> None:
 
 
 def _apply_plugin_prompt_hooks(prompt: str) -> str:
-    """Apply on_prompt_build hooks from plugins (sync context).
-
-    This runs hook callbacks synchronously. If a callback is a coroutine function,
-    it is executed in a separate thread to avoid blocking the running event loop.
-    """
+    """Apply on_prompt_build hooks from plugins via dispatch_sync."""
     if _prompt_hook_registry is None:
         return prompt
-
-    callbacks = _prompt_hook_registry.get_hooks("on_prompt_build")
-    if not callbacks:
-        return prompt
-
-    import asyncio
-
-    error_tracker = getattr(_prompt_hook_registry, "_error_tracker", None)
-
-    for callback in callbacks:
-        plugin_id = getattr(callback, "__plugin_id__", "unknown")
-        if error_tracker and error_tracker.is_disabled(plugin_id):
-            continue
-        timeout = getattr(callback, "__hook_timeout__", 5.0)
-        try:
-            result = callback(prompt=prompt)
-            if asyncio.iscoroutine(result):
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(asyncio.run, result)
-                    result = future.result(timeout=timeout)
-            if isinstance(result, str) and result.strip():
-                prompt += "\n\n" + result
-        except Exception as e:
-            logger.debug(f"on_prompt_build hook from '{plugin_id}' error: {e}")
-            if error_tracker:
-                error_tracker.record_error(plugin_id, "hook:on_prompt_build", str(e))
+    results = _prompt_hook_registry.dispatch_sync("on_prompt_build", prompt=prompt)
+    for result in results:
+        if isinstance(result, str) and result.strip():
+            prompt += "\n\n" + result
     return prompt
 
 

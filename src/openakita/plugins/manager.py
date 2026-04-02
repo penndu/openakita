@@ -147,6 +147,14 @@ class PluginManager:
                     self._failed[manifest.id] = f"conflicts with {conflict}"
                     continue
 
+            if manifest.depends:
+                missing = [d for d in manifest.depends if d not in self._loaded]
+                if missing:
+                    msg = f"missing dependencies: {', '.join(missing)}"
+                    logger.warning("Plugin '%s' skipped: %s", manifest.id, msg)
+                    self._failed[manifest.id] = msg
+                    continue
+
             try:
                 await asyncio.wait_for(
                     self._load_single(manifest, plugin_dir),
@@ -167,7 +175,16 @@ class PluginManager:
                 self._state.record_error(manifest.id, msg)
 
         self._refresh_skill_catalog()
+        self._reload_llm_registries()
         self._save_state()
+
+    def _reload_llm_registries(self) -> None:
+        """Notify LLM registries to pick up plugin-provided providers."""
+        try:
+            from ..llm.registries import reload_registries
+            reload_registries()
+        except Exception as e:
+            logger.debug("LLM registry reload skipped: %s", e)
 
     async def _load_single(
         self, manifest: PluginManifest, plugin_dir: Path

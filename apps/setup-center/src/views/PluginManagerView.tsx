@@ -171,6 +171,14 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
 
   const [logsPanel, setLogsPanel] = useState<string | null>(null);
   const [logsContent, setLogsContent] = useState("");
+
+  const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+  const showToast = (msg: string, type: "ok" | "err" = "ok") => {
+    clearTimeout(toastTimer.current);
+    setToast({ msg, type });
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
+  };
   const [categoryFilter, setCategoryFilter] = useState("all");
 
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -236,6 +244,12 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
     setLogsPanel((prev) => (prev === id ? null : prev));
   };
 
+  const ACTION_LABELS: Record<string, { ok: string; err: string }> = {
+    enable:  { ok: t("plugins.toastEnabled"),     err: t("plugins.toastEnableFail") },
+    disable: { ok: t("plugins.toastDisabled"),    err: t("plugins.toastDisableFail") },
+    delete:  { ok: t("plugins.toastUninstalled"), err: t("plugins.toastUninstallFail") },
+  };
+
   const handleAction = async (id: string, action: "enable" | "disable" | "delete") => {
     try {
       const method = action === "delete" ? "DELETE" : "POST";
@@ -249,13 +263,16 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
       } else {
         updatePluginLocal(id, { enabled: action === "enable" });
       }
+      showToast(ACTION_LABELS[action]?.ok ?? "OK");
     } catch (e: any) {
-      setError(e.message);
+      const msg = ACTION_LABELS[action]?.err ?? e.message;
+      showToast(`${msg}: ${e.message}`, "err");
     }
   };
 
   const handleInstall = async () => {
     if (!installUrl.trim()) return;
+    if (!confirm(t("plugins.trustWarning"))) return;
     setInstalling(true);
     setError("");
     try {
@@ -265,8 +282,10 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
         body: JSON.stringify({ source: installUrl.trim() }),
       });
       setInstallUrl("");
+      showToast(t("plugins.toastInstalled"));
       await fetchPlugins(false);
     } catch (e: any) {
+      showToast(e.message, "err");
       setError(e.message);
     } finally {
       setInstalling(false);
@@ -1095,6 +1114,23 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
           )}
         </div>
       ) : null}
+
+      {/* Toast notification */}
+      {toast && (
+        <div
+          onClick={() => setToast(null)}
+          style={{
+            position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)",
+            padding: "10px 24px", borderRadius: 8, fontSize: 13, cursor: "pointer",
+            background: toast.type === "ok" ? "var(--ok, #22c55e)" : "var(--danger, #ef4444)",
+            color: "#fff", boxShadow: "0 4px 16px rgba(0,0,0,0.18)", zIndex: 9999,
+            maxWidth: 420, textAlign: "center", whiteSpace: "pre-line",
+            animation: "fadeIn 0.2s ease",
+          }}
+        >
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }

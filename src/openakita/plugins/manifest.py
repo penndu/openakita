@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+import re
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = {"id", "name", "version", "type"}
 VALID_TYPES = {"python", "mcp", "skill"}
+
+_PLUGIN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9\-_.]{0,128}$")
 
 BASIC_PERMISSIONS = frozenset({
     "tools.register",
@@ -42,37 +46,78 @@ ADVANCED_PERMISSIONS = frozenset({
 SYSTEM_PERMISSIONS = frozenset({
     "hooks.all",
     "memory.replace",
-    "system.config.write",  # reserved: will gate writes to global settings in P1
+    "system.config.write",  # reserved: will gate writes to global settings
 })
 
 ALL_PERMISSIONS = BASIC_PERMISSIONS | ADVANCED_PERMISSIONS | SYSTEM_PERMISSIONS
 
 
-@dataclass
-class PluginManifest:
-    """Parsed plugin.json manifest."""
+class PluginManifest(BaseModel):
+    """Parsed plugin.json manifest with strict validation."""
+
+    model_config = {"extra": "allow", "frozen": False, "populate_by_name": True}
 
     id: str
     name: str
     version: str
-    plugin_type: str  # "python" | "mcp" | "skill"
+    plugin_type: str = Field("python", alias="type")
     entry: str = "plugin.py"
     description: str = ""
     author: str = ""
     license: str = ""
     homepage: str = ""
-    permissions: list[str] = field(default_factory=list)
-    requires: dict[str, Any] = field(default_factory=dict)
-    provides: dict[str, Any] = field(default_factory=dict)
-    replaces: list[str] = field(default_factory=list)  # reserved: plugins this one supersedes
-    conflicts: list[str] = field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    requires: dict[str, Any] = Field(default_factory=dict)
+    provides: dict[str, Any] = Field(default_factory=dict)
+    replaces: list[str] = Field(default_factory=list)  # reserved: plugins this one supersedes
+    conflicts: list[str] = Field(default_factory=list)
+    depends: list[str] = Field(default_factory=list)  # reserved: inter-plugin dependency
     category: str = ""
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     icon: str = ""
     load_timeout: float = 10.0
     hook_timeout: float = 5.0
     retrieve_timeout: float = 3.0
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = Field(default_factory=dict, exclude=True)
+
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, v: str) -> str:
+        if not _PLUGIN_ID_RE.match(v):
+            raise ValueError(
+                f"Plugin ID '{v}' is invalid — must match {_PLUGIN_ID_RE.pattern}"
+            )
+        return v
+
+    @field_validator("plugin_type")
+    @classmethod
+    def _validate_type(cls, v: str) -> str:
+        if v not in VALID_TYPES:
+            raise ValueError(f"Invalid plugin type '{v}', must be one of {VALID_TYPES}")
+        return v
+
+    @field_validator("entry")
+    @classmethod
+    def _validate_entry(cls, v: str) -> str:
+        if ".." in v:
+            raise ValueError(f"Plugin entry '{v}' must not contain '..'")
+        return v
+
+    @field_validator("load_timeout", "hook_timeout", "retrieve_timeout", mode="before")
+    @classmethod
+    def _coerce_timeout(cls, v: Any, info: ValidationInfo) -> float:
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            defaults = {"load_timeout": 10.0, "hook_timeout": 5.0, "retrieve_timeout": 3.0}
+            return defaults.get(info.field_name, 10.0)
+
+    @field_validator("permissions", mode="before")
+    @classmethod
+    def _validate_permissions(cls, v: Any) -> list[str]:
+        if not isinstance(v, list):
+            raise ValueError(f"'permissions' must be a list, got {type(v).__name__}")
+        return v
 
     @property
     def basic_permissions(self) -> list[str]:
@@ -110,69 +155,37 @@ def parse_manifest(plugin_dir: Path) -> PluginManifest:
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise ManifestError(f"Invalid JSON in {manifest_path}: {e}") from e
 
+    if not isinstance(raw, dict):
+        raise ManifestError(f"plugin.json must be a JSON object in {manifest_path}")
+
     missing = REQUIRED_FIELDS - set(raw.keys())
     if missing:
         raise ManifestError(
             f"Missing required fields in {manifest_path}: {missing}"
         )
 
-    plugin_type = raw.get("type", "")
-    if plugin_type not in VALID_TYPES:
-        raise ManifestError(
-            f"Invalid plugin type '{plugin_type}' in {manifest_path}, "
-            f"must be one of {VALID_TYPES}"
-        )
-
     permissions = raw.get("permissions", [])
-    if not isinstance(permissions, list):
-        raise ManifestError(
-            f"'permissions' must be a list in {manifest_path}, "
-            f"got {type(permissions).__name__}"
-        )
+    if isinstance(permissions, list):
+        unknown = set(permissions) - ALL_PERMISSIONS
+        if unknown:
+            logger.warning(
+                "Plugin '%s' declares unknown permissions: %s (ignored)",
+                raw.get("id", "?"),
+                unknown,
+            )
+            raw = {**raw, "permissions": [p for p in permissions if p in ALL_PERMISSIONS]}
 
-    unknown = set(permissions) - ALL_PERMISSIONS
-    if unknown:
-        logger.warning(
-            "Plugin '%s' declares unknown permissions: %s (ignored)",
-            raw.get("id", "?"),
-            unknown,
-        )
-        permissions = [p for p in permissions if p in ALL_PERMISSIONS]
+    entry = raw.get("entry")
+    if entry is None:
+        raw = {**raw, "entry": _default_entry(raw.get("type", "python"))}
 
-    return PluginManifest(
-        id=raw["id"],
-        name=raw["name"],
-        version=raw["version"],
-        plugin_type=plugin_type,
-        entry=raw.get("entry", _default_entry(plugin_type)),
-        description=raw.get("description", ""),
-        author=raw.get("author", ""),
-        license=raw.get("license", ""),
-        homepage=raw.get("homepage", ""),
-        permissions=permissions,
-        requires=raw.get("requires", {}),
-        provides=raw.get("provides", {}),
-        replaces=raw.get("replaces", []),
-        conflicts=raw.get("conflicts", []),
-        category=raw.get("category", ""),
-        tags=raw.get("tags", []),
-        icon=raw.get("icon", ""),
-        load_timeout=_safe_float(raw.get("load_timeout", 10), 10.0, "load_timeout", manifest_path),
-        hook_timeout=_safe_float(raw.get("hook_timeout", 5), 5.0, "hook_timeout", manifest_path),
-        retrieve_timeout=_safe_float(raw.get("retrieve_timeout", 3), 3.0, "retrieve_timeout", manifest_path),
-        raw=raw,
-    )
-
-
-def _safe_float(value: Any, default: float, field_name: str, path: Path) -> float:
     try:
-        return float(value)
-    except (ValueError, TypeError):
-        logger.warning(
-            "Invalid %s value %r in %s, using default %.1f",
-            field_name, value, path, default,
-        )
-        return default
+        manifest = PluginManifest.model_validate(raw)
+    except Exception as e:
+        raise ManifestError(f"Manifest validation failed in {manifest_path}: {e}") from e
+
+    manifest.raw = raw
+    return manifest
 
 
 def _default_entry(plugin_type: str) -> str:

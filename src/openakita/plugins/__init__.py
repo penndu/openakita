@@ -2,6 +2,7 @@
 
 from .api import PluginAPI, PluginBase
 from .catalog import PluginCatalog
+from .errors import PluginError, PluginErrorCode
 from .hooks import HookRegistry
 from .manager import PluginManager
 from .manifest import PluginManifest, parse_manifest
@@ -17,6 +18,8 @@ __all__ = [
     "PluginAPI",
     "PluginBase",
     "PluginCatalog",
+    "PluginError",
+    "PluginErrorCode",
     "PluginManager",
     "PluginManifest",
     "PluginState",

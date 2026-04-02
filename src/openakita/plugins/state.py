@@ -23,10 +23,14 @@ class PluginStateEntry:
     last_error_time: float = 0.0
 
 
+_SCHEMA_VERSION = 2
+
+
 @dataclass
 class PluginState:
     """Persistent plugin state, stored in data/plugin_state.json."""
 
+    schema_version: int = _SCHEMA_VERSION
     plugins: dict[str, PluginStateEntry] = field(default_factory=dict)
     active_backends: dict[str, str] = field(default_factory=dict)  # reserved for future memory/search backend switching
 
@@ -76,6 +80,7 @@ class PluginState:
 
     def save(self, path: Path) -> None:
         data = {
+            "schema_version": _SCHEMA_VERSION,
             "plugins": {
                 pid: {
                     "enabled": e.enabled,
@@ -106,6 +111,9 @@ class PluginState:
             return cls()
 
         state = cls()
+        file_version = data.get("schema_version", 1)
+        if file_version < _SCHEMA_VERSION:
+            logger.info("Migrating plugin_state.json from v%d to v%d", file_version, _SCHEMA_VERSION)
         plugins_data = data.get("plugins", {})
         if not isinstance(plugins_data, dict):
             logger.warning("Corrupt plugin_state.json: 'plugins' is not a dict, starting fresh")

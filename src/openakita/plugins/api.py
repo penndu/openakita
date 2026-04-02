@@ -241,12 +241,15 @@ class PluginAPI:
             self.log(f"register_hook: callback is not callable: {callback!r}", "error")
             return
 
-        basic_hooks = {"on_init", "on_shutdown", "on_schedule"}
+        basic_hooks = {"on_init", "on_shutdown", "on_schedule", "on_config_change", "on_error"}
         message_hooks = {
             "on_message_received", "on_message_sending",
             "on_session_start", "on_session_end",
         }
-        retrieve_hooks = {"on_retrieve", "on_prompt_build", "on_tool_result"}
+        retrieve_hooks = {
+            "on_retrieve", "on_prompt_build", "on_tool_result",
+            "on_before_tool_use", "on_after_tool_use",
+        }
 
         if hook_name in basic_hooks:
             if not self._check_permission("hooks.basic"):

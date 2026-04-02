@@ -1739,7 +1739,15 @@
     "viewLogs": "View Runtime Logs",
     "logsTitle": "Runtime Logs",
     "noLogs": "No logs recorded",
-    "logsLoadFail": "Failed to load logs"
+    "logsLoadFail": "Failed to load logs",
+    "trustWarning": "Installing a plugin grants it access to your data. Please confirm the source is trusted.\n\nProceed with installation?",
+    "toastInstalled": "Plugin installed successfully",
+    "toastUninstalled": "Plugin removed",
+    "toastEnabled": "Plugin enabled",
+    "toastDisabled": "Plugin disabled",
+    "toastEnableFail": "Enable failed",
+    "toastDisableFail": "Disable failed",
+    "toastUninstallFail": "Uninstall failed"
   },
   "poster": {
     "title": "Poster Generator",

@@ -1739,7 +1739,15 @@
     "viewLogs": "查看运行日志",
     "logsTitle": "运行日志",
     "noLogs": "暂无日志记录",
-    "logsLoadFail": "日志加载失败"
+    "logsLoadFail": "日志加载失败",
+    "trustWarning": "安装插件等同于授权其访问您的数据，请确认来源可信。\n\n确认安装？",
+    "toastInstalled": "插件安装成功",
+    "toastUninstalled": "插件已移除",
+    "toastEnabled": "插件已启用",
+    "toastDisabled": "插件已停用",
+    "toastEnableFail": "启用失败",
+    "toastDisableFail": "停用失败",
+    "toastUninstallFail": "移除失败"
   },
   "poster": {
     "title": "海报生成",

@@ -1,4 +1,4 @@
-"""Hook registry — 10 lifecycle hooks with per-callback isolation."""
+"""Hook registry — 14 lifecycle hooks with per-callback isolation."""
 
 from __future__ import annotations
 
@@ -23,6 +23,10 @@ HOOK_NAMES = frozenset({
     "on_session_end",
     "on_prompt_build",
     "on_schedule",
+    "on_before_tool_use",
+    "on_after_tool_use",
+    "on_config_change",
+    "on_error",
 })
 
 DEFAULT_HOOK_TIMEOUT = 5.0
@@ -68,8 +72,6 @@ class HookRegistry:
             callback.__plugin_id__ = plugin_id  # type: ignore[attr-defined]
             callback.__hook_timeout__ = DEFAULT_HOOK_TIMEOUT  # type: ignore[attr-defined]
         except AttributeError:
-            # Python 3.13+ does not allow setting attributes on bound methods;
-            # wrap in a thin lambda to carry metadata.
             wrapper = _wrap_callback(callback, plugin_id)
             self._hooks[hook_name].append(wrapper)
             logger.debug(
@@ -106,6 +108,7 @@ class HookRegistry:
 
         Each callback is independently wrapped with timeout and exception
         isolation — a failing callback never blocks others.
+        Catches BaseException (including CancelledError) to protect the host.
         Snapshot the callback list to avoid concurrent-modification issues.
         """
         callbacks = list(self._hooks.get(hook_name, []))
@@ -134,32 +137,78 @@ class HookRegistry:
                     "Hook '%s' callback from plugin '%s' timed out (%.1fs), skipped",
                     hook_name, plugin_id, timeout,
                 )
-                should_disable = self._error_tracker.record_error(
+                self._error_tracker.record_error(
                     plugin_id, f"hook:{hook_name}", "timeout"
                 )
-                if should_disable:
-                    logger.error(
-                        "Plugin '%s' auto-disabled due to repeated errors",
-                        plugin_id,
-                    )
                 return _SKIP
-            except Exception as e:
+            except BaseException as e:
                 logger.error(
                     "Hook '%s' callback from plugin '%s' raised %s: %s",
                     hook_name, plugin_id, type(e).__name__, e,
                 )
-                should_disable = self._error_tracker.record_error(
+                self._error_tracker.record_error(
                     plugin_id, f"hook:{hook_name}", str(e)
                 )
-                if should_disable:
-                    logger.error(
-                        "Plugin '%s' auto-disabled due to repeated errors",
-                        plugin_id,
-                    )
                 return _SKIP
 
         raw = await asyncio.gather(*(_run_one(cb) for cb in callbacks))
         return [r for r in raw if r is not _SKIP]
+
+    def dispatch_sync(self, hook_name: str, **kwargs) -> list[Any]:
+        """Synchronous dispatch — runs each callback serially in the current thread.
+
+        Used by prompt builder, retrieval engine, and other sync contexts.
+        For async callbacks, runs them in a separate thread with a fresh event
+        loop to avoid deadlocking the caller's loop.
+        """
+        callbacks = list(self._hooks.get(hook_name, []))
+        if not callbacks:
+            return []
+
+        results: list[Any] = []
+        for callback in callbacks:
+            plugin_id = getattr(callback, "__plugin_id__", "unknown")
+            if self._error_tracker.is_disabled(plugin_id):
+                continue
+            timeout = getattr(callback, "__hook_timeout__", DEFAULT_HOOK_TIMEOUT)
+            if asyncio.iscoroutinefunction(callback):
+                import concurrent.futures
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        future = pool.submit(asyncio.run, callback(**kwargs))
+                        result = future.result(timeout=timeout)
+                    if result is not None:
+                        results.append(result)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(
+                        "Hook '%s' async callback from plugin '%s' timed out in sync dispatch",
+                        hook_name, plugin_id,
+                    )
+                    self._error_tracker.record_error(
+                        plugin_id, f"hook:{hook_name}", "timeout"
+                    )
+                except BaseException as e:
+                    logger.error(
+                        "Hook '%s' sync-dispatch from plugin '%s' raised %s: %s",
+                        hook_name, plugin_id, type(e).__name__, e,
+                    )
+                    self._error_tracker.record_error(
+                        plugin_id, f"hook:{hook_name}", str(e)
+                    )
+            else:
+                try:
+                    result = callback(**kwargs)
+                    if result is not None:
+                        results.append(result)
+                except BaseException as e:
+                    logger.error(
+                        "Hook '%s' sync callback from plugin '%s' raised %s: %s",
+                        hook_name, plugin_id, type(e).__name__, e,
+                    )
+                    self._error_tracker.record_error(
+                        plugin_id, f"hook:{hook_name}", str(e)
+                    )
+        return results
 
     def get_hooks(self, hook_name: str) -> list[Callable]:
         return list(self._hooks.get(hook_name, []))
