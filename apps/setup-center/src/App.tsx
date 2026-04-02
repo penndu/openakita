@@ -2578,7 +2578,7 @@ export function App() {
       notifyError("请先设置当前工作区");
       return;
     }
-    const _busyId = notifyLoading("读取 skills...");
+    const _busyId = notifyLoading(t("common.loadingSkills", "正在读取技能列表..."));
     try {
       let skillsList: any[] = [];
       // ── 后端运行中 → HTTP API ──
@@ -2627,10 +2627,10 @@ export function App() {
       return;
     }
     if (!skillsDetail) {
-      notifyError("未读取到 skills 列表（请先刷新 skills）");
+      notifyError(t("common.skillsNotLoaded", "未读取到技能列表，请先刷新技能"));
       return;
     }
-    const _busyId = notifyLoading("保存 skills 启用状态...");
+    const _busyId = notifyLoading(t("common.savingSkillState", "正在保存技能启用状态..."));
     try {
       const externalAllowlist = skillsDetail
         .filter((s) => !s.system && !!s.skill_id)

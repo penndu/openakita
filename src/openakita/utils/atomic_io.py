@@ -103,6 +103,19 @@ def safe_json_write(
     safe_write(path, content, backup=backup, fsync=fsync)
 
 
+def append_jsonl(path: Path, obj: dict, *, fsync: bool = False) -> None:
+    """Append a single JSON object as one line to a JSONL file (append-only)."""
+    import os
+
+    line = json.dumps(obj, ensure_ascii=False, default=str) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(line)
+        if fsync:
+            f.flush()
+            os.fsync(f.fileno())
+
+
 def read_json_safe(path: Path) -> dict | None:
     """Read JSON from *path*, falling back to .bak if primary is missing or corrupt.
 

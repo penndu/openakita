@@ -1132,11 +1132,11 @@ export function ChatView({
         }).catch(() => {});
       }
     }},
-    { id: "skill", label: "使用技能", description: "调用已安装的技能（发送 /skill:<技能名> 触发）", action: (args) => {
+    { id: "skill", label: t("chat.skillUseCmd", "使用技能"), description: t("chat.skillUseCmdDesc", "输入 /skill 技能名称 即可触发已安装技能"), action: (args) => {
       if (args) {
         setInputValue(`请使用技能「${args}」来帮我：`);
       } else {
-        setMessages((prev) => [...prev, { id: genId(), role: "system", content: "用法: /skill <技能名>，如 /skill web-search。在消息中提及技能名即可触发。", timestamp: Date.now() }]);
+        setMessages((prev) => [...prev, { id: genId(), role: "system", content: t("chat.skillUsageHint", "用法: /skill 技能名称\n例如: /skill web-search\n在消息中提及技能名称即可触发。"), timestamp: Date.now() }]);
       }
     }},
     { id: "persona", label: "切换角色", description: "切换 Agent 的人格预设", action: (args) => {
@@ -1220,20 +1220,29 @@ export function ChatView({
         setMessages(prev => [...prev, { id: genId(), role: "system", content: "用法: /memory [list]", timestamp: Date.now() }]);
       }
     }},
-    { id: "skills", label: t("chat.skillsCmd", "技能管理"), description: t("chat.skillsCmdDesc", "查看已安装的技能列表"), action: () => {
+    { id: "skills", label: t("chat.skillsCmd", "技能列表"), description: t("chat.skillsCmdDesc", "查看已安装的技能列表"), action: () => {
+      const loadingId = genId();
+      setMessages(prev => [...prev, { id: loadingId, role: "system", content: t("chat.skillsLoading", "正在加载技能列表..."), timestamp: Date.now() }]);
       safeFetch(`${apiBase}/api/skills`).then(r => r.json()).then(data => {
         const skills = data?.skills || (Array.isArray(data) ? data : []);
         if (!skills.length) {
-          setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.skillsEmpty", "暂无已安装技能。可在「技能商店」中浏览安装。"), timestamp: Date.now() }]);
+          setMessages(prev => prev.map(m => m.id === loadingId ? { ...m, content: t("chat.skillsEmpty", "暂无已安装技能。可在「技能商店」中浏览安装。") } : m));
         } else {
-          const lines = skills.map((s: any) => `- **${s.name || s.id}**: ${s.description || "无描述"} ${s.enabled === false ? "(已禁用)" : ""}`);
-          setMessages(prev => [...prev, { id: genId(), role: "system", content: `**已安装技能** (${skills.length})：\n${lines.join("\n")}`, timestamp: Date.now() }]);
+          const lang = i18n.language || "zh";
+          const isZh = lang.startsWith("zh");
+          const lines = skills.map((s: any) => {
+            const name = (isZh ? s.name_i18n?.zh : s.name_i18n?.en) || s.name || s.id;
+            const desc = (isZh ? s.description_i18n?.zh : s.description_i18n?.en) || s.description || t("skills.marketplaceNoDesc", "暂无描述");
+            const status = s.enabled === false ? ` (${t("skills.disabled", "已禁用")})` : "";
+            return `- **${name}**: ${desc}${status}`;
+          });
+          setMessages(prev => prev.map(m => m.id === loadingId ? { ...m, content: `**${t("skills.installed", "已安装")}** (${skills.length})：\n${lines.join("\n")}` } : m));
         }
       }).catch(() => {
-        setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.skillsLoadFail", "无法加载技能列表。"), timestamp: Date.now() }]);
+        setMessages(prev => prev.map(m => m.id === loadingId ? { ...m, content: `${t("chat.skillsLoadFail", "无法加载技能列表，请稍后重试。")}\n\n${t("chat.skillsRetry", "重试")}: /skills` } : m));
       });
     }},
-    { id: "help", label: "帮助", description: "显示可用命令列表", action: () => {} },
+    { id: "help", label: t("common.help", "帮助"), description: t("common.helpDesc", "显示可用命令列表"), action: () => {} },
   ];
     const helpCmd = cmds.find((c) => c.id === "help");
     if (helpCmd) {
@@ -2134,7 +2143,7 @@ export function ChatView({
 
                 currentToolCalls = [...currentToolCalls, { tool: event.tool, args: event.args, status: "running", id: event.id }];
                 const _tcId = event.id || genId();
-                const _desc = formatToolDescription(event.tool, event.args);
+                const _desc = formatToolDescription(event.tool, event.args, (k: string, fb?: string) => t(k, fb || k));
                 const newTc: ChainToolCall = { toolId: _tcId, tool: event.tool, args: event.args, status: "running", description: _desc };
                 if (currentChainGroup) {
                   const grp: ChainGroup = currentChainGroup;
@@ -3110,7 +3119,7 @@ export function ChatView({
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
         <IconMessageCircle size={48} />
         <div className="mt-3 font-semibold">{t("chat.title")}</div>
-        <div className="mt-1 text-xs opacity-50">{t("chat.serviceNotRunning", "后端服务未启动，请启动后再进行使用")}</div>
+        <div className="mt-1 text-xs opacity-50">{t("chat.serviceNotRunning", "服务尚未启动，请先启动后再使用")}</div>
       </div>
     );
   }

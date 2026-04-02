@@ -275,6 +275,51 @@ async def trigger_task(request: Request, task_id: str):
     return {"status": "ok", "execution": execution.to_dict()}
 
 
+@router.get("/api/scheduler/executions")
+async def list_executions(
+    request: Request,
+    task_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List execution history, optionally filtered by task_id."""
+    scheduler = _get_scheduler(request)
+    if scheduler is None:
+        return {"error": "Agent not initialized", "executions": []}
+
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    all_execs = scheduler.get_executions(task_id=task_id)
+    total = len(all_execs)
+    all_execs_reversed = list(reversed(all_execs))
+    page = all_execs_reversed[offset : offset + limit]
+    return {
+        "executions": [e.to_dict() for e in page],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
+
+
+@router.get("/api/scheduler/tasks/{task_id}/executions")
+async def list_task_executions(
+    request: Request,
+    task_id: str,
+    limit: int = 20,
+):
+    """List execution history for a specific task."""
+    scheduler = _get_scheduler(request)
+    if scheduler is None:
+        return {"error": "Agent not initialized", "executions": []}
+
+    limit = max(1, min(limit, 100))
+    execs = scheduler.get_executions(task_id=task_id, limit=limit)
+    return {
+        "executions": [e.to_dict() for e in reversed(execs)],
+        "total": len(execs),
+    }
+
+
 @router.get("/api/scheduler/channels")
 async def list_channels(request: Request):
     """List available IM channels with chat_id for notification targeting."""

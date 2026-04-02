@@ -7,6 +7,7 @@
 - cancel_scheduled_task: 取消任务
 - update_scheduled_task: 更新任务
 - trigger_scheduled_task: 立即触发
+- query_task_executions: 查询执行历史
 """
 
 import logging
@@ -28,6 +29,7 @@ class ScheduledHandler:
         "cancel_scheduled_task",
         "update_scheduled_task",
         "trigger_scheduled_task",
+        "query_task_executions",
     ]
 
     def __init__(self, agent: "Agent"):
@@ -58,6 +60,8 @@ class ScheduledHandler:
             return await self._update_task(params)
         elif tool_name == "trigger_scheduled_task":
             return await self._trigger_task(params)
+        elif tool_name == "query_task_executions":
+            return self._query_executions(params)
         else:
             return f"❌ Unknown scheduled tool: {tool_name}"
 
@@ -397,6 +401,33 @@ class ScheduledHandler:
             running.append(f"{name}({status})")
 
         return ", ".join(running) if running else "（无已配置的通道）"
+
+    def _query_executions(self, params: dict) -> str:
+        """查询执行历史"""
+        task_id = params.get("task_id")
+        limit = min(params.get("limit", 10), 50)
+
+        execs = self.agent.task_scheduler.get_executions(
+            task_id=task_id, limit=limit
+        )
+
+        if not execs:
+            if task_id:
+                return f"任务 {task_id} 暂无执行记录"
+            return "暂无任何任务执行记录"
+
+        lines = []
+        for e in reversed(execs):
+            time_str = e.started_at.strftime("%m-%d %H:%M") if e.started_at else "?"
+            status_icon = "✅" if e.status == "success" else "❌"
+            duration = f"{e.duration_seconds:.1f}s" if e.duration_seconds else "-"
+            line = f"  {status_icon} {time_str} | 耗时 {duration}"
+            if e.error:
+                line += f" | 错误: {e.error[:100]}"
+            lines.append(line)
+
+        header = f"任务 {task_id} 的" if task_id else ""
+        return f"📋 {header}最近 {len(execs)} 条执行记录：\n" + "\n".join(lines)
 
 
 def create_handler(agent: "Agent"):
