@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { ChainGroup, ChainEntry, ChatToolCall } from "../utils/chatTypes";
-import { summarizeToolResult } from "../utils/chatHelpers";
 import {
   IconChevronRight, IconCheck, IconX, IconLoader, IconCircle,
 } from "../../../icons";
@@ -183,11 +182,9 @@ function ChainEntryLine({ entry, onSkipStep }: { entry: ChainEntry; onSkipStep?:
       const isError = entry.status === "error";
       const icon = isError ? <IconX size={11} /> : <IconCheck size={11} />;
       const cls = isError ? "chainNarrToolEnd chainNarrToolError" : "chainNarrToolEnd";
-      const summary = summarizeToolResult(entry.tool, entry.result, isError, t);
       return (
         <div className={cls}>
           {icon}
-          <span className="chainNarrToolSummary">{summary}</span>
           <ToolResultBlock result={entry.result} />
         </div>
       );
@@ -242,8 +239,8 @@ function ChainGroupItem({ group, onToggle, isLast, streaming, onSkipStep }: {
         <span className="chainChevron" style={{ transform: showContent ? "rotate(90deg)" : "rotate(0deg)" }}>
           <IconChevronRight size={11} />
         </span>
-        <span className="chainThinkingLabel">{headerLabel}</span>
-        {isActive && <IconLoader size={11} className="chainSpinner" />}
+        <span className={`chainThinkingLabel ${isActive ? "chainThinkingLabelActive" : ""}`}>{headerLabel}</span>
+        {isActive && <IconLoader size={16} className="chainSpinner chainSpinnerActive" />}
       </div>
       {showContent && (
         <div className="chainNarrFlow">

@@ -115,6 +115,16 @@ class ToolExecutor:
     结构化错误处理和 Plan 模式检查。
     """
 
+    _TOOL_ALIASES: dict[str, str] = {
+        "create_todo_plan": "create_todo",
+        "create-todo": "create_todo",
+        "get-todo-status": "get_todo_status",
+        "update-todo-step": "update_todo_step",
+        "complete-todo": "complete_todo",
+        "exit-plan-mode": "exit_plan_mode",
+        "create-plan-file": "create_plan_file",
+    }
+
     def __init__(
         self,
         handler_registry: SystemHandlerRegistry,
@@ -166,6 +176,33 @@ class ToolExecutor:
             return self._handler_registry.get_handler_name_for_tool(tool_name)
         except Exception:
             return None
+
+    def _suggest_similar_tool(self, tool_name: str) -> str:
+        """为未知工具名生成带相似推荐的错误信息。"""
+        all_tools = self._handler_registry.list_tools()
+        candidates: list[tuple[float, str]] = []
+        name_lower = tool_name.lower()
+        for t in all_tools:
+            t_lower = t.lower()
+            # substring match scores highest
+            if name_lower in t_lower or t_lower in name_lower:
+                candidates.append((0.9, t))
+                continue
+            # token overlap (split on _ and compare)
+            tokens_a = set(name_lower.split("_"))
+            tokens_b = set(t_lower.split("_"))
+            overlap = tokens_a & tokens_b
+            if overlap:
+                score = len(overlap) / max(len(tokens_a | tokens_b), 1)
+                candidates.append((score, t))
+        candidates.sort(key=lambda x: -x[0])
+        top = [name for _, name in candidates[:5]]
+        msg = f"❌ 未知工具: {tool_name}。"
+        if top:
+            msg += f" 你是否想使用: {', '.join(top)}？"
+        else:
+            msg += " 请检查工具名称是否正确。"
+        return msg
 
     def _is_concurrency_safe(self, tool_name: str, tool_input: dict) -> bool:
         """判断工具在给定输入下是否并发安全。
@@ -301,6 +338,13 @@ class ToolExecutor:
         if isinstance(tool_input, dict):
             tool_input = normalize_tool_input(tool_name, tool_input)
 
+        canonical = self._TOOL_ALIASES.get(tool_name)
+        if canonical is None and "-" in tool_name:
+            canonical = self._TOOL_ALIASES.get(tool_name.replace("-", "_"))
+        if canonical:
+            logger.info(f"[ToolExecutor] Alias corrected: '{tool_name}' -> '{canonical}'")
+            tool_name = canonical
+
         logger.info(f"Executing tool: {tool_name} with {tool_input}")
 
         # ★ 拦截 JSON 解析失败的工具调用（参数被 API 截断）
@@ -339,7 +383,8 @@ class ToolExecutor:
                     result = await self._handler_registry.execute_by_tool(tool_name, tool_input)
                 else:
                     span.set_attribute("error", f"unknown_tool: {tool_name}")
-                    return f"❌ 未知工具: {tool_name}。请检查工具名称是否正确。"
+                    suggestion = self._suggest_similar_tool(tool_name)
+                    return suggestion
 
                 # 获取执行期间产生的新日志（WARNING/ERROR/CRITICAL）
                 all_logs = log_buffer.get_logs(count=500)

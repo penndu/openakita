@@ -198,8 +198,6 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
           onEdit={onEdit}
           onRegenerate={onRegenerate}
           onRewind={onRewind}
-          onFork={onFork}
-          onSaveMemory={onSaveMemory}
           onSkipStep={onSkipStep}
           onImagePreview={onImagePreview}
         />
@@ -207,7 +205,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
     );
   }, [
     messages.length, displayMode, apiBaseUrl, showChain, mdModules,
-    onAskAnswer, onRetry, onEdit, onRegenerate, onRewind, onFork, onSaveMemory, onSkipStep, onImagePreview,
+    onAskAnswer, onRetry, onEdit, onRegenerate, onRewind, onSkipStep, onImagePreview,
   ]);
 
   const Footer = useCallback(() => <div style={{ height: 32 }} />, []);

@@ -252,6 +252,7 @@ class ReasoningEngine:
         response_handler: ResponseHandler,
         agent_state: AgentState,
         memory_manager: Any = None,
+        plan_exit_pending: dict | None = None,
     ) -> None:
         self._brain = brain
         self._tool_executor = tool_executor
@@ -259,6 +260,7 @@ class ReasoningEngine:
         self._response_handler = response_handler
         self._state = agent_state
         self._memory_manager = memory_manager
+        self._plan_exit_pending = plan_exit_pending
         self._plugin_hooks = None
 
         # Agent Harness: Runtime Supervisor + Resource Budget
@@ -2214,6 +2216,11 @@ class ReasoningEngine:
                     _decision_text = (decision.text_content or "").strip()
                     if _decision_text and decision.type == DecisionType.TOOL_CALLS:
                         yield {"type": "chain_text", "content": _decision_text[:2000]}
+                elif decision.type == DecisionType.TOOL_CALLS:
+                    yield {"type": "text_replace", "content": ""}
+                    _decision_text = (decision.text_content or "").strip()
+                    if _decision_text:
+                        yield {"type": "chain_text", "content": _decision_text[:2000]}
                 elif _raw_streamed_text != (decision.text_content or ""):
                     yield {
                         "type": "text_replace",
@@ -2814,7 +2821,7 @@ class ReasoningEngine:
                         )
 
                         # SSE: 通知前端显示审批面板（通过 SSE 而非 WS，确保 Tauri 本地模式可用）
-                        _pending = getattr(self.agent, "_plan_exit_pending", {})
+                        _pending = self._plan_exit_pending or {}
                         _pending_data = _pending.get(conversation_id, {}) if isinstance(_pending, dict) else {}
                         if _pending_data:
                             yield {"type": "plan_ready_for_approval", "data": {
@@ -4153,27 +4160,6 @@ class ReasoningEngine:
             return (working_messages, no_tool_call_count, verify_incomplete_count,
                     no_confirmation_text_count, max_no_tool_retries)
 
-        # ── 对话式回复放行（参照 claude-code needsFollowUp 模式） ──
-        if intent is None and stripped_text:
-            _clean = stripped_text.strip()
-            _action_claims_quick = (
-                "已完成", "已执行", "已保存", "已发送", "已创建", "已修改",
-                "已删除", "文件已", "脚本已", "命令已",
-            )
-            _has_action_claim = any(kw in _clean for kw in _action_claims_quick)
-            if len(_clean) > 80 and not _has_action_claim:
-                logger.info(
-                    f"[IntentTag] No tag, substantial text reply "
-                    f"(len={len(_clean)}), accepting as valid response"
-                )
-                return clean_llm_response(stripped_text)
-            if self._is_conversational_reply(stripped_text, working_messages):
-                logger.info(
-                    f"[IntentTag] No tag, conversational reply detected, "
-                    f"accepting as valid response"
-                )
-                return clean_llm_response(stripped_text)
-
         if intent == "REPLY" and stripped_text and len(stripped_text.strip()) > 10:
             logger.info(
                 "[IntentTag] REPLY intent with substantial text, "
@@ -4881,74 +4867,6 @@ class ReasoningEngine:
         return any(re.search(pat, _tail) for pat in confirmation_patterns)
 
     @staticmethod
-    def _is_conversational_reply(text: str, messages: list[dict]) -> bool:
-        """判断无 intent 标记的回复是否为合法的对话式回复。
-
-        许多模型（如 kimi-for-coding、部分 OpenAI 兼容端点）不会可靠地
-        输出 [REPLY]/[ACTION] 标记。此方法通过启发式规则区分：
-        - 对话回复（回答问题、闲聊、说明能力）→ True → 直接返回
-        - 伪执行断言（声称已完成操作但未调用工具）→ False → ForceToolCall
-        """
-        _text = (text or "").strip()
-        if not _text or len(_text) < 5:
-            return False
-
-        _action_claims = (
-            "已完成", "已执行", "已保存", "已发送", "已创建", "已修改",
-            "已删除", "已上传", "已下载", "已安装", "已设置", "已配置",
-            "我已经", "操作完成", "任务完成", "执行成功", "文件已",
-            "脚本已", "命令已", "已写入", "已生成文件",
-        )
-        if any(claim in _text for claim in _action_claims):
-            return False
-
-        last_user_text = ""
-        for msg in reversed(messages):
-            if msg.get("role") != "user":
-                continue
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                if content.startswith("[系统]") or content.startswith("[系统提示]"):
-                    continue
-                last_user_text = content
-                break
-            if isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        t = part.get("text", "")
-                        if not t.startswith("[系统]") and not t.startswith("[系统提示]"):
-                            last_user_text = t
-                            break
-                if last_user_text:
-                    break
-
-        _ctx_prefix = "[以上是之前的对话历史"
-        if _ctx_prefix in last_user_text:
-            idx = last_user_text.find("：]")
-            if idx != -1:
-                last_user_text = last_user_text[idx + 2:].strip()
-
-        _question_markers = ("?", "？", "吗", "吗？", "嘛", "呢", "不", "能不能", "可以")
-        if any(m in last_user_text for m in _question_markers):
-            return True
-
-        _greeting_patterns = (
-            "你好", "在吗", "在嘛", "在不在", "嗨", "hello", "hi ",
-            "干嘛", "干啥", "你在", "早上好", "晚上好", "下午好",
-        )
-        _lower = last_user_text.lower().strip()
-        if any(_lower.startswith(g) or _lower == g for g in _greeting_patterns):
-            return True
-        if len(last_user_text.strip()) <= 10:
-            return True
-
-        # 命令式请求（>10 字符，非问句）：若 LLM 回复较长（>200 字符），
-        # 大概率是知识型内容（方案分析、架构建议等），也应视为合法对话回复。
-        if len(_text) > 200:
-            return True
-
-        return False
-
     @staticmethod
     def _effective_force_retries(base_retries: int, conversation_id: str | None) -> int:
         """计算有效 ForceToolCall 重试次数。

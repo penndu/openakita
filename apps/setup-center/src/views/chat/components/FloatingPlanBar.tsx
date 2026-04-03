@@ -20,7 +20,7 @@ function FloatingTodoStepItem({ step, idx }: { step: ChatTodoStep; idx: number }
     : step.status === "failed" ? "rgba(239,68,68,1)"
     : step.status === "cancelled" ? "var(--muted)"
     : step.status === "skipped" ? "var(--muted)" : "var(--muted)";
-  const descText = (typeof step.description === "string" ? step.description : JSON.stringify(step.description)) || "（无描述）";
+  const descText = typeof step.description === "string" ? step.description : JSON.stringify(step.description);
   const resultText = step.result
     ? (typeof step.result === "string" ? step.result : JSON.stringify(step.result))
     : null;
@@ -38,12 +38,10 @@ function FloatingTodoStepItem({ step, idx }: { step: ChatTodoStep; idx: number }
 export function FloatingPlanBar({ plan }: { plan: ChatTodo }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const TERMINAL_STATES = ["completed", "failed", "skipped", "cancelled"];
-  const resolved = plan.steps.filter((s) => TERMINAL_STATES.includes(s.status)).length;
-  const failed = plan.steps.filter((s) => s.status === "failed").length;
+  const completed = plan.steps.filter((s) => s.status === "completed").length;
   const total = plan.steps.length;
-  const pct = total > 0 ? Math.round((resolved / total) * 100) : 0;
-  const allDone = resolved === total && total > 0;
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const allDone = completed === total && total > 0;
 
   const activeStep = plan.steps.find((s) => s.status === "in_progress")
     || plan.steps.find((s) => s.status === "pending");
@@ -58,11 +56,11 @@ export function FloatingPlanBar({ plan }: { plan: ChatTodo }) {
         <div className="floatingTodoHeaderLeft">
           <IconClipboard size={14} style={{ opacity: 0.6 }} />
           <span className="floatingTodoTitle">
-            {(typeof plan.taskSummary === "string" ? plan.taskSummary : JSON.stringify(plan.taskSummary)) || "任务进行中"}
+            {typeof plan.taskSummary === "string" ? plan.taskSummary : JSON.stringify(plan.taskSummary)}
           </span>
         </div>
         <div className="floatingTodoHeaderRight">
-          <span className="floatingTodoProgress">{resolved}/{total}{failed > 0 ? ` (${failed} 失败)` : ""}</span>
+          <span className="floatingTodoProgress">{completed}/{total}</span>
           <span className="floatingTodoChevron" style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }}>
             <IconChevronDown size={14} />
           </span>

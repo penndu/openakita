@@ -36,37 +36,6 @@ SKILL_GIT_CLONE_TIMEOUT_SECONDS = 120
 SKILL_INSTALL_CIRCUIT_THRESHOLD = 2
 SKILL_INSTALL_CIRCUIT_COOLDOWN_SECONDS = 300
 
-ALLOWED_URL_HOSTS = {
-    "github.com", "raw.githubusercontent.com",
-    "gitee.com", "gitlab.com",
-    "bitbucket.org",
-    "huggingface.co",
-    "skills.sh",
-}
-
-_PRIVATE_IP_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
-                        "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
-                        "172.30.", "172.31.", "192.168.", "127.", "0.")
-
-
-def _is_url_safe(url: str) -> tuple[bool, str]:
-    """校验 URL 是否安全（仅允许 http/https + 已知主机，拒绝私有 IP）。"""
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return False, "URL 格式无效"
-    if parsed.scheme not in ("http", "https"):
-        return False, f"不支持的协议: {parsed.scheme}（仅支持 http/https）"
-    host = (parsed.hostname or "").lower()
-    if not host:
-        return False, "URL 缺少主机名"
-    if any(host.startswith(p) for p in _PRIVATE_IP_PREFIXES) or host in ("localhost", "[::]", "[::1]"):
-        return False, f"不允许访问内部地址: {host}"
-    if host not in ALLOWED_URL_HOSTS and not any(host.endswith("." + d) for d in ALLOWED_URL_HOSTS):
-        return False, f"主机 {host} 不在允许列表中（支持: {', '.join(sorted(ALLOWED_URL_HOSTS))}）"
-    return True, ""
-
 
 class SkillManager:
     """
@@ -455,10 +424,6 @@ class SkillManager:
         """从 URL 安装技能（仅接受 raw SKILL.md 文件）"""
         import httpx
 
-        safe, reason = _is_url_safe(url)
-        if not safe:
-            return f"❌ URL 安全检查未通过: {reason}"
-
         skill_dir: Path | None = None
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -501,10 +466,6 @@ class SkillManager:
                 async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                     for file_url in extra_files:
                         try:
-                            safe, reason = _is_url_safe(file_url)
-                            if not safe:
-                                logger.warning("extra_files URL blocked: %s — %s", file_url, reason)
-                                continue
                             from urllib.parse import urlparse as _urlparse
                             file_name = _urlparse(file_url).path.split("/")[-1]
                             if not file_name:

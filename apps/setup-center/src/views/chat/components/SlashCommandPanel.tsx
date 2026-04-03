@@ -60,7 +60,7 @@ export function SlashCommandPanel({
             borderTop: idx === 0 ? "none" : "1px solid rgba(17,24,39,0.1)",
           }}
         >
-          <span style={{ fontSize: 16, opacity: 0.7, display: "inline-flex", alignItems: "center" }}>
+          <span style={{ fontSize: 16, opacity: 0.7, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, minWidth: 20 }}>
             {cmd.id === "model" ? <IconRefresh size={16} /> :
              cmd.id === "plan" ? <IconClipboard size={16} /> :
              cmd.id === "clear" ? <IconTrash size={16} /> :

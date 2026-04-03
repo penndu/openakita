@@ -469,7 +469,8 @@ async def _stream_chat(
             if event_type == "__agent_error__":
                 _agent_errored = True
                 if not _client_disconnected:
-                    yield _sse("error", {"message": event.get("__exc_msg__", "Unknown error")})
+                    _err_msg = event.get("__exc_msg__") or "Unknown error"
+                    yield _sse("error", {"message": _err_msg})
                     yield _sse("done")
                 break
 
@@ -700,7 +701,8 @@ async def _stream_chat(
     except Exception as e:
         logger.error(f"Chat stream error: {e}", exc_info=True)
         if not _client_disconnected:
-            yield _sse("error", {"message": str(e)[:500]})
+            err_msg = str(e)[:500] or f"{type(e).__name__}: unknown error"
+            yield _sse("error", {"message": err_msg})
             yield _sse("done")
     finally:
         # ── Wait for agent task to finish (deferred save if SSE gen was interrupted) ──

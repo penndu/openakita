@@ -207,7 +207,8 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
     setNotAvailable(false);
     try {
       const resp = await safeFetch(`${apiBaseRef.current()}/api/plugins/list`);
-      const data: PluginListResponse = await resp.json();
+      const raw = await resp.json();
+      const data: PluginListResponse = raw.data ?? raw;
       setPlugins(data.plugins || []);
       setFailed(data.failed || {});
     } catch (e: any) {
@@ -303,7 +304,8 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
     if (!readmeCache[pluginId]) {
       try {
         const resp = await safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/readme`);
-        const data = await resp.json();
+        const raw = await resp.json();
+        const data = raw.data ?? raw;
         setReadmeCache((prev) => ({ ...prev, [pluginId]: data.readme || t("plugins.noReadme") }));
       } catch {
         setReadmeCache((prev) => ({ ...prev, [pluginId]: t("plugins.readmeLoadFail") }));
@@ -327,9 +329,11 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
         safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/schema`),
         safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/config`),
       ]);
-      const schemaData = await schemaResp.json();
-      const configData = await configResp.json();
-      setConfigSchema(schemaData.schema || null);
+      const schemaRaw = await schemaResp.json();
+      const configRaw = await configResp.json();
+      const schemaData = schemaRaw.data ?? schemaRaw;
+      const configData = configRaw.data ?? configRaw;
+      setConfigSchema(schemaData.schema ?? null);
       setConfigValues(configData || {});
     } catch {
       setConfigSchema(null);
@@ -392,7 +396,8 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
       const resp = await safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/open-folder`, {
         method: "POST",
       });
-      const data = await resp.json();
+      const raw = await resp.json();
+      const data = raw.data ?? raw;
       if (data.path) {
         await showInFolder(data.path);
       }
@@ -421,7 +426,8 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
     setLogsContent("");
     try {
       const resp = await safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/logs?lines=200`);
-      const data = await resp.json();
+      const raw = await resp.json();
+      const data = raw.data ?? raw;
       setLogsContent(data.logs || t("plugins.noLogs"));
     } catch {
       setLogsContent(t("plugins.logsLoadFail"));
@@ -432,7 +438,8 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
     setLogsContent("");
     try {
       const resp = await safeFetch(`${apiBaseRef.current()}/api/plugins/${pluginId}/logs?lines=200`);
-      const data = await resp.json();
+      const raw = await resp.json();
+      const data = raw.data ?? raw;
       setLogsContent(data.logs || t("plugins.noLogs"));
     } catch {
       setLogsContent(t("plugins.logsLoadFail"));
@@ -824,7 +831,6 @@ export default function PluginManagerView({ visible, httpApiBase }: Props) {
                             <tr key={perm} style={{ borderBottom: "1px solid var(--line)" }}>
                               <td style={{ padding: "4px 8px", color: "var(--fg)" }}>
                                 {permLabel(perm, lang)}
-                                <span style={{ color: "var(--muted)", marginLeft: 4 }}>({perm})</span>
                               </td>
                               <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
                                 {isBasic ? (

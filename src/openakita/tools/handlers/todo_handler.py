@@ -61,8 +61,10 @@ class PlanHandler:
     def _get_current_todo(self) -> dict | None:
         """获取当前会话的 Todo（会话隔离）。
 
-        如果本实例没有数据但模块级 _session_handlers 中有旧 handler
-        持有该 todo（工具系统热重载后的典型场景），自动恢复到本实例。
+        恢复优先级：
+        1. 本实例 _todos_by_session（最快路径）
+        2. 模块级 _session_handlers 中旧 handler（工具系统热重载后的典型场景）
+        3. TodoStore 持久层（进程重启 / handler 重建后的兜底恢复）
         """
         cid = self._get_conversation_id()
         if cid:
@@ -76,6 +78,14 @@ class PlanHandler:
                     self._todos_by_session[cid] = old_todo
                     logger.info(f"[Todo] Recovered todo {old_todo.get('id')} from previous handler for {cid}")
                     return old_todo
+            # Fallback: recover from persistent store
+            stored = self._store.get(cid)
+            if stored is not None and stored.get("status") == "in_progress":
+                self._todos_by_session[cid] = stored
+                register_plan_handler(cid, self)
+                register_active_todo(cid, stored.get("id", ""))
+                logger.info(f"[Todo] Recovered todo {stored.get('id')} from TodoStore for {cid}")
+                return stored
             return None
         return self.current_todo
 
@@ -158,6 +168,9 @@ class PlanHandler:
 
     async def _create_todo(self, params: dict) -> str:
         """创建任务计划"""
+        if "task_summary" not in params and "goal" in params:
+            params["task_summary"] = params.pop("goal")
+
         _plan = self._get_current_todo()
         if _plan and _plan.get("status") == "in_progress":
             plan_id = _plan["id"]
@@ -289,7 +302,7 @@ class PlanHandler:
             return "❌ 请指定步骤的目标状态（如 in_progress、completed、failed、skipped）"
 
         _VALID_TRANSITIONS: dict[str, set[str]] = {
-            "pending": {"in_progress", "skipped", "cancelled"},
+            "pending": {"in_progress", "completed", "skipped", "cancelled"},
             "in_progress": {"completed", "failed", "skipped", "cancelled"},
             "completed": set(),
             "failed": {"in_progress"},

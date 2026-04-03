@@ -11,7 +11,7 @@ import type {
   ChainToolCall,
   ChainSummaryItem,
 } from "./chatTypes";
-import { IS_TAURI, saveFileDialog, writeTextFile, logger } from "../../../platform";
+import { IS_TAURI } from "../../../platform";
 import { getAccessToken } from "../../../platform/auth";
 
 // ── 持久化 Key 常量 ──
@@ -87,11 +87,13 @@ export const SVG_PATHS: Record<string, string> = {
 
 // ── 对话导出 ──
 
-export async function exportConversation(msgs: ChatMessage[], title: string, format: "md" | "json") {
+export function exportConversation(msgs: ChatMessage[], title: string, format: "md" | "json") {
   let content: string;
+  let mimeType: string;
   let ext: string;
   if (format === "json") {
     content = JSON.stringify(msgs.map(({ streaming, ...rest }) => rest), null, 2);
+    mimeType = "application/json";
     ext = "json";
   } else {
     const lines: string[] = [`# ${title}`, "", `> 导出时间: ${new Date().toLocaleString()}`, ""];
@@ -109,38 +111,16 @@ export async function exportConversation(msgs: ChatMessage[], title: string, for
       lines.push("---", "");
     }
     content = lines.join("\n");
+    mimeType = "text/markdown";
     ext = "md";
   }
-
-  const sanitizedTitle = title.replace(/[/\\?%*:|"<>]/g, "_").slice(0, 50);
-
-  logger.info("Chat.Export", "start", { format: ext, msgCount: msgs.length });
-  if (IS_TAURI) {
-    try {
-      const savePath = await saveFileDialog({
-        title: "导出对话",
-        defaultPath: `${sanitizedTitle}.${ext}`,
-        filters: [{ name: ext === "json" ? "JSON" : "Markdown", extensions: [ext] }],
-      });
-      if (savePath) {
-        await writeTextFile(savePath, content);
-        logger.info("Chat.Export", "success", { path: savePath });
-      }
-    } catch (e) {
-      logger.error("Chat.Export", "error", { error: String(e) });
-    }
-  } else {
-    const mimeType = ext === "json" ? "application/json" : "text/markdown";
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${sanitizedTitle}.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  }
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${title.replace(/[/\\?%*:|"<>]/g, "_").slice(0, 50)}.${ext}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 // ── Auth token helper ──
@@ -260,30 +240,7 @@ export function basename(path: string): string {
   return path.replace(/\\/g, "/").split("/").pop() || path;
 }
 
-const SKILL_TOOL_NAMES: Record<string, string> = {
-  list_skills: "chat.toolListSkills",
-  get_skill_info: "chat.toolGetSkillInfo",
-  run_skill_script: "chat.toolRunSkillScript",
-  get_skill_reference: "chat.toolGetSkillRef",
-  install_skill: "chat.toolInstallSkill",
-  load_skill: "chat.toolLoadSkill",
-  reload_skill: "chat.toolReloadSkill",
-  manage_skill_enabled: "chat.toolManageEnabled",
-  execute_skill: "chat.toolExecuteSkill",
-  uninstall_skill: "chat.toolUninstallSkill",
-};
-
-export function formatToolDescription(tool: string, args: Record<string, unknown>, t?: (k: string, fb?: string) => string): string {
-  const _t = t || ((_k: string, fb?: string) => fb || _k);
-
-  // Skill tools: use friendly names
-  const skillKey = SKILL_TOOL_NAMES[tool];
-  if (skillKey) {
-    const friendly = _t(skillKey, tool);
-    const skillName = String(args.skill_name || args.name || "").slice(0, 30);
-    return skillName ? `${friendly}: ${skillName}` : friendly;
-  }
-
+export function formatToolDescription(tool: string, args: Record<string, unknown>): string {
   switch (tool) {
     case "read_file":
       return `Read ${basename(String(args.path || args.file || ""))}`;
@@ -311,50 +268,6 @@ export function formatToolDescription(tool: string, args: Record<string, unknown
       return `Asked: "${String(args.question || "").slice(0, 40)}"`;
     default:
       return `${tool}(${Object.keys(args).slice(0, 3).join(", ")})`;
-  }
-}
-
-type TFn = (key: string, fallbackOrOpts?: string | Record<string, unknown>) => string;
-
-export function summarizeToolResult(tool: string, result: string | undefined, isError: boolean, t?: TFn): string {
-  const _t = t || ((k: string, fb?: string | Record<string, unknown>) => (typeof fb === "string" ? fb : (fb as Record<string, unknown>)?.defaultValue as string ?? k));
-  if (!result || !result.trim()) return isError ? _t("chat.toolFailed", "Failed") : _t("chat.toolDone", "Done");
-  if (isError) {
-    const short = result.replace(/^(Tool error|Error|❌)\s*/i, "").slice(0, 80);
-    return `${_t("chat.toolFailed", "Failed")}: ${short}`;
-  }
-  const r = result.trim();
-  if (r.length <= 60) return r;
-
-  // Skill tools: extract meaningful summary
-  if (tool in SKILL_TOOL_NAMES) {
-    if (tool === "list_skills") {
-      const countMatch = r.match(/\((\d+)\)/);
-      if (countMatch) return _t("chat.toolSkillCount", { count: countMatch[1], defaultValue: `${countMatch[1]} skills total` } as unknown as string);
-      const lineCount = r.split("\n").filter((l: string) => l.trim().startsWith("-")).length;
-      if (lineCount > 0) return _t("chat.toolSkillCount", { count: lineCount, defaultValue: `${lineCount} skills total` } as unknown as string);
-    }
-    // For other skill tools, extract first meaningful line
-    const firstLine = r.split("\n").find((l: string) => l.trim() && !l.startsWith("─") && !l.startsWith("==="));
-    if (firstLine) return firstLine.replace(/^[✅❌🔧⚙️]+\s*/, "").slice(0, 60);
-    return _t("chat.toolSkillResult", "Skill operation done");
-  }
-
-  switch (tool) {
-    case "read_file":
-      return _t("chat.toolReadLines", { count: r.split("\n").length, defaultValue: `Read ${r.split("\n").length} lines` } as unknown as string);
-    case "web_search":
-      return _t("chat.toolSearchResults", { match: (r.match(/\d+ results?/i)?.[0]) || "results", defaultValue: "Found results" } as unknown as string);
-    case "write_file": case "edit_file":
-      return _t("chat.toolWriteSuccess", "Written");
-    case "execute_code": case "run_code":
-      return _t("chat.toolOutput", { len: r.length, defaultValue: `Output ${r.length} chars` } as unknown as string);
-    case "list_files": case "list_dir": {
-      const count = r.split("\n").filter(Boolean).length;
-      return _t("chat.toolListFiles", { count, defaultValue: `${count} files` } as unknown as string);
-    }
-    default:
-      return r.slice(0, 60) + "…";
   }
 }
 

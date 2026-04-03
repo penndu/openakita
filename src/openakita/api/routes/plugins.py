@@ -59,7 +59,10 @@ _SAFE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9\-_.]{0,128}$")
 def _check_plugin_id(plugin_id: str) -> None:
     """Validate plugin_id to prevent path traversal."""
     if not _SAFE_ID_RE.match(plugin_id):
-        raise HTTPException(status_code=400, detail="Invalid plugin ID")
+        raise HTTPException(
+            status_code=400,
+            detail=make_error_response(PluginErrorCode.INVALID_MANIFEST, detail="无效的插件 ID"),
+        )
 
 
 class InstallBody(BaseModel):
@@ -239,12 +242,12 @@ async def list_plugins(request: Request) -> dict[str, Any]:
         plugins_dir = _plugins_dir()
         await _sync_new_plugins(pm, plugins_dir)
         plugins, failed = _build_plugin_list(pm, plugins_dir)
-        return {"plugins": plugins, "failed": failed}
+        return {"ok": True, "data": {"plugins": plugins, "failed": failed}}
     except Exception as e:
         logger.exception("Failed to list plugins")
         raise HTTPException(
             status_code=500,
-            detail=make_error_response(PluginErrorCode.INTERNAL_ERROR, detail=str(e)),
+            detail=make_error_response(PluginErrorCode.INTERNAL_ERROR),
         ) from e
 
 
@@ -254,12 +257,20 @@ async def install_plugin(body: InstallBody, request: Request) -> dict[str, str]:
         plugins_dir = _plugins_dir()
         src = body.source.strip()
         try:
-            if src.startswith(("http://", "https://")):
+            if installer._is_git_url(src):
+                plugin_id = await asyncio.to_thread(installer.install_from_git, src, plugins_dir)
+            elif src.startswith(("http://", "https://")):
                 plugin_id = await asyncio.to_thread(installer.install_from_url, src, plugins_dir)
             else:
-                plugin_id = await asyncio.to_thread(
-                    installer.install_from_path, Path(src), plugins_dir
-                )
+                local = Path(src)
+                try:
+                    plugin_id = await asyncio.to_thread(
+                        installer.install_from_path, local, plugins_dir
+                    )
+                except PluginInstallError:
+                    plugin_id = await asyncio.to_thread(
+                        installer.install_bundle, local, plugins_dir
+                    )
         except PluginInstallError as e:
             err_str = str(e)
             if "not a valid zip" in err_str.lower():
@@ -277,9 +288,10 @@ async def install_plugin(body: InstallBody, request: Request) -> dict[str, str]:
                 detail=make_error_response(code, detail=err_str),
             ) from e
         except (ValueError, OSError, FileNotFoundError) as e:
+            logger.warning("Plugin install error: %s", e)
             raise HTTPException(
                 status_code=400,
-                detail=make_error_response(PluginErrorCode.INSTALL_FAILED, detail=str(e)),
+                detail=make_error_response(PluginErrorCode.INSTALL_FAILED),
             ) from e
         except Exception as e:
             logger.exception("Unexpected error installing plugin from %s", src)
@@ -343,21 +355,39 @@ def _plugin_config_path(plugin_id: str) -> Path:
 @router.get("/{plugin_id}/config")
 async def get_plugin_config(plugin_id: str) -> dict[str, Any]:
     _check_plugin_id(plugin_id)
+    plugin_dir = _plugins_dir() / plugin_id
+    if not plugin_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND),
+        )
     path = _plugin_config_path(plugin_id)
     if not path.is_file():
-        return {}
+        return {"ok": True, "data": {}}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        config = json.loads(path.read_text(encoding="utf-8"))
+        return {"ok": True, "data": config}
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Plugin config read failed for %s: %s", plugin_id, e)
-        raise HTTPException(status_code=500, detail="Invalid plugin config file") from e
+        raise HTTPException(
+            status_code=500,
+            detail=make_error_response(PluginErrorCode.CONFIG_INVALID),
+        ) from e
 
 
 @router.put("/{plugin_id}/config")
 async def update_plugin_config(
     plugin_id: str,
     body: Annotated[dict[str, Any], Body()],
+    request: Request,
 ) -> dict[str, Any]:
+    _check_plugin_id(plugin_id)
+    plugin_dir = _plugins_dir() / plugin_id
+    if not plugin_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND),
+        )
     path = _plugin_config_path(plugin_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     current: dict[str, Any] = {}
@@ -365,33 +395,72 @@ async def update_plugin_config(
         try:
             current = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail="Existing config is invalid JSON") from e
+            raise HTTPException(
+                status_code=500,
+                detail=make_error_response(PluginErrorCode.CONFIG_INVALID),
+            ) from e
     current.update(body)
+
+    schema = _read_config_schema(plugin_dir)
+    if schema is not None:
+        try:
+            from jsonschema import validate, ValidationError as JsonSchemaError
+
+            validate(instance=current, schema=schema)
+        except JsonSchemaError as ve:
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response(
+                    PluginErrorCode.CONFIG_INVALID,
+                    detail=ve.message,
+                ),
+            ) from ve
+        except ImportError:
+            logger.debug("jsonschema not installed, skipping config validation")
+        except Exception as ve:
+            logger.debug("Config schema validation error: %s", ve)
+
     path.write_text(
         json.dumps(current, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    return current
+    pm = _get_plugin_manager(request)
+    if pm is not None:
+        hook_reg = getattr(pm, "_hook_registry", None)
+        if hook_reg is not None:
+            try:
+                await hook_reg.dispatch(
+                    "on_config_change", plugin_id=plugin_id, config=current,
+                )
+            except Exception:
+                logger.debug("on_config_change dispatch failed for '%s'", plugin_id)
+    return {"ok": True, "data": current}
 
 
 @router.get("/{plugin_id}/readme")
 async def get_plugin_readme(plugin_id: str) -> dict[str, str]:
+    _check_plugin_id(plugin_id)
     plugin_dir = _plugins_dir() / plugin_id
     if not plugin_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Plugin not found")
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND),
+        )
     readme = _read_readme(plugin_dir)
-    return {"readme": readme}
+    return {"ok": True, "data": {"readme": readme}}
 
 
 @router.get("/{plugin_id}/schema")
 async def get_plugin_config_schema(plugin_id: str) -> dict[str, Any]:
+    _check_plugin_id(plugin_id)
     plugin_dir = _plugins_dir() / plugin_id
     if not plugin_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Plugin not found")
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND),
+        )
     schema = _read_config_schema(plugin_dir)
-    if schema is None:
-        return {"schema": None}
-    return {"schema": schema}
+    return {"ok": True, "data": {"schema": schema}}
 
 
 class PermissionGrantBody(BaseModel):
@@ -404,11 +473,12 @@ async def grant_permissions(
     plugin_id: str, body: PermissionGrantBody, request: Request
 ) -> dict[str, Any]:
     """Grant permissions to a plugin and optionally reload it."""
+    _check_plugin_id(plugin_id)
     pm = _require_manager(request)
     pm.approve_permissions(plugin_id, body.permissions)
     if body.reload:
         await pm.reload_plugin(plugin_id)
-    return {"ok": True, "granted": body.permissions}
+    return {"ok": True, "data": {"granted": body.permissions}}
 
 
 class PermissionRevokeBody(BaseModel):
@@ -421,23 +491,32 @@ async def revoke_permissions(
     plugin_id: str, body: PermissionRevokeBody, request: Request
 ) -> dict[str, Any]:
     """Revoke permissions from a plugin and optionally reload it."""
+    _check_plugin_id(plugin_id)
     pm = _require_manager(request)
     pm.revoke_permissions(plugin_id, body.permissions)
     if body.reload:
         await pm.reload_plugin(plugin_id)
-    return {"ok": True, "revoked": body.permissions}
+    return {"ok": True, "data": {"revoked": body.permissions}}
 
 
 @router.get("/{plugin_id}/permissions")
 async def get_plugin_permissions(plugin_id: str, request: Request) -> dict[str, Any]:
     """Get detailed permission info for a plugin."""
+    _check_plugin_id(plugin_id)
     plugin_dir = _plugins_dir() / plugin_id
     if not plugin_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Plugin not found")
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND),
+        )
     try:
         manifest = parse_manifest(plugin_dir)
     except ManifestError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.warning("Manifest error for '%s': %s", plugin_id, e)
+        raise HTTPException(
+            status_code=400,
+            detail=make_error_response(PluginErrorCode.INVALID_MANIFEST),
+        ) from e
 
     from ...plugins.manifest import BASIC_PERMISSIONS, ADVANCED_PERMISSIONS, SYSTEM_PERMISSIONS
 
@@ -465,15 +544,19 @@ async def get_plugin_permissions(plugin_id: str, request: Request) -> dict[str, 
         })
 
     return {
-        "plugin_id": plugin_id,
-        "permission_level": manifest.max_permission_level,
-        "permissions": perm_details,
+        "ok": True,
+        "data": {
+            "plugin_id": plugin_id,
+            "permission_level": manifest.max_permission_level,
+            "permissions": perm_details,
+        },
     }
 
 
 @router.post("/{plugin_id}/reload")
 async def reload_plugin(plugin_id: str, request: Request) -> dict[str, Any]:
     """Reload a plugin (useful after granting permissions or changing config)."""
+    _check_plugin_id(plugin_id)
     async with _plugin_op_lock:
         pm = _require_manager(request)
         await pm.reload_plugin(plugin_id)
@@ -486,6 +569,7 @@ async def get_plugin_logs(
     request: Request,
     lines: int = 100,
 ) -> dict[str, str]:
+    _check_plugin_id(plugin_id)
     pm = _get_plugin_manager(request)
     if pm is not None:
         text = pm.get_plugin_logs(plugin_id, lines)
@@ -496,18 +580,25 @@ async def get_plugin_logs(
             text = "\n".join(all_lines[-lines:])
         else:
             text = f"No logs found for plugin '{plugin_id}'"
-    return {"logs": text}
+    return {"ok": True, "data": {"logs": text}}
 
 
 @router.get("/{plugin_id}/icon")
 async def get_plugin_icon(plugin_id: str) -> Response:
     """Serve the plugin's icon file (png/svg/jpg)."""
+    _check_plugin_id(plugin_id)
     plugin_dir = _plugins_dir() / plugin_id
     if not plugin_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Plugin not found")
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND),
+        )
     icon_name = _find_icon(plugin_dir)
     if icon_name is None:
-        raise HTTPException(status_code=404, detail="No icon file")
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND, detail="无图标文件"),
+        )
     icon_path = plugin_dir / icon_name
     data = icon_path.read_bytes()
     ext = icon_path.suffix.lower()
@@ -521,8 +612,11 @@ async def open_plugin_folder(plugin_id: str) -> dict[str, str]:
     _check_plugin_id(plugin_id)
     plugin_dir = _plugins_dir() / plugin_id
     if not plugin_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Plugin not found")
-    return {"path": str(plugin_dir.resolve())}
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND),
+        )
+    return {"ok": True, "data": {"path": str(plugin_dir.resolve())}}
 
 
 @router.get("/{plugin_id}/export")
@@ -531,7 +625,10 @@ async def export_plugin(plugin_id: str) -> Response:
     _check_plugin_id(plugin_id)
     plugin_dir = _plugins_dir() / plugin_id
     if not plugin_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Plugin not found")
+        raise HTTPException(
+            status_code=404,
+            detail=make_error_response(PluginErrorCode.NOT_FOUND),
+        )
 
     _EXPORT_EXCLUDE_DIRS = {"logs", "deps", "__pycache__", ".env", "node_modules"}
     _EXPORT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per file
@@ -560,20 +657,20 @@ async def export_plugin(plugin_id: str) -> Response:
 # --- Hub / Marketplace ---
 
 PLUGIN_CATEGORIES = [
-    {"slug": "channel", "name": "Chat Providers", "icon": "message-circle"},
-    {"slug": "llm", "name": "AI Models", "icon": "cpu"},
-    {"slug": "knowledge", "name": "Productivity", "icon": "book-open"},
-    {"slug": "tool", "name": "Tools & Automation", "icon": "wrench"},
-    {"slug": "memory", "name": "Memory", "icon": "brain"},
-    {"slug": "hook", "name": "Hooks & Extensions", "icon": "git-branch"},
-    {"slug": "skill", "name": "Skills", "icon": "star"},
-    {"slug": "mcp", "name": "MCP Servers", "icon": "plug"},
+    {"slug": "channel", "name": "Chat Providers", "name_zh": "聊天通道", "icon": "message-circle"},
+    {"slug": "llm", "name": "AI Models", "name_zh": "AI 模型", "icon": "cpu"},
+    {"slug": "knowledge", "name": "Productivity", "name_zh": "知识与效率", "icon": "book-open"},
+    {"slug": "tool", "name": "Tools & Automation", "name_zh": "工具与自动化", "icon": "wrench"},
+    {"slug": "memory", "name": "Memory", "name_zh": "记忆存储", "icon": "brain"},
+    {"slug": "hook", "name": "Hooks & Extensions", "name_zh": "钩子与扩展", "icon": "git-branch"},
+    {"slug": "skill", "name": "Skills", "name_zh": "技能", "icon": "star"},
+    {"slug": "mcp", "name": "MCP Servers", "name_zh": "MCP 服务", "icon": "plug"},
 ]
 
 
 @router.get("/hub/categories")
-async def list_categories() -> list[dict]:
-    return PLUGIN_CATEGORIES
+async def list_categories() -> dict[str, Any]:
+    return {"ok": True, "data": PLUGIN_CATEGORIES}
 
 
 @router.get("/hub/search")
@@ -582,9 +679,78 @@ async def hub_search(
     category: str = "",
 ) -> dict[str, Any]:
     return {
-        "query": q,
-        "category": category,
-        "results": [],
-        "total": 0,
-        "message": "插件市场即将上线",
+        "ok": True,
+        "data": {
+            "query": q,
+            "category": category,
+            "results": [],
+            "total": 0,
+            "message": "插件市场即将上线",
+        },
+    }
+
+
+@router.get("/health")
+async def plugin_health(request: Request) -> dict[str, Any]:
+    """Plugin system health summary for monitoring dashboards."""
+    pm = _get_plugin_manager(request)
+    if pm is None:
+        return {"ok": True, "data": {"status": "unavailable", "loaded": 0, "failed": 0, "disabled": 0}}
+    loaded = pm.list_loaded()
+    failed = pm.list_failed()
+    disabled_count = 0
+    state = pm.state
+    if state:
+        loaded_ids = {p["id"] for p in loaded}
+        failed_ids = set(failed)
+        for entry in state.plugins.values():
+            if not entry.enabled and entry.plugin_id not in loaded_ids and entry.plugin_id not in failed_ids:
+                disabled_count += 1
+    error_tracker = getattr(pm, "_error_tracker", None)
+    auto_disabled = []
+    if error_tracker is not None:
+        for pid in list(getattr(error_tracker, "_disabled", set())):
+            auto_disabled.append(pid)
+    return {
+        "ok": True,
+        "data": {
+            "status": "healthy" if not failed else "degraded",
+            "loaded": len(loaded),
+            "failed": len(failed),
+            "disabled": disabled_count,
+            "auto_disabled": auto_disabled,
+            "failed_ids": list(failed.keys()),
+        },
+    }
+
+
+@router.get("/updates")
+async def check_updates(request: Request) -> dict[str, Any]:
+    """Check for available plugin updates. Requires marketplace to be ready."""
+    pm = _get_plugin_manager(request)
+    installed: list[dict[str, str]] = []
+    if pm is not None:
+        for info in pm.list_loaded():
+            installed.append({"id": info["id"], "version": info.get("version", "?")})
+    return {
+        "ok": True,
+        "data": {
+            "installed_count": len(installed),
+            "updates_available": [],
+            "message": "升级检查功能将在插件市场上线后可用",
+        },
+    }
+
+
+@router.post("/{plugin_id}/update")
+async def update_plugin(plugin_id: str, request: Request) -> dict[str, Any]:
+    """Update a specific plugin to the latest version. Requires marketplace."""
+    _check_plugin_id(plugin_id)
+    return {
+        "ok": False,
+        "error": {
+            "code": "NOT_IMPLEMENTED",
+            "message": "一键升级功能将在插件市场上线后可用",
+            "guidance": "当前请手动重新安装最新版本",
+        },
     }

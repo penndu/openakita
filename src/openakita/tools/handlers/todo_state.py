@@ -118,13 +118,15 @@ def auto_close_todo(session_id: str) -> bool:
     自动关闭指定 session 的活跃 Todo（任务结束时调用）。
 
     当一轮 ReAct 循环结束但 LLM 未显式调用 complete_todo 时，
-    此函数确保 Todo 被正确收尾：
-    - in_progress 步骤 -> completed（已开始执行，视为完成）
-    - pending 步骤 -> skipped（未执行到）
-    - Todo 状态设为 completed，保存并注销
+    此函数确保 Todo 被正确收尾。
+
+    **多轮计划保护**: 如果计划中仍有 pending 步骤（尚未开始执行），
+    说明这是一个跨多轮的计划，本轮只是完成了部分步骤。此时不关闭
+    计划，仅将 in_progress 步骤标记为 completed，保留 pending 步骤
+    供下一轮继续执行。
 
     Returns:
-        True 如果有 Todo 被关闭，False 如果没有活跃 Todo
+        True 如果有 Todo 被关闭，False 如果没有活跃 Todo（或计划被保留）
     """
     if not has_active_todo(session_id):
         return False
@@ -134,6 +136,28 @@ def auto_close_todo(session_id: str) -> bool:
     if not handler or not plan:
         unregister_active_todo(session_id)
         return True
+
+    steps = plan.get("steps", [])
+    has_pending = any(s.get("status") == "pending" for s in steps)
+
+    if has_pending:
+        # Multi-turn plan: keep plan alive, just snapshot in_progress steps
+        from datetime import datetime as _dt
+        _now = _dt.now().isoformat()
+        for step in steps:
+            if step.get("status") == "in_progress":
+                step["status"] = "completed"
+                step["result"] = step.get("result") or "(本轮自动标记完成)"
+                step["completed_at"] = _now
+        # Persist intermediate state
+        if hasattr(handler, "_store"):
+            handler._store.upsert(session_id, plan)
+            handler._store.save()
+        logger.info(
+            f"[Todo] Plan for {session_id} has {sum(1 for s in steps if s.get('status') == 'pending')} "
+            f"pending steps, keeping alive for next turn"
+        )
+        return False
 
     handler.finalize_plan(plan, session_id, action="auto_close")
     logger.info(f"[Todo] Auto-closed todo for session {session_id}")

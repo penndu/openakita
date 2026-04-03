@@ -17,8 +17,6 @@ export const FlatMessageItem = memo(function FlatMessageItem({
   onEdit,
   onRegenerate,
   onRewind,
-  onFork,
-  onSaveMemory,
   isLast,
   apiBaseUrl,
   showChain = true,
@@ -32,8 +30,6 @@ export const FlatMessageItem = memo(function FlatMessageItem({
   onEdit?: (msgId: string) => void;
   onRegenerate?: (msgId: string) => void;
   onRewind?: (msgId: string) => void;
-  onFork?: (msgId: string) => void;
-  onSaveMemory?: (msgId: string) => void;
   isLast?: boolean;
   apiBaseUrl?: string;
   showChain?: boolean;
@@ -47,16 +43,6 @@ export const FlatMessageItem = memo(function FlatMessageItem({
   const isSystem = msg.role === "system";
 
   if (isSystem) {
-    const isRichContent = msg.content && (msg.content.includes("**") || msg.content.includes("\n") || msg.content.length > 80);
-    if (isRichContent && mdModules) {
-      return (
-        <div className="flatMsgSystemRich">
-          <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]} rehypePlugins={[mdModules.rehypeRaw]}>
-            {msg.content || ""}
-          </mdModules.ReactMarkdown>
-        </div>
-      );
-    }
     return (
       <div className="flatMsgSystem">
         <span>{msg.content}</span>
@@ -165,12 +151,6 @@ export const FlatMessageItem = memo(function FlatMessageItem({
         )}
         {!isLast && !msg.streaming && onRewind && (
           <button className="msgActionBtn" onClick={() => onRewind(msg.id)} title={t("chat.rewind", "回到这里")}>⏪</button>
-        )}
-        {!msg.streaming && onFork && (
-          <button className="msgActionBtn" onClick={() => onFork(msg.id)} title={t("chat.fork", "从此分叉")}>🔀</button>
-        )}
-        {isAssistant && !msg.streaming && onSaveMemory && (
-          <button className="msgActionBtn" onClick={() => onSaveMemory(msg.id)} title={t("chat.saveMemory", "保存为记忆")}>💾</button>
         )}
       </div>
     </div>

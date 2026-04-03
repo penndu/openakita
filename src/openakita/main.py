@@ -2181,6 +2181,37 @@ def serve(
     _stop_heartbeat()
 
 
+@app.command(name="plugin-validate")
+def plugin_validate(
+    path: str = typer.Argument(".", help="插件目录路径（含 plugin.json）"),
+):
+    """校验插件 manifest 是否有效（Pydantic 校验 + 权限检查）"""
+    from .plugins.manifest import ManifestError, parse_manifest
+
+    plugin_dir = Path(path).resolve()
+    if not plugin_dir.is_dir():
+        typer.echo(f"❌ 路径不存在或不是目录: {plugin_dir}", err=True)
+        raise typer.Exit(1)
+
+    try:
+        manifest = parse_manifest(plugin_dir)
+    except ManifestError as e:
+        typer.echo(f"❌ 校验失败: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"✅ 插件校验通过")
+    typer.echo(f"   ID:      {manifest.id}")
+    typer.echo(f"   名称:    {manifest.name}")
+    typer.echo(f"   版本:    {manifest.version}")
+    typer.echo(f"   类型:    {manifest.plugin_type}")
+    typer.echo(f"   入口:    {manifest.entry}")
+    typer.echo(f"   权限级别: {manifest.max_permission_level}")
+    if manifest.permissions:
+        typer.echo(f"   权限:    {', '.join(manifest.permissions)}")
+    if manifest.depends:
+        typer.echo(f"   依赖:    {', '.join(manifest.depends)}")
+
+
 @app.command(name="run-mcp-module", hidden=True)
 def run_mcp_module(
     module_path: str = typer.Argument(..., help="Python module path for MCP server"),

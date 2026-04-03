@@ -73,7 +73,7 @@ _ZONE_OP_MATRIX: dict[Zone, dict[OpType, PolicyDecision]] = {
         OpType.CREATE: PolicyDecision.ALLOW,
         OpType.EDIT: PolicyDecision.ALLOW,
         OpType.OVERWRITE: PolicyDecision.ALLOW,
-        OpType.DELETE: PolicyDecision.ALLOW,
+        OpType.DELETE: PolicyDecision.CONFIRM,
         OpType.RECURSIVE_DELETE: PolicyDecision.CONFIRM,
     },
     Zone.CONTROLLED: {

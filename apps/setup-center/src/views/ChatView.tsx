@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { setThemePref } from "../theme";
 import type { Theme } from "../theme";
-import { invoke, downloadFile, openFileWithDefault, showInFolder, readFileBase64, onDragDrop, IS_TAURI, IS_WEB, IS_MOBILE_BROWSER, onWsEvent, logger, getAssetUrl, sendNotification } from "../platform";
+import { invoke, downloadFile, openFileWithDefault, showInFolder, readFileBase64, onDragDrop, IS_TAURI, IS_WEB, IS_MOBILE_BROWSER, onWsEvent, logger, getAssetUrl } from "../platform";
 import { getAccessToken } from "../platform/auth";
 import { safeFetch } from "../providers";
 import type {
@@ -34,7 +34,7 @@ import type {
   PlanApprovalEvent,
 } from "../types";
 import { genId, formatTime, formatDate, timeAgo } from "../utils";
-import { notifyError, notifyInfo, notifySuccess } from "../utils/notify";
+import { notifyError } from "../utils/notify";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import {
   IconSend, IconPaperclip, IconMic, IconStopCircle,
@@ -63,12 +63,6 @@ import {
   ERROR_META, SVG_PATHS, getNextSpinnerTip,
 } from "./chat/utils/chatHelpers";
 import { useMdModules } from "./chat/hooks/useMdModules";
-import { useRecording } from "./chat/hooks/useRecording";
-import { useAttachments } from "./chat/hooks/useAttachments";
-import { useSecurityPolicy } from "./chat/hooks/useSecurityPolicy";
-import type { PermissionMode } from "./chat/hooks/useSecurityPolicy";
-import { useCircuitBreaker } from "./chat/hooks/useCircuitBreaker";
-import { useFrictionDetector } from "./chat/hooks/useFrictionDetector";
 import { useMessageReducer, useConversationReducer } from "./chat/hooks/useMessages";
 import type { MessageAction, ConversationAction } from "./chat/hooks/useMessages";
 import { useQueryGuard } from "./chat/hooks/useQueryGuard";
@@ -137,6 +131,8 @@ export function ChatView({
   const [selectedEndpoint, setSelectedEndpoint] = useState("auto");
   const [chatMode, setChatMode] = useState<"agent" | "plan" | "ask">("agent");
   const planMode = chatMode === "plan";
+  const [pendingApproval, setPendingApproval] = useState<PlanApprovalEvent | null>(null);
+  const pendingApprovalRef = useRef<PlanApprovalEvent | null>(null);
   const [streamingTick, setStreamingTick] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== "undefined" && window.innerWidth > 768);
   const [sidebarPinned, setSidebarPinned] = useState(() => {
@@ -154,8 +150,6 @@ export function ChatView({
   const msgSearchRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<MessageListHandle>(null);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
-  const [pendingApproval, setPendingApproval] = useState<PlanApprovalEvent | null>(null);
-  const pendingApprovalRef = useRef<PlanApprovalEvent | null>(null);
   const [lightbox, setLightbox] = useState<{ url: string; downloadUrl: string; name: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [securityConfirm, setSecurityConfirm] = useState<{
@@ -192,6 +186,7 @@ export function ChatView({
   useEffect(() => { try { localStorage.setItem("chat_showChain", String(showChain)); } catch {} }, [showChain]);
   useEffect(() => { try { localStorage.setItem("chat_displayMode", displayMode); } catch {} }, [displayMode]);
 
+  const [isRecording, setIsRecording] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -394,6 +389,7 @@ export function ChatView({
 
   // (messagesSnapshotRef / liveMessagesCache removed — StreamContext manages live messages)
 
+  // 页面隐藏/关闭时立即落盘，降低"当天消息未及时写入 localStorage"的概率
   useEffect(() => {
     const flushNow = () => {
       if (saveMessagesTimerRef.current) {
@@ -401,36 +397,81 @@ export function ChatView({
         saveMessagesTimerRef.current = null;
       }
       flushCurrentConversationToStorage();
-      // N16: persist draft input
-      const draft = inputTextRef.current;
-      const cid = activeConvIdRef.current;
-      if (cid) {
-        try {
-          if (draft) localStorage.setItem(`chat_draft_${cid}`, draft);
-          else localStorage.removeItem(`chat_draft_${cid}`);
-        } catch {}
-      }
-    };
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      flushNow();
-      // N16: warn if streaming
-      const hasActiveStream = streamContexts.current.size > 0 &&
-        Array.from(streamContexts.current.values()).some((ctx) => ctx.isStreaming);
-      if (hasActiveStream) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
+
+      // Reset "running" conversations that have no active SSE stream,
+      // preventing stale status after page reload / HMR.
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_CONVS);
+        if (raw) {
+          const convs: ChatConversation[] = JSON.parse(raw);
+          let dirty = false;
+          for (const c of convs) {
+            if (c.status === "running" && !streamContexts.current.get(c.id)?.isStreaming) {
+              c.status = "idle";
+              dirty = true;
+            }
+          }
+          if (dirty) localStorage.setItem(STORAGE_KEY_CONVS, JSON.stringify(convs));
+        }
+      } catch { /* ignore */ }
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") flushNow();
     };
-    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("beforeunload", flushNow);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("beforeunload", flushNow);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [flushCurrentConversationToStorage]);
+
+  // ── Stale "running" status recovery on mount ──
+  // After HMR / manual refresh, conversations may still show status="running" in
+  // localStorage while no SSE stream is active. Reconcile with backend busy state.
+  const staleRecoveryDoneRef = useRef(false);
+  useEffect(() => {
+    if (!serviceRunning || staleRecoveryDoneRef.current) return;
+    const convs = latestConversationsRef.current;
+    const stale = convs.filter(
+      (c) => c.status === "running" && !streamContexts.current.get(c.id)?.isStreaming,
+    );
+    if (stale.length === 0) { staleRecoveryDoneRef.current = true; return; }
+    staleRecoveryDoneRef.current = true;
+
+    const staleIds = new Set(stale.map((c) => c.id));
+
+    (async () => {
+      try {
+        const res = await safeFetch(`${apiBase}/api/chat/busy`);
+        const data = await res.json();
+        const busyIds = new Set(
+          ((data?.busy_conversations as { conversation_id: string }[]) ?? []).map(
+            (b) => b.conversation_id,
+          ),
+        );
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (!staleIds.has(c.id) || busyIds.has(c.id)) return c;
+            return { ...c, status: "completed" as ConversationStatus };
+          }),
+        );
+        // Re-hydrate active conversation if it was among the stale ones
+        const curActive = activeConvIdRef.current;
+        if (curActive && staleIds.has(curActive) && !busyIds.has(curActive)) {
+          const meta = convs.find((c) => c.id === curActive);
+          void hydrateConversationMessages(curActive, meta?.messageCount || 0);
+        }
+      } catch {
+        setConversations((prev) =>
+          prev.map((c) =>
+            staleIds.has(c.id) ? { ...c, status: "idle" as ConversationStatus } : c,
+          ),
+        );
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally run once when service becomes available
+  }, [serviceRunning]);
 
   // ── APP 后台恢复：中断已断开的 SSE 流 ──
   // Tauri / Capacitor / mobile browsers kill HTTP streams when the app/tab is
@@ -502,30 +543,12 @@ export function ChatView({
   useEffect(() => {
     if (!activeConvId) {
       setMessages([]);
-      setPendingAttachments([]);
-      setPendingApproval(null);
-      pendingApprovalRef.current = null;
       return;
     }
-    setPendingApproval(null);
-    pendingApprovalRef.current = null;
     if (skipConvLoadRef.current) {
       skipConvLoadRef.current = false;
       return;
     }
-
-    setPendingAttachments([]);
-
-    // N16: restore draft input for this conversation
-    try {
-      const draft = localStorage.getItem(`chat_draft_${activeConvId}`);
-      if (draft) {
-        setInputValue(draft);
-        localStorage.removeItem(`chat_draft_${activeConvId}`);
-      } else {
-        setInputValue("");
-      }
-    } catch { setInputValue(""); }
 
     // If a StreamContext is actively streaming for this conv, restore its state directly
     const ctx = streamContexts.current.get(activeConvId);
@@ -557,12 +580,13 @@ export function ChatView({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   // abortRef/readerRef removed — now per-session in StreamContext
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // ── 输入框 Undo/Redo 栈 (6.2) ──
   const undoStackRef = useRef<string[]>([""]);
   const undoIdxRef = useRef(0);
   const undoDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
+
 
   const pushUndoSnapshot = useCallback((val: string) => {
     if (undoDebounceRef.current) clearTimeout(undoDebounceRef.current);
@@ -854,14 +878,7 @@ export function ChatView({
         if (convId === activeConvIdRef.current) {
           safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`)
             .then((r) => r.json())
-            .then((d2) => {
-              if (!d2?.messages?.length) return;
-              const list = messageListRef.current;
-              const wasAtBottom = list?.isAtBottom() ?? true;
-              if (!wasAtBottom) list?.saveScrollPosition();
-              setMessages((prev) => patchMessagesWithBackend(prev, d2.messages));
-              if (!wasAtBottom) requestAnimationFrame(() => list?.restoreScrollPosition());
-            })
+            .then((d2) => { if (d2?.messages?.length) setMessages((prev) => patchMessagesWithBackend(prev, d2.messages)); })
             .catch(() => {});
         }
         const preview = (d.last_message_preview as string) || "";
@@ -943,15 +960,15 @@ export function ChatView({
       .then((r) => r.json())
       .then((data) => {
         if (!data?.messages?.length) return;
-        const list = messageListRef.current;
-        const wasAtBottom = list?.isAtBottom() ?? true;
-        if (!wasAtBottom) list?.saveScrollPosition();
         setMessages((prev) => patchMessagesWithBackend(prev, data.messages));
-        if (!wasAtBottom) requestAnimationFrame(() => list?.restoreScrollPosition());
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceRunning, activeConvId, streamingTick, apiBaseUrl, messages.length]);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const blobUrlsRef = useRef<string[]>([]);
 
   // ── API base URL (ref for stable closure access) ──
   const apiBase = apiBaseUrl;
@@ -968,39 +985,7 @@ export function ChatView({
     return data.url as string;
   }, []);
 
-  const { isRecording, recordingDuration, toggleRecording, cleanupRecording } = useRecording({
-    uploadFile, apiBaseRef, setPendingAttachments, notifyError, t,
-  });
-
-  const {
-    fileInputRef, pastedLargeText, setPastedLargeText, dragOver, setDragOver,
-    handleFileSelect, handlePaste,
-  } = useAttachments({
-    uploadFile, apiBaseRef, setPendingAttachments, activeConvId: activeConvId,
-  });
-
-  const {
-    permissionMode, setPermissionMode, checkAutoAllow,
-    recordAllow, recordDeny, getSessionTrustInfo,
-  } = useSecurityPolicy();
-
-  const sseBreaker = useCircuitBreaker({ failureThreshold: 5, cooldownMs: 30_000 });
-
-  const frictionDetector = useFrictionDetector(useCallback((hint: string) => {
-    const hints: Record<string, string> = {
-      repeated_errors: t("chat.frictionErrors", "连续遇到多次错误，可以尝试简化任务或查看帮助文档"),
-      same_error_retry: t("chat.frictionSameError", "同类型错误多次出现，可能需要换个方式描述需求"),
-      idle_after_error: t("chat.frictionIdle", "遇到困难了？可以尝试 /help 查看可用命令"),
-    };
-    notifyInfo(hints[hint] || hints.repeated_errors, 8000);
-  }, [t]));
-
-  useEffect(() => {
-    const timer = setInterval(() => frictionDetector.checkIdle(), 60_000);
-    return () => clearInterval(timer);
-  }, [frictionDetector.checkIdle]);
-
-  // ── 组件卸载清理：abort 所有流式请求 ──
+  // ── 组件卸载清理：abort 所有流式请求 + 停止麦克风 ──
   useEffect(() => {
     return () => {
       for (const [, ctx] of streamContexts.current) {
@@ -1009,6 +994,15 @@ export function ChatView({
         if (ctx.pollingTimer) clearInterval(ctx.pollingTimer);
       }
       streamContexts.current.clear();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        try { mediaRecorderRef.current.stop(); } catch { /* ignore */ }
+      }
+      mediaRecorderRef.current = null;
+      if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+      for (const url of blobUrlsRef.current) {
+        try { URL.revokeObjectURL(url); } catch {}
+      }
+      blobUrlsRef.current = [];
     };
   }, []);
 
@@ -1020,11 +1014,7 @@ export function ChatView({
 
   useEffect(() => {
     if (convSwitchScrollRef.current && messages.length > 0) {
-      logger.debug("Chat.Scroll", "convSwitch.scrollToBottom", { convId: activeConvIdRef.current });
-      messageListRef.current?.forceFollow();
-      requestAnimationFrame(() => {
-        setTimeout(() => messageListRef.current?.scrollToBottom("auto"), 50);
-      });
+      requestAnimationFrame(() => messageListRef.current?.scrollToBottom("auto"));
       convSwitchScrollRef.current = false;
     }
   }, [messages]);
@@ -1035,10 +1025,8 @@ export function ChatView({
       return;
     }
     if (needsScrollOnVisible.current) {
-      logger.debug("Chat.Scroll", "tabVisible.scrollToBottom");
-      messageListRef.current?.forceFollow();
       requestAnimationFrame(() => {
-        setTimeout(() => messageListRef.current?.scrollToBottom("auto"), 50);
+        messageListRef.current?.scrollToBottom("auto");
       });
       needsScrollOnVisible.current = false;
     }
@@ -1139,11 +1127,11 @@ export function ChatView({
         }).catch(() => {});
       }
     }},
-    { id: "skill", label: t("chat.skillUseCmd", "使用技能"), description: t("chat.skillUseCmdDesc", "输入 /skill 技能名称 即可触发已安装技能"), action: (args) => {
+    { id: "skill", label: "使用技能", description: "调用已安装的技能（发送 /skill:<技能名> 触发）", action: (args) => {
       if (args) {
         setInputValue(`请使用技能「${args}」来帮我：`);
       } else {
-        setMessages((prev) => [...prev, { id: genId(), role: "system", content: t("chat.skillUsageHint", "用法: /skill 技能名称\n例如: /skill web-search\n在消息中提及技能名称即可触发。"), timestamp: Date.now() }]);
+        setMessages((prev) => [...prev, { id: genId(), role: "system", content: "用法: /skill <技能名>，如 /skill web-search。在消息中提及技能名即可触发。", timestamp: Date.now() }]);
       }
     }},
     { id: "persona", label: "切换角色", description: "切换 Agent 的人格预设", action: (args) => {
@@ -1212,8 +1200,8 @@ export function ChatView({
     }},
     { id: "memory", label: t("chat.memoryCmd", "记忆管理"), description: t("chat.memoryCmdDesc", "查看/管理 AI 记忆条目"), action: (args) => {
       if (args === "list" || !args) {
-        safeFetch(`${apiBase}/api/memories?limit=20`).then(r => r.json()).then(data => {
-          const entries = data?.memories || data?.entries || [];
+        safeFetch(`${apiBase}/api/memory/entries?limit=20`).then(r => r.json()).then(data => {
+          const entries = data?.entries || data?.memories || [];
           if (!entries.length) {
             setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.memoryEmpty", "暂无记忆条目。AI 会在对话中自动学习和记忆。"), timestamp: Date.now() }]);
           } else {
@@ -1227,29 +1215,20 @@ export function ChatView({
         setMessages(prev => [...prev, { id: genId(), role: "system", content: "用法: /memory [list]", timestamp: Date.now() }]);
       }
     }},
-    { id: "skills", label: t("chat.skillsCmd", "技能列表"), description: t("chat.skillsCmdDesc", "查看已安装的技能列表"), action: () => {
-      const loadingId = genId();
-      setMessages(prev => [...prev, { id: loadingId, role: "system", content: t("chat.skillsLoading", "正在加载技能列表..."), timestamp: Date.now() }]);
+    { id: "skills", label: t("chat.skillsCmd", "技能管理"), description: t("chat.skillsCmdDesc", "查看已安装的技能列表"), action: () => {
       safeFetch(`${apiBase}/api/skills`).then(r => r.json()).then(data => {
-        const skills = data?.skills || (Array.isArray(data) ? data : []);
+        const skills = Array.isArray(data?.skills) ? data.skills : [];
         if (!skills.length) {
-          setMessages(prev => prev.map(m => m.id === loadingId ? { ...m, content: t("chat.skillsEmpty", "暂无已安装技能。可在「技能商店」中浏览安装。") } : m));
+          setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.skillsEmpty", "暂无已安装技能。可在设置 > 高级 > 平台连接中启用技能商店，或使用 /skill install <url> 安装。"), timestamp: Date.now() }]);
         } else {
-          const lang = i18n.language || "zh";
-          const isZh = lang.startsWith("zh");
-          const lines = skills.map((s: any) => {
-            const name = (isZh ? s.name_i18n?.zh : s.name_i18n?.en) || s.name || s.id;
-            const desc = (isZh ? s.description_i18n?.zh : s.description_i18n?.en) || s.description || t("skills.marketplaceNoDesc", "暂无描述");
-            const status = s.enabled === false ? ` (${t("skills.disabled", "已禁用")})` : "";
-            return `- **${name}**: ${desc}${status}`;
-          });
-          setMessages(prev => prev.map(m => m.id === loadingId ? { ...m, content: `**${t("skills.installed", "已安装")}** (${skills.length})：\n${lines.join("\n")}` } : m));
+          const lines = skills.map((s: any) => `- **${s.name || s.skill_id}**: ${s.description || t("chat.skillsNoDesc", "无描述")} ${s.enabled === false ? "(已禁用)" : ""}`);
+          setMessages(prev => [...prev, { id: genId(), role: "system", content: `**已安装技能** (${skills.length})：\n${lines.join("\n")}`, timestamp: Date.now() }]);
         }
       }).catch(() => {
-        setMessages(prev => prev.map(m => m.id === loadingId ? { ...m, content: `${t("chat.skillsLoadFail", "无法加载技能列表，请稍后重试。")}\n\n${t("chat.skillsRetry", "重试")}: /skills` } : m));
+        setMessages(prev => [...prev, { id: genId(), role: "system", content: t("chat.skillsLoadFail", "无法加载技能列表。"), timestamp: Date.now() }]);
       });
     }},
-    { id: "help", label: t("common.help", "帮助"), description: t("common.helpDesc", "显示可用命令列表"), action: () => {} },
+    { id: "help", label: "帮助", description: "显示可用命令列表", action: () => {} },
   ];
     const helpCmd = cmds.find((c) => c.id === "help");
     if (helpCmd) {
@@ -1390,7 +1369,6 @@ export function ChatView({
       const cmdId = parts[0].toLowerCase();
       const cmd = slashCommands.find((c) => c.id === cmdId);
       if (cmd) {
-        logger.info("Chat.Slash", "execute", { command: cmdId });
         cmd.action(parts.slice(1).join(" "));
         setInputValue("");
         setSlashOpen(false);
@@ -1662,13 +1640,6 @@ export function ChatView({
     streamContexts.current.set(thisConvId, sctx);
     // User just sent a message — ensure Virtuoso follows regardless of scroll position
     messageListRef.current?.forceFollow();
-    // Explicit scroll as fallback — followOutput alone can miss under React 18 batching.
-    // Two attempts: fast (60ms) for immediate feedback, slow (300ms) after thinking
-    // indicator has rendered and Virtuoso has measured the full item height.
-    requestAnimationFrame(() => {
-      setTimeout(() => messageListRef.current?.scrollToBottom("auto"), 60);
-      setTimeout(() => messageListRef.current?.scrollToBottom("auto"), 300);
-    });
     // Functional updater chains with any pending setMessages (e.g. handleAskAnswer's answered flag)
     if (thisConvId === activeConvIdRef.current) {
       setMessages((prev) => {
@@ -1835,16 +1806,6 @@ export function ChatView({
       }
 
       resetIdleTimer(); // Start idle timer before fetch
-      if (!sseBreaker.canAttempt()) {
-        notifyError(t("chat.sseBreakerOpen", "通信异常过于频繁，请稍后再试"));
-        updateMessages((prev) => prev.map((m) =>
-          m.id === assistantMsg.id ? { ...m, content: t("chat.sseBreakerOpen", "通信异常过于频繁，请稍后再试"), streaming: false } : m
-        ));
-        queryGuard.endQuery(guardHandle.generation);
-        return;
-      }
-
-      logger.info("Chat.Stream", "start", { convId: thisConvId, mode: chatMode });
 
       const response = await fetch(`${apiBase}/api/chat`, {
         method: "POST",
@@ -1947,8 +1908,6 @@ export function ChatView({
             const event: StreamEvent = JSON.parse(data);
             sseParseFailures = 0;
 
-            if (queryGuard.isStale(guardHandle.generation)) break;
-
             switch (event.type) {
               case "heartbeat":
                 continue;
@@ -1982,17 +1941,9 @@ export function ChatView({
                 }
                 continue;
               }
-              case "context_compressed": {
+              case "context_compressed":
                 pendingCompressedInfo = { beforeTokens: event.before_tokens, afterTokens: event.after_tokens };
-                const savedPct = event.before_tokens > 0 ? Math.round((1 - event.after_tokens / event.before_tokens) * 100) : 0;
-                notifyInfo(t("chat.contextCompressedNotify", {
-                  before: Math.round(event.before_tokens / 1000),
-                  after: Math.round(event.after_tokens / 1000),
-                  saved: savedPct,
-                  defaultValue: `上下文已压缩: ${Math.round(event.before_tokens / 1000)}K → ${Math.round(event.after_tokens / 1000)}K (节省${savedPct}%)`,
-                }), 4000);
                 break;
-              }
               case "iteration_start": {
                 // 新迭代 → 新 chain group
                 const newGroup: ChainGroup = {
@@ -2062,7 +2013,7 @@ export function ChatView({
                 currentContent += event.content;
                 break;
               case "text_replace":
-                currentContent = event.content;
+                currentContent = event.content ?? "";
                 break;
               case "tool_call_start": {
                 if (event.tool === "delegate_to_agent" && event.args?.agent_id) {
@@ -2150,7 +2101,7 @@ export function ChatView({
 
                 currentToolCalls = [...currentToolCalls, { tool: event.tool, args: event.args, status: "running", id: event.id }];
                 const _tcId = event.id || genId();
-                const _desc = formatToolDescription(event.tool, event.args, (k: string, fb?: string) => t(k, fb || k));
+                const _desc = formatToolDescription(event.tool, event.args);
                 const newTc: ChainToolCall = { toolId: _tcId, tool: event.tool, args: event.args, status: "running", description: _desc };
                 if (currentChainGroup) {
                   const grp: ChainGroup = currentChainGroup;
@@ -2257,7 +2208,7 @@ export function ChatView({
                       : event.stepIdx != null && currentPlan!.steps.indexOf(s) === event.stepIdx;
                     return matched ? { ...s, status: event.status as ChatTodoStep["status"] } : s;
                   });
-                  const allDone = newSteps.every((s) => s.status === "completed" || s.status === "skipped" || s.status === "failed" || s.status === "cancelled");
+                  const allDone = newSteps.every((s) => s.status === "completed" || s.status === "skipped" || s.status === "failed");
                   currentPlan = { ...currentPlan, steps: newSteps, ...(allDone ? { status: "completed" as const } : {}) } as ChatTodo;
                 }
                 break;
@@ -2272,54 +2223,18 @@ export function ChatView({
                 }
                 break;
               case "plan_ready_for_approval":
-                pendingApprovalRef.current = event.data;
+                pendingApprovalRef.current = event.data as PlanApprovalEvent;
                 break;
               case "security_confirm": {
-                const secEvent = {
-                  tool: event.tool, args: event.args, reason: event.reason,
-                  risk_level: event.risk_level, needs_sandbox: event.needs_sandbox, id: event.id,
-                };
-                if (secEvent.id && checkAutoAllow(secEvent)) {
-                  logger.info("Chat.Security", "auto.allow", { tool: event.tool, riskLevel: event.risk_level, mode: permissionMode });
-                  recordAllow(event.tool);
-                  (async () => {
-                    try {
-                      const headers: Record<string, string> = { "Content-Type": "application/json" };
-                      if (!IS_TAURI) {
-                        const token = getAccessToken();
-                        if (token) headers["Authorization"] = `Bearer ${token}`;
-                      }
-                      await safeFetch(`${apiBaseRef.current}/api/chat/security-confirm`, {
-                        method: "POST", headers,
-                        body: JSON.stringify({ confirm_id: event.id || "", decision: "allow" }),
-                      });
-                    } catch (err) {
-                      logger.error("Chat.Security", "auto.allow.failed", { error: String(err) });
-                      setSecurityConfirm({
-                        tool: event.tool, args: event.args, reason: event.reason,
-                        riskLevel: event.risk_level, needsSandbox: event.needs_sandbox,
-                        toolId: event.id, countdown: 120,
-                      });
-                    }
-                  })();
-                } else {
-                  logger.info("Chat.Security", "confirm.show", { tool: event.tool, riskLevel: event.risk_level, confirmId: event.id });
-                  if (document.hidden) {
-                    sendNotification({
-                      title: t("chat.securityConfirmTitle", "安全确认"),
-                      body: `${event.tool}: ${event.reason}`,
-                    });
-                  }
-                  setSecurityConfirm({
-                    tool: event.tool,
-                    args: event.args,
-                    reason: event.reason,
-                    riskLevel: event.risk_level,
-                    needsSandbox: event.needs_sandbox,
-                    toolId: event.id,
-                    countdown: 120,
-                  });
-                }
+                setSecurityConfirm({
+                  tool: event.tool,
+                  args: event.args,
+                  reason: event.reason,
+                  riskLevel: event.risk_level,
+                  needsSandbox: event.needs_sandbox,
+                  toolId: event.id,
+                  countdown: 120,
+                });
                 break;
               }
               case "ask_user": {
@@ -2398,14 +2313,9 @@ export function ChatView({
                   category: classifyError(event.message),
                   raw: event.message,
                 };
-                frictionDetector.recordError(currentError.category);
                 break;
               case "done":
                 gracefulDone = true;
-                logger.info("Chat.Stream", "done", { convId: thisConvId, contentLen: currentContent.length, toolCalls: currentToolCalls.length });
-                if (document.hidden) {
-                  sendNotification({ title: t("chat.replyReady", "回复已就绪"), body: currentContent.slice(0, 100) || t("chat.taskCompleted", "任务已完成") });
-                }
                 if (event.usage) {
                   if (typeof event.usage.context_tokens === "number") setContextTokens(event.usage.context_tokens);
                   if (typeof event.usage.context_limit === "number") setContextLimit(event.usage.context_limit);
@@ -2455,14 +2365,9 @@ export function ChatView({
                 : m
             ));
 
-            if (event.type === "done") {
-              messageListRef.current?.cancelFollow();
-              break;
-            }
-          } catch (parseErr) {
+            if (event.type === "done") break;
+          } catch {
             sseParseFailures++;
-            const breakerState = sseBreaker.recordFailure();
-            logger.warn("Chat.Stream", "SSE parse failure", { count: sseParseFailures, dataLen: data.length, breaker: breakerState });
             if (sseParseFailures >= 5) {
               notifyError(t("chat.sseParseError", "SSE 数据解析异常频繁，可能存在通信问题"));
               sseParseFailures = 0;
@@ -2500,11 +2405,8 @@ export function ChatView({
 
         if (!gracefulDone && convId) {
           // SSE 连接被中断（未收到 "done" 事件），后端可能仍在运行，启动持续轮询恢复
-          sseBreaker.recordFailure();
           attemptRecovery(3000);
         } else if (gracefulDone) {
-          sseBreaker.recordSuccess();
-          frictionDetector.recordSuccess();
           // SSE 正常完成，但若未交付任何有效响应，做一次性回填
           const streamDeliveredPayload = !!(
             currentContent.trim() || currentAsk || currentToolCalls.length > 0
@@ -2545,13 +2447,11 @@ export function ChatView({
           (e instanceof Error && e.name === "AbortError");
 
         if (isAbortLike) {
-          logger.info("Chat.Stream", "aborted", { convId: thisConvId, userStopped: sctx.userStopped });
           updateMessages((prev) => prev.map((m) =>
             m.id === assistantMsg.id ? { ...m, streaming: false } : m
           ));
         } else {
           const errMsg = e instanceof Error ? e.message : String(e);
-          logger.error("Chat.Stream", "error", { convId: thisConvId, error: errMsg });
           let guidance = t("chat.backendServiceHint");
           try {
             const healthRes = await fetch(`${apiBase}/api/health`, { signal: AbortSignal.timeout(5000) });
@@ -2567,7 +2467,6 @@ export function ChatView({
         attemptRecovery(abort.signal.aborted ? 4000 : 3000);
       }
     } finally {
-      messageListRef.current?.cancelFollow();
       if (idleTimer) clearTimeout(idleTimer);
       if (screenFlushRaf) { cancelAnimationFrame(screenFlushRaf); screenFlushRaf = 0; }
       const ctx = streamContexts.current.get(thisConvId);
@@ -2685,25 +2584,21 @@ export function ChatView({
 
   const handlePlanReject = useCallback((feedback: string) => {
     setPendingApproval(null);
-    const rejectMessage = feedback
+    const msg = feedback
       ? `计划需要修改。修改意见：\n${feedback}`
       : "计划需要修改，请重新调整。";
-    sendMessage(rejectMessage, undefined, undefined, "plan");
+    sendMessage(msg, undefined, undefined, "plan");
   }, [sendMessage]);
 
-  const handlePlanDismiss = useCallback(async () => {
+  const handlePlanDismiss = useCallback(() => {
     const approval = pendingApproval;
     setPendingApproval(null);
     if (approval?.conversation_id) {
-      try {
-        await safeFetch(`${apiBase}/api/plan/dismiss`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conversation_id: approval.conversation_id }),
-        });
-      } catch (e) {
-        console.warn("Failed to dismiss plan approval:", e);
-      }
+      safeFetch(`${apiBase}/api/plan/dismiss`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: approval.conversation_id }),
+      }).catch(() => {});
     }
   }, [pendingApproval, apiBase]);
 
@@ -2754,84 +2649,8 @@ export function ChatView({
     const msgs = latestMessagesRef.current;
     const idx = msgs.findIndex((m) => m.id === msgId);
     if (idx < 0 || idx >= msgs.length - 1) return;
-    const deleteCount = msgs.length - idx - 1;
-    setConfirmDialog({
-      message: t("chat.confirmRewind", {
-        count: deleteCount,
-        defaultValue: `确定要回退到这条消息吗？之后的 ${deleteCount} 条消息将被删除。`,
-      }),
-      onConfirm: () => setMessages((prev) => prev.slice(0, idx + 1)),
-    });
-  }, [t]);
-
-  // N3: Fork conversation from a specific message
-  const handleForkConversation = useCallback(async (msgId: string) => {
-    const msgs = latestMessagesRef.current;
-    const idx = msgs.findIndex((m) => m.id === msgId);
-    if (idx < 0) return;
-    const forkedMsgs = msgs.slice(0, idx + 1).map((m) => ({ ...m, id: genId() }));
-    const newId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : genId();
-
-    // Save current conversation first
-    flushCurrentConversationToStorage();
-
-    // Create new conversation
-    setConversations((prev) => [{
-      id: newId,
-      title: `${prev.find((c) => c.id === activeConvId)?.title || t("chat.defaultTitle")} (fork)`,
-      lastMessage: forkedMsgs[forkedMsgs.length - 1]?.content?.slice(0, 50) || "",
-      timestamp: Date.now(),
-      messageCount: forkedMsgs.length,
-      agentProfileId: multiAgentEnabled ? selectedAgent : undefined,
-    }, ...prev]);
-
-    saveMessagesToStorage(STORAGE_KEY_MSGS_PREFIX + newId, forkedMsgs);
-    skipConvLoadRef.current = true;
-    setActiveConvId(newId);
-    setMessages(forkedMsgs);
-    setPendingAttachments([]);
-
-    // Sync to backend
-    if (serviceRunning) {
-      try {
-        await safeFetch(`${apiBaseRef.current}/api/sessions/${encodeURIComponent(newId)}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            replace: true,
-            messages: forkedMsgs.map((m) => ({
-              role: m.role,
-              content: m.content || "",
-            })),
-          }),
-        });
-      } catch {
-        logger.warn("Chat.Fork", "backend sync failed", { newId });
-      }
-    }
-
-    notifyInfo(t("chat.forkedConversation", "已从此处分叉创建新会话"));
-  }, [activeConvId, multiAgentEnabled, selectedAgent, serviceRunning, t, flushCurrentConversationToStorage]);
-
-  // N4: Save message content as memory
-  const handleSaveAsMemory = useCallback(async (msgId: string) => {
-    const msg = latestMessagesRef.current.find((m) => m.id === msgId);
-    if (!msg?.content) return;
-    try {
-      const res = await safeFetch(`${apiBaseRef.current}/api/memories`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: msg.content.slice(0, 2000), type: "fact", importance_score: 0.8 }),
-      });
-      if (res.ok) {
-        notifySuccess(t("chat.memorySaved", "已保存为记忆"));
-      } else {
-        notifyError(t("chat.memorySaveFailed", "保存记忆失败"));
-      }
-    } catch {
-      notifyError(t("chat.memorySaveFailed", "保存记忆失败"));
-    }
-  }, [t]);
+    setMessages((prev) => prev.slice(0, idx + 1));
+  }, []);
 
   const handleSkipStep = useCallback(() => {
     safeFetch(`${apiBase}/api/chat/skip`, {
@@ -2960,38 +2779,231 @@ export function ChatView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamingTick, messageQueue, sendMessage]);
 
-  // handleFileSelect, handlePaste, pastedLargeText — moved to useAttachments hook
+  // ── 文件/图片上传 ──
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      const uploadId = genId();
+      const att: ChatAttachment = {
+        type: file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "voice" : file.type === "application/pdf" ? "document" : "file",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+        _uploadId: uploadId,
+      };
+      if (att.type === "video" && file.size > 7 * 1024 * 1024) {
+        notifyError(`视频文件过大 (${(file.size / 1024 / 1024).toFixed(1)}MB)，桌面端最大支持 7MB（base64 编码后需 < 10MB）`);
+        continue;
+      }
+      if (att.type === "image" || att.type === "video") {
+        const reader = new FileReader();
+        reader.onload = () => {
+          att.previewUrl = att.type === "image" ? reader.result as string : undefined;
+          att.url = reader.result as string;
+          setPendingAttachments((prev) => [...prev, att]);
+        };
+        reader.onerror = () => {
+          notifyError(`文件读取失败: ${file.name}`);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setPendingAttachments((prev) => [...prev, att]);
+        uploadFile(file, file.name)
+          .then((serverUrl) => {
+            setPendingAttachments((prev) =>
+              prev.map((a) => a._uploadId === uploadId
+                ? { ...a, url: `${apiBaseRef.current}${serverUrl}` } : a)
+            );
+          })
+          .catch(() => {
+            notifyError(`文件上传失败: ${file.name}`);
+            setPendingAttachments((prev) =>
+              prev.filter((a) => a._uploadId !== uploadId || a.url));
+          });
+      }
+    }
+    e.target.value = "";
+  }, [uploadFile]);
 
-  // dragOver, Tauri drag-drop — moved to useAttachments hook
+  // ── 粘贴处理 ──
+  const [pastedLargeText, setPastedLargeText] = useState<{ text: string; lines: number } | null>(null);
+  useEffect(() => { setPastedLargeText(null); setPendingApproval(null); pendingApprovalRef.current = null; }, [activeConvId]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    // Large text paste detection (6.4)
+    const plainText = e.clipboardData?.getData("text/plain") || "";
+    if (plainText.length > PASTE_CHAR_THRESHOLD) {
+      e.preventDefault();
+      const lineCount = plainText.split("\n").length;
+      setPastedLargeText({ text: plainText, lines: lineCount });
+      return;
+    }
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          setPendingAttachments((prev) => [...prev, {
+            type: "image",
+            name: `粘贴图片-${Date.now()}.png`,
+            previewUrl: reader.result as string,
+            url: reader.result as string,
+            size: file.size,
+            mimeType: file.type,
+          }]);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  }, []);
+
+  // ── 拖拽图片/文件 (Tauri native or HTML5 drag-drop) ──
+  const [dragOver, setDragOver] = useState(false);
+  useEffect(() => {
+    if (!IS_TAURI) return; // Web uses HTML5 drag-drop via onDrop on the container
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+
+    const mimeMap: Record<string, string> = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+      gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml",
+      mp4: "video/mp4", webm: "video/webm", avi: "video/x-msvideo",
+      mov: "video/quicktime", mkv: "video/x-matroska",
+      pdf: "application/pdf", txt: "text/plain", md: "text/plain",
+      json: "application/json", csv: "text/csv",
+    };
+
+    const handleDroppedPaths = (paths: string[]) => {
+      for (const filePath of paths) {
+        const name = filePath.split(/[\\/]/).pop() || "file";
+        const ext = (name.split(".").pop() || "").toLowerCase();
+        const isImage = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext);
+        const isVideo = ["mp4", "webm", "avi", "mov", "mkv"].includes(ext);
+        const mimeType = mimeMap[ext] || "application/octet-stream";
+        readFileBase64(filePath)
+          .then((dataUrl) => {
+            if (cancelled) return;
+            if (isVideo) {
+              const commaIdx = dataUrl.indexOf(",");
+              const base64Len = commaIdx >= 0 ? dataUrl.length - commaIdx - 1 : dataUrl.length;
+              const estimatedSize = base64Len * 3 / 4;
+              const VIDEO_MAX_SIZE = 7 * 1024 * 1024;
+              if (estimatedSize > VIDEO_MAX_SIZE) {
+                notifyError(`视频文件过大 (${(estimatedSize / 1024 / 1024).toFixed(1)}MB)，最大支持 7MB（base64 编码后需 < 10MB）`);
+                return;
+              }
+            }
+            setPendingAttachments((prev) => [...prev, {
+              type: isImage ? "image" : isVideo ? "video" : "file",
+              name,
+              previewUrl: isImage ? dataUrl : undefined,
+              url: dataUrl,
+              mimeType,
+            }]);
+          })
+          .catch((err) => logger.error("Chat", "DragDrop read_file_base64 failed", { name, error: String(err) }));
+      }
+    };
+
+    onDragDrop({
+      onEnter: () => { if (!cancelled) setDragOver(true); },
+      onOver: () => { if (!cancelled) setDragOver(true); },
+      onLeave: () => { if (!cancelled) setDragOver(false); },
+      onDrop: (paths) => {
+        if (cancelled) return;
+        setDragOver(false);
+        handleDroppedPaths(paths);
+      },
+    }).then((unsub) => { unlisten = unsub; });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // ── 语音录制 ──
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const toggleRecording = useCallback(async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+      setRecordingDuration(0);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4"
+        : MediaRecorder.isTypeSupported("audio/ogg") ? "audio/ogg" : "";
+      const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
+      const opts: MediaRecorderOptions = mimeType ? { mimeType } : {};
+      const mediaRecorder = new MediaRecorder(stream, opts);
+      const uploadId = genId();
+      audioChunksRef.current = [];
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: mimeType || "audio/webm" });
+        const localPreview = URL.createObjectURL(blob);
+        blobUrlsRef.current.push(localPreview);
+        const filename = `voice-${Date.now()}.${ext}`;
+        const tempAtt: ChatAttachment = {
+          type: "voice", name: filename, previewUrl: localPreview,
+          size: blob.size, mimeType: mimeType || "audio/webm", _uploadId: uploadId,
+        };
+        setPendingAttachments((prev) => [...prev, tempAtt]);
+        uploadFile(blob, filename)
+          .then((serverUrl) => {
+            setPendingAttachments((prev) =>
+              prev.map((a) => a._uploadId === uploadId ? { ...a, url: `${apiBaseRef.current}${serverUrl}` } : a)
+            );
+          })
+          .catch(() => {
+            notifyError(t("chat.voiceUploadFailed", "语音上传失败"));
+            setPendingAttachments((prev) => prev.filter((a) => a._uploadId !== uploadId || a.url));
+          });
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingDuration(0);
+      recordingTimerRef.current = setInterval(() => setRecordingDuration(d => d + 1), 1000);
+    } catch (err: any) {
+      const name = err?.name || "";
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        notifyError(t("chat.micPermissionDenied", "麦克风权限被拒绝，请在浏览器/系统设置中允许访问"));
+      } else if (name === "NotFoundError") {
+        notifyError(t("chat.micNotFound", "未检测到麦克风设备"));
+      } else {
+        notifyError(t("chat.micError", "无法访问麦克风，请检查浏览器权限设置"));
+      }
+    }
+  }, [isRecording]);
 
   const [atAgentOpen, setAtAgentOpen] = useState(false);
   const [atAgentFilter, setAtAgentFilter] = useState("");
   const [atAgentIdx, setAtAgentIdx] = useState(0);
 
-  const matchAgent = useCallback((a: AgentProfile, q: string): boolean => {
-    if (!q) return true;
-    const ql = q.toLowerCase();
-    if (a.name.toLowerCase().includes(ql)) return true;
-    if (a.id.toLowerCase().includes(ql)) return true;
-    if (a.description?.toLowerCase().includes(ql)) return true;
-    if (a.name_i18n) {
-      for (const v of Object.values(a.name_i18n)) {
-        if (v.toLowerCase().includes(ql)) return true;
-      }
-    }
-    if (a.description_i18n) {
-      for (const v of Object.values(a.description_i18n)) {
-        if (v.toLowerCase().includes(ql)) return true;
-      }
-    }
-    return false;
-  }, []);
-
   // ── 输入框键盘处理 ──
   const handleInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Undo/Redo must be checked before the IME guard because
-    // Ctrl+Shift+Z may report keyCode 229 on Windows with Chinese IME active.
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+    // macOS 中文输入法按回车选字时 isComposing=true，此时不应触发发送
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
+    // Undo/Redo (6.2)
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
       e.preventDefault();
       if (undoIdxRef.current > 0) {
         undoIdxRef.current--;
@@ -2999,7 +3011,7 @@ export function ChatView({
       }
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && ((e.key === "Z" || (e.key === "z" && e.shiftKey)) || e.key === "y")) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "Z" || (e.key === "z" && e.shiftKey))) {
       e.preventDefault();
       if (undoIdxRef.current < undoStackRef.current.length - 1) {
         undoIdxRef.current++;
@@ -3008,11 +3020,9 @@ export function ChatView({
       return;
     }
 
-    // macOS 中文输入法按回车选字时 isComposing=true，此时不应触发发送
-    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-
     if (atAgentOpen) {
-      const agents = agentProfiles.filter((a) => matchAgent(a, atAgentFilter));
+      const q = atAgentFilter;
+      const agents = agentProfiles.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
       if (e.key === "ArrowDown") { e.preventDefault(); setAtAgentIdx((i) => Math.min(i + 1, agents.length - 1)); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setAtAgentIdx((i) => Math.max(0, i - 1)); return; }
       if (e.key === "Enter" || e.key === "Tab") {
@@ -3023,7 +3033,7 @@ export function ChatView({
           const ta = e.target as HTMLTextAreaElement;
           const val = ta.value;
           const cursor = ta.selectionStart ?? val.length;
-          const before = val.slice(0, cursor).replace(/@[^\s@]*$/, "");
+          const before = val.slice(0, cursor).replace(/@\w*$/, "");
           setInputValue(before + val.slice(cursor));
         }
         setAtAgentOpen(false);
@@ -3097,7 +3107,7 @@ export function ChatView({
         sendMessage();
       }
     }
-  }, [atAgentOpen, atAgentFilter, atAgentIdx, agentProfiles, matchAgent, slashOpen, slashFilter, slashCommands, slashSelectedIdx, sendMessage, isCurrentConvStreaming, handleInsertMessage, handleQueueMessage, messageQueue, activeConvId, setInputValue, shortcutsOpen, handleCancelTask]);
+  }, [atAgentOpen, atAgentFilter, atAgentIdx, agentProfiles, slashOpen, slashFilter, slashCommands, slashSelectedIdx, sendMessage, isCurrentConvStreaming, handleInsertMessage, handleQueueMessage, messageQueue, activeConvId, setInputValue, shortcutsOpen, handleCancelTask]);
 
   // ── 输入变化处理（非受控模式：仅更新 ref，不触发全局重渲染） ──
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -3118,10 +3128,10 @@ export function ChatView({
       }
     }
 
-    // @agent 联想（支持中文及其他 Unicode 字符）
+    // @agent 联想
     const cursor = e.target.selectionStart ?? val.length;
     const beforeCursor = val.slice(0, cursor);
-    const atMatch = beforeCursor.match(/@([^\s@]*)$/);
+    const atMatch = beforeCursor.match(/@(\w*)$/);
     if (atMatch && multiAgentEnabled && agentProfiles.length > 0) {
       setAtAgentOpen(true);
       setAtAgentFilter(atMatch[1].toLowerCase());
@@ -3164,7 +3174,7 @@ export function ChatView({
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
         <IconMessageCircle size={48} />
         <div className="mt-3 font-semibold">{t("chat.title")}</div>
-        <div className="mt-1 text-xs opacity-50">{t("chat.serviceNotRunning", "服务尚未启动，请先启动后再使用")}</div>
+        <div className="mt-1 text-xs opacity-50">{t("chat.serviceNotRunning", "后端服务未启动，请启动后再进行使用")}</div>
       </div>
     );
   }
@@ -3475,9 +3485,9 @@ export function ChatView({
             </div>
           )}
           {!hydrating && messages.length === 0 && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 24 }}>
-              <div style={{ opacity: 0.4, display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div style={{ marginBottom: 12, display: "flex", justifyContent: "center" }}><IconMessageCircle size={48} /></div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 24 }}>
+              <div style={{ opacity: 0.4, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+                <IconMessageCircle size={48} style={{ marginBottom: 12 }} />
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{t("chat.emptyTitle")}</div>
                 <div style={{ fontSize: 13, marginTop: 4 }}>{t("chat.emptyDesc")}</div>
               </div>
@@ -3507,6 +3517,7 @@ export function ChatView({
               </div>
             </div>
           )}
+          {messages.length > 0 && (
           <ErrorBoundary>
           <MessageList
             ref={messageListRef}
@@ -3516,18 +3527,16 @@ export function ChatView({
             apiBaseUrl={apiBaseUrl}
             mdModules={mdModules}
             isStreaming={isCurrentConvStreaming}
-            searchHighlight={msgSearchOpen ? msgSearchQuery : undefined}
             onAskAnswer={handleAskAnswer}
             onRetry={handleRegenerate}
             onEdit={handleEditMessage}
             onRegenerate={handleRegenerate}
             onRewind={handleRewind}
-            onFork={handleForkConversation}
-            onSaveMemory={handleSaveAsMemory}
             onSkipStep={handleSkipStep}
             onImagePreview={handleImagePreview}
           />
           </ErrorBoundary>
+          )}
 
           {/* Sub-agent progress cards */}
           {displaySubAgentTasks.length > 0 && (
@@ -3536,13 +3545,7 @@ export function ChatView({
 
         </div>
 
-        {/* 浮动 Plan 进度条 —— 贴在输入框上方，仅显示进行中的 plan */}
-        {(() => {
-          const activePlan = [...messages].reverse().find((m) => m.todo && m.todo.status !== "completed" && m.todo.status !== "failed" && m.todo.status !== "cancelled")?.todo;
-          return activePlan ? <FloatingPlanBar plan={activePlan} /> : null;
-        })()}
-
-        {/* Plan 审批面板 */}
+        {/* Plan 审批面板 —— exit_plan_mode 后弹出，等待用户批准或修改 */}
         {pendingApproval && (
           <PlanApprovalPanel
             approval={pendingApproval}
@@ -3556,6 +3559,12 @@ export function ChatView({
             onDismiss={handlePlanDismiss}
           />
         )}
+
+        {/* 浮动 Plan 进度条 —— 贴在输入框上方，仅显示进行中的 plan */}
+        {(() => {
+          const activePlan = [...messages].reverse().find((m) => m.todo && m.todo.status !== "completed" && m.todo.status !== "failed" && m.todo.status !== "cancelled")?.todo;
+          return activePlan ? <FloatingPlanBar plan={activePlan} /> : null;
+        })()}
 
         {/* 长闲置回归提示 (6.7) */}
         {idleReturnPrompt && (
@@ -3762,9 +3771,10 @@ export function ChatView({
 
           {/* @Agent 联想面板 */}
           {atAgentOpen && (() => {
-            const agents = agentProfiles.filter((a) => matchAgent(a, atAgentFilter));
+            const agents = agentProfiles.filter((a) =>
+              a.name.toLowerCase().includes(atAgentFilter) || a.id.toLowerCase().includes(atAgentFilter),
+            );
             if (agents.length === 0) return null;
-            const lang = i18n.language || "en";
             return (
               <div style={{
                 position: "absolute", bottom: "100%", left: 0, right: 0,
@@ -3773,41 +3783,36 @@ export function ChatView({
                 maxHeight: 200, overflow: "auto", zIndex: 100,
                 padding: "4px 0", marginBottom: 4,
               }}>
-                {agents.map((a, i) => {
-                  const displayName = a.name_i18n?.[lang] || a.name;
-                  const displayDesc = a.description_i18n?.[lang] || a.description;
-                  return (
-                    <div
-                      key={a.id}
-                      onClick={() => {
-                        setSelectedAgent(a.id);
-                        const ta = inputRef.current;
-                        if (ta) {
-                          const val = ta.value;
-                          const cursor = ta.selectionStart ?? val.length;
-                          const before = val.slice(0, cursor).replace(/@[^\s@]*$/, "");
-                          setInputValue(before + val.slice(cursor));
-                        }
-                        setAtAgentOpen(false);
-                        inputRef.current?.focus();
-                      }}
-                      ref={(el) => { if (i === atAgentIdx && el) el.scrollIntoView({ block: "nearest" }); }}
-                      style={{
-                        padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
-                        background: i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent",
-                        transition: "background 0.1s",
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(37,99,235,0.08)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent"; }}
-                    >
-                      <span style={{ fontSize: 16, flexShrink: 0 }}>{a.icon || "🤖"}</span>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap" }}>{displayName}</div>
-                        {displayDesc && <div style={{ fontSize: 11, opacity: 0.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{displayDesc}</div>}
-                      </div>
+                {agents.map((a, i) => (
+                  <div
+                    key={a.id}
+                    onClick={() => {
+                      setSelectedAgent(a.id);
+                      const ta = inputRef.current;
+                      if (ta) {
+                        const val = ta.value;
+                        const cursor = ta.selectionStart ?? val.length;
+                        const before = val.slice(0, cursor).replace(/@\w*$/, "");
+                        setInputValue(before + val.slice(cursor));
+                      }
+                      setAtAgentOpen(false);
+                      inputRef.current?.focus();
+                    }}
+                    style={{
+                      padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+                      background: i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(37,99,235,0.08)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent"; }}
+                  >
+                    <span style={{ fontSize: 16 }}>{a.icon || "🤖"}</span>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{a.name}</div>
+                      {a.description && <div style={{ fontSize: 11, opacity: 0.5 }}>{a.description}</div>}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             );
           })()}
@@ -3880,7 +3885,7 @@ export function ChatView({
             );
           })()}
 
-          <div className={`chatInputBox ${chatMode !== "agent" ? "chatInputBoxPlan" : ""}`}>
+          <div className={`chatInputBox ${chatMode === "plan" ? "chatInputBoxPlan" : chatMode === "ask" ? "chatInputBoxAsk" : ""}`}>
             {/* Top row: compact model picker */}
             <div className="chatInputTop" ref={modelMenuRef} style={{ position: "relative" }}>
               <button
@@ -3943,18 +3948,15 @@ export function ChatView({
                     <IconChevronDown size={12} />
                   </button>
                   {agentMenuOpen && (
-                    <div className="chatModelMenu" style={{ minWidth: 280 }}>
+                    <div className="chatModelMenu" style={{ minWidth: 220 }}>
                       {!agentProfiles.some(p => p.id === "default") && (
                         <div
                           key="__default__"
                           className={`chatModelMenuItem ${selectedAgent === "default" ? "chatModelMenuItemActive" : ""}`}
                           onClick={() => { setSelectedAgent("default"); setAgentMenuOpen(false); }}
-                          style={{ alignItems: "flex-start", gap: 8 }}
                         >
-                          <span style={{ fontSize: 16, flexShrink: 0, lineHeight: "20px" }}>🎯</span>
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap" }}>{t("chat.agentDefault")}</div>
-                          </div>
+                          <span style={{ marginRight: 6 }}>🎯</span>
+                          <span style={{ fontWeight: 600 }}>{t("chat.agentDefault")}</span>
                         </div>
                       )}
                       {agentProfiles.map((ap) => (
@@ -3962,13 +3964,10 @@ export function ChatView({
                           key={ap.id}
                           className={`chatModelMenuItem ${selectedAgent === ap.id ? "chatModelMenuItemActive" : ""}`}
                           onClick={() => { setSelectedAgent(ap.id); setAgentMenuOpen(false); }}
-                          style={{ alignItems: "flex-start", gap: 8 }}
                         >
-                          <span style={{ fontSize: 16, flexShrink: 0, lineHeight: "20px" }}>{ap.icon}</span>
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap" }}>{ap.name}</div>
-                            {ap.description && <div style={{ fontSize: 11, opacity: 0.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ap.description}</div>}
-                          </div>
+                          <span style={{ marginRight: 6 }}>{ap.icon}</span>
+                          <span style={{ fontWeight: 600 }}>{ap.name}</span>
+                          <span style={{ fontSize: 11, opacity: 0.5, marginLeft: 6 }}>{ap.description}</span>
                         </div>
                       ))}
                     </div>
@@ -4059,7 +4058,7 @@ export function ChatView({
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
               onPaste={handlePaste}
-              placeholder={orgCommandPending ? t("chat.orgProcessing", "组织正在处理中...") : orgMode ? (selectedOrgNodeId ? t("chat.orgSendToNode", "输入指令发送给 {{node}}...", { node: selectedOrgNodeId }) : t("chat.orgSendToOrg", "输入指令发送给组织...")) : isCurrentConvStreaming ? `Enter ${t("chat.queueHint")}${t("chat.commaEscStop", "，Esc 停止")}` : chatMode === "plan" ? `Plan ${t("chat.planMode")}  · ${t("chat.enterSend", "Enter 发送，Shift+Enter 换行")}` : chatMode === "ask" ? t("chat.askModeReadOnly", "Ask Mode - read only") : `${t("chat.placeholder")}  · ${t("chat.enterSendSlash", "Enter 发送，Shift+Enter 换行，/ 命令")}`}
+              placeholder={orgCommandPending ? t("chat.orgProcessing", "组织正在处理中...") : orgMode ? (selectedOrgNodeId ? t("chat.orgSendToNode", "输入指令发送给 {{node}}...", { node: selectedOrgNodeId }) : t("chat.orgSendToOrg", "输入指令发送给组织...")) : isCurrentConvStreaming ? `Enter ${t("chat.queueHint")}${t("chat.commaEscStop", "，Esc 停止")}` : chatMode === "plan" ? t("chat.planModePlaceholder", { enterSend: t("chat.enterSend") }) : chatMode === "ask" ? t("chat.askModePlaceholder") : `${t("chat.placeholder")}  · ${t("chat.enterSendSlash", "Enter 发送，Shift+Enter 换行，/ 命令")}`}
               rows={1}
               className="chatInputTextarea"
               onInput={(e) => {
@@ -4100,50 +4099,30 @@ export function ChatView({
                   <button
                     data-slot="toolbar"
                     onClick={() => setModeMenuOpen((v) => !v)}
-                    className={`chatInputIconBtn ${chatMode !== "agent" ? "chatInputIconBtnActive" : ""}`}
-                    title={chatMode === "agent" ? "Agent Mode" : chatMode === "plan" ? "Plan Mode" : "Ask Mode"}
+                    className={`chatInputIconBtn ${chatMode === "plan" ? "chatInputIconBtnPlan" : chatMode === "ask" ? "chatInputIconBtnAsk" : ""}`}
+                    title={chatMode === "agent" ? t("chat.modeAgentTitle") : chatMode === "plan" ? t("chat.modePlanTitle") : t("chat.modeAskTitle")}
                   >
                     {{ agent: <IconBot size={16} />, plan: <IconPlan size={16} />, ask: <IconSearch size={16} /> }[chatMode]}
                     <span style={{ fontSize: 11, marginLeft: 2 }}>
-                      {chatMode === "agent" ? "Agent" : chatMode === "plan" ? "Plan" : "Ask"}
+                      {chatMode === "agent" ? t("chat.modeAgent") : chatMode === "plan" ? t("chat.modePlan") : t("chat.modeAsk")}
                     </span>
                     <IconChevronDown size={10} style={{ marginLeft: 2, opacity: 0.5 }} />
                   </button>
                   {modeMenuOpen && (
                     <div className="chatModeMenu">
-                      <div className="chatModeMenuSection">{t("chat.executionMode", "执行模式")}</div>
+                      <div className="chatModeMenuSection">{t("chat.executionMode")}</div>
                       {([
-                        { key: "agent" as const, icon: <IconBot size={14} />, label: "Agent", desc: "直接执行任务" },
-                        { key: "plan" as const, icon: <IconPlan size={14} />, label: "Plan", desc: "先规划再执行" },
-                        { key: "ask" as const, icon: <IconSearch size={14} />, label: "Ask", desc: "只读分析模式" },
+                        { key: "agent" as const, icon: <IconBot size={14} />, label: t("chat.modeAgent"), desc: t("chat.modeAgentDesc") },
+                        { key: "plan" as const, icon: <IconPlan size={14} />, label: t("chat.modePlan"), desc: t("chat.modePlanDesc") },
+                        { key: "ask" as const, icon: <IconSearch size={14} />, label: t("chat.modeAsk"), desc: t("chat.modeAskDesc") },
                       ]).map((m) => (
                         <div
                           key={m.key}
-                          className={`chatModeMenuItem ${chatMode === m.key ? "chatModeMenuItemActive" : ""}`}
+                          className={`chatModeMenuItem ${chatMode === m.key ? (m.key === "ask" ? "chatModeMenuItemActiveAsk" : m.key === "plan" ? "chatModeMenuItemActive" : "chatModeMenuItemActiveAgent") : ""}`}
                           onClick={() => { setChatMode(m.key); setModeMenuOpen(false); }}
                         >
                           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             {m.icon}
-                            <span style={{ fontWeight: 600 }}>{m.label}</span>
-                          </span>
-                          <span style={{ fontSize: 10, opacity: 0.5 }}>{m.desc}</span>
-                        </div>
-                      ))}
-                      <div className="chatModeMenuSection" style={{ marginTop: 6 }}>
-                        <IconShield size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-                        {t("chat.permissionMode", "权限模式")}
-                      </div>
-                      {([
-                        { key: "cautious" as PermissionMode, label: t("chat.permCautious", "谨慎"), desc: t("chat.permCautiousDesc", "所有操作均需确认") },
-                        { key: "smart" as PermissionMode, label: t("chat.permSmart", "智能"), desc: t("chat.permSmartDesc", "低风险自动放行") },
-                        { key: "trust" as PermissionMode, label: t("chat.permTrust", "信任"), desc: t("chat.permTrustDesc", "仅高风险需确认") },
-                      ]).map((m) => (
-                        <div
-                          key={m.key}
-                          className={`chatModeMenuItem ${permissionMode === m.key ? "chatModeMenuItemActive" : ""}`}
-                          onClick={() => { setPermissionMode(m.key); }}
-                        >
-                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <span style={{ fontWeight: 600 }}>{m.label}</span>
                           </span>
                           <span style={{ fontSize: 10, opacity: 0.5 }}>{m.desc}</span>
@@ -4173,7 +4152,7 @@ export function ChatView({
                     >
                       <IconZap size={16} />
                       <span style={{ fontSize: 11, marginLeft: 2 }}>
-                        {thinkingMode === "on" ? "Think" : thinkingMode === "off" ? "NoThink" : "Auto"}
+                        {thinkingMode === "on" ? t("chat.thinkingBtnOn") : thinkingMode === "off" ? t("chat.thinkingBtnOff") : t("chat.thinkingBtnAuto")}
                       </span>
                     </button>
                   </TooltipTrigger>
@@ -4210,14 +4189,14 @@ export function ChatView({
               </div>
 
               <div className="chatInputToolbarRight">
-                {/* Context usage ring — show when limit is known */}
-                {contextLimit > 0 && (() => {
-                  const pct = contextLimit > 0 ? Math.min(contextTokens / contextLimit, 1) : 0;
+                {/* Context usage ring — only show when we have real usage data */}
+                {contextLimit > 0 && contextTokens > 0 && (() => {
+                  const pct = Math.min(contextTokens / contextLimit, 1);
                   const pctLabel = (pct * 100).toFixed(1);
                   const fmtK = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
                   const r = 9; const sw = 2; const circ = 2 * Math.PI * r;
                   const offset = circ * (1 - pct);
-                  const color = pct > 0.95 ? "#ef4444" : pct > 0.8 ? "#f59e0b" : pct > 0.5 ? "#3b82f6" : "var(--muted2, #999)";
+                  const color = pct > 0.95 ? "#ef4444" : pct > 0.8 ? "#f59e0b" : pct > 0.5 ? "#3b82f6" : "#999";
                   return (
                     <div
                       style={{ position: "relative", display: "inline-flex", alignItems: "center", cursor: "default", marginRight: 4 }}
@@ -4226,11 +4205,9 @@ export function ChatView({
                     >
                       <svg width={22} height={22} viewBox="0 0 22 22">
                         <circle cx={11} cy={11} r={r} fill="none" stroke="var(--line)" strokeWidth={sw} />
-                        {pct > 0 && (
-                          <circle cx={11} cy={11} r={r} fill="none" stroke={color} strokeWidth={sw}
-                            strokeDasharray={circ} strokeDashoffset={offset}
-                            strokeLinecap="round" transform="rotate(-90 11 11)" style={{ transition: "stroke-dashoffset 0.4s ease" }} />
-                        )}
+                        <circle cx={11} cy={11} r={r} fill="none" stroke={color} strokeWidth={sw}
+                          strokeDasharray={circ} strokeDashoffset={offset}
+                          strokeLinecap="round" transform="rotate(-90 11 11)" style={{ transition: "stroke-dashoffset 0.4s ease" }} />
                       </svg>
                       {contextTooltipVisible && (
                         <div style={{
@@ -4239,9 +4216,7 @@ export function ChatView({
                           padding: "4px 8px", borderRadius: 6, whiteSpace: "nowrap", pointerEvents: "none",
                           zIndex: 100,
                         }}>
-                          {contextTokens > 0
-                            ? `${pctLabel}% · ${fmtK(contextTokens)} / ${fmtK(contextLimit)} ${t("chat.contextUsed", "context used")}`
-                            : `${fmtK(contextLimit)} ${t("chat.contextAvailable", "可用上下文")}`}
+                          {pctLabel}% · {fmtK(contextTokens)} / {fmtK(contextLimit)} context used
                         </div>
                       )}
                     </div>
@@ -4370,7 +4345,7 @@ export function ChatView({
         onClose={closeLightbox}
         downloadFile={downloadFile}
         showInFolder={showInFolder}
-        t={t}
+        t={(k, d) => t(k, d ?? "")}
       />}
       <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
 
@@ -4404,15 +4379,11 @@ export function ChatView({
 
       {securityConfirm && createPortal(
         <SecurityConfirmModal
-          key={securityConfirm.toolId || securityConfirm.tool}
           data={securityConfirm}
           apiBase={apiBaseUrl}
           onClose={handleSecurityClose}
           timerRef={securityTimerRef}
           setData={setSecurityConfirm}
-          onAllow={recordAllow}
-          onDeny={recordDeny}
-          sessionTrustInfo={getSessionTrustInfo(securityConfirm.tool)}
         />,
         document.body,
       )}

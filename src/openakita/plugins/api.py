@@ -204,12 +204,27 @@ class PluginAPI:
         handler_name = f"plugin_{self._plugin_id}"
         tool_names = []
         normalized_defs = []
+        existing_tools = set()
+        tool_defs_list = self._host.get("tool_definitions")
+        if tool_defs_list is not None:
+            existing_tools = {
+                t.get("name") or t.get("function", {}).get("name", "")
+                for t in tool_defs_list
+                if isinstance(t, dict)
+            }
         for d in definitions:
             defn = _normalize_tool_definition(d)
             if defn is None:
                 self.log(f"Skipping tool definition with no name: {d!r}", "warning")
                 continue
-            tool_names.append(defn["name"])
+            name = defn["name"]
+            if name in existing_tools and name not in self._registered_tools:
+                self.log(
+                    f"Tool '{name}' already registered by another source, skipping",
+                    "warning",
+                )
+                continue
+            tool_names.append(name)
             normalized_defs.append(defn)
 
         if not tool_names:
@@ -307,7 +322,7 @@ class PluginAPI:
         channel_registry = self._host.get("channel_registry")
         if channel_registry is not None:
             try:
-                channel_registry(type_name, factory)
+                channel_registry(type_name, factory, owner=f"plugin:{self._plugin_id}")
                 self._registered_channels.append(type_name)
                 self.log(f"Registered channel type: {type_name}")
             except Exception as e:
@@ -316,6 +331,8 @@ class PluginAPI:
             self.log("No channel_registry available", "warning")
 
     # --- Memory backend (advanced / system) ---
+    # NOTE: Registered backends are stored but not yet consumed by MemoryManager.
+    # Full wiring is planned — see plugin_system_enhancement plan P2-5.
 
     def register_memory_backend(self, backend: MemoryBackendProtocol) -> None:
         replace_mode = "memory.replace" in self._granted_permissions
@@ -345,9 +362,10 @@ class PluginAPI:
             return
         search_backends = self._host.get("search_backends")
         if search_backends is not None:
-            search_backends[name] = backend
-            self._registered_search_backends.append(name)
-            self.log(f"Registered search backend: {name}")
+            qualified = f"{self._plugin_id}:{name}"
+            search_backends[qualified] = backend
+            self._registered_search_backends.append(qualified)
+            self.log(f"Registered search backend: {qualified}")
         else:
             self.log("No search_backends registry available", "warning")
 
@@ -576,9 +594,10 @@ class PluginAPI:
             from ..channels.registry import unregister_adapter
         except ImportError:
             return
+        owner = f"plugin:{self._plugin_id}"
         for type_name in self._registered_channels:
             try:
-                unregister_adapter(type_name)
+                unregister_adapter(type_name, owner=owner)
             except Exception:
                 pass
         self._registered_channels.clear()

@@ -7,7 +7,7 @@ export function LightboxOverlay({ lightbox, onClose, downloadFile: dlFile, showI
   onClose: () => void;
   downloadFile: (url: string, name: string) => Promise<string>;
   showInFolder: (path: string) => Promise<void>;
-  t: (...args: any[]) => string;
+  t: (k: string, d?: string) => string;
 }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });

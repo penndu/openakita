@@ -85,7 +85,14 @@ import { useVersionCheck } from "./hooks/useVersionCheck";
 import { useEnvManager } from "./hooks/useEnvManager";
 import { AdvancedView } from "./views/AdvancedView";
 
-const THEME_I18N_KEYS: Record<Theme, string> = { system: "topbar.themeSystem", dark: "topbar.themeDark", light: "topbar.themeLight" };
+const THEME_I18N_KEYS: Record<Theme, string> = {
+  system: "topbar.themeSystem",
+  dark: "topbar.themeDark",
+  light: "topbar.themeLight",
+  "daltonized-light": "topbar.themeDaltonizedLight",
+  "daltonized-dark": "topbar.themeDaltonizedDark",
+  "high-contrast": "topbar.themeHighContrast",
+};
 
 /** Health-check timeout for recurring monitoring (heartbeat + refreshStatus).
  *  Startup/one-shot probes keep their own shorter timeouts.
@@ -2578,7 +2585,7 @@ export function App() {
       notifyError("请先设置当前工作区");
       return;
     }
-    const _busyId = notifyLoading(t("common.loadingSkills", "正在读取技能列表..."));
+    const _busyId = notifyLoading("读取 skills...");
     try {
       let skillsList: any[] = [];
       // ── 后端运行中 → HTTP API ──
@@ -2627,10 +2634,10 @@ export function App() {
       return;
     }
     if (!skillsDetail) {
-      notifyError(t("common.skillsNotLoaded", "未读取到技能列表，请先刷新技能"));
+      notifyError("未读取到 skills 列表（请先刷新 skills）");
       return;
     }
-    const _busyId = notifyLoading(t("common.savingSkillState", "正在保存技能启用状态..."));
+    const _busyId = notifyLoading("保存 skills 启用状态...");
     try {
       const externalAllowlist = skillsDetail
         .filter((s) => !s.system && !!s.skill_id)
@@ -2850,7 +2857,7 @@ export function App() {
                     width: 18, height: 18,
                     left: disabledViews.includes("mcp") ? 2 : 20,
                   }} />
-                </div>
+              </div>
               </label>
             </summary>
             <div className="flex flex-col gap-2.5 px-4 py-3 border-t border-border">
@@ -3278,14 +3285,14 @@ export function App() {
                         <ToggleGroup type="single" variant="outline" size="sm" value={wMode} onValueChange={(v) => {
                           if (!v) return;
                           const m = v as "http" | "websocket";
-                          const oldKey = isWs ? "WEWORK_WS_ENABLED" : "WEWORK_ENABLED";
-                          const newKey = m === "websocket" ? "WEWORK_WS_ENABLED" : "WEWORK_ENABLED";
-                          setEnvDraft((d) => {
-                            const wasEnabled = (d[oldKey] || "false").toLowerCase() === "true";
+                                const oldKey = isWs ? "WEWORK_WS_ENABLED" : "WEWORK_ENABLED";
+                                const newKey = m === "websocket" ? "WEWORK_WS_ENABLED" : "WEWORK_ENABLED";
+                                setEnvDraft((d) => {
+                                  const wasEnabled = (d[oldKey] || "false").toLowerCase() === "true";
                             const next: Record<string, string> = { ...d, WEWORK_MODE: m };
                             if (wasEnabled && oldKey !== newKey) { next[oldKey] = "false"; next[newKey] = "true"; }
-                            return next;
-                          });
+                                  return next;
+                                });
                         }} className="mt-1 [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground">
                           <ToggleGroupItem value="http">{t("config.imWeworkModeHttp")}</ToggleGroupItem>
                           <ToggleGroupItem value="websocket">{t("config.imWeworkModeWs")}</ToggleGroupItem>
@@ -3370,11 +3377,11 @@ export function App() {
                 const obMode = (envDraft["ONEBOT_MODE"] || "reverse") as "reverse" | "forward";
                 const isReverse = obMode === "reverse";
                 return {
-                  title: "OneBot（需要 openakita[onebot] + NapCat/Lagrange）",
-                  enabledKey: "ONEBOT_ENABLED",
-                  apply: "https://github.com/botuniverse/onebot-11",
-                  body: (
-                    <>
+                title: "OneBot（需要 openakita[onebot] + NapCat/Lagrange）",
+                enabledKey: "ONEBOT_ENABLED",
+                apply: "https://github.com/botuniverse/onebot-11",
+                body: (
+                  <>
                       <div style={{ marginBottom: 8 }}>
                         <div className="label">{t("config.imOneBotMode")}</div>
                         <ToggleGroup type="single" variant="outline" size="sm" value={obMode} onValueChange={(v) => { if (v) setEnvDraft((d) => ({ ...d, ONEBOT_MODE: v })); }} className="mt-1 [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground">
@@ -3394,8 +3401,8 @@ export function App() {
                         FT({ k: "ONEBOT_WS_URL", label: "WebSocket URL", placeholder: "ws://127.0.0.1:8080" })
                       )}
                       {FT({ k: "ONEBOT_ACCESS_TOKEN", label: "Access Token", type: "password", placeholder: t("config.imOneBotTokenHint") })}
-                    </>
-                  ),
+                  </>
+                ),
                 };
               })(),
             ].map((c) => {
@@ -3458,7 +3465,7 @@ export function App() {
                         left: envDraft["MCP_ENABLED"] === "false" ? 2 : 20,
                         transition: "left 0.2s",
                       }} />
-                    </div>
+                </div>
                   </label>
                 </div>
                 <div className="grid2">
@@ -3485,7 +3492,7 @@ export function App() {
                         left: envDraft["DESKTOP_ENABLED"] === "false" ? 2 : 20,
                         transition: "left 0.2s",
                       }} />
-                    </div>
+                </div>
                   </label>
                 </div>
                 <div className="divider" />
@@ -3619,28 +3626,28 @@ export function App() {
     endpointSummary
       .filter((e) => e.enabled !== false)
       .map((e) => {
-        const h = endpointHealth[e.name];
-        return {
+      const h = endpointHealth[e.name];
+      return {
+        name: e.name,
+        provider: e.provider,
+        apiType: e.apiType,
+        baseUrl: e.baseUrl,
+        model: e.model,
+        keyEnv: e.keyEnv,
+        keyPresent: e.keyPresent,
+        health: h ? {
           name: e.name,
-          provider: e.provider,
-          apiType: e.apiType,
-          baseUrl: e.baseUrl,
-          model: e.model,
-          keyEnv: e.keyEnv,
-          keyPresent: e.keyPresent,
-          health: h ? {
-            name: e.name,
-            status: h.status as "healthy" | "degraded" | "unhealthy" | "unknown",
-            latencyMs: h.latencyMs,
-            error: h.error,
-            errorCategory: h.errorCategory,
-            consecutiveFailures: h.consecutiveFailures,
-            cooldownRemaining: h.cooldownRemaining,
-            isExtendedCooldown: h.isExtendedCooldown,
-            lastCheckedAt: h.lastCheckedAt,
-          } : undefined,
-        };
-      }),
+          status: h.status as "healthy" | "degraded" | "unhealthy" | "unknown",
+          latencyMs: h.latencyMs,
+          error: h.error,
+          errorCategory: h.errorCategory,
+          consecutiveFailures: h.consecutiveFailures,
+          cooldownRemaining: h.cooldownRemaining,
+          isExtendedCooldown: h.isExtendedCooldown,
+          lastCheckedAt: h.lastCheckedAt,
+        } : undefined,
+      };
+    }),
     [endpointSummary, endpointHealth],
   );
 
@@ -4094,7 +4101,7 @@ export function App() {
               ← {t("common.back", "返回")}
             </button>
           )}
-          {obStepDots.map((s, i) => (
+        {obStepDots.map((s, i) => (
             <div key={s} className="flex flex-col items-center gap-1" style={{ minWidth: 40 }}>
               <div
                 className={`size-2 rounded-full transition-all duration-200 ${
@@ -4138,18 +4145,18 @@ export function App() {
                           {obEnvCheck.conflicts.some(c => c.includes("失败") || c.includes("进程"))
                             ? <AlertTriangle className="size-4 text-amber-500 shrink-0" />
                             : <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />}
-                          {obEnvCheck.conflicts.some(c => c.includes("失败") || c.includes("进程"))
-                            ? t("onboarding.welcome.envWarning")
-                            : t("onboarding.welcome.envCleaned")}
+                        {obEnvCheck.conflicts.some(c => c.includes("失败") || c.includes("进程"))
+                          ? t("onboarding.welcome.envWarning")
+                          : t("onboarding.welcome.envCleaned")}
                         </div>
                         <ul className="ml-5 list-disc space-y-0.5">
-                          {obEnvCheck.conflicts.map((c, i) => <li key={i}>{c}</li>)}
-                        </ul>
+                        {obEnvCheck.conflicts.map((c, i) => <li key={i}>{c}</li>)}
+                      </ul>
                         <p className="text-xs text-muted-foreground">
-                          检查路径: {obEnvCheck.openakitaRoot ?? "(未知)"}
-                        </p>
+                        检查路径: {obEnvCheck.openakitaRoot ?? "(未知)"}
+                      </p>
                         <Button variant="secondary" size="sm" onClick={() => obLoadEnvCheck()}>
-                          重新检测环境
+                        重新检测环境
                         </Button>
                       </CardContent>
                     </Card>
@@ -4170,10 +4177,10 @@ export function App() {
                       {t("onboarding.welcome.serviceDetected")}
                     </div>
                     <p className="text-muted-foreground">
-                      {t("onboarding.welcome.serviceDetectedDesc", { version: obDetectedService.version })}
-                    </p>
+                    {t("onboarding.welcome.serviceDetectedDesc", { version: obDetectedService.version })}
+                  </p>
                     <Button size="sm" onClick={() => obConnectExistingService()}>
-                      {t("onboarding.welcome.connectExisting")}
+                    {t("onboarding.welcome.connectExisting")}
                     </Button>
                   </CardContent>
                 </Card>
@@ -4206,43 +4213,43 @@ export function App() {
                   <Card className="mt-2 shadow-sm">
                     <CardContent className="py-4 px-4 space-y-3">
                       <p className="text-xs text-muted-foreground leading-relaxed">{t("onboarding.welcome.customRootHint")}</p>
-                      {obCurrentRoot && (
+                    {obCurrentRoot && (
                         <p className="text-[11px] text-muted-foreground/60 break-all">
-                          {t("onboarding.welcome.customRootCurrent", { path: obCurrentRoot })}
-                        </p>
-                      )}
+                        {t("onboarding.welcome.customRootCurrent", { path: obCurrentRoot })}
+                      </p>
+                    )}
                       <div className="flex gap-2 items-center">
                         <Input
                           className="flex-1 h-8 text-[13px]"
-                          value={obCustomRootInput}
-                          onChange={(e) => { setObCustomRootInput(e.target.value); setObCustomRootApplied(false); }}
-                          placeholder={t("onboarding.welcome.customRootPlaceholder")}
-                        />
+                        value={obCustomRootInput}
+                        onChange={(e) => { setObCustomRootInput(e.target.value); setObCustomRootApplied(false); }}
+                        placeholder={t("onboarding.welcome.customRootPlaceholder")}
+                      />
                         <Button
                           size="sm"
                           className="h-8 shrink-0"
-                          disabled={!obCustomRootInput.trim() || obCustomRootApplied || obCustomRootBusy}
-                          onClick={async () => {
-                            if (obCustomRootBusy) return;
-                            setObCustomRootBusy(true);
-                            try {
-                              const info = await invoke<{ defaultRoot: string; currentRoot: string; customRoot: string | null }>(
-                                "set_custom_root_dir", { path: obCustomRootInput.trim(), migrate: obCustomRootMigrate }
-                              );
-                              setObCurrentRoot(info.currentRoot);
-                              setObCustomRootApplied(true);
+                        disabled={!obCustomRootInput.trim() || obCustomRootApplied || obCustomRootBusy}
+                        onClick={async () => {
+                          if (obCustomRootBusy) return;
+                          setObCustomRootBusy(true);
+                          try {
+                            const info = await invoke<{ defaultRoot: string; currentRoot: string; customRoot: string | null }>(
+                              "set_custom_root_dir", { path: obCustomRootInput.trim(), migrate: obCustomRootMigrate }
+                            );
+                            setObCurrentRoot(info.currentRoot);
+                            setObCustomRootApplied(true);
                               notifySuccess(t("onboarding.welcome.customRootApplied", { path: info.currentRoot }));
-                              obLoadEnvCheck();
-                            } catch (e: any) {
+                            obLoadEnvCheck();
+                          } catch (e: any) {
                               notifyError(String(e));
-                            } finally {
-                              setObCustomRootBusy(false);
-                            }
-                          }}
-                        >
+                          } finally {
+                            setObCustomRootBusy(false);
+                          }
+                        }}
+                      >
                           {obCustomRootBusy ? <Loader2 className="size-3.5 animate-spin" /> : t("onboarding.welcome.customRootApply")}
                         </Button>
-                      </div>
+                    </div>
                       <div className="flex items-center gap-2">
                         <Checkbox
                           id="ob-migrate"
@@ -4250,31 +4257,31 @@ export function App() {
                           onCheckedChange={(v) => setObCustomRootMigrate(!!v)}
                         />
                         <Label htmlFor="ob-migrate" className="text-xs cursor-pointer font-normal">
-                          {t("onboarding.welcome.customRootMigrate")}
+                        {t("onboarding.welcome.customRootMigrate")}
                         </Label>
-                      </div>
-                      {obCustomRootApplied && obCustomRootInput.trim() && (
+                    </div>
+                    {obCustomRootApplied && obCustomRootInput.trim() && (
                         <Button
                           variant="link"
                           className="h-auto p-0 text-[11px] text-muted-foreground"
-                          onClick={async () => {
-                            try {
-                              const info = await invoke<{ defaultRoot: string; currentRoot: string; customRoot: string | null }>(
-                                "set_custom_root_dir", { path: null, migrate: false }
-                              );
-                              setObCurrentRoot(info.currentRoot);
-                              setObCustomRootInput("");
-                              setObCustomRootApplied(false);
+                        onClick={async () => {
+                          try {
+                            const info = await invoke<{ defaultRoot: string; currentRoot: string; customRoot: string | null }>(
+                              "set_custom_root_dir", { path: null, migrate: false }
+                            );
+                            setObCurrentRoot(info.currentRoot);
+                            setObCustomRootInput("");
+                            setObCustomRootApplied(false);
                               notifySuccess(t("onboarding.welcome.customRootDefault") + ": " + info.currentRoot);
-                              obLoadEnvCheck();
-                            } catch (e: any) {
+                            obLoadEnvCheck();
+                          } catch (e: any) {
                               notifyError(String(e));
-                            }
-                          }}
-                        >
-                          {t("onboarding.welcome.customRootDefault")}
+                          }
+                        }}
+                      >
+                        {t("onboarding.welcome.customRootDefault")}
                         </Button>
-                      )}
+                    )}
                     </CardContent>
                   </Card>
                 )}
@@ -4354,30 +4361,30 @@ export function App() {
               <Card className="text-left">
                 <CardContent className="py-5 px-5 space-y-4">
                   <div className="whitespace-pre-wrap text-[13px] leading-[1.7] max-h-[240px] overflow-y-auto rounded-lg border bg-muted/40 p-4 text-foreground">
-                    {t("onboarding.agreement.content")}
-                  </div>
+                  {t("onboarding.agreement.content")}
+                </div>
                   <div className="space-y-2">
                     <Label className="text-sm font-semibold">{t("onboarding.agreement.confirmLabel")}</Label>
                     <Input
-                      value={obAgreementInput}
-                      onChange={(e) => { setObAgreementInput(e.target.value); setObAgreementError(false); }}
-                      placeholder={t("onboarding.agreement.confirmPlaceholder")}
+                  value={obAgreementInput}
+                  onChange={(e) => { setObAgreementInput(e.target.value); setObAgreementError(false); }}
+                  placeholder={t("onboarding.agreement.confirmPlaceholder")}
                       aria-invalid={obAgreementError || undefined}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          if (obAgreementInput.trim() === t("onboarding.agreement.confirmText")) {
-                            setObAgreementError(false);
-                            setObStep("ob-llm");
-                          } else {
-                            setObAgreementError(true);
-                          }
-                        }
-                      }}
-                    />
-                    {obAgreementError && (
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      if (obAgreementInput.trim() === t("onboarding.agreement.confirmText")) {
+                        setObAgreementError(false);
+                        setObStep("ob-llm");
+                      } else {
+                        setObAgreementError(true);
+                      }
+                    }
+                  }}
+                />
+                {obAgreementError && (
                       <p className="text-[13px] text-destructive">{t("onboarding.agreement.errorMismatch")}</p>
-                    )}
-                  </div>
+                )}
+              </div>
                 </CardContent>
               </Card>
             </div>
@@ -4496,17 +4503,17 @@ export function App() {
                   <CardContent className="py-4 px-5 space-y-2.5">
                     <p className="text-[13px] font-semibold text-muted-foreground">{t("onboarding.system.cmdExamples")}</p>
                     <div className="bg-slate-900 rounded-lg px-4 py-3.5 font-mono text-[13px] leading-[1.9] text-slate-200 overflow-x-auto">
-                      {obCliOa && <>
+                    {obCliOa && <>
                         <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> serve <span className="text-slate-400 ml-6">{t("onboarding.system.commentServe")}</span></div>
                         <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> status <span className="text-slate-400 ml-4">{t("onboarding.system.commentStatus")}</span></div>
                         <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> run <span className="text-slate-400 ml-9">{t("onboarding.system.commentRun")}</span></div>
                       </>}
                       {obCliOa && obCliOpenakita && <div className="h-1" />}
-                      {obCliOpenakita && <>
+                    {obCliOpenakita && <>
                         <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> init <span className="text-slate-400 ml-2">{t("onboarding.system.commentInit")}</span></div>
                         <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> serve <span className="text-slate-400">{t("onboarding.system.commentServe")}</span></div>
-                      </>}
-                    </div>
+                    </>}
+                  </div>
                   </CardContent>
                 </Card>
               )}
@@ -4631,7 +4638,7 @@ export function App() {
                     <div className="flex items-center gap-2 font-semibold">
                       <AlertTriangle className="size-4 text-amber-500 shrink-0" />
                       {t("onboarding.done.someErrors")}
-                    </div>
+                </div>
                     <p className="text-muted-foreground">{t("onboarding.done.errorsHint")}</p>
                   </CardContent>
                 </Card>
@@ -4703,52 +4710,50 @@ export function App() {
 
     if (view === "skills") {
       return disabledViews.includes("skills") ? (
-        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
           <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「工具与技能」配置中启用</p>
-        </div>
-      ) : (
-        <SkillManager
-          venvDir={venvDir}
-          currentWorkspaceId={currentWorkspaceId}
-          envDraft={envDraft}
-          onEnvChange={setEnvDraft}
-          onSaveEnvKeys={saveEnvKeys}
-          apiBaseUrl={apiBaseUrl}
-          serviceRunning={!!serviceStatus?.running}
-          dataMode={dataMode}
-        />
+            </div>
+          ) : (
+            <SkillManager
+              venvDir={venvDir}
+              currentWorkspaceId={currentWorkspaceId}
+              envDraft={envDraft}
+              onEnvChange={setEnvDraft}
+              onSaveEnvKeys={async (keys) => {
+                await saveEnvKeys(keys);
+              }}
+              apiBaseUrl={apiBaseUrl}
+              serviceRunning={!!serviceStatus?.running}
+              dataMode={dataMode}
+            />
       );
     }
     if (view === "im") {
       return disabledViews.includes("im") ? (
-        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
           <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「配置 → IM 通道」中启用</p>
-        </div>
-      ) : (
+            </div>
+          ) : (
         <IMView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "token_stats") {
       return (
-        <div>
-          {_disableToggle("token_stats", t("sidebar.tokenStats"))}
-          {disabledViews.includes("token_stats") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-            <TokenStatsView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
-          )}
-        </div>
+        <TokenStatsView
+          serviceRunning={serviceStatus?.running ?? false}
+          apiBaseUrl={apiBaseUrl}
+          disabled={disabledViews.includes("token_stats")}
+          onToggleDisabled={() => toggleViewDisabled("token_stats")}
+        />
       );
     }
     if (view === "mcp") {
       return disabledViews.includes("mcp") ? (
-        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
           <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「工具与技能」配置中启用</p>
-        </div>
-      ) : (
-        <MCPView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
+            </div>
+          ) : (
+            <MCPView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "plugins") {
@@ -4756,20 +4761,20 @@ export function App() {
     }
     if (view === "scheduler") {
       return disabledViews.includes("scheduler") ? (
-        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
           <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「灵魂与意志」配置中启用</p>
-        </div>
-      ) : (
-        <SchedulerView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
+            </div>
+          ) : (
+            <SchedulerView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "memory") {
       return disabledViews.includes("memory") ? (
-        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
           <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「灵魂与意志」配置中启用</p>
-        </div>
-      ) : (
-        <MemoryView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
+            </div>
+          ) : (
+            <MemoryView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "identity") {
@@ -5131,7 +5136,7 @@ export function App() {
           </div>
           <div className="content" style={{ display: view !== "chat" ? undefined : "none", flex: 1, minHeight: 0 }}>
             <Suspense fallback={<div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.5 }}><div className="spinner" style={{ width: 24, height: 24 }} /></div>}>
-              {renderStepContent()}
+            {renderStepContent()}
             </Suspense>
           </div>
         </div>

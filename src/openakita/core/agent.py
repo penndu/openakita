@@ -622,6 +622,7 @@ class Agent:
             response_handler=self.response_handler,
             agent_state=self.agent_state,
             memory_manager=self.memory_manager,
+            plan_exit_pending=self._plan_exit_pending,
         )
 
         logger.info(f"Agent '{self.name}' created (with refactored sub-modules)")
@@ -3221,6 +3222,22 @@ class Agent:
         if history_messages and history_messages[-1].get("role") == "user":
             history_messages = history_messages[:-1]
 
+        # Dedup: remove consecutive messages with identical role+content
+        # (can occur from session persistence across retries or restarts)
+        if len(history_messages) >= 2:
+            deduped: list[dict] = [history_messages[0]]
+            for hm in history_messages[1:]:
+                prev = deduped[-1]
+                if hm.get("role") == prev.get("role") and hm.get("content") == prev.get("content"):
+                    continue
+                deduped.append(hm)
+            if len(deduped) < len(history_messages):
+                logger.warning(
+                    f"[Session:{session_id}] Removed {len(history_messages) - len(deduped)} "
+                    f"duplicate messages from history"
+                )
+            history_messages = deduped
+
         _STRIP_MARKERS = ["\n\n[子Agent工作总结]", "\n\n[执行摘要]"]
         _RE_TIME_PREFIX = re.compile(r"^\[\d{1,2}:\d{2}\]\s")
 
@@ -3398,7 +3415,18 @@ class Agent:
 
         # Desktop Chat 附件处理（与 IM 的 pending_images 对齐）
         if attachments and not pending_images:
+            _desk_llm_client = getattr(self.brain, "_llm_client", None)
+            _desk_has_vision = (
+                _desk_llm_client
+                and _desk_llm_client.has_any_endpoint_with_capability("vision")
+            )
+            _desk_has_video = (
+                _desk_llm_client
+                and _desk_llm_client.has_any_endpoint_with_capability("video")
+            )
+
             content_blocks: list[dict] = []
+            _degraded_notices: list[str] = []
             if compiled_message:
                 content_blocks.append({"type": "text", "text": compiled_message})
             for att in attachments:
@@ -3419,9 +3447,19 @@ class Agent:
                 )
 
                 if is_image and att_url:
-                    content_blocks.append({"type": "image_url", "image_url": {"url": att_url}})
+                    if _desk_has_vision:
+                        content_blocks.append({"type": "image_url", "image_url": {"url": att_url}})
+                    else:
+                        _degraded_notices.append(
+                            f"[用户发送了图片 {att_name}，当前模型不支持图片输入]"
+                        )
                 elif is_video and att_url:
-                    content_blocks.append({"type": "video_url", "video_url": {"url": att_url}})
+                    if _desk_has_video:
+                        content_blocks.append({"type": "video_url", "video_url": {"url": att_url}})
+                    else:
+                        _degraded_notices.append(
+                            f"[用户发送了视频 {att_name}，当前模型不支持视频输入]"
+                        )
                 elif att_type == "document" and att_url:
                     content_blocks.append({
                         "type": "text",
@@ -3432,6 +3470,17 @@ class Agent:
                         "type": "text",
                         "text": f"[附件: {att_name} ({att_mime})] URL: {att_url}",
                     })
+
+            if _degraded_notices:
+                content_blocks.append({
+                    "type": "text",
+                    "text": "\n".join(_degraded_notices),
+                })
+                logger.info(
+                    "[Session:%s] Desktop attachments degraded: vision=%s video=%s, %d notice(s)",
+                    session_id, _desk_has_vision, _desk_has_video, len(_degraded_notices),
+                )
+
             if content_blocks:
                 messages.append({"role": "user", "content": content_blocks})
             elif compiled_message:
@@ -6622,8 +6671,15 @@ NEXT: 建议的下一步（如有）"""
             if self.handler_registry.has_tool(tool_name):
                 result = await self.handler_registry.execute_by_tool(tool_name, tool_input)
             else:
-                # 未注册的工具
-                return f"❌ 未知工具: {tool_name}。请检查工具名称是否正确。"
+                all_tools = self.handler_registry.list_tools()
+                name_lower = tool_name.lower()
+                similar = [
+                    t for t in all_tools
+                    if name_lower in t.lower() or t.lower() in name_lower
+                    or set(name_lower.split("_")) & set(t.lower().split("_"))
+                ][:5]
+                hint = f" 你是否想使用: {', '.join(similar)}？" if similar else " 请检查工具名称是否正确。"
+                return f"❌ 未知工具: {tool_name}。{hint}"
 
             # 获取执行期间产生的新日志（WARNING/ERROR/CRITICAL）
             all_logs = log_buffer.get_logs(count=500)

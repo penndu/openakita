@@ -53,11 +53,20 @@ export class AgentSprite {
     this.sprite.on('pointerover', () => { this._showTooltip(); });
     this.sprite.on('pointerout', () => { this._hideTooltip(); });
     this.sprite.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      const nativeEvent = pointer.event;
+      const clientX =
+        nativeEvent instanceof MouseEvent ? nativeEvent.clientX :
+        nativeEvent instanceof TouchEvent ? nativeEvent.changedTouches[0]?.clientX ?? pointer.x :
+        pointer.x;
+      const clientY =
+        nativeEvent instanceof MouseEvent ? nativeEvent.clientY :
+        nativeEvent instanceof TouchEvent ? nativeEvent.changedTouches[0]?.clientY ?? pointer.y :
+        pointer.y;
       if (pointer.rightButtonDown()) {
         pointer.event.preventDefault();
-        this.onAgentContextMenu?.(this.nodeId, this.config, pointer.event.clientX, pointer.event.clientY);
+        this.onAgentContextMenu?.(this.nodeId, this.config, clientX, clientY);
       } else {
-        this.onAgentClick?.(this.nodeId, this.config, pointer.event.clientX, pointer.event.clientY);
+        this.onAgentClick?.(this.nodeId, this.config, clientX, clientY);
       }
     });
 

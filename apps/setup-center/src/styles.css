@@ -2347,6 +2347,16 @@ button.btnApplyRestart:hover {
   box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.08);
 }
 
+.chatInputBoxAsk {
+  border-color: rgba(22, 163, 74, 0.3);
+  background: rgba(22, 163, 74, 0.02);
+}
+
+.chatInputBoxAsk:focus-within {
+  border-color: rgba(22, 163, 74, 0.4);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.08);
+}
+
 .chatInputTop {
   padding: 8px 12px 0 12px;
   display: flex;
@@ -2475,6 +2485,16 @@ button.btnApplyRestart:hover {
 .chatInputIconBtnActive {
   color: rgba(124, 58, 237, 0.9) !important;
   background: rgba(124, 58, 237, 0.08) !important;
+}
+
+.chatInputIconBtnPlan {
+  color: rgba(124, 58, 237, 0.9) !important;
+  background: rgba(124, 58, 237, 0.08) !important;
+}
+
+.chatInputIconBtnAsk {
+  color: rgba(22, 163, 74, 0.9) !important;
+  background: rgba(22, 163, 74, 0.08) !important;
 }
 
 .chatInputIconBtnDanger {
@@ -3117,6 +3137,12 @@ button.btnApplyRestart:hover {
   font-size: 12px;
   font-weight: 600;
   color: var(--muted, #888);
+}
+
+.chainThinkingLabelActive {
+  font-size: 13px;
+  color: rgba(37, 99, 235, 0.9);
+  animation: chainPulseText 1.8s ease-in-out infinite;
   opacity: 0.7;
 }
 
@@ -3212,9 +3238,19 @@ button.btnApplyRestart:hover {
   animation: chainSpin 0.8s linear infinite;
 }
 
+.chainSpinnerActive {
+  color: rgba(37, 99, 235, 0.85);
+  filter: drop-shadow(0 0 3px rgba(37, 99, 235, 0.4));
+}
+
 @keyframes chainSpin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@keyframes chainPulseText {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 /* 工具结束行 */
@@ -3459,6 +3495,18 @@ button.btnApplyRestart:hover {
 .chatModeMenuItemActive {
   background: rgba(124, 58, 237, 0.15) !important;
   color: rgba(124, 58, 237, 0.95);
+  font-weight: 600;
+}
+
+.chatModeMenuItemActiveAgent {
+  background: rgba(37, 99, 235, 0.12) !important;
+  color: rgba(37, 99, 235, 0.95);
+  font-weight: 600;
+}
+
+.chatModeMenuItemActiveAsk {
+  background: rgba(22, 163, 74, 0.15) !important;
+  color: rgba(22, 163, 74, 0.95);
   font-weight: 600;
 }
 
