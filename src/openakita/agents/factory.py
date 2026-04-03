@@ -13,7 +13,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from .profile import AgentProfile, SkillsMode
+from .profile import AgentProfile, AgentType, SkillsMode
 
 if TYPE_CHECKING:
     from openakita.core.agent import Agent
@@ -134,6 +134,23 @@ class AgentFactory:
         # ── 记忆隔离 ──
         if profile.memory_mode == "isolated":
             self._apply_memory_isolation(agent, profile)
+
+        # ── 权限规则注入 (MA1) ──
+        if profile.permission_rules:
+            try:
+                from ..core.permission import from_config
+                ruleset = from_config(
+                    {r["permission"]: {r.get("pattern", "*"): r["action"]}
+                     for r in profile.permission_rules
+                     if "permission" in r and "action" in r}
+                )
+                if ruleset and hasattr(agent, "_tool_executor"):
+                    agent._tool_executor._extra_permission_rules = ruleset
+                    logger.info(
+                        f"Injected {len(ruleset)} permission rule(s) from profile {profile.id}"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to inject permission_rules for {profile.id}: {e}")
 
         if profile.custom_prompt:
             agent._custom_prompt_suffix = profile.custom_prompt
@@ -497,10 +514,19 @@ class AgentInstancePool:
                 return entry.agent
 
             parent_brain = None
-            for k, v in self._pool.items():
-                if k.startswith(f"{session_id}::") and hasattr(v.agent, "brain"):
-                    parent_brain = v.agent.brain
-                    break
+            session_entries = [
+                e for e in self._pool.values()
+                if e.session_id == session_id and hasattr(e.agent, "brain")
+            ]
+            if session_entries:
+                # Prefer default/system profiles, then earliest created
+                def _sort_key(e: _PoolEntry) -> tuple:
+                    profile = getattr(e.agent, "_agent_profile", None)
+                    is_default = e.profile_id == "default"
+                    is_system = profile is not None and getattr(profile, "type", None) == AgentType.SYSTEM
+                    return (not is_default, not is_system, e.created_at)
+                best = min(session_entries, key=_sort_key)
+                parent_brain = best.agent.brain
 
             if parent_brain is None:
                 agent = await self._factory.create(profile)

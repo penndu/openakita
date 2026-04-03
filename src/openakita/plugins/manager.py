@@ -127,6 +127,39 @@ class PluginManager:
 
     # --- Loading ---
 
+    @staticmethod
+    def _topological_sort(
+        manifests: list[tuple[Path, PluginManifest]],
+    ) -> tuple[list[tuple[Path, PluginManifest]], list[str]]:
+        """Sort plugins by dependency order using Kahn's algorithm.
+
+        Returns (sorted_list, cyclic_ids).
+        Plugins involved in cycles are excluded and their IDs returned.
+        """
+        by_id: dict[str, tuple[Path, PluginManifest]] = {m.id: (d, m) for d, m in manifests}
+        in_degree: dict[str, int] = {mid: 0 for mid in by_id}
+        dependents: dict[str, list[str]] = {mid: [] for mid in by_id}
+
+        for mid, (_, m) in by_id.items():
+            for dep in m.depends:
+                if dep in by_id:
+                    in_degree[mid] += 1
+                    dependents[dep].append(mid)
+
+        queue = [mid for mid, deg in in_degree.items() if deg == 0]
+        sorted_ids: list[str] = []
+        while queue:
+            node = queue.pop(0)
+            sorted_ids.append(node)
+            for child in dependents.get(node, []):
+                in_degree[child] -= 1
+                if in_degree[child] == 0:
+                    queue.append(child)
+
+        cyclic = [mid for mid in by_id if mid not in sorted_ids]
+        result = [by_id[mid] for mid in sorted_ids]
+        return result, cyclic
+
     async def load_all(self) -> None:
         """Load all discovered and enabled plugins.
 
@@ -138,14 +171,23 @@ class PluginManager:
             logger.debug("No plugins found in %s", self._plugins_dir)
             return
 
+        # Parse all manifests first for topological sorting
+        parsed: list[tuple[Path, PluginManifest]] = []
         for plugin_dir in plugin_dirs:
             try:
                 manifest = parse_manifest(plugin_dir)
+                parsed.append((plugin_dir, manifest))
             except ManifestError as e:
                 logger.error("Skipping %s: %s", plugin_dir.name, e)
                 self._failed[plugin_dir.name] = str(e)
-                continue
 
+        sorted_plugins, cyclic_ids = self._topological_sort(parsed)
+        for cid in cyclic_ids:
+            msg = f"cyclic dependency detected, skipped"
+            logger.error("Plugin '%s' %s", cid, msg)
+            self._failed[cid] = msg
+
+        for plugin_dir, manifest in sorted_plugins:
             if not self._check_openakita_version(manifest):
                 continue
 
@@ -458,9 +500,12 @@ class PluginManager:
                     ]
                     for sid in skill_ids:
                         try:
-                            registry.pop(sid, None)
+                            if hasattr(skill_loader, "unload_skill"):
+                                skill_loader.unload_skill(sid)
+                            else:
+                                registry.pop(sid, None)
                         except Exception:
-                            pass
+                            registry.pop(sid, None)
                     if skill_ids:
                         logger.debug(
                             "Removed %d skill(s) from plugin '%s'",

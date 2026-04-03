@@ -205,6 +205,47 @@ class ManifestError(Exception):
     """Raised when plugin.json is invalid."""
 
 
+def _check_path_safety(value: str, field_name: str, plugin_id: str = "?") -> None:
+    """Reject paths that contain '..' or absolute path components."""
+    if ".." in value:
+        raise ManifestError(
+            f"Plugin '{plugin_id}' field '{field_name}' contains '..' (path traversal): {value!r}"
+        )
+    if value.startswith("/") or (len(value) >= 2 and value[1] == ":"):
+        raise ManifestError(
+            f"Plugin '{plugin_id}' field '{field_name}' is an absolute path: {value!r}"
+        )
+
+
+def _validate_manifest_paths(raw: dict, plugin_id: str) -> None:
+    """Validate all path-like fields in a manifest dict."""
+    entry = raw.get("entry", "")
+    if entry:
+        _check_path_safety(entry, "entry", plugin_id)
+
+    provides = raw.get("provides", {})
+    if isinstance(provides, dict):
+        for key, val in provides.items():
+            if isinstance(val, str) and val:
+                _check_path_safety(val, f"provides.{key}", plugin_id)
+
+    hooks = raw.get("hooks", {})
+    if isinstance(hooks, dict):
+        for key, val in hooks.items():
+            if isinstance(val, str) and val:
+                _check_path_safety(val, f"hooks.{key}", plugin_id)
+
+    mcp_config = raw.get("mcp_config", {})
+    if isinstance(mcp_config, dict):
+        for key in ("command", "cwd"):
+            val = mcp_config.get(key, "")
+            if isinstance(val, str) and val:
+                _check_path_safety(val, f"mcp_config.{key}", plugin_id)
+        for arg in mcp_config.get("args", []):
+            if isinstance(arg, str) and ".." in arg:
+                _check_path_safety(arg, "mcp_config.args[]", plugin_id)
+
+
 def parse_manifest(plugin_dir: Path) -> PluginManifest:
     """Parse and validate a plugin.json file from a plugin directory."""
     manifest_path = plugin_dir / "plugin.json"
@@ -240,6 +281,8 @@ def parse_manifest(plugin_dir: Path) -> PluginManifest:
     if entry is None:
         raw = {**raw, "entry": _default_entry(raw.get("type", "python"))}
 
+    _validate_manifest_paths(raw, raw.get("id", "?"))
+
     try:
         manifest = PluginManifest.model_validate(raw)
     except Exception as e:
@@ -257,3 +300,74 @@ def _default_entry(plugin_type: str) -> str:
     if plugin_type == "skill":
         return "SKILL.md"
     return "plugin.py"
+
+
+def validate_plugin(plugin_dir: Path) -> list[str]:
+    """Strict validation of a plugin directory. Returns a list of issues (empty = valid).
+
+    Checks:
+    - Manifest schema (strict mode)
+    - SKILL.md frontmatter (if provides.skill exists)
+    - All path fields for traversal
+    - Entry file existence
+    - Hook file existence
+    """
+    issues: list[str] = []
+
+    manifest_path = plugin_dir / "plugin.json"
+    if not manifest_path.exists():
+        return ["plugin.json not found"]
+
+    try:
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        return [f"Invalid JSON: {e}"]
+
+    if not isinstance(raw, dict):
+        return ["plugin.json must be a JSON object"]
+
+    missing = REQUIRED_FIELDS - set(raw.keys())
+    if missing:
+        issues.append(f"Missing required fields: {missing}")
+
+    pid = raw.get("id", "?")
+
+    try:
+        _validate_manifest_paths(raw, pid)
+    except ManifestError as e:
+        issues.append(str(e))
+
+    try:
+        PluginManifest.model_validate(raw)
+    except Exception as e:
+        issues.append(f"Schema validation: {e}")
+
+    entry = raw.get("entry", _default_entry(raw.get("type", "python")))
+    entry_path = plugin_dir / entry
+    if not entry_path.exists():
+        issues.append(f"Entry file not found: {entry}")
+
+    provides = raw.get("provides", {})
+    if isinstance(provides, dict):
+        skill_file = provides.get("skill", "")
+        if skill_file:
+            skill_path = plugin_dir / skill_file
+            if not skill_path.exists():
+                issues.append(f"Declared skill file not found: {skill_file}")
+            else:
+                skill_md = skill_path if skill_path.name.upper() == "SKILL.MD" else skill_path / "SKILL.md"
+                if skill_md.exists():
+                    try:
+                        content = skill_md.read_text(encoding="utf-8")
+                        if "---" not in content[:50]:
+                            issues.append(f"SKILL.md missing YAML frontmatter")
+                    except Exception as e:
+                        issues.append(f"Cannot read SKILL.md: {e}")
+
+    permissions = raw.get("permissions", [])
+    if isinstance(permissions, list):
+        unknown = set(permissions) - ALL_PERMISSIONS
+        if unknown:
+            issues.append(f"Unknown permissions: {unknown}")
+
+    return issues

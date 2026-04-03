@@ -380,6 +380,27 @@ class ScheduledTask:
         self.status = TaskStatus.CANCELLED
         self.updated_at = datetime.now()
 
+    def force_reset_to_scheduled(self, reason: str = "") -> None:
+        """Force-reset from RUNNING to SCHEDULED (for shutdown/recovery).
+
+        Uses the state machine when possible, falls back to direct assignment
+        only if the transition is blocked, and always logs the audit trail.
+        """
+        if self.status == TaskStatus.RUNNING:
+            if not self._check_transition(TaskStatus.SCHEDULED):
+                logger.warning(
+                    f"Task {self.id}: force_reset bypassing state machine "
+                    f"({self.status.value} → scheduled), reason={reason}"
+                )
+            self.status = TaskStatus.SCHEDULED
+            self.updated_at = datetime.now()
+            logger.info(f"Task {self.id}: force-reset to SCHEDULED, reason={reason}")
+        else:
+            logger.debug(
+                f"Task {self.id}: force_reset_to_scheduled called "
+                f"in {self.status.value}, no-op"
+            )
+
     def mark_running(self) -> None:
         """标记为执行中"""
         if not self._check_transition(TaskStatus.RUNNING):

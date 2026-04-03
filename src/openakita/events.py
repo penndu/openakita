@@ -30,6 +30,7 @@ class StreamEventType(str, Enum):
 
     # ── Text output ──
     TEXT_DELTA = "text_delta"
+    TEXT_REPLACE = "text_replace"
 
     # ── Tool execution ──
     TOOL_CALL_START = "tool_call_start"
@@ -51,6 +52,7 @@ class StreamEventType(str, Enum):
 
     # ── Agent orchestration ──
     AGENT_HANDOFF = "agent_handoff"
+    AGENT_SWITCH = "agent_switch"
     USER_INSERT = "user_insert"
     SUB_AGENT_STATE = "sub_agent_state"
 
@@ -96,6 +98,13 @@ def normalize_stream_event(event: dict | None) -> dict:
         payload["data"] = data
 
     if event_type == StreamEventType.SUB_AGENT_STATE.value:
+        payload.setdefault("agent_id", payload.get("agentId", ""))
+        payload.setdefault("session_id", payload.get("sessionId", ""))
+
+    if event_type == StreamEventType.TEXT_REPLACE.value:
+        payload.setdefault("content", "")
+
+    if event_type == StreamEventType.AGENT_SWITCH.value:
         payload.setdefault("agent_id", payload.get("agentId", ""))
         payload.setdefault("session_id", payload.get("sessionId", ""))
 

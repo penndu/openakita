@@ -5,6 +5,21 @@ Session Todo 状态管理 + 生命周期函数
 - 模块级字典管理（_session_active_todos / _session_todo_required / _session_handlers）
 - 注册、注销、查询、清理函数
 - auto_close_todo / cancel_todo / force_close_plan 等生命周期函数
+
+ADR: Persistence Architecture (TD3)
+------------------------------------
+Single-worker deployment:
+  - Module-level dicts (_session_active_todos, _session_todo_required,
+    _session_handlers) are the PRIMARY source of truth for in-flight state.
+  - TodoStore (todo_store.json) is a durable backup; on restart the store
+    is loaded back into module-level dicts to recover active plans.
+
+Multi-worker deployment (future):
+  - Module-level dicts will be REPLACED by a shared backend (Redis or
+    equivalent) so that all workers share the same in-flight state.
+  - TodoStore can remain as a file-based audit log / cold backup.
+  - Migration path: introduce a TodoStateBackend interface, make the
+    module-level dict the default implementation, add Redis impl later.
 """
 
 import logging
@@ -24,7 +39,7 @@ __all__ = [
     "auto_close_todo", "cancel_todo", "force_close_plan",
     "register_plan_handler", "get_todo_handler_for_session",
     "get_active_todo_prompt",
-    "iter_active_todo_sessions",
+    "get_active_todo_sessions", "iter_active_todo_sessions",
     # Private but depended on externally (transition period)
     "_session_active_todos", "_session_todo_required", "_session_handlers",
     "_emit_todo_lifecycle_event",
@@ -122,9 +137,13 @@ def clear_session_todo_state(session_id: str) -> None:
     _session_handlers.pop(session_id, None)
 
 
-def iter_active_todo_sessions() -> dict[str, str]:
+def get_active_todo_sessions() -> dict[str, str]:
     """返回所有活跃 todo 的 {session_id: plan_id} 副本（只读）"""
     return dict(_session_active_todos)
+
+
+# Backward-compatible alias
+iter_active_todo_sessions = get_active_todo_sessions
 
 
 def _emit_todo_lifecycle_event(session_id: str, event_type: str, plan: dict | None = None) -> None:
@@ -169,11 +188,19 @@ def auto_close_todo(session_id: str) -> bool:
     has_pending = any(s.get("status") == "pending" for s in steps)
 
     if has_pending:
-        # Multi-turn plan: keep plan alive, just snapshot in_progress steps
+        # Multi-turn plan: keep plan alive, just snapshot in_progress steps.
+        # TD2: Protect steps marked in_progress during the CURRENT turn —
+        # if a step has a last_updated_turn matching the current turn_id,
+        # leave it in_progress for the next turn to avoid the race condition
+        # where auto_close runs right after the LLM sets a step in_progress.
         from datetime import datetime as _dt
         _now = _dt.now().isoformat()
+        current_turn = plan.get("_current_turn_id", "")
         for step in steps:
             if step.get("status") == "in_progress":
+                step_turn = step.get("_last_updated_turn", "")
+                if current_turn and step_turn == current_turn:
+                    continue
                 step["status"] = "completed"
                 step["result"] = step.get("result") or "(本轮自动标记完成)"
                 step["completed_at"] = _now
@@ -251,6 +278,7 @@ def force_close_plan(session_id: str) -> bool:
         except Exception:
             pass
         had_state = True
+    _session_handlers.pop(session_id, None)
     if had_state:
         logger.warning(f"[Plan] Force-closed all plan state for session {session_id}")
     return had_state

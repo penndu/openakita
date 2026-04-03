@@ -100,6 +100,14 @@ def _cleanup_chat_runtime_state(request: Request, conversation_id: str) -> None:
     except Exception:
         pass
 
+    # Clear pending tool confirmations in the ToolExecutor
+    try:
+        brain = getattr(request.app.state, "brain", None)
+        if brain and hasattr(brain, "_tool_executor"):
+            brain._tool_executor.clear_confirm_cache()
+    except Exception:
+        pass
+
     try:
         orchestrators = []
 

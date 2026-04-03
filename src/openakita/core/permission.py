@@ -236,6 +236,7 @@ def check_permission(
     tool_name: str,
     tool_input: dict,
     mode: str = "agent",
+    extra_rules: Ruleset | None = None,
 ) -> PermissionDecision:
     """统一权限检查入口 — 先检查模式规则，再查询 PolicyEngine。
 
@@ -243,6 +244,8 @@ def check_permission(
         tool_name: 工具名称
         tool_input: 工具参数
         mode: 当前模式（plan / ask / agent）
+        extra_rules: 额外规则集（如 AgentProfile.permission_rules），
+                     在 mode rules 之后、PolicyEngine 之前评估。
 
     Returns:
         PermissionDecision: 权限检查结果
@@ -255,6 +258,24 @@ def check_permission(
         chain.extend(mode_decision.decision_chain)
         if mode_decision.behavior == "deny":
             return mode_decision
+
+    # Step 1b: 额外规则（如 AgentProfile.permission_rules）
+    if extra_rules:
+        permission = _tool_to_permission(tool_name)
+        pattern = "*"
+        if tool_name in EDIT_TOOLS:
+            file_path = tool_input.get("path", tool_input.get("file_path", ""))
+            pattern = str(file_path) if file_path else "*"
+        rule = evaluate(permission, pattern, extra_rules)
+        chain.append({"layer": "extra_rules", "action": rule.action})
+        if rule.action == "deny":
+            return PermissionDecision(
+                behavior="deny",
+                reason=f"智能体配置规则禁止使用工具 {tool_name}。",
+                reason_detail=f"extra_rule={rule}",
+                policy_name="AgentProfileRules",
+                decision_chain=chain,
+            )
 
     # Step 2: PolicyEngine（仅 agent 模式 / mode 规则放行后）
     try:
