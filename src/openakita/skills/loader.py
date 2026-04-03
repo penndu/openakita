@@ -325,19 +325,28 @@ class SkillLoader:
                 )
                 return None
 
-            # 验证
+            # 验证: hard errors block registration, warnings are logged
             errors = self.parser.validate(skill)
-            if errors:
-                for error in errors:
-                    logger.warning(f"Skill validation warning: {error}")
+            hard_errors = [e for e in (errors or []) if e.startswith("ERROR:")]
+            warnings = [e for e in (errors or []) if not e.startswith("ERROR:")]
+            for w in warnings:
+                logger.warning(f"Skill validation warning: {w}")
+            if hard_errors:
+                for e in hard_errors:
+                    logger.error(f"Skill validation error: {e}")
+                logger.error(f"Skill '{skill_dir.name}' rejected due to validation errors")
+                return None
 
-            # 用目录名作为 skill_id（天然唯一，不依赖加载顺序）
             sid = skill_dir.name
 
-            # 注册到 registry
-            self.registry.register(skill, skill_id=sid, plugin_source=plugin_source)
-            self._loaded_skills[sid] = skill
+            registered = self.registry.register(
+                skill, skill_id=sid, plugin_source=plugin_source,
+            )
+            if not registered:
+                logger.warning(f"Skill '{sid}' registration rejected (conflict)")
+                return None
 
+            self._loaded_skills[sid] = skill
             logger.info(f"Loaded skill: {sid} (name={skill.metadata.name})")
             return skill
 
@@ -702,8 +711,12 @@ class SkillLoader:
             return None
 
         skill_dir = skill.skill_dir
+        plugin_source = None
+        entry = self.registry.get(name)
+        if entry:
+            plugin_source = entry.plugin_source
         self.unload_skill(name)
-        return self.load_skill(skill_dir)
+        return self.load_skill(skill_dir, plugin_source=plugin_source)
 
     @property
     def loaded_count(self) -> int:

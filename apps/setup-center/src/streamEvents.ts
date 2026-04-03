@@ -44,6 +44,7 @@ export const StreamEventType = {
 
   // ── Agent orchestration ──
   AGENT_HANDOFF: "agent_handoff",
+  AGENT_SWITCH: "agent_switch",
   USER_INSERT: "user_insert",
   SUB_AGENT_STATE: "sub_agent_state",
 

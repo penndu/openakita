@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from ..utils.atomic_io import safe_json_write, safe_write
-from .task import ScheduledTask, TaskExecution, TaskStatus, TriggerType
+from .task import ScheduledTask, TaskDurability, TaskExecution, TaskStatus, TriggerType
 from .triggers import Trigger
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,7 @@ class TaskScheduler:
 
         # 执行记录
         self._executions: list[TaskExecution] = []
+        self._seen_execution_ids: set[str] = set()
 
         # 运行状态
         self._running = False
@@ -167,13 +168,23 @@ class TaskScheduler:
                     for tid in still_running:
                         task = self._tasks.get(tid)
                         if task and task.status == TaskStatus.RUNNING:
-                            task.status = TaskStatus.SCHEDULED
-                            task.updated_at = datetime.now()
+                            task.force_reset_to_scheduled(
+                                reason=f"scheduler stop (timeout={graceful_timeout}s)"
+                            )
                     self._running_tasks.clear()
-                    self._save_tasks()
-                return
 
         async with self._lock:
+            # T1: Remove all SESSION tasks on stop
+            session_ids = [
+                tid for tid, t in self._tasks.items()
+                if t.durability == TaskDurability.SESSION
+            ]
+            for tid in session_ids:
+                self._tasks.pop(tid, None)
+                self._triggers.pop(tid, None)
+            if session_ids:
+                logger.info(f"Cleared {len(session_ids)} SESSION task(s) on stop")
+
             self._save_tasks()
 
         logger.info("TaskScheduler stopped")
@@ -587,12 +598,17 @@ class TaskScheduler:
                 )
                 return
 
+            skipped_session = 0
             for item in data:
                 try:
                     if not isinstance(item, dict):
                         logger.warning(f"Skipping non-dict task entry: {type(item).__name__}")
                         continue
                     task = ScheduledTask.from_dict(item)
+                    # T1: SESSION tasks should not survive restart
+                    if task.durability == TaskDurability.SESSION:
+                        skipped_session += 1
+                        continue
                     self._tasks[task.id] = task
 
                     trigger = Trigger.from_config(task.trigger_type.value, task.trigger_config)
@@ -601,6 +617,8 @@ class TaskScheduler:
                 except Exception as e:
                     task_id = item.get("id", "?") if isinstance(item, dict) else "?"
                     logger.warning(f"Failed to load task {task_id}: {e}")
+            if skipped_session:
+                logger.info(f"Skipped {skipped_session} SESSION-durability task(s) on load")
 
             logger.info(f"Loaded {len(self._tasks)} tasks from storage")
 
@@ -642,6 +660,7 @@ class TaskScheduler:
                             logger.debug(f"Skipping corrupt execution line {line_num}")
                     self._executions = loaded[-1000:]
 
+            self._seen_execution_ids = {e.id for e in self._executions}
             logger.info(f"Loaded {len(self._executions)} executions from storage")
         except Exception as e:
             logger.warning(f"Failed to load executions: {e}")
@@ -659,22 +678,29 @@ class TaskScheduler:
             logger.warning(f"Failed to migrate executions to JSONL: {e}")
 
     def _save_tasks(self) -> None:
-        """保存任务"""
+        """保存tasks (SESSION durability tasks are excluded from persistence)."""
         tasks_file = self.storage_path / "tasks.json"
 
         try:
-            data = [task.to_dict() for task in self._tasks.values()]
+            data = [
+                task.to_dict() for task in self._tasks.values()
+                if task.durability != TaskDurability.SESSION
+            ]
             safe_json_write(tasks_file, data, fsync=True)
 
         except Exception as e:
             logger.error(f"Failed to save tasks: {e}")
 
     def _append_execution(self, execution: TaskExecution) -> None:
-        """追加单条执行记录到 JSONL 文件。"""
+        """追加单条执行记录到 JSONL 文件（幂等：跳过已记录的 id）。"""
+        if execution.id in self._seen_execution_ids:
+            logger.debug(f"Skipping duplicate execution append: {execution.id}")
+            return
         from ..utils.atomic_io import append_jsonl
         executions_file = self.storage_path / "executions.json"
         try:
             append_jsonl(executions_file, execution.to_dict(), fsync=True)
+            self._seen_execution_ids.add(execution.id)
         except Exception as e:
             logger.error(f"Failed to append execution: {e}")
 
@@ -691,6 +717,7 @@ class TaskScheduler:
             recent = lines[-1000:]
             safe_write(executions_file, "".join(recent), backup=True, fsync=True)
             self._executions = self._executions[-1000:]
+            self._seen_execution_ids = {e.id for e in self._executions}
             logger.info(f"Trimmed executions file: {len(lines)} -> {len(recent)} lines")
         except Exception as e:
             logger.warning(f"Failed to trim executions file: {e}")

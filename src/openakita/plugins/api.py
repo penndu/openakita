@@ -81,8 +81,14 @@ class PluginAPI:
         self._manifest = manifest
         self._granted_permissions = set(granted_permissions)
         self._data_dir = data_dir
-        self._host = host_refs or {}
+        self._host = dict(host_refs or {})
         self._hook_registry = hook_registry
+
+        # Wrap skill_loader with capability-scoped proxy
+        if "skill_loader" in self._host and self._host["skill_loader"] is not None:
+            self._host["skill_loader"] = _ScopedSkillLoader(
+                self._host["skill_loader"], plugin_id=plugin_id,
+            )
         self._registered_tools: list[str] = []
         self._registered_channels: list[str] = []
         self._registered_hooks: list[str] = []
@@ -636,6 +642,46 @@ class PluginAPI:
         except RuntimeError:
             if hasattr(mcp_client, "remove_server"):
                 mcp_client.remove_server(server_name)
+
+
+    def __getattr__(self, name: str) -> Any:
+        logger.warning(
+            "[PluginAPI] Plugin '%s' accessed non-existent attribute '%s' — "
+            "this may indicate an API mismatch or version skew.",
+            self._plugin_id,
+            name,
+        )
+        raise AttributeError(
+            f"PluginAPI has no attribute {name!r}. "
+            f"Check the plugin API documentation for available methods."
+        )
+
+
+class _ScopedSkillLoader:
+    """Capability-scoped wrapper around SkillLoader.
+
+    Only exposes safe methods; blocks access to internal references like
+    parser, registry, or private attributes.
+    """
+
+    _ALLOWED = frozenset({"load_skill", "unload_skill", "get_tool_definitions",
+                          "get_skill", "get_skill_body", "loaded_count"})
+
+    def __init__(self, real_loader: Any, plugin_id: str) -> None:
+        self._real = real_loader
+        self._plugin_id = plugin_id
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._ALLOWED:
+            return getattr(self._real, name)
+        logger.warning(
+            "[ScopedSkillLoader] Plugin '%s' tried to access '%s' — blocked",
+            self._plugin_id, name,
+        )
+        raise AttributeError(
+            f"ScopedSkillLoader does not expose '{name}'. "
+            f"Allowed: {sorted(self._ALLOWED)}"
+        )
 
 
 class PluginBase(ABC):

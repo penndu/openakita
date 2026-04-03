@@ -296,10 +296,23 @@ def _compile_with_rules(content: str, config: dict) -> str:
     """Rule-based compilation with HTML cleanup and code block skipping.
 
     Falls back to static templates if extraction produces poor results.
+
+    ADR (EV3): For targets listed in ``_STATIC_FALLBACKS`` (currently
+    ``agent_core``), this *sync* path always returns the hand-crafted static
+    template and never parses ``AGENT.md``.  This is intentional:
+
+    * The sync path is used at import time / first prompt build when no event
+      loop is available.  It must be fast and deterministic.
+    * The *async* ``compile()`` path (which calls the LLM) is the canonical
+      route for incorporating live ``AGENT.md`` edits.  It writes compiled
+      output to ``identity/runtime/agent.core.md``.
+    * On startup, ``PromptBuilder`` should call ``check_compiled_outdated``
+      and, when stale, schedule an async ``compile_all`` so that the runtime
+      prompt reflects the latest ``AGENT.md``.  Until that finishes, the
+      static fallback provides a safe, well-tested default.
     """
     target = config.get("target", "")
 
-    # Try static fallback first — guaranteed quality
     if target in _STATIC_FALLBACKS:
         return _STATIC_FALLBACKS[target]
 

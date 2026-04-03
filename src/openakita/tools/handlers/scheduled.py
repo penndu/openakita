@@ -69,7 +69,7 @@ class ScheduledHandler:
         """创建定时任务"""
         from ...core.im_context import get_im_session
         from ...scheduler import ScheduledTask, TriggerType
-        from ...scheduler.task import TaskType
+        from ...scheduler.task import TaskSource, TaskType
 
         # 必填字段校验
         for field in ("name", "description", "trigger_type", "trigger_config"):
@@ -148,6 +148,7 @@ class ScheduledHandler:
             user_id=user_id,
             channel_id=channel_id,
             chat_id=chat_id,
+            task_source=TaskSource.CHAT,
         )
         task.metadata["notify_on_start"] = params.get("notify_on_start", True)
         task.metadata["notify_on_complete"] = params.get("notify_on_complete", True)

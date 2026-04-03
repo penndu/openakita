@@ -151,10 +151,13 @@ class ToolExecutor:
         # Security: pending confirmations — tool calls that returned CONFIRM
         # and are awaiting user decision via ask_user.
         # When the agent retries after ask_user, we auto-mark as confirmed.
-        self._pending_confirms: dict[str, dict] = {}  # cache_key → params
+        self._pending_confirms: dict[str, dict] = {}  # cache_key → {tool_name, params, metadata, ts}
 
         # Current mode for permission checks (set by ReasoningEngine before tool loop)
         self._current_mode: str = "agent"
+
+        # Extra permission rules injected by AgentFactory (profile rules)
+        self._extra_permission_rules: list | None = None
 
     # 并发安全工具: 这些工具的只读操作可以并行执行
     _CONCURRENCY_SAFE_TOOLS: set[str] = {
@@ -381,8 +384,7 @@ class ToolExecutor:
         if todo_block:
             return todo_block
 
-        # Runtime permission check: enforce path-level restrictions
-        perm_block = self._check_permission(tool_name, tool_input)
+        perm_block = self._check_permission_deny_msg(tool_name, tool_input)
         if perm_block:
             return perm_block
 
@@ -472,7 +474,11 @@ class ToolExecutor:
         *,
         session_id: str | None = None,
     ) -> str:
-        """Execute an already policy-checked tool, applying sandbox/checkpoint hooks."""
+        """Execute an already policy-checked tool, applying sandbox/checkpoint hooks.
+
+        Permission check is assumed to be done by the caller (execute_batch or
+        ReasoningEngine).  Only todo-required gate remains here.
+        """
         tool_name = self._canonicalize_tool_name(tool_name)
         if isinstance(tool_input, dict):
             tool_input = normalize_tool_input(tool_name, tool_input)
@@ -480,10 +486,6 @@ class ToolExecutor:
         todo_block = self._check_todo_required(tool_name, session_id)
         if todo_block:
             return todo_block
-
-        perm_block = self._check_permission(tool_name, tool_input)
-        if perm_block:
-            return perm_block
 
         if getattr(policy_result, "metadata", {}).get("needs_checkpoint"):
             try:
@@ -587,73 +589,42 @@ class ToolExecutor:
                     None,
                 )
 
-            perm_block = self._check_permission(tool_name, tool_input)
-            if perm_block:
+            # Unified permission check (mode + policy + fail-closed)
+            perm_decision = self.check_permission(tool_name, tool_input)
+
+            if perm_decision.behavior == "deny":
                 return (
                     idx,
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
-                        "content": perm_block,
+                        "content": f"⚠️ 策略拒绝: {perm_decision.reason}",
                         "is_error": True,
                     },
                     None,
                     None,
                 )
 
-            # Policy Engine check
-            from .policy import PolicyDecision, get_policy_engine
-            policy_engine = get_policy_engine()
-            policy_result = policy_engine.assert_tool_allowed(tool_name, tool_input)
-
-            # Persist audit for ALL policy decisions
-            try:
-                from .audit_logger import get_audit_logger
-                get_audit_logger().log(
-                    tool_name=tool_name,
-                    decision=policy_result.decision.value,
-                    reason=policy_result.reason,
-                    policy=policy_result.policy_name,
-                    params_preview=str(tool_input)[:200],
-                    metadata=policy_result.metadata,
-                )
-            except Exception:
-                pass
-
-            if policy_result.decision == PolicyDecision.DENY:
-                return (
-                    idx,
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": f"⚠️ 策略拒绝: {policy_result.reason}",
-                        "is_error": True,
-                    },
-                    None,
-                    None,
-                )
-
-            if policy_result.decision == PolicyDecision.CONFIRM:
-                # Check if this is a retry of a previously CONFIRM'd call
-                # (agent asked user via ask_user, user approved, agent retried).
+            if perm_decision.behavior == "confirm":
+                from .policy import get_policy_engine
+                policy_engine = get_policy_engine()
                 confirm_key = policy_engine._confirm_cache_key(tool_name, tool_input)
                 if confirm_key in self._pending_confirms:
-                    # Treat as user-approved retry → mark confirmed & proceed
                     policy_engine.mark_confirmed(tool_name, tool_input)
                     del self._pending_confirms[confirm_key]
                     logger.info(
                         f"[Security] Auto-allowed retry of confirmed tool: {tool_name}"
                     )
                 else:
-                    # First CONFIRM hit — store pending and block
                     self._pending_confirms[confirm_key] = {
                         "tool_name": tool_name,
                         "params": tool_input,
-                        "metadata": policy_result.metadata,
+                        "metadata": perm_decision.metadata,
+                        "ts": time.time(),
                     }
-                    risk = policy_result.metadata.get("risk_level", "")
+                    risk = perm_decision.metadata.get("risk_level", "")
                     sandbox_hint = ""
-                    if policy_result.metadata.get("needs_sandbox"):
+                    if perm_decision.metadata.get("needs_sandbox"):
                         sandbox_hint = "\n注意: 此命令将在沙箱中执行以保护系统安全。"
 
                     return (
@@ -662,7 +633,7 @@ class ToolExecutor:
                             "type": "tool_result",
                             "tool_use_id": tool_use_id,
                             "content": (
-                                f"⚠️ 需要用户确认: {policy_result.reason}"
+                                f"⚠️ 需要用户确认: {perm_decision.reason}"
                                 f"{sandbox_hint}\n"
                                 "请使用 ask_user 工具询问用户是否允许此操作，"
                                 "得到用户同意后再重新调用此工具。"
@@ -672,7 +643,7 @@ class ToolExecutor:
                                 "tool_name": tool_name,
                                 "params": tool_input,
                                 "risk_level": risk,
-                                "needs_sandbox": policy_result.metadata.get(
+                                "needs_sandbox": perm_decision.metadata.get(
                                     "needs_sandbox", False
                                 ),
                             },
@@ -680,6 +651,9 @@ class ToolExecutor:
                         None,
                         None,
                     )
+
+            # Build a minimal policy_result-like object for execute_tool_with_policy
+            policy_result = perm_decision
 
             handler_name = self.get_handler_name(tool_name)
             handler_lock = self._handler_locks.get(handler_name) if handler_name else None
@@ -935,26 +909,92 @@ class ToolExecutor:
 
         return None
 
-    def _check_permission(self, tool_name: str, tool_input: dict) -> str | None:
-        """模式级权限检查 — Plan/Ask 模式下拦截不允许的工具。
+    def check_permission(self, tool_name: str, tool_input: dict) -> "PermissionDecision":
+        """Unified permission check — mode rules + PolicyEngine + fail-closed.
 
-        这里只做 mode gate；PolicyEngine 由外层统一调用，避免重复审计。
-
-        Returns:
-            中文拒绝消息字符串，或 None（允许执行）。
+        This is the single choke-point for all permission decisions.
+        Callers should inspect `decision.behavior` ("allow" / "deny" / "confirm").
         """
-        if self._current_mode == "agent":
-            return None
+        from .permission import PermissionDecision, check_permission
 
-        from .permission import check_mode_permission
+        self._prune_stale_confirms()
 
-        decision = check_mode_permission(tool_name, tool_input, mode=self._current_mode)
-        if decision is None:
-            return None
-        if decision.behavior == "deny":
-            logger.warning(
-                f"[Permission] DENIED {tool_name} in {self._current_mode} mode: "
-                f"{decision.reason_detail}"
+        try:
+            decision = check_permission(
+                tool_name, tool_input,
+                mode=self._current_mode,
+                extra_rules=self._extra_permission_rules,
             )
-            return decision.reason
-        return None
+        except Exception as e:
+            logger.error(f"[Permission] Unexpected error in check_permission: {e}")
+            decision = PermissionDecision(
+                behavior="deny",
+                reason="权限检查异常，已阻止操作。",
+                reason_detail=str(e),
+            )
+
+        # Step 3: per-tool check_permissions callback (PM3 extension point)
+        if decision.behavior == "allow":
+            tool_perm_check = self._handler_registry.get_permission_check(tool_name)
+            if tool_perm_check is not None:
+                try:
+                    tool_decision = tool_perm_check(tool_name, tool_input)
+                    if tool_decision is not None and getattr(tool_decision, "behavior", "allow") != "allow":
+                        decision = tool_decision
+                except Exception as e:
+                    logger.warning(f"[Permission] per-tool check_permissions error for {tool_name}: {e}")
+
+        if decision.behavior != "allow":
+            logger.warning(
+                f"[Permission] {decision.behavior.upper()} {tool_name} "
+                f"in {self._current_mode} mode: {decision.reason_detail}"
+            )
+
+        # Audit log for every decision
+        try:
+            from .audit_logger import get_audit_logger
+            get_audit_logger().log(
+                tool_name=tool_name,
+                decision=decision.behavior,
+                reason=decision.reason,
+                policy=decision.policy_name,
+                params_preview=str(tool_input)[:200],
+                metadata=decision.metadata,
+            )
+        except Exception:
+            pass
+
+        return decision
+
+    def clear_confirm_cache(self) -> None:
+        """Clear all pending confirm entries (called on /api/chat/clear)."""
+        count = len(self._pending_confirms)
+        self._pending_confirms.clear()
+        if count:
+            logger.debug(f"[Permission] Cleared {count} pending confirm(s)")
+
+    def _prune_stale_confirms(self) -> None:
+        """Remove pending confirms older than 5 minutes."""
+        if not self._pending_confirms:
+            return
+        now = time.time()
+        stale = [k for k, v in self._pending_confirms.items() if now - v.get("ts", 0) > 300]
+        for k in stale:
+            del self._pending_confirms[k]
+
+    def _check_permission_deny_msg(self, tool_name: str, tool_input: dict) -> str | None:
+        """Convenience wrapper: returns a deny message string or None for allow.
+
+        For CONFIRM decisions in standalone (non-batch) context, returns a
+        message asking the user to confirm via ask_user.
+        """
+        decision = self.check_permission(tool_name, tool_input)
+        if decision.behavior == "allow":
+            return None
+        if decision.behavior == "confirm":
+            return (
+                f"⚠️ 需要用户确认: {decision.reason}\n"
+                "请使用 ask_user 工具询问用户是否允许此操作，"
+                "得到用户同意后再重新调用此工具。"
+            )
+        return decision.reason

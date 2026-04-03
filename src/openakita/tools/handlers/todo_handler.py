@@ -303,6 +303,11 @@ class PlanHandler:
                 force_close_plan(cid)
             return "❌ 当前没有活动的计划，请先创建一个任务计划"
 
+        # TD2: stamp a unique turn_id on every update_step call so that
+        # auto_close_todo can distinguish "just set in_progress this turn"
+        # from "was in_progress from a previous turn".
+        _plan["_current_turn_id"] = datetime.now().isoformat()
+
         step_id = str(params.get("step_id", "")).strip()
         status = str(params.get("status", "")).strip()
         result = params.get("result", "")
@@ -350,6 +355,8 @@ class PlanHandler:
 
                 if status == "in_progress" and not step.get("started_at"):
                     step["started_at"] = datetime.now().isoformat()
+                if status == "in_progress":
+                    step["_last_updated_turn"] = _plan.get("_current_turn_id", "")
                 elif status in ["completed", "failed", "skipped", "cancelled"]:
                     step["completed_at"] = datetime.now().isoformat()
 

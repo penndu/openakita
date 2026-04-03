@@ -114,7 +114,7 @@ async def create_task(request: Request, body: TaskCreateRequest):
     if scheduler is None:
         return {"error": "Agent not initialized"}
 
-    from openakita.scheduler.task import ScheduledTask, TaskType, TriggerType
+    from openakita.scheduler.task import ScheduledTask, TaskSource, TaskType, TriggerType
 
     try:
         trigger_type = TriggerType(body.trigger_type)
@@ -136,6 +136,7 @@ async def create_task(request: Request, body: TaskCreateRequest):
         reminder_message=body.reminder_message,
         prompt=body.prompt,
     )
+    task.task_source = TaskSource.MANUAL
     task.channel_id = body.channel_id or None
     task.chat_id = body.chat_id or None
     task.enabled = body.enabled

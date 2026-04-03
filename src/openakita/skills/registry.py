@@ -310,33 +310,77 @@ class SkillEntry:
         系统技能使用原 tool_name，外部技能使用 skill_ 前缀
         """
         if self.system and self.tool_name:
-            # 系统技能：使用原工具名
             return {
                 "name": self.tool_name,
                 "description": self.description,
                 "input_schema": self._get_input_schema(),
+                "x-capability-origin": self.origin,
             }
-        else:
-            # 外部技能：使用 skill_ 前缀，基于 skill_id 生成唯一工具名
-            safe = re.sub(r"[^a-zA-Z0-9_]", "_", self.skill_id)
-            return {
-                "name": f"skill_{safe}",
-                "description": f"[Skill] {self.description}",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "description": "要执行的操作",
-                        },
-                        "params": {
-                            "type": "object",
-                            "description": "操作参数",
-                        },
+
+        safe = re.sub(r"[^a-zA-Z0-9_]", "_", self.skill_id)
+        desc = f"[Skill] {self.description}"
+        body = self.get_body() or ""
+        input_schema = self._parse_parameters_from_body(body)
+
+        if input_schema is None:
+            body_preview = body[:200].strip() if body else ""
+            if body_preview:
+                desc = f"[Skill] {self.description}\n\n{body_preview}"
+            input_schema = {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "要执行的操作",
                     },
-                    "required": ["action"],
+                    "params": {
+                        "type": "object",
+                        "description": "操作参数",
+                    },
                 },
+                "required": ["action"],
             }
+
+        return {
+            "name": f"skill_{safe}",
+            "description": desc,
+            "input_schema": input_schema,
+            "x-capability-origin": self.origin,
+        }
+
+    @staticmethod
+    def _parse_parameters_from_body(body: str) -> dict | None:
+        """Try to extract structured inputSchema from ## Parameters / ## 参数 section."""
+        if not body:
+            return None
+        param_match = re.search(
+            r"^##\s+(?:Parameters|参数)\s*\n(.*?)(?=\n##\s|\Z)",
+            body, re.MULTILINE | re.DOTALL,
+        )
+        if not param_match:
+            return None
+
+        section = param_match.group(1).strip()
+        props: dict = {}
+        required: list[str] = []
+        for line in section.splitlines():
+            m = re.match(
+                r"^[-*]\s+`(\w+)`\s*(?:\((\w+)\))?\s*(?:\*\*required\*\*|必填)?\s*[:\-—]\s*(.+)",
+                line.strip(),
+            )
+            if not m:
+                continue
+            name, ptype, desc = m.group(1), m.group(2) or "string", m.group(3).strip()
+            props[name] = {"type": ptype, "description": desc}
+            if "required" in line.lower() or "必填" in line:
+                required.append(name)
+
+        if not props:
+            return None
+        schema: dict = {"type": "object", "properties": props}
+        if required:
+            schema["required"] = required
+        return schema
 
     def _get_input_schema(self) -> dict:
         """
@@ -403,13 +447,19 @@ class SkillRegistry:
         skill_id: str | None = None,
         *,
         plugin_source: str | None = None,
-    ) -> None:
+        force: bool = False,
+    ) -> bool:
         """
         注册技能
 
         Args:
             skill: 解析后的技能对象
             skill_id: 唯一标识（通常为目录名）。未提供时回退到 metadata.name。
+            plugin_source: 插件来源标识
+            force: 允许覆盖已有条目（仅 reload 场景使用）
+
+        Returns:
+            True if registered, False if rejected due to conflict.
         """
         entry = SkillEntry.from_parsed_skill(
             skill,
@@ -417,11 +467,22 @@ class SkillRegistry:
             plugin_source=plugin_source,
         )
 
-        if entry.skill_id in self._skills:
-            logger.debug(f"Skill '{entry.skill_id}' already registered, overwriting")
+        existing = self._skills.get(entry.skill_id)
+        if existing is not None and not force:
+            logger.warning(
+                "Skill '%s' already registered (origin=%s, plugin=%s). "
+                "Rejecting new registration from plugin=%s. "
+                "Use force=True or unregister first.",
+                entry.skill_id,
+                existing.origin,
+                existing.plugin_source or "none",
+                plugin_source or "none",
+            )
+            return False
 
         self._skills[entry.skill_id] = entry
         logger.info(f"Registered skill: {entry.skill_id} (name={entry.name})")
+        return True
 
     def unregister(self, key: str) -> bool:
         """
