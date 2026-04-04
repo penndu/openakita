@@ -675,21 +675,15 @@ class PlanHandler:
 
         try:
             pending_dict = getattr(self.agent, "_plan_exit_pending", None)
-            if isinstance(pending_dict, dict):
-                pending_dict[conversation_id] = {
-                    "summary": summary,
-                    "plan_id": plan_id,
-                    "plan_file": plan_file_path,
-                    "conversation_id": conversation_id,
-                }
-            else:
-                self.agent._plan_exit_pending = {}
-                self.agent._plan_exit_pending[conversation_id] = {
-                    "summary": summary,
-                    "plan_id": plan_id,
-                    "plan_file": plan_file_path,
-                    "conversation_id": conversation_id,
-                }
+            if not isinstance(pending_dict, dict):
+                pending_dict = {}
+                self.agent._plan_exit_pending = pending_dict
+            pending_dict[conversation_id] = {
+                "summary": summary,
+                "plan_id": plan_id,
+                "plan_file": plan_file_path,
+                "conversation_id": conversation_id,
+            }
             logger.info(
                 f"[Plan] exit_plan_mode: flagged for mode switch "
                 f"(conv={conversation_id}, plan_file={plan_file_path})"

@@ -201,7 +201,7 @@ def _should_block_tool(
             "请使用已提供的工具列表中的工具，或建议用户切换到 agent 模式。"
         )
 
-    if tool_name == "run_shell":
+    if tool_name in ("run_shell", "run_powershell"):
         cmd = ""
         if isinstance(tool_input, dict):
             cmd = tool_input.get("command", "")
@@ -212,10 +212,10 @@ def _should_block_tool(
                 pass
         if cmd and _is_shell_write_command(cmd):
             logger.warning(
-                f"[ModeGuard] Blocked run_shell write command in {mode} mode: {cmd[:100]}"
+                f"[ModeGuard] Blocked {tool_name} write command in {mode} mode: {cmd[:100]}"
             )
             return (
-                f"错误：在 {mode} 模式下，run_shell 仅允许执行只读命令（如 cat、grep、ls、find 等）。"
+                f"错误：在 {mode} 模式下，{tool_name} 仅允许执行只读命令（如 cat、grep、ls、find 等）。"
                 f"检测到写操作命令，已拦截。请使用只读命令，或建议用户切换到 agent 模式。"
             )
 
@@ -2466,7 +2466,7 @@ class ReasoningEngine:
                             )
                             t_args = tc.get("input", tc.get("arguments", {}))
                             t_id = tc.get("id", str(uuid.uuid4()))
-                            # Runtime mode guard
+                            # Runtime mode guard — no tool_call events for blocked tools
                             _blocked_msg = _should_block_tool(
                                 t_name, t_args, _allowed_tool_names, _effective_mode
                             )
@@ -2474,12 +2474,7 @@ class ReasoningEngine:
                                 logger.warning(
                                     f"[ModeGuard] Blocked '{t_name}' in {_effective_mode} mode"
                                 )
-                                yield {"type": "tool_call_start", "tool": t_name, "name": t_name, "args": t_args, "id": t_id}
-                                yield {
-                                    "type": "tool_call_end", "tool": t_name,
-                                    "result": _blocked_msg[:_SSE_RESULT_PREVIEW_CHARS],
-                                    "id": t_id, "is_error": True,
-                                }
+                                yield {"type": "chain_text", "content": f"\n{_blocked_msg}\n"}
                                 tool_results_for_msg.append({
                                     "type": "tool_result", "tool_use_id": t_id,
                                     "content": _blocked_msg, "is_error": True,
@@ -2645,7 +2640,8 @@ class ReasoningEngine:
                             })
                             continue
 
-                        # Runtime mode guard
+                        # Runtime mode guard — blocked tools do NOT emit
+                        # tool_call_start/end to avoid leaking events to the frontend
                         _blocked_msg = _should_block_tool(
                             tool_name, tool_args, _allowed_tool_names, _effective_mode
                         )
@@ -2653,12 +2649,7 @@ class ReasoningEngine:
                             logger.warning(
                                 f"[ModeGuard] Blocked '{tool_name}' in {_effective_mode} mode"
                             )
-                            yield {"type": "tool_call_start", "tool": tool_name, "name": tool_name, "args": tool_args, "id": tool_id}
-                            yield {
-                                "type": "tool_call_end", "tool": tool_name,
-                                "result": _blocked_msg[:_SSE_RESULT_PREVIEW_CHARS],
-                                "id": tool_id, "is_error": True,
-                            }
+                            yield {"type": "chain_text", "content": f"\n{_blocked_msg}\n"}
                             tool_results_for_msg.append({
                                 "type": "tool_result", "tool_use_id": tool_id,
                                 "content": _blocked_msg, "is_error": True,

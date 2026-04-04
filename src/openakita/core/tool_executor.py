@@ -130,6 +130,9 @@ class ToolExecutor:
         "complete-todo": "complete_todo",
         "exit-plan-mode": "exit_plan_mode",
         "create-plan-file": "create_plan_file",
+        "schedule-task": "schedule_task",
+        "schedule_task_create": "schedule_task",
+        "list-scheduled-tasks": "list_scheduled_tasks",
     }
 
     def __init__(

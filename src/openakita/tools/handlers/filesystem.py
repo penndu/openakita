@@ -222,6 +222,11 @@ class FilesystemHandler:
         block_timeout_ms = params.get("block_timeout_ms")
         if block_timeout_ms is None:
             timeout_s = params.get("timeout", 60)
+            # 确保 timeout_s 是整数类型（防止外部传入字符串导致 TypeError）
+            try:
+                timeout_s = int(timeout_s)
+            except (ValueError, TypeError):
+                timeout_s = 60
             timeout_s = max(10, min(timeout_s, 600))
             block_timeout_ms = timeout_s * 1000
 

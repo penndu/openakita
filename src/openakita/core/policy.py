@@ -130,6 +130,7 @@ _CRITICAL_SHELL_PATTERNS: list[str] = [
 _HIGH_RISK_SHELL_PATTERNS: list[str] = [
     # Windows cmd + PowerShell
     r"Remove-Item\s+.*-Recurse",
+    r"Remove-Item\s+.*-Force",
     r"del\s+/[sS]",
     r"rd\s+/[sS]",
     r"rmdir\s+/[sS]\s*/[qQ]",
@@ -165,6 +166,10 @@ _HIGH_RISK_SHELL_PATTERNS: list[str] = [
 
 # P1-6: MEDIUM 风险 Shell 模式（需确认但不需沙箱）
 _MEDIUM_RISK_SHELL_PATTERNS: list[str] = [
+    # 删除 / 清理（未匹配 HIGH 的情况）
+    r"Remove-Item\b",
+    r"Clear-Content\b",
+    r"Clear-Item\b",
     # 环境 / 配置修改
     r"setx?\s+",
     r"export\s+\w+=",
