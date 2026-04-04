@@ -59,9 +59,9 @@ function AskQuestionItem({
                   width: 22, height: 22, borderRadius: isMulti ? 4 : 11, flexShrink: 0,
                   background: isSelected ? "rgba(124,58,237,0.85)" : "rgba(124,58,237,0.10)",
                   color: isSelected ? "#fff" : "rgba(124,58,237,0.8)",
-                  fontSize: 11, fontWeight: 700, transition: "all 0.15s",
+                  fontSize: 11, fontWeight: 700, transition: "all 0.15s", lineHeight: 1,
                 }}>
-                  {isSelected ? (isMulti ? "✓" : "●") : (optionLetters[(letterOffset || 0) + idx] || String(idx + 1))}
+                  {optionLetters[(letterOffset || 0) + idx] || String(idx + 1)}
                 </span>
                 <span>{opt.label}</span>
               </button>
@@ -85,7 +85,7 @@ function AskQuestionItem({
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
                 width: 22, height: 22, borderRadius: isMulti ? 4 : 11, flexShrink: 0,
                 background: "rgba(0,0,0,0.04)", color: "rgba(0,0,0,0.35)",
-                fontSize: 11, fontWeight: 700,
+                fontSize: 11, fontWeight: 700, lineHeight: 1,
               }}>…</span>
               <span>{t("chat.otherOption", "其他（手动输入）")}</span>
             </button>
