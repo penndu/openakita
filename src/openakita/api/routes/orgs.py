@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from openakita.core.engine_bridge import to_engine
+from openakita.memory.types import normalize_tags
 
 ALLOWED_AVATAR_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"}
 MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2 MB
@@ -958,7 +959,7 @@ async def add_memory(request: Request, org_id: str):
             content,
             source_node="user",
             memory_type=mt,
-            tags=body.get("tags", []),
+            tags=normalize_tags(body.get("tags")),
             importance=body.get("importance", 0.5),
         )
     elif scope == MemoryScope.DEPARTMENT:
@@ -970,7 +971,7 @@ async def add_memory(request: Request, org_id: str):
             content,
             "user",
             memory_type=mt,
-            tags=body.get("tags", []),
+            tags=normalize_tags(body.get("tags")),
             importance=body.get("importance", 0.5),
         )
     else:
@@ -981,7 +982,7 @@ async def add_memory(request: Request, org_id: str):
             node_id,
             content,
             memory_type=mt,
-            tags=body.get("tags", []),
+            tags=normalize_tags(body.get("tags")),
             importance=body.get("importance", 0.5),
         )
     return entry.to_dict()
@@ -1613,7 +1614,7 @@ async def get_org_stats(request: Request, org_id: str):
                         if hasattr(e.memory_type, "value")
                         else str(e.memory_type),
                         "timestamp": e.created_at,
-                        "tags": e.tags[:3] if e.tags else [],
+                        "tags": e.tags[:3],
                     }
                 )
         except Exception:
