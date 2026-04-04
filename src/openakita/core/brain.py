@@ -305,13 +305,22 @@ class Brain:
                 self._compiler_on_failure(str(e))
                 logger.warning(f"Compiler LLM failed, falling back to main model: {e}")
 
-        # 回退到主模型（同样禁用思考，以节省时间）
+        # 回退到主模型
+        # 主模型可能是 reasoning 模型（如 mimo-v2-pro），即使 enable_thinking=False
+        # 也会在 reasoning 字段产出思考内容，占用 max_tokens 预算。
+        # 需要增大 max_tokens 确保 reasoning 之后仍有余量产出 content。
         _source = "main_fallback"
+        _fallback_max = max(max_tokens * 4, 2048)
+        if _fallback_max != max_tokens:
+            logger.info(
+                f"[compiler_think] Falling back to main model, "
+                f"bumping max_tokens {max_tokens} → {_fallback_max}"
+            )
         response = await self._llm_client.chat(
             messages=messages,
             system=system,
             enable_thinking=False,
-            max_tokens=max_tokens,
+            max_tokens=_fallback_max,
         )
         self._record_usage(response)
         req_id = self._dump_llm_request(system, messages, [], caller="compiler_think")
