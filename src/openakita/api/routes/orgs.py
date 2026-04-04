@@ -1505,21 +1505,28 @@ async def get_org_stats(request: Request, org_id: str):
             pending_messages += messenger.get_pending_count(n.id)
 
     now_mono = _time.monotonic()
+    now_wall = _time.time()
     per_node: list[dict] = []
     anomalies: list[dict] = []
     agent_cache = getattr(rt, "_agent_cache", None) or {}
+    node_last_activity = getattr(rt, "_node_last_activity", {})
+    node_busy_since = getattr(rt, "_node_busy_since", {})
     store = _get_project_store(request, org_id)
     for n in org.nodes:
         cache_key = f"{org_id}:{n.id}"
-        cached = agent_cache.get(cache_key) if isinstance(agent_cache, dict) else None
         idle_secs = None
-        if cached:
-            try:
-                last = cached.last_used
-                if isinstance(last, (int, float)) and last > 0:
-                    idle_secs = now_mono - last
-            except Exception:
-                pass
+        last_act = node_last_activity.get(cache_key)
+        if last_act and last_act > 0:
+            idle_secs = now_mono - last_act
+        else:
+            cached = agent_cache.get(cache_key) if isinstance(agent_cache, dict) else None
+            if cached:
+                try:
+                    last = cached.last_used
+                    if isinstance(last, (int, float)) and last > 0:
+                        idle_secs = now_mono - last
+                except Exception:
+                    pass
         node_pending = messenger.get_pending_count(n.id) if messenger else 0
 
         assigned = store.all_tasks(assignee=n.id)
@@ -1541,6 +1548,16 @@ async def get_org_stats(request: Request, org_id: str):
         }
         external_tools = list(getattr(n, "external_tools", []) or [])
 
+        running_since_ms: float | None = None
+        if n.status.value == "busy":
+            bs = node_busy_since.get(cache_key)
+            if bs and bs > 0:
+                running_since_ms = (now_wall - (now_mono - bs)) * 1000
+
+        recent_activity_ts: int | None = None
+        if last_act and last_act > 0:
+            recent_activity_ts = round((now_wall - (now_mono - last_act)) * 1000)
+
         entry = {
             "id": n.id,
             "role_title": n.role_title,
@@ -1548,6 +1565,8 @@ async def get_org_stats(request: Request, org_id: str):
             "status": n.status.value,
             "pending_messages": node_pending,
             "idle_seconds": round(idle_secs) if idle_secs is not None else None,
+            "running_since": round(running_since_ms) if running_since_ms is not None else None,
+            "recent_activity_ts": recent_activity_ts,
             "current_task": getattr(n, "_current_task_desc", None),
             "current_task_title": current_task_title,
             "plan_progress": plan_progress,
@@ -1660,7 +1679,7 @@ async def get_org_stats(request: Request, org_id: str):
                     "type": et,
                     "from": d.get("from_node") or evt.get("actor", ""),
                     "to": d.get("to_node", ""),
-                    "task": (d.get("task") or d.get("content") or "")[:80],
+                    "task": (d.get("task") or d.get("content") or d.get("result_preview") or d.get("prompt") or "")[:800],
                     "status": (
                         "accepted"
                         if et == "task_accepted"
