@@ -137,7 +137,7 @@ class AgentMailbox:
     async def receive(self, timeout: float = 300.0) -> dict | None:
         try:
             return await asyncio.wait_for(self._queue.get(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     async def drain_all(self) -> list[dict]:
@@ -447,7 +447,7 @@ class AgentOrchestrator:
 
             return result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             health.failed += 1
             health.last_error = "timeout_idle"
             self._fallback.record_failure(agent_profile_id)
@@ -584,7 +584,7 @@ class AgentOrchestrator:
                 )
 
         if isolated_browser and hasattr(agent, "browser_manager"):
-            from openakita.tools.browser import PlaywrightTools, BrowserUseRunner
+            from openakita.tools.browser import BrowserUseRunner, PlaywrightTools
             agent.browser_manager = isolated_browser
             agent.pw_tools = PlaywrightTools(isolated_browser)
             agent.bu_runner = BrowserUseRunner(isolated_browser)
@@ -635,7 +635,7 @@ class AgentOrchestrator:
                     except (asyncio.CancelledError, Exception):
                         pass
                     self._update_sub_state(state_key, "timeout", elapsed)
-                    raise asyncio.TimeoutError()
+                    raise TimeoutError()
 
                 fp = self._get_progress_fingerprint(agent, session.id, session)
                 if fp != last_fingerprint:
@@ -683,7 +683,7 @@ class AgentOrchestrator:
                     except (asyncio.CancelledError, Exception):
                         pass
                     self._update_sub_state(state_key, "timeout", elapsed)
-                    raise asyncio.TimeoutError()
+                    raise TimeoutError()
 
             self._update_sub_state(state_key, "completed", time.monotonic() - start)
             return task.result()

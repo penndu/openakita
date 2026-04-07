@@ -7,7 +7,7 @@ Agent 包 manifest.json 数据模型与校验逻辑
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from openakita.memory.types import normalize_tags
