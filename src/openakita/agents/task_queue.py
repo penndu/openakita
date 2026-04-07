@@ -9,9 +9,10 @@ import heapq
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class TaskQueue:
             except (asyncio.CancelledError, Exception):
                 pass
 
-        for task_id, task in self._active.items():
+        for _task_id, task in self._active.items():
             if not task.done():
                 task.cancel()
         self._active.clear()
@@ -100,7 +101,7 @@ class TaskQueue:
         self._heap.clear()
 
         # 清理任何残留的 Future
-        for tid, fut in list(self._results.items()):
+        for _tid, fut in list(self._results.items()):
             if not fut.done():
                 fut.cancel()
         self._results.clear()
@@ -163,10 +164,7 @@ class TaskQueue:
         """Main worker loop: picks tasks from queue and executes them."""
         while self._running:
             async with self._lock:
-                if self._heap:
-                    task = heapq.heappop(self._heap)
-                else:
-                    task = None
+                task = heapq.heappop(self._heap) if self._heap else None
 
             if task is None:
                 self._not_empty.clear()

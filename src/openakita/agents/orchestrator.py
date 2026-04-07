@@ -1008,7 +1008,7 @@ class AgentOrchestrator:
         try:
             path = self._log_dir.parent / "sub_agent_states.json"
             if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, dict):
                     for key, state in data.items():
@@ -1357,13 +1357,7 @@ def _extract_output_files(record: dict) -> list[str]:
         name = tool.get("name", "")
         preview = tool.get("input_preview", "")
 
-        if name == "deliver_artifacts":
-            for m in re.finditer(r"'path'\s*:\s*'([^']+)'", preview):
-                _add(m.group(1))
-            for m in re.finditer(r'"path"\s*:\s*"([^"]+)"', preview):
-                _add(m.group(1))
-
-        elif name == "write_file":
+        if name in ("deliver_artifacts", "write_file"):
             for m in re.finditer(r"'path'\s*:\s*'([^']+)'", preview):
                 _add(m.group(1))
             for m in re.finditer(r'"path"\s*:\s*"([^"]+)"', preview):

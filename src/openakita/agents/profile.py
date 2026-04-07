@@ -11,8 +11,8 @@ import json
 import logging
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ from ..core.capabilities import (
     build_capability_id,
     build_namespace,
 )
-from openakita.utils.atomic_io import atomic_json_write
+from ..utils.atomic_io import atomic_json_write
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +41,13 @@ BUILTIN_CATEGORIES: list[dict[str, Any]] = [
 _BUILTIN_IDS = frozenset(c["id"] for c in BUILTIN_CATEGORIES)
 
 
-class AgentType(str, Enum):
+class AgentType(StrEnum):
     SYSTEM = "system"
     CUSTOM = "custom"
     DYNAMIC = "dynamic"
 
 
-class SkillsMode(str, Enum):
+class SkillsMode(StrEnum):
     INCLUSIVE = "inclusive"  # 仅含 skills 列表中的技能
     EXCLUSIVE = "exclusive"  # 排除 skills 列表中的技能
     ALL = "all"  # 全部技能
@@ -167,7 +167,7 @@ class AgentProfile:
         self.type = safe_agent_type(self.type)
         self.skills_mode = safe_skills_mode(self.skills_mode)
         if not self.created_at:
-            self.created_at = datetime.now(timezone.utc).isoformat()
+            self.created_at = datetime.now(UTC).isoformat()
 
     @property
     def is_system(self) -> bool:

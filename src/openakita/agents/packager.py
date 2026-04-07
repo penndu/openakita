@@ -12,14 +12,12 @@ import json
 import logging
 import re
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from .manifest import (
-    FORBIDDEN_EXTENSIONS,
-    MAX_ICON_SIZE,
     MAX_PACKAGE_SIZE,
     MAX_SINGLE_FILE_SIZE,
     SPEC_VERSION,
@@ -28,7 +26,7 @@ from .manifest import (
     ManifestAuthor,
     validate_file_safety,
 )
-from .profile import AgentProfile, AgentType, ProfileStore
+from .profile import AgentProfile, ProfileStore
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +134,7 @@ class AgentPackager:
             bundled_skills=bundled_skill_names,
             required_builtin_skills=builtin_skills,
             required_external_skills=external_skill_refs,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
         )
 
         errors = manifest.validate()
@@ -432,7 +430,9 @@ class AgentInstaller:
         skill_md = skill_dir / "SKILL.md"
         if skill_md.exists():
             try:
-                import yaml, re as _re
+                import re as _re
+
+                import yaml
                 m = _re.match(r"^---\s*\n(.*?)\n---", skill_md.read_text("utf-8"), _re.DOTALL)
                 if m:
                     fm = yaml.safe_load(m.group(1)) or {}
@@ -462,7 +462,7 @@ class AgentInstaller:
             "source": source,
             "version": version or "",
             "type": origin_type,
-            "installed_at": datetime.now(timezone.utc).isoformat(),
+            "installed_at": datetime.now(UTC).isoformat(),
         }
         if agent_id:
             data["installed_by_agent"] = agent_id
@@ -487,7 +487,9 @@ class AgentInstaller:
         if skill_md_path not in zf.namelist():
             return None
         try:
-            import yaml, re as _re
+            import re as _re
+
+            import yaml
             content = zf.read(skill_md_path).decode("utf-8", errors="replace")
             m = _re.match(r"^---\s*\n(.*?)\n---", content, _re.DOTALL)
             if m:
