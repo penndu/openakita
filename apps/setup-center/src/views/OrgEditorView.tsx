@@ -32,6 +32,7 @@ import {
   IconUsers,
   IconChevronDown,
   IconSitemap,
+  IconMaximize2,
   IconAlertCircle,
 } from "../icons";
 import { safeFetch } from "../providers";
@@ -74,11 +75,11 @@ import {
   detectOverlap,
   nodeTypes,
   OrgCanvasControls,
-  CollapsibleMiniMap,
   NodeTasksTabContent,
   OrgEdgeInspector,
   OrgNodeInspector,
   OrgSettingsPanel,
+  OrgBlackboardPanel,
   OrgEditorTopBar,
   OrgListPanel,
 } from "../components/org-editor";
@@ -113,6 +114,13 @@ function useMd(): MdMods | null {
   return m;
 }
 
+const EDGE_TYPE_LABELS: Record<string, string> = {
+  hierarchy: "上下级",
+  collaborate: "协作",
+  escalate: "上报",
+  consult: "咨询",
+};
+
 // ── Main Component ──
 
 export function OrgEditorView({
@@ -145,6 +153,8 @@ export function OrgEditorView({
   const [layoutLocked, setLayoutLocked] = useState(false);
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, string>>({});
   const [rightPanel, setRightPanel] = useState<RightPanelMode>("none");
+  const [orgBlackboardOpen, setOrgBlackboardOpen] = useState(false);
+  const [inboxSummary, setInboxSummary] = useState({ unreadCount: 0, pendingApprovals: 0 });
   const [nodeEvents, setNodeEvents] = useState<any[]>([]);
   const [nodeSchedules, setNodeSchedules] = useState<any[]>([]);
   const [nodeMessages, setNodeMessages] = useState<any[]>([]);
@@ -159,6 +169,13 @@ export function OrgEditorView({
   // Activity feed state
   const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>([]);
   const [viewMode, setViewMode] = useState<"canvas" | "projects" | "dashboard">("canvas");
+  const [taskChainFocus, setTaskChainFocus] = useState<{
+    ownerNodeId: string | null;
+    waitingNodeIds: string[];
+    delegatedNodeIds: string[];
+    waitingReplyNodeIds: string[];
+    messageRoutes: Array<{ fromNodeId: string; toNodeId: string; status: string; messageCount: number }>;
+  } | null>(null);
   const [chatPanelNode, setChatPanelNode] = useState<string | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -234,6 +251,10 @@ export function OrgEditorView({
     }
   }, [currentOrg?.id, currentOrg?.status]);
 
+  useEffect(() => {
+    if (rightPanel !== "org") setOrgBlackboardOpen(false);
+  }, [rightPanel]);
+
   // ── Data fetching ──
 
   const fetchOrgList = useCallback(async () => {
@@ -271,6 +292,7 @@ export function OrgEditorView({
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
       setRightPanel("none");
+      setOrgBlackboardOpen(false);
       const running = data.status === "active" || data.status === "running";
       setLayoutLocked(running);
     } catch (e) {
@@ -311,6 +333,20 @@ export function OrgEditorView({
     }
   }, [apiBaseUrl]);
 
+  const fetchInboxSummary = useCallback(async (orgId: string) => {
+    try {
+      const resp = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/inbox?limit=1`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      setInboxSummary({
+        unreadCount: data.unread_count || 0,
+        pendingApprovals: data.pending_approvals || 0,
+      });
+    } catch {
+      /* ignore */
+    }
+  }, [apiBaseUrl]);
+
   const fetchAgentProfiles = useCallback(async () => {
     try {
       const res = await safeFetch(`${apiBaseUrl}/api/agents/profiles`);
@@ -347,10 +383,23 @@ export function OrgEditorView({
     }
   }, [currentOrg?.id, selectedNodeId, bbScope, fetchBlackboard]);
 
+  useEffect(() => {
+    if (!currentOrg?.id) {
+      setInboxSummary({ unreadCount: 0, pendingApprovals: 0 });
+      return;
+    }
+    void fetchInboxSummary(currentOrg.id);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void fetchInboxSummary(currentOrg.id);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [currentOrg?.id, fetchInboxSummary]);
+
   // ── Load historical events on org switch ──
   const loadHistoricalEvents = useCallback(async (orgId: string) => {
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/events?limit=50`);
+      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/events?limit=200`);
       const events: any[] = await res.json();
       if (!Array.isArray(events) || events.length === 0) return;
       const evtTypeMap: Record<string, string> = {
@@ -385,7 +434,7 @@ export function OrgEditorView({
           };
         })
         .sort((a, b) => b.time - a.time)
-        .slice(0, 50);
+        .slice(0, 200);
       if (mapped.length > 0) {
         setActivityFeed(mapped);
       }
@@ -402,7 +451,7 @@ export function OrgEditorView({
 
   const pushActivity = useCallback((event: string, data: any) => {
     const entry: ActivityEvent = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, time: Date.now(), event, data };
-    setActivityFeed((prev) => [entry, ...prev].slice(0, 200));
+    setActivityFeed((prev) => [entry, ...prev].slice(0, 500));
   }, []);
 
   const triggerEdgeAnimation = useCallback((fromNode: string, toNode: string, color: string) => {
@@ -865,8 +914,9 @@ export function OrgEditorView({
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setContextMenu(null);
-    if (rightPanel === "node" || rightPanel === "edge") {
+    if (rightPanel === "node" || rightPanel === "edge" || rightPanel === "org") {
       autoSave();
+      setOrgBlackboardOpen(false);
       setRightPanel("none");
     }
   }, [rightPanel, autoSave]);
@@ -874,6 +924,15 @@ export function OrgEditorView({
   const onNodeDragStop = useCallback(() => {
     autoSave();
   }, [autoSave]);
+
+  const fitCanvasToViewport = useCallback(() => {
+    reactFlowRef.current?.fitView({
+      padding: 0.16,
+      duration: 260,
+      includeHiddenNodes: false,
+    });
+    setContextMenu(null);
+  }, []);
 
   // ── Fetch node detail when selected in live mode ──
   useEffect(() => {
@@ -958,6 +1017,114 @@ export function OrgEditorView({
       }),
     );
   }, [orgStats, setNodes]);
+
+  useEffect(() => {
+    if (viewMode !== "projects") setTaskChainFocus(null);
+  }, [viewMode]);
+
+  const onTaskChainFocusChange = useCallback(
+    (focus: {
+      ownerNodeId: string | null;
+      waitingNodeIds: string[];
+      delegatedNodeIds: string[];
+      waitingReplyNodeIds: string[];
+      messageRoutes: Array<{ fromNodeId: string; toNodeId: string; status: string; messageCount: number }>;
+    } | null) => {
+      setTaskChainFocus(focus);
+    },
+    [],
+  );
+
+  const flowNodes = useMemo(
+    () =>
+      nodes.map((n) => {
+        const d = n.data as unknown as OrgNodeData;
+        const focus = taskChainFocus
+          ? {
+              owner_node_id: taskChainFocus.ownerNodeId,
+              waiting_node_ids: [...taskChainFocus.waitingNodeIds, ...taskChainFocus.waitingReplyNodeIds],
+              delegated_node_ids: taskChainFocus.delegatedNodeIds,
+            }
+          : null;
+        return {
+          ...n,
+          data: { ...d, _task_chain_focus: focus },
+        };
+      }),
+    [nodes, taskChainFocus],
+  );
+
+  const flowEdges = useMemo(() => {
+    const routeMap = new Map(
+      (taskChainFocus?.messageRoutes || []).map((route) => [`${route.fromNodeId}->${route.toNodeId}`, route]),
+    );
+    return edges.map((e) => {
+      const anim = edgeAnimations[e.id];
+      const flowCount = liveMode ? edgeFlowCounts[e.id] : undefined;
+      const baseLabel = `${(e.data as any)?.label || ""} ${flowCount && flowCount > 0 ? `(${flowCount})` : ""}`.trim() || undefined;
+      const base = baseLabel ? { ...e, label: baseLabel } : e;
+      const route = routeMap.get(`${e.source}->${e.target}`) || routeMap.get(`${e.target}->${e.source}`);
+      let merged = base;
+      if (route) {
+        const focusColor =
+          route.status === "waiting_reply"
+            ? "#f59e0b"
+            : route.status === "replied"
+              ? "#8b5cf6"
+              : "#06b6d4";
+        const focusLabel =
+          route.status === "waiting_reply"
+            ? `等待回复 ${route.messageCount}`
+            : route.status === "replied"
+              ? `已回复 ${route.messageCount}`
+              : `协作中 ${route.messageCount}`;
+        merged = {
+          ...base,
+          animated: true,
+          label: `${baseLabel || ""} ${focusLabel}`.trim(),
+          style: {
+            ...base.style,
+            stroke: focusColor,
+            strokeWidth: 3.5,
+            filter: `drop-shadow(0 0 4px ${focusColor})`,
+          },
+          markerEnd: { ...(base.markerEnd as any), color: focusColor },
+        };
+      }
+      if (!anim) return merged;
+      return {
+        ...merged,
+        animated: true,
+        style: { ...merged.style, stroke: anim.color, strokeWidth: 3, filter: `drop-shadow(0 0 4px ${anim.color})` },
+        markerEnd: { ...(merged.markerEnd as any), color: anim.color },
+      };
+    });
+  }, [edges, edgeAnimations, edgeFlowCounts, liveMode, taskChainFocus]);
+
+  const handleOpenTaskInCanvas = useCallback(
+    (nodeIds: string[]) => {
+      const existing = nodeIds.filter((id) => nodes.some((n) => n.id === id));
+      if (existing.length === 0) {
+        showToast("画布中未找到相关节点", "error");
+        return;
+      }
+      setViewMode("canvas");
+      setSelectedEdgeId(null);
+      setSelectedNodeId(existing[0]);
+      setRightPanel("node");
+      setPropsTab("overview");
+      requestAnimationFrame(() => {
+        const inst = reactFlowRef.current;
+        if (!inst) return;
+        inst.fitView({
+          nodes: existing.map((id) => ({ id })),
+          padding: 0.32,
+          duration: 380,
+        });
+      });
+    },
+    [nodes, showToast],
+  );
 
   // ── Selected node data ──
 
@@ -1128,7 +1295,8 @@ export function OrgEditorView({
           handleSave={handleSave}
           rightPanel={rightPanel}
           setRightPanel={setRightPanel}
-          activityFeed={activityFeed}
+          inboxUnreadCount={inboxSummary.unreadCount}
+          pendingApprovals={inboxSummary.pendingApprovals}
         />
       )}
 
@@ -1228,6 +1396,8 @@ export function OrgEditorView({
                   orgId={selectedOrgId}
                   apiBaseUrl={apiBaseUrl}
                   nodes={nodes.map(n => ({ id: n.id, role_title: (n.data as any)?.role_title, avatar: (n.data as any)?.avatar }))}
+                  onTaskChainFocusChange={onTaskChainFocusChange}
+                  onOpenTaskInCanvas={handleOpenTaskInCanvas}
                 />
               ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", height: "100%" }}>
@@ -1239,23 +1409,10 @@ export function OrgEditorView({
           <div style={{ flex: 1, position: "relative" }} onContextMenu={(e) => e.preventDefault()}>
             <ReactFlow
               onInit={(instance) => {
-                reactFlowRef.current = instance;
+                reactFlowRef.current = instance as ReactFlowInstance<Node, Edge>;
               }}
-              nodes={nodes}
-              edges={edges.map((e) => {
-                const anim = edgeAnimations[e.id];
-                const flowCount = liveMode ? edgeFlowCounts[e.id] : undefined;
-                const base = flowCount && flowCount > 0
-                  ? { ...e, label: `${(e.data as any)?.label || ""} ${flowCount > 0 ? `(${flowCount})` : ""}`.trim() || undefined }
-                  : e;
-                if (!anim) return base;
-                return {
-                  ...base,
-                  animated: true,
-                  style: { ...base.style, stroke: anim.color, strokeWidth: 3, filter: `drop-shadow(0 0 4px ${anim.color})` },
-                  markerEnd: { ...(base.markerEnd as any), color: anim.color },
-                };
-              })}
+              nodes={flowNodes as Node[]}
+              edges={flowEdges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
@@ -1310,7 +1467,21 @@ export function OrgEditorView({
                   )}
                 </div>
               </Panel>
-              {!isMobile && <CollapsibleMiniMap edgeColors={EDGE_COLORS} />}
+              {!isMobile && (
+                <Panel position="top-left">
+                  <div className="org-edge-legend-panel">
+                    <div className="org-edge-legend-panel__title">连线说明</div>
+                    <div className="org-edge-legend-list">
+                      {Object.entries(EDGE_COLORS).map(([type, color]) => (
+                        <span key={type} className="org-edge-legend-item">
+                          <span className="org-edge-legend-line" style={{ background: color }} />
+                          <span>{EDGE_TYPE_LABELS[type] || type}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </Panel>
+              )}
 
             </ReactFlow>
             {/* ── Context menu (portal to body to avoid clipping) ── */}
@@ -1356,6 +1527,9 @@ export function OrgEditorView({
                       <span className="org-ctx-icon">📌</span>粘贴节点
                     </button>
                   )}
+                  <button onClick={() => fitCanvasToViewport()}>
+                    <IconMaximize2 size={13} className="org-ctx-icon" />适应窗口
+                  </button>
                   <button onClick={() => { setNodes(computeTreeLayout(nodes, edges)); setContextMenu(null); }}>
                     <span className="org-ctx-icon">🔀</span>自动布局
                   </button>
@@ -1365,76 +1539,187 @@ export function OrgEditorView({
             )}
             {/* ── Canvas bottom: live activity feed ── */}
             {liveMode && layoutLocked && orgStats && (() => {
-              const perNode: any[] = orgStats.per_node || [];
-              const recentTasks: any[] = orgStats.recent_tasks || [];
               const anomalies: any[] = orgStats.anomalies || [];
-              const nodeLabel = (id: string) => {
+              const nodeLabel = (id: string | null | undefined) => {
+                if (!id) return "?";
                 const nd = nodes.find(n => n.id === id);
-                return (nd?.data as any)?.role_title || id?.slice(0, 6) || id || "?";
-              };
-              const typeIcon: Record<string, string> = {
-                task_delegated: "📤", task_delivered: "📦", task_accepted: "✅",
-                task_rejected: "↩️", task_timeout: "⏰",
-              };
-              const typeLabel: Record<string, string> = {
-                task_delegated: "分配任务", task_delivered: "交付成果",
-                task_accepted: "验收通过", task_rejected: "打回",
-                task_timeout: "超时",
+                return (nd?.data as any)?.role_title || id.slice(0, 6) || id || "?";
               };
 
-              const busyLines: { key: string; node: string; text: string; pct: number; color: string }[] = [];
-              for (const n of perNode) {
-                if (n.status !== "busy" && !n.current_task_title) continue;
-                const pp = n.plan_progress || {};
-                const pct = pp.total > 0 ? Math.round((pp.completed / pp.total) * 100) : -1;
-                const taskDesc = n.current_task_title || (n.current_task ? String(n.current_task).slice(0, 50) : "执行中…");
-                busyLines.push({ key: n.id, node: n.role_title || nodeLabel(n.id), text: taskDesc, pct, color: "#3b82f6" });
-              }
+              const parseAnomaly = (a: any) => {
+                const message = String(a?.message || "");
+                const idleMatch = message.match(/空闲超过\s*(\d+)\s*分钟/);
+                if (idleMatch) return `${a.role_title || nodeLabel(a.node_id)} 已空闲 ${idleMatch[1]} 分钟`;
+                if (/阻塞|失败|异常|报错|超时/i.test(message)) return `${a.role_title || nodeLabel(a.node_id)} ${message}`;
+                return `${a.role_title || nodeLabel(a.node_id)} ${message}`;
+              };
+              const anomalySummary = anomalies.slice(0, 5).map((a: any) => parseAnomaly(a)).join(" · ");
 
-              if (busyLines.length === 0 && recentTasks.length === 0 && anomalies.length === 0) return null;
+              const activityItems = activityFeed.slice(0, 160).map((entry) => {
+                const d = entry.data || {};
+                const actorNodeId = d.node_id || d.from_node || d.accepted_by || d.rejected_by || d.source_node || null;
+                const actor = actorNodeId ? nodeLabel(actorNodeId) : "系统";
+                const detailText = String(d.task || d.current_task || d.message || d.content || d.summary || d.reason || d.error || d.result || "").trim();
+                const base = {
+                  key: entry.id,
+                  time: fmtTime(entry.time),
+                  actorNodeId,
+                  actor,
+                  badge: "事件",
+                  badgeClass: "",
+                  summary: entry.event,
+                  detail: detailText,
+                };
+                if (entry.event === "org:node_status") {
+                  const status = d.status || "busy";
+                  return {
+                    ...base,
+                    badge: status === "error" ? "异常" : status === "idle" ? "完成" : "执行中",
+                    badgeClass: status === "error" ? "org-feed-state-badge--danger" : status === "idle" ? "org-feed-state-badge--done" : "org-feed-state-badge--busy",
+                    summary: status === "idle"
+                      ? `${actor} 完成当前处理`
+                      : status === "error"
+                        ? `${actor} 执行异常`
+                        : `${actor} 开始执行任务`,
+                  };
+                }
+                if (entry.event === "org:task_delegated") {
+                  return {
+                    ...base,
+                    badge: "分派",
+                    badgeClass: "org-feed-state-badge--busy",
+                    summary: `${nodeLabel(d.from_node)} 向 ${nodeLabel(d.to_node)} 分派任务`,
+                  };
+                }
+                if (entry.event === "org:task_delivered") {
+                  return {
+                    ...base,
+                    badge: "交付",
+                    badgeClass: "org-feed-state-badge--busy",
+                    summary: `${nodeLabel(d.from_node)} 向 ${nodeLabel(d.to_node)} 交付结果`,
+                  };
+                }
+                if (entry.event === "org:task_accepted") {
+                  return {
+                    ...base,
+                    badge: "通过",
+                    badgeClass: "org-feed-state-badge--done",
+                    summary: `${nodeLabel(d.accepted_by)} 验收通过`,
+                  };
+                }
+                if (entry.event === "org:task_rejected") {
+                  return {
+                    ...base,
+                    badge: "打回",
+                    badgeClass: "org-feed-state-badge--danger",
+                    summary: `${nodeLabel(d.rejected_by)} 打回任务`,
+                  };
+                }
+                if (entry.event === "org:task_timeout") {
+                  return {
+                    ...base,
+                    badge: "超时",
+                    badgeClass: "org-feed-state-badge--warn",
+                    summary: `${actor} 处理超时`,
+                  };
+                }
+                if (entry.event === "org:task_complete") {
+                  return {
+                    ...base,
+                    badge: "完成",
+                    badgeClass: "org-feed-state-badge--done",
+                    summary: `${actor} 完成任务`,
+                  };
+                }
+                if (entry.event === "org:message") {
+                  return {
+                    ...base,
+                    badge: "消息",
+                    summary: `${nodeLabel(d.from_node)} 向 ${nodeLabel(d.to_node)} 发送消息`,
+                  };
+                }
+                if (entry.event === "org:blackboard_update") {
+                  return {
+                    ...base,
+                    badge: "黑板",
+                    summary: `${actor} 更新黑板`,
+                  };
+                }
+                if (entry.event === "org:heartbeat_start" || entry.event === "org:heartbeat_done") {
+                  return {
+                    ...base,
+                    badge: "巡检",
+                    summary: entry.event === "org:heartbeat_start" ? "组织开始心跳巡检" : "组织完成心跳巡检",
+                  };
+                }
+                if (entry.event === "org:broadcast") {
+                  return {
+                    ...base,
+                    badge: "广播",
+                    summary: `${actor} 发起广播`,
+                  };
+                }
+                return base;
+              });
 
               return (
                 <div className="org-live-feed">
-                  {busyLines.map(b => (
-                    <div key={b.key} className="org-feed-item org-feed-busy" onClick={() => {
-                      setSelectedNodeId(b.key); setSelectedEdgeId(null); setRightPanel("node"); setPropsTab("tasks");
-                    }}>
-                      <span className="org-feed-dot" style={{ background: b.color, animation: "orgDotPulse 1.5s ease-in-out infinite" }} />
-                      <span className="org-feed-who">{b.node}</span>
-                      <span className="org-feed-text">{b.text}</span>
-                      {b.pct >= 0 && (
-                        <span className="org-feed-progress">
-                          <span className="org-feed-bar"><span className="org-feed-bar-fill" style={{ width: `${b.pct}%` }} /></span>
-                          <span className="org-feed-pct">{b.pct}%</span>
+                  <div className="org-live-feed-header">
+                    <div className="org-feed-summary org-feed-summary--plain">
+                      <span className="org-feed-summary__badge org-feed-summary__badge--plain">运行记录</span>
+                      <span className="org-feed-summary__text org-feed-summary__text--plain">
+                        这里会按时间持续累计组织动作，可滚动翻阅历史，查看每个节点正在做什么、做过什么以及结果如何。
+                      </span>
+                      {anomalies.length > 0 && (
+                        <span
+                          className="org-feed-summary__badge org-feed-summary__badge--warn-inline"
+                          title={anomalySummary}
+                        >
+                          需关注 {anomalies.length}
                         </span>
                       )}
                     </div>
-                  ))}
-                  {recentTasks.slice(0, 6).map((t: any, i: number) => {
-                    const ts = t.t ? new Date(typeof t.t === "number" && t.t < 1e12 ? t.t * 1000 : t.t) : null;
-                    const timeStr = ts ? `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}` : "";
-                    const icon = typeIcon[t.type] || "📋";
-                    const label = typeLabel[t.type] || t.type;
-                    const statusCls = t.status === "accepted" ? "org-feed-ok" : t.status === "rejected" ? "org-feed-err" : "";
-                    return (
-                      <div key={`rt-${i}`} className={`org-feed-item ${statusCls}`}>
-                        <span className="org-feed-time">{timeStr}</span>
-                        <span className="org-feed-icon">{icon}</span>
-                        <span className="org-feed-who">{nodeLabel(t.from)}</span>
-                        <span className="org-feed-arrow">→</span>
-                        <span className="org-feed-who">{nodeLabel(t.to)}</span>
-                        <span className="org-feed-label">{label}</span>
-                        {t.task && <span className="org-feed-text">{t.task.slice(0, 40)}{t.task.length > 40 ? "…" : ""}</span>}
-                      </div>
-                    );
-                  })}
-                  {anomalies.map((a: any, i: number) => (
-                    <div key={`an-${i}`} className="org-feed-item org-feed-warn">
-                      <span className="org-feed-icon">⚠</span>
-                      <span className="org-feed-who" style={{ color: "#f59e0b" }}>{a.role_title || nodeLabel(a.node_id)}</span>
-                      <span className="org-feed-text" style={{ color: "#f59e0b" }}>{String(a.message).slice(0, 50)}</span>
+                    {selectedOrgId && rightPanel !== "command" && (
+                      <button
+                        onClick={() => { setChatPanelNode(null); setRightPanel("command"); }}
+                        className="org-chat-fab org-chat-fab--inline"
+                        title="打开组织指挥台"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        </svg>
+                        <span className="org-chat-fab-label">指挥台</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="org-feed-card org-feed-card--log">
+                    <div className="org-feed-card__body org-feed-card__body--log">
+                      {activityItems.length === 0 ? (
+                        <div className="org-feed-empty">暂无运行记录。组织启动后，这里会持续累积每个节点的执行、分派、交付、消息与异常历史。</div>
+                      ) : activityItems.map((item) => (
+                        <div
+                          key={item.key}
+                          className={`org-feed-log-row ${item.actorNodeId ? "org-feed-log-row--clickable" : ""}`}
+                          onClick={item.actorNodeId ? () => {
+                            setSelectedNodeId(item.actorNodeId);
+                            setSelectedEdgeId(null);
+                            setRightPanel("node");
+                            setPropsTab("overview");
+                          } : undefined}
+                        >
+                          <div className="org-feed-log-row__meta">
+                            <span className="org-feed-time">{item.time}</span>
+                            <span className="org-feed-who">{item.actor}</span>
+                            <span className={`org-feed-state-badge ${item.badgeClass || "org-feed-state-badge--neutral"}`}>{item.badge}</span>
+                          </div>
+                          <div className="org-feed-log-row__content">
+                            <div className="org-feed-log-row__summary">{item.summary}</div>
+                            {item.detail ? <div className="org-feed-log-row__detail">{item.detail}</div> : null}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
               );
             })()}
@@ -1442,7 +1727,7 @@ export function OrgEditorView({
           )}
 
           {/* ═══ Floating Chat FAB (always visible when org selected) ═══ */}
-          {selectedOrgId && rightPanel !== "command" && (
+          {selectedOrgId && rightPanel !== "command" && !(liveMode && layoutLocked && orgStats) && (
             <button
               onClick={() => { setChatPanelNode(null); setRightPanel("command"); }}
               className="org-chat-fab"
@@ -1480,10 +1765,9 @@ export function OrgEditorView({
 
           <style>{`
             .org-chat-fab {
-              position: absolute; bottom: 18px; left: 0; right: 0; z-index: 40;
+              position: absolute; right: 18px; bottom: 18px; z-index: 40;
               display: flex; align-items: center; gap: 8px;
               width: fit-content;
-              margin: 0 auto;
               padding: 12px 20px; border: none; border-radius: 16px;
               background: linear-gradient(135deg, #3b82f6, #6366f1) !important;
               color: #ffffff !important; cursor: pointer; font-size: 13px; font-weight: 600;
@@ -1491,6 +1775,18 @@ export function OrgEditorView({
               transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
               animation: org-fab-in 0.4s cubic-bezier(0.34,1.56,0.64,1);
               -webkit-text-fill-color: #ffffff !important;
+            }
+            .org-chat-fab--inline {
+              position: relative;
+              right: auto;
+              bottom: auto;
+              z-index: auto;
+              padding: 10px 16px;
+              border-radius: 14px;
+              margin-left: auto;
+              animation: none;
+              box-shadow: 0 4px 16px rgba(99,102,241,0.26);
+              flex-shrink: 0;
             }
             @keyframes org-fab-in {
               from { transform: scale(0.5) translateY(20px); opacity: 0; }
@@ -1545,6 +1841,45 @@ export function OrgEditorView({
             }
             .org-ctx-menu button:hover { background: var(--hover-bg); }
             .org-ctx-icon { width: 18px; text-align: center; flex-shrink: 0; font-size: 14px; }
+            .org-edge-legend-panel {
+              margin-top: 46px;
+              display: flex;
+              flex-direction: column;
+              gap: 8px;
+              min-width: 210px;
+              padding: 10px 12px;
+              border: 1px solid rgba(51,65,85,0.14);
+              border-radius: 12px;
+              background: color-mix(in srgb, var(--card-bg) 50%, transparent);
+              box-shadow: 0 6px 18px rgba(15,23,42,0.08);
+              backdrop-filter: blur(8px);
+            }
+            .org-edge-legend-panel__title {
+              font-size: 11px;
+              font-weight: 700;
+              color: var(--text);
+              letter-spacing: 0.03em;
+            }
+            .org-edge-legend-list {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 8px 12px;
+            }
+            .org-edge-legend-item {
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+              font-size: 11px;
+              color: var(--muted);
+              white-space: nowrap;
+            }
+            .org-edge-legend-line {
+              display: inline-block;
+              width: 18px;
+              height: 3px;
+              border-radius: 999px;
+              flex-shrink: 0;
+            }
 
             /* ── Top bar layout ── */
             .org-topbar {
@@ -1597,24 +1932,39 @@ export function OrgEditorView({
 
             /* ── View tabs (center) ── */
             .org-topbar-tabs {
-              display: flex; align-items: center; gap: 0;
-              border-bottom: 2px solid transparent;
+              display: inline-flex;
+              align-items: center;
+              gap: 4px;
+              padding: 4px;
+              border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+              border-radius: 14px;
+              background: color-mix(in srgb, var(--card-bg) 76%, var(--bg-subtle) 24%);
+              box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
               flex-shrink: 0;
             }
             .org-view-tab {
               display: inline-flex; align-items: center; gap: 5px;
-              height: 32px; padding: 0 16px;
+              height: 34px; padding: 0 16px;
               border: none; background: transparent;
-              border-bottom: 2px solid transparent;
-              margin-bottom: -1px;
+              border-radius: 10px;
               color: var(--muted); font-size: 13px; font-weight: 500;
               cursor: pointer; white-space: nowrap;
-              transition: color 0.15s, border-color 0.15s;
+              transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, transform 0.15s;
             }
-            .org-view-tab:hover { color: var(--text); }
+            .org-view-tab:hover {
+              color: var(--text);
+              background: color-mix(in srgb, var(--bg-subtle) 68%, transparent);
+            }
+            .org-view-tab[data-state="on"],
             .org-view-tab--active {
-              color: var(--primary) !important; font-weight: 600;
-              border-bottom-color: var(--primary) !important;
+              color: var(--primary) !important;
+              font-weight: 600;
+              background: color-mix(in srgb, var(--card-bg) 92%, white 8%) !important;
+              box-shadow: 0 1px 2px rgba(15,23,42,0.06), inset 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent);
+            }
+            .org-view-tab[data-state="on"] svg,
+            .org-view-tab--active svg {
+              color: var(--primary);
             }
 
             /* ── Right actions ── */
@@ -1725,61 +2075,268 @@ export function OrgEditorView({
 
             /* ── Canvas bottom live activity feed ── */
             .org-live-feed {
-              position: absolute; bottom: 0; left: 0; right: 0;
-              z-index: 5; max-height: 140px; overflow-y: auto;
-              background: linear-gradient(to top, var(--bg-app) 75%, transparent);
-              padding: 10px 14px 6px;
+              position: absolute; left: 0; right: 0; bottom: 0;
+              z-index: 5;
+              display: flex;
+              flex-direction: column;
+              gap: 10px;
+              min-height: 250px;
+              max-height: 360px;
+              background: linear-gradient(to top, color-mix(in srgb, var(--bg-app) 94%, #ffffff 6%) 92%, color-mix(in srgb, var(--bg-app) 82%, transparent));
+              padding: 12px 16px 14px;
+              border-top: 1px solid rgba(51,65,85,0.12);
+              box-shadow: 0 -10px 28px rgba(15,23,42,0.10);
               scrollbar-width: thin;
+            }
+            .org-live-feed-header {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+            }
+            .org-feed-card {
+              min-width: 0;
+              height: 100%;
+              border: 1px solid rgba(51,65,85,0.14);
+              border-radius: 14px;
+              background: color-mix(in srgb, var(--bg-app) 94%, #ffffff 6%);
+              box-shadow: 0 8px 22px rgba(15,23,42,0.10);
+            }
+            .org-feed-card--log {
+              flex: 1 1 auto;
+              min-height: 0;
+              display: flex;
+              flex-direction: column;
+            }
+            .org-feed-card__title {
+              padding: 12px 14px 10px;
+              border-bottom: 1px solid rgba(51,65,85,0.12);
+              font-size: 12px;
+              font-weight: 700;
+              letter-spacing: 0.03em;
+              color: var(--text);
+            }
+            .org-feed-card__body {
+              display: flex;
+              flex-direction: column;
+              gap: 0;
+              height: 100%;
+              min-height: 190px;
+              overflow-y: auto;
+              padding: 6px 14px 10px;
+            }
+            .org-feed-card__body--log {
+              min-height: 230px;
+              padding-top: 8px;
+            }
+            .org-feed-empty {
+              padding: 18px 2px;
+              font-size: 12px;
+              color: var(--muted);
+            }
+            .org-feed-summary {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              margin-bottom: 0;
+              padding: 8px 10px;
+              border-radius: 10px;
+              font-size: 12px;
+              flex: 1 1 auto;
+              min-width: 0;
+            }
+            .org-feed-summary--warn {
+              background: rgba(245,158,11,0.12);
+              border: 1px solid rgba(245,158,11,0.18);
+            }
+            .org-feed-summary--plain {
+              background: rgba(59,130,246,0.12);
+              border: 1px solid rgba(59,130,246,0.18);
+            }
+            .org-feed-summary__badge {
+              display: inline-flex;
+              align-items: center;
+              height: 22px;
+              padding: 0 8px;
+              border-radius: 999px;
+              background: rgba(245,158,11,0.14);
+              color: #b45309;
+              font-weight: 700;
+              flex-shrink: 0;
+            }
+            .org-feed-summary__badge--plain {
+              background: rgba(59,130,246,0.12);
+              color: #1d4ed8;
+            }
+            .org-feed-summary__badge--warn-inline {
+              margin-left: auto;
+              background: rgba(245,158,11,0.14);
+              color: #b45309;
+            }
+            .org-feed-summary__text {
+              min-width: 0;
+              color: #92400e;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
+            .org-feed-summary__text--plain {
+              color: #1e40af;
+            }
+            .org-feed-section-title {
+              margin: 4px 0 6px;
+              font-size: 11px;
+              font-weight: 700;
+              letter-spacing: 0.04em;
+              color: var(--muted);
+              text-transform: uppercase;
             }
             .org-feed-item {
               display: flex; align-items: center; gap: 6px;
-              padding: 3px 0; font-size: 11px; color: var(--text);
+              padding: 3px 0; font-size: 12px; color: var(--text);
               line-height: 1.4; white-space: nowrap;
               border-bottom: 1px solid rgba(51,65,85,0.15);
             }
             .org-feed-item:last-child { border-bottom: none; }
-            .org-feed-busy { cursor: pointer; }
-            .org-feed-busy:hover .org-feed-who { color: var(--primary); }
             .org-feed-ok { }
             .org-feed-err .org-feed-label { color: #ef4444; }
-            .org-feed-warn { color: #f59e0b; }
-            .org-feed-dot {
-              width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+            .org-feed-log-row {
+              display: flex;
+              align-items: flex-start;
+              gap: 8px;
+              min-width: 0;
+              padding: 10px 0;
+              border-bottom: 1px solid rgba(51,65,85,0.12);
+              font-size: 12px;
+            }
+            .org-feed-log-row:last-child {
+              border-bottom: none;
+            }
+            .org-feed-log-row--clickable {
+              cursor: pointer;
+            }
+            .org-feed-log-row--clickable:hover .org-feed-who,
+            .org-feed-log-row--clickable:hover .org-feed-log-row__summary {
+              color: var(--primary);
+            }
+            .org-feed-log-row {
+              display: flex;
+              align-items: flex-start;
+              gap: 8px;
+            }
+            .org-feed-log-row__meta {
+              flex: 0 0 196px;
+              min-width: 196px;
+              max-width: 196px;
+              display: grid;
+              grid-template-columns: 48px 78px 56px;
+              align-items: center;
+              gap: 8px;
+              padding-top: 1px;
+              justify-items: start;
+            }
+            .org-feed-log-row__summary,
+            .org-feed-log-row__detail {
+              min-width: 0;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: normal;
+              display: -webkit-box;
+              -webkit-line-clamp: 2;
+              -webkit-box-orient: vertical;
+            }
+            .org-feed-log-row__content {
+              flex: 1 1 auto;
+              min-width: 0;
+              display: flex;
+              flex-direction: column;
+              gap: 2px;
+            }
+            .org-feed-log-row__summary {
+              font-weight: 600;
+              color: var(--text);
+              line-height: 1.45;
+            }
+            .org-feed-log-row__detail {
+              color: var(--muted);
+              line-height: 1.45;
             }
             .org-feed-time {
-              font-size: 10px; color: var(--muted); font-family: monospace;
-              flex-shrink: 0; min-width: 36px;
+              font-size: 11px; color: var(--muted); font-family: monospace;
+              line-height: 1;
+              text-align: left;
             }
-            .org-feed-icon { flex-shrink: 0; font-size: 12px; }
             .org-feed-who {
-              font-weight: 600; color: var(--text); flex-shrink: 0;
-              max-width: 100px; overflow: hidden; text-overflow: ellipsis;
+              width: 100%;
+              min-width: 0;
+              font-weight: 600; color: var(--text);
               transition: color 0.15s;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              text-align: left;
             }
-            .org-feed-arrow { color: var(--muted); flex-shrink: 0; font-size: 10px; }
-            .org-feed-label {
-              font-size: 10px; padding: 1px 5px; border-radius: 3px;
-              background: rgba(99,102,241,0.12); color: var(--primary);
+            .org-feed-state-badge {
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              height: 20px;
+              padding: 0 8px;
+              border-radius: 999px;
+              font-size: 11px;
+              font-weight: 600;
               flex-shrink: 0;
+              min-width: 52px;
+              text-align: center;
             }
-            .org-feed-text {
-              color: var(--muted); font-size: 10px;
-              overflow: hidden; text-overflow: ellipsis; min-width: 0;
+            .org-feed-state-badge--neutral {
+              background: rgba(100,116,139,0.12);
+              color: #475569;
             }
-            .org-feed-progress {
-              display: inline-flex; align-items: center; gap: 4px;
-              flex-shrink: 0;
+            .org-feed-state-badge--busy {
+              background: rgba(59,130,246,0.12);
+              color: #2563eb;
             }
-            .org-feed-bar {
-              width: 48px; height: 3px; border-radius: 2px;
-              background: rgba(51,65,85,0.3); overflow: hidden;
+            .org-feed-state-badge--done {
+              background: rgba(34,197,94,0.14);
+              color: #15803d;
             }
-            .org-feed-bar-fill {
-              height: 100%; border-radius: 2px;
-              background: #3b82f6; transition: width 0.3s ease;
+            .org-feed-state-badge--warn {
+              background: rgba(245,158,11,0.14);
+              color: #b45309;
             }
-            .org-feed-pct {
-              font-size: 9px; color: var(--muted); font-weight: 600;
+            .org-feed-state-badge--danger {
+              background: rgba(239,68,68,0.12);
+              color: #dc2626;
+            }
+            @media (max-width: 980px) {
+              .org-chat-fab {
+                right: 12px;
+                bottom: 12px;
+              }
+              .org-edge-legend-panel {
+                display: none;
+              }
+              .org-live-feed {
+                max-height: 420px;
+              }
+              .org-feed-log-row {
+                flex-direction: column;
+                gap: 4px;
+              }
+              .org-feed-log-row__meta {
+                flex: none;
+                min-width: 0;
+                max-width: none;
+                width: 100%;
+                grid-template-columns: 48px minmax(0, 1fr) 56px;
+              }
+              .org-feed-summary {
+                flex-wrap: wrap;
+              }
+              .org-feed-summary__badge--warn-inline {
+                margin-left: 0;
+              }
             }
 
             /* ── Blackboard markdown content ── */
@@ -1917,33 +2474,83 @@ export function OrgEditorView({
         )}
       </PanelShell>
 
-      {/* ── Right Panel: Org Settings ── */}
       <PanelShell
         open={rightPanel === "org" && !!currentOrg}
-        onClose={() => { autoSave(); setRightPanel("none"); }}
-        width={300}
+        onClose={() => { autoSave(); setOrgBlackboardOpen(false); setRightPanel("none"); }}
+        width={480}
         isMobile={isMobile}
+        style={{ overflow: "hidden" }}
       >
         {currentOrg && (
-          <OrgSettingsPanel
-            currentOrg={currentOrg}
-            setCurrentOrg={setCurrentOrg}
-            autoSave={autoSave}
-            onClose={() => { autoSave(); setRightPanel("none"); }}
-            liveMode={liveMode}
-            apiBaseUrl={apiBaseUrl}
-            md={md}
-            handleExportOrg={handleExportOrg}
-            handleImportOrg={handleImportOrg}
-            bbEntries={bbEntries}
-            setBbEntries={setBbEntries}
-            bbScope={bbScope}
-            setBbScope={setBbScope}
-            bbLoading={bbLoading}
-            fetchBlackboard={fetchBlackboard}
-            confirmReset={confirmReset}
-            setConfirmReset={setConfirmReset}
-          />
+          <div className="flex h-full flex-col bg-background">
+            <div className="flex items-start justify-between border-b px-4 pt-4 pb-3">
+              <div>
+                <div className="mb-1 text-base font-semibold">组织设置与黑板</div>
+                <div className="text-xs text-muted-foreground">在同一侧栏中切换配置与组织沉淀</div>
+              </div>
+              <Button variant="ghost" size="icon-sm" onClick={() => { autoSave(); setOrgBlackboardOpen(false); setRightPanel("none"); }}>
+                <IconX size={14} />
+              </Button>
+            </div>
+            <div className="border-b px-4 py-2">
+              <div className="inline-flex rounded-xl border bg-background p-1">
+                <button
+                  className={`rounded-lg px-3 py-1.5 text-xs ${!orgBlackboardOpen ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                  onClick={() => setOrgBlackboardOpen(false)}
+                >
+                  设置
+                </button>
+                <button
+                  className={`rounded-lg px-3 py-1.5 text-xs ${orgBlackboardOpen ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                  onClick={() => {
+                    fetchBlackboard(currentOrg.id, bbScope);
+                    setOrgBlackboardOpen(true);
+                  }}
+                >
+                  黑板
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1">
+              {orgBlackboardOpen ? (
+                <OrgBlackboardPanel
+                  currentOrg={currentOrg}
+                  apiBaseUrl={apiBaseUrl}
+                  md={md}
+                  bbEntries={bbEntries}
+                  setBbEntries={setBbEntries}
+                  bbScope={bbScope}
+                  setBbScope={setBbScope}
+                  bbLoading={bbLoading}
+                  fetchBlackboard={fetchBlackboard}
+                  onClose={() => { autoSave(); setOrgBlackboardOpen(false); setRightPanel("none"); }}
+                  embedded
+                />
+              ) : (
+                <OrgSettingsPanel
+                  currentOrg={currentOrg}
+                  setCurrentOrg={setCurrentOrg}
+                  autoSave={autoSave}
+                  onClose={() => { autoSave(); setOrgBlackboardOpen(false); setRightPanel("none"); }}
+                  liveMode={liveMode}
+                  apiBaseUrl={apiBaseUrl}
+                  md={md}
+                  handleExportOrg={handleExportOrg}
+                  handleImportOrg={handleImportOrg}
+                  bbEntries={bbEntries}
+                  setBbEntries={setBbEntries}
+                  bbScope={bbScope}
+                  setBbScope={setBbScope}
+                  bbLoading={bbLoading}
+                  fetchBlackboard={fetchBlackboard}
+                  confirmReset={confirmReset}
+                  setConfirmReset={setConfirmReset}
+                  onOpenBlackboard={() => setOrgBlackboardOpen(true)}
+                  embedded
+                />
+              )}
+            </div>
+          </div>
         )}
       </PanelShell>
 
@@ -1960,6 +2567,7 @@ export function OrgEditorView({
             orgId={currentOrg.id}
             visible={true}
             onClose={() => setRightPanel("none")}
+            onCountsChange={setInboxSummary}
           />
         )}
       </PanelShell>

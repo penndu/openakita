@@ -1492,6 +1492,7 @@ class PolicyEngine:
             "decision": result.decision.value,
             "reason": result.reason,
             "policy": result.policy_name,
+            "risk_level": result.metadata.get("risk_level", ""),
         }
         self._audit_log.append(entry)
 

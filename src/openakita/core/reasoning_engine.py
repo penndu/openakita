@@ -791,9 +791,10 @@ class ReasoningEngine:
 
         # ForceToolCall 配置
         im_floor = max(0, int(getattr(settings, "force_tool_call_im_floor", 1)))
+        _override = getattr(self, "_force_tool_override", None)
         configured = int(
-            getattr(self, "_force_tool_override", None)
-            or getattr(settings, "force_tool_call_max_retries", 0)
+            _override if _override is not None
+            else getattr(settings, "force_tool_call_max_retries", 0)
         )
         if session_type == "im":
             base_force_retries = max(im_floor, configured)
@@ -2133,9 +2134,10 @@ class ReasoningEngine:
 
             # ForceToolCall 配置
             im_floor = max(0, int(getattr(settings, "force_tool_call_im_floor", 1)))
+            _override = getattr(self, "_force_tool_override", None)
             configured = int(
-                getattr(self, "_force_tool_override", None)
-                or getattr(settings, "force_tool_call_max_retries", 0)
+                _override if _override is not None
+                else getattr(settings, "force_tool_call_max_retries", 0)
             )
             if session_type == "im":
                 base_force_retries = max(im_floor, configured)
@@ -4801,13 +4803,27 @@ class ReasoningEngine:
                     "请重试、或切换到更稳定的端点/模型后再继续。"
                 )
 
-        # 未执行过工具 — 解析意图声明标记
+        # 未执行过"实质性"工具 — 解析意图声明标记
         intent, stripped_text = parse_intent_tag(decision.text_content or "")
         logger.info(
             f"[IntentTag] intent={intent or 'NONE'}, "
             f"has_tool_calls=False, tools_executed_in_task=False, "
             f'text_preview="{(stripped_text or "")[:80].replace(chr(10), " ")}"'
         )
+
+        # 管理型工具（create_todo 等）已执行且有文本回复 → 任务已完成，
+        # 不要 ForceToolCall 强制重试，否则会把"创建 plan"变成"执行 plan"。
+        if (
+            executed_tool_names
+            and all(t in _ADMIN_TOOL_NAMES for t in executed_tool_names)
+            and stripped_text
+            and len(stripped_text.strip()) > 10
+        ):
+            logger.info(
+                "[IntentTag] Admin-only tools executed with substantial reply — "
+                "accepting as completed (skip ForceToolCall)"
+            )
+            return clean_llm_response(stripped_text)
 
         # Model glitch: LLM returned empty content (content: []) but consumed
         # output tokens on internal reasoning. Retry silently without counting

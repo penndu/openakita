@@ -7,5 +7,6 @@ export { NodeTasksTabContent } from "./NodeTasksTabContent";
 export { OrgEdgeInspector } from "./OrgEdgeInspector";
 export { OrgNodeInspector } from "./OrgNodeInspector";
 export { OrgSettingsPanel } from "./OrgSettingsPanel";
+export { OrgBlackboardPanel } from "./OrgBlackboardPanel";
 export { OrgEditorTopBar } from "./OrgEditorTopBar";
 export { OrgListPanel } from "./OrgListPanel";

@@ -50,7 +50,8 @@ export interface OrgEditorTopBarProps {
   handleSave: () => void;
   rightPanel: RightPanelMode;
   setRightPanel: (v: RightPanelMode) => void;
-  activityFeed: any[];
+  inboxUnreadCount: number;
+  pendingApprovals: number;
 }
 
 export function OrgEditorTopBar({
@@ -74,7 +75,8 @@ export function OrgEditorTopBar({
   handleSave,
   rightPanel,
   setRightPanel,
-  activityFeed,
+  inboxUnreadCount,
+  pendingApprovals,
 }: OrgEditorTopBarProps) {
   const statusLabel = TOPBAR_STATUS_LABELS[currentOrg.status] || currentOrg.status;
   const statusColor = STATUS_COLORS[currentOrg.status] || "var(--muted)";
@@ -140,13 +142,22 @@ export function OrgEditorTopBar({
           size="sm"
           className="org-topbar-tabs"
         >
-          <ToggleGroupItem value="canvas" className="gap-1 text-xs">
+          <ToggleGroupItem
+            value="canvas"
+            className={`org-view-tab gap-1 text-xs ${viewMode === "canvas" ? "org-view-tab--active" : ""}`}
+          >
             <IconSitemap size={13} /> 编排
           </ToggleGroupItem>
-          <ToggleGroupItem value="projects" className="gap-1 text-xs">
+          <ToggleGroupItem
+            value="projects"
+            className={`org-view-tab gap-1 text-xs ${viewMode === "projects" ? "org-view-tab--active" : ""}`}
+          >
             <IconClipboard size={13} /> 项目
           </ToggleGroupItem>
-          <ToggleGroupItem value="dashboard" className="gap-1 text-xs">
+          <ToggleGroupItem
+            value="dashboard"
+            className={`org-view-tab gap-1 text-xs ${viewMode === "dashboard" ? "org-view-tab--active" : ""}`}
+          >
             <IconCircleDot size={13} /> 看板
           </ToggleGroupItem>
         </ToggleGroup>
@@ -248,10 +259,31 @@ export function OrgEditorTopBar({
               style={{ position: "relative" }}
             >
               <IconInbox size={15} />
-              {activityFeed.length > 0 && <span className="org-notif-dot" />}
+              {(inboxUnreadCount > 0 || pendingApprovals > 0) && <span className="org-notif-dot" />}
+              {pendingApprovals > 0 ? (
+                <span
+                  className="absolute -right-1 -top-1 min-w-[16px] rounded-full bg-amber-500 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+                  title={`${pendingApprovals} 个待审批`}
+                >
+                  {pendingApprovals > 9 ? "9+" : pendingApprovals}
+                </span>
+              ) : inboxUnreadCount > 0 ? (
+                <span
+                  className="absolute -right-1 -top-1 min-w-[16px] rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+                  title={`${inboxUnreadCount} 条未读`}
+                >
+                  {inboxUnreadCount > 9 ? "9+" : inboxUnreadCount}
+                </span>
+              ) : null}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>收件箱</TooltipContent>
+          <TooltipContent>
+            {pendingApprovals > 0
+              ? `${pendingApprovals} 个待审批`
+              : inboxUnreadCount > 0
+                ? `${inboxUnreadCount} 条未读`
+                : "收件箱"}
+          </TooltipContent>
         </Tooltip>
         {canOpenPopupWindow() && (
           <Tooltip>

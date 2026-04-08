@@ -7,16 +7,16 @@ export function OrgCanvasControls() {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
 
   return (
-    <Panel position="bottom-left">
+    <Panel position="top-right">
       <TooltipProvider>
-        <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-card/90 p-1 shadow-md backdrop-blur-sm">
+        <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-card/50 p-1 shadow-md backdrop-blur-sm">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon-xs" onClick={() => zoomIn()}>
                 <ZoomIn className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="right">放大</TooltipContent>
+            <TooltipContent side="left">放大</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -24,7 +24,7 @@ export function OrgCanvasControls() {
                 <ZoomOut className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="right">缩小</TooltipContent>
+            <TooltipContent side="left">缩小</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -32,7 +32,7 @@ export function OrgCanvasControls() {
                 <Maximize className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="right">适应视图</TooltipContent>
+            <TooltipContent side="left">适应视图</TooltipContent>
           </Tooltip>
         </div>
       </TooltipProvider>

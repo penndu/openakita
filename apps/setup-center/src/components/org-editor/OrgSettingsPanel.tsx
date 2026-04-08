@@ -34,6 +34,8 @@ export interface OrgSettingsPanelProps {
   fetchBlackboard: (orgId: string, scope: string) => void;
   confirmReset: boolean;
   setConfirmReset: (v: boolean) => void;
+  onOpenBlackboard: () => void;
+  embedded?: boolean;
 }
 
 export function OrgSettingsPanel({
@@ -54,22 +56,30 @@ export function OrgSettingsPanel({
   fetchBlackboard,
   confirmReset,
   setConfirmReset,
+  onOpenBlackboard,
+  embedded = false,
 }: OrgSettingsPanelProps) {
   const [personaCollapsed, setPersonaCollapsed] = useState(false);
   const [bizCollapsed, setBizCollapsed] = useState(false);
   const opMode = (currentOrg as any).operation_mode || "command";
 
   return (
-    <div className="p-3 space-y-2.5">
-      <div className="flex justify-between items-center">
-        <div className="font-semibold text-[13px]">组织设置</div>
-        <Button variant="ghost" size="icon-xs" onClick={() => { autoSave(); onClose(); }}>
-          <IconX size={12} />
-        </Button>
-      </div>
+    <div className="flex h-full flex-col bg-background">
+      {!embedded && (
+        <div className="flex items-start justify-between border-b px-4 pt-4 pb-3">
+          <div>
+            <div className="mb-1 text-base font-semibold">组织设置</div>
+            <div className="text-xs text-muted-foreground">组织级配置与运行参数</div>
+          </div>
+          <Button variant="ghost" size="icon-sm" onClick={() => { autoSave(); onClose(); }}>
+            <IconX size={14} />
+          </Button>
+        </div>
+      )}
 
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
       {/* ── 运行模式 ── */}
-      <div className="rounded-lg border bg-card p-2.5">
+      <div className="rounded-xl border bg-card p-3">
         <div className="font-semibold text-xs mb-1.5">运行模式</div>
         <ToggleGroup
           type="single"
@@ -91,7 +101,7 @@ export function OrgSettingsPanel({
 
       {/* ── 核心业务 (仅自主模式) ── */}
       {opMode === "autonomous" && (
-        <div className="rounded-lg border bg-card p-2.5">
+        <div className="rounded-xl border bg-card p-3">
           <div
             className="flex justify-between items-center cursor-pointer"
             onClick={() => setBizCollapsed(!bizCollapsed)}
@@ -148,7 +158,7 @@ export function OrgSettingsPanel({
       )}
 
       {/* ── 用户身份 ── */}
-      <div className="rounded-lg border bg-card p-2.5">
+      <div className="rounded-xl border bg-card p-3">
         <div
           className="flex justify-between items-center cursor-pointer"
           onClick={() => setPersonaCollapsed(!personaCollapsed)}
@@ -236,7 +246,7 @@ export function OrgSettingsPanel({
       </div>
 
       {/* ── Quick actions ── */}
-      <div className="rounded-lg border bg-card p-2.5">
+      <div className="rounded-xl border bg-card p-3">
         <div className="font-semibold text-xs mb-1.5">操作</div>
         <div className="flex flex-wrap gap-1">
           <Button variant="outline" size="xs" className="text-[10px]" onClick={() => setConfirmReset(true)}>重置组织</Button>
@@ -258,108 +268,41 @@ export function OrgSettingsPanel({
         </div>
       </div>
 
-      {/* ── Blackboard ── */}
-      <div>
-        <div className="flex justify-between items-center mb-1.5">
-          <div className="font-semibold text-[13px]">组织黑板</div>
+      <div className="rounded-xl border bg-card p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">组织黑板</div>
+            <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+              记录组织级事实、决策、进展与待办。作为关键上下文，单独在二级侧栏中查看。
+            </div>
+          </div>
           <Button
             variant="outline"
             size="xs"
-            className="text-[10px]"
-            onClick={() => fetchBlackboard(currentOrg.id, bbScope)}
-            disabled={bbLoading}
+            className="shrink-0"
+            onClick={() => {
+              fetchBlackboard(currentOrg.id, bbScope);
+              onOpenBlackboard();
+            }}
           >
-            {bbLoading ? "..." : "刷新"}
+            切换到黑板
           </Button>
         </div>
-
-        <ToggleGroup
-          type="single"
-          value={bbScope}
-          onValueChange={(v) => { if (v) setBbScope(v as typeof bbScope); }}
-          variant="outline"
-          size="sm"
-          className="mb-2"
-        >
-          <ToggleGroupItem value="all" className="text-[10px] h-6 px-2">全部</ToggleGroupItem>
-          <ToggleGroupItem value="org" className="text-[10px] h-6 px-2">组织级</ToggleGroupItem>
-          <ToggleGroupItem value="department" className="text-[10px] h-6 px-2">部门级</ToggleGroupItem>
-          <ToggleGroupItem value="node" className="text-[10px] h-6 px-2">节点级</ToggleGroupItem>
-        </ToggleGroup>
-
-        {bbEntries.length === 0 ? (
-          <div className="text-[11px] text-muted-foreground py-4 px-2.5 text-center border border-dashed rounded-lg">
-            {bbLoading ? "加载中..." : "暂无记录"}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {bbEntries.map((entry: any) => {
-              const scopeLabel = entry.scope === "org" ? "组织" : entry.scope === "department" ? entry.scope_owner : entry.source_node || "节点";
-              const typeColors: Record<string, string> = {
-                fact: "#3b82f6", decision: "#f59e0b", lesson: "#10b981",
-                progress: "#8b5cf6", todo: "#ef4444",
-              };
-              const typeLabels: Record<string, string> = {
-                fact: "事实", decision: "决策", lesson: "经验",
-                progress: "进展", todo: "待办",
-              };
-              return (
-                <div key={entry.id} className="rounded-md border p-1.5 bg-card text-[11px]">
-                  <div className="flex justify-between items-center mb-0.5">
-                    <div className="flex gap-1 items-center">
-                      <Badge
-                        variant="outline"
-                        className="text-[9px] px-1.5 py-0 font-semibold"
-                        style={{
-                          background: (typeColors[entry.memory_type] || "#6b7280") + "18",
-                          color: typeColors[entry.memory_type] || "#6b7280",
-                          borderColor: (typeColors[entry.memory_type] || "#6b7280") + "40",
-                        }}
-                      >
-                        {typeLabels[entry.memory_type] || entry.memory_type}
-                      </Badge>
-                      <span className="text-[9px] text-muted-foreground">{scopeLabel}</span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      className="h-4 w-4 text-muted-foreground"
-                      title="删除此条"
-                      onClick={async () => {
-                        try {
-                          await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/memory/${entry.id}`, { method: "DELETE" });
-                          setBbEntries((prev) => prev.filter((e: any) => e.id !== entry.id));
-                        } catch { /* ignore */ }
-                      }}
-                    >
-                      ×
-                    </Button>
-                  </div>
-                  <div className="bb-entry-content leading-relaxed break-words">
-                    {md ? (
-                      <md.ReactMarkdown remarkPlugins={[md.remarkGfm]} rehypePlugins={[md.rehypeHighlight]}>
-                        {entry.content}
-                      </md.ReactMarkdown>
-                    ) : (
-                      <pre className="whitespace-pre-wrap m-0 font-[inherit]">{entry.content}</pre>
-                    )}
-                  </div>
-                  {Array.isArray(entry.tags) && entry.tags.length > 0 && (
-                    <div className="mt-0.5 flex gap-1 flex-wrap">
-                      {entry.tags.map((t: string) => (
-                        <Badge key={t} variant="secondary" className="text-[9px] px-1 py-0">#{t}</Badge>
-                      ))}
-                    </div>
-                  )}
-                  <div className="text-[9px] text-muted-foreground mt-0.5">
-                    {entry.source_node && <span>来自 {entry.source_node} · </span>}
-                    {fmtShortDate(entry.created_at)}
-                  </div>
-                </div>
-              );
-            })}
+        <div className="mt-3 flex items-center gap-2 text-[11px] text-muted-foreground">
+          <Badge variant="secondary" className="h-5 px-2 text-[10px]">
+            {bbLoading ? "同步中" : `${bbEntries.length} 条记录`}
+          </Badge>
+          <span>支持按组织级、部门级、节点级快速筛选</span>
+        </div>
+        {bbEntries[0] && (
+          <div className="mt-3 rounded-lg border bg-muted/20 px-3 py-2">
+            <div className="text-[10px] font-medium text-muted-foreground">最近一条</div>
+            <div className="mt-1 line-clamp-2 text-[11px] leading-5 text-foreground">
+              {String(bbEntries[0].content || "").replace(/\s+/g, " ").trim()}
+            </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

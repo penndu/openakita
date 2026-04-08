@@ -622,4 +622,19 @@ ORG_NODE_TOOLS: list[dict] = [
             "required": ["project_id", "title"],
         },
     },
+    # ── 任务取消 ──
+    {
+        "name": "org_cancel_chain",
+        "description": "取消一条任务链及其所有子链。会终止正在执行的子节点、更新项目任务状态。用于响应用户的'停止/取消任务'指令。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chain_id": {
+                    "type": "string",
+                    "description": "要取消的任务链 ID。可用 org_list_delegated_tasks 查找。",
+                },
+            },
+            "required": ["chain_id"],
+        },
+    },
 ]

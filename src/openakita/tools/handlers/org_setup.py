@@ -25,6 +25,7 @@ _VALID_ACTIONS = (
     "create_from_template",
     "update_org",
     "delete_org",
+    "send_command",
 )
 
 
@@ -57,6 +58,8 @@ class OrgSetupHandler:
             return await self._update_org(params)
         elif action == "delete_org":
             return await self._delete_org(params)
+        elif action == "send_command":
+            return await self._send_command(params)
         return f"❌ Unknown action: {action}. Valid: {', '.join(_VALID_ACTIONS)}"
 
     # ------------------------------------------------------------------
@@ -685,6 +688,55 @@ class OrgSetupHandler:
         except Exception as e:
             logger.error(f"[OrgSetup] Failed to delete org: {e}", exc_info=True)
             return f"❌ 删除失败: {e}"
+
+    # ------------------------------------------------------------------
+    # send_command — dispatch a task to a running org
+    # ------------------------------------------------------------------
+
+    async def _send_command(self, params: dict[str, Any]) -> str:
+        org_id = params.get("org_id", "")
+        command = params.get("command", "").strip()
+        if not org_id:
+            return "❌ send_command 需要提供 org_id"
+        if not command:
+            return "❌ send_command 需要提供 command（任务描述）"
+
+        from ...orgs.runtime import get_runtime
+
+        rt = get_runtime()
+        if rt is None:
+            return "❌ 组织运行时未初始化，请确认服务已启动"
+
+        try:
+            result = await rt.send_command(
+                org_id=org_id,
+                target_node_id=None,
+                content=command,
+            )
+        except ValueError as e:
+            return f"❌ {e}"
+        except Exception as e:
+            logger.error(f"[OrgSetup] send_command failed: {e}", exc_info=True)
+            return f"❌ 命令执行失败: {e}"
+
+        if isinstance(result, dict):
+            node_id = result.get("node_id", "")
+            status = result.get("status", "")
+            reply = result.get("reply", "") or result.get("result", "")
+            chain_id = result.get("chain_id", "")
+
+            lines = [f"✅ 组织命令已执行"]
+            if node_id:
+                lines.append(f"- 执行节点: {node_id}")
+            if status:
+                lines.append(f"- 状态: {status}")
+            if chain_id:
+                lines.append(f"- Chain ID: {chain_id}")
+            if reply:
+                lines.append(f"\n**执行结果：**\n{reply[:2000]}")
+            return "\n".join(lines)
+
+        return f"✅ 命令已发送。响应: {str(result)[:2000]}"
 
     # ------------------------------------------------------------------
     # Internal helpers

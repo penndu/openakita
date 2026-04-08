@@ -155,8 +155,12 @@ class OrgToolHandler:
                         updates["started_at"] = _now_iso()
                     elif status == "delivered":
                         updates["delivered_at"] = _now_iso()
+                        updates["progress_pct"] = max(existing.progress_pct, 90)
                     elif status == "accepted":
                         updates["completed_at"] = _now_iso()
+                        updates["progress_pct"] = 100
+                    elif status == "rejected":
+                        updates["progress_pct"] = max(existing.progress_pct, 50)
                 if updates:
                     store.update_task(existing.project_id, existing.id, updates)
                 return
@@ -208,6 +212,94 @@ class OrgToolHandler:
             store.add_task(proj.id, task)
         except Exception as exc:
             logger.debug("project-task auto-link failed: %s", exc)
+
+    def _task_id_for_chain(self, org_id: str, chain_id: str | None) -> str | None:
+        if not chain_id:
+            return None
+        try:
+            from openakita.orgs.project_store import ProjectStore
+
+            mgr = self._runtime._manager
+            store = ProjectStore(mgr._org_dir(org_id))
+            task = store.find_task_by_chain(chain_id)
+            return task.id if task else None
+        except Exception:
+            return None
+
+    def _update_task_runtime_state(
+        self,
+        org_id: str,
+        chain_id: str | None,
+        *,
+        runtime_phase: str | None = None,
+        current_owner_node_id: str | None = None,
+        waiting_on_nodes: list[str] | None = None,
+        last_error: str | None = None,
+        last_event: str | None = None,
+        cancel_requested: bool = False,
+        cancelled: bool = False,
+    ) -> None:
+        """Update runtime-facing task fields without disturbing business status.
+
+        These fields explain what the chain is doing right now and are safe to
+        add incrementally because they do not replace ``TaskStatus``.
+        """
+        if not chain_id:
+            return
+        try:
+            from openakita.orgs.project_store import ProjectStore
+
+            mgr = self._runtime._manager
+            org_dir = mgr._org_dir(org_id)
+            store = ProjectStore(org_dir)
+            task = store.find_task_by_chain(chain_id)
+            if not task:
+                return
+            from openakita.orgs.models import TaskStatus
+
+            _PHASE_ORDER = {
+                "orphan_reset": 0, "orphan_cancelled": 0,
+                "queued": 1, "running": 2, "waiting_children": 3,
+                "gathering": 4, "delivered": 5, "completed": 6,
+                "accepted": 7, "failed": 8,
+                "cancel_requested": 9, "cancelled": 10,
+            }
+
+            updates: dict[str, Any] = {"runtime_updated_at": _now_iso()}
+            if runtime_phase is not None:
+                cur_order = _PHASE_ORDER.get(task.runtime_phase or "", -1)
+                new_order = _PHASE_ORDER.get(runtime_phase, -1)
+                if new_order >= cur_order or runtime_phase in ("cancel_requested", "cancelled", "failed"):
+                    updates["runtime_phase"] = runtime_phase
+                if runtime_phase == "cancelled" and task.status not in (
+                    TaskStatus.CANCELLED,
+                    TaskStatus.ACCEPTED,
+                ):
+                    updates["status"] = TaskStatus.CANCELLED
+                    updates["cancelled_at"] = _now_iso()
+                    updates["waiting_on_nodes"] = []
+                elif runtime_phase == "completed" and task.status == TaskStatus.IN_PROGRESS:
+                    updates["status"] = TaskStatus.DELIVERED
+                    updates["delivered_at"] = _now_iso()
+                    updates["progress_pct"] = max(task.progress_pct, 90)
+            if current_owner_node_id is not None:
+                updates["current_owner_node_id"] = current_owner_node_id
+            if waiting_on_nodes is not None:
+                updates["waiting_on_nodes"] = list(waiting_on_nodes)
+            if last_error is not None:
+                updates["last_error"] = last_error[:500]
+            if last_event is not None:
+                updates["last_event"] = last_event[:120]
+            if cancel_requested:
+                updates["cancel_requested_at"] = _now_iso()
+            if cancelled:
+                updates["cancelled_at"] = _now_iso()
+                updates["waiting_on_nodes"] = []
+                if task.status not in (TaskStatus.CANCELLED, TaskStatus.ACCEPTED):
+                    updates["status"] = TaskStatus.CANCELLED
+            store.update_task(task.project_id, task.id, updates)
+        except Exception as exc:
+            logger.debug("runtime task state update failed: %s", exc)
 
     def _append_execution_log(self, org_id: str, chain_id: str, entry: str, node_id: str) -> None:
         """Append an entry to a ProjectTask's execution_log."""
@@ -498,6 +590,14 @@ class OrgToolHandler:
         self._runtime._chain_delegation_depth[sub_chain_id] = chain_depth + 1
 
         self._runtime._register_child_chain(org_id, parent_chain_id, sub_chain_id, to_node)
+        self._update_task_runtime_state(
+            org_id,
+            parent_chain_id,
+            runtime_phase="waiting_children",
+            current_owner_node_id=node_id,
+            waiting_on_nodes=[c.get("node_id", "") for c in self._runtime.get_child_chains(parent_chain_id)],
+            last_event="task_assigned",
+        )
 
         self._runtime.get_event_store(org_id).emit(
             "task_assigned",
@@ -507,6 +607,8 @@ class OrgToolHandler:
                 "task": args["task"][:100],
                 "chain_id": sub_chain_id,
                 "parent_chain_id": parent_chain_id,
+                "task_id": self._task_id_for_chain(org_id, sub_chain_id),
+                "parent_task_id": self._task_id_for_chain(org_id, parent_chain_id),
             },
         )
         await self._runtime._broadcast_ws(
@@ -542,11 +644,24 @@ class OrgToolHandler:
             parent_task_id=parent_task_id,
             depth=depth,
         )
+        self._update_task_runtime_state(
+            org_id,
+            sub_chain_id,
+            runtime_phase="running",
+            current_owner_node_id=to_node,
+            waiting_on_nodes=[],
+            last_event="task_assigned",
+        )
         self._append_execution_log(
             org_id,
             sub_chain_id,
             f"委派给 {to_node}: {args['task'][:80]}",
             node_id,
+        )
+        self._runtime._inbox.push_progress(
+            org_id, node_id,
+            title=f"任务委派: {node_id} → {to_node}",
+            body=args["task"][:200],
         )
         return (
             f"任务已分配给 {to_node}（sub_chain: {sub_chain_id[:16]}）: {args['task'][:50]}\n"
@@ -575,6 +690,16 @@ class OrgToolHandler:
                     "to_node": result.to_node if hasattr(result, "to_node") else "",
                     "content": args["content"][:120],
                 },
+            )
+            from .models import InboxPriority
+
+            self._runtime._inbox.push(
+                org_id,
+                title=f"问题上报: {node_id}",
+                body=args["content"][:300],
+                source_node=node_id,
+                category="escalation",
+                priority=InboxPriority.ACTION,
             )
             return "已上报给上级"
         return "无法上报（没有上级节点）"
@@ -963,7 +1088,27 @@ class OrgToolHandler:
         to_node = args.get("to_node", "")
         deliverable = args.get("deliverable", "")
         summary = args.get("summary", "")
-        chain_id = args.get("task_chain_id") or _now_iso()
+        chain_id = args.get("task_chain_id") or ""
+
+        if chain_id:
+            from openakita.orgs.project_store import ProjectStore
+            mgr = self._runtime._manager
+            store = ProjectStore(mgr._org_dir(org_id))
+            task = store.find_task_by_chain(chain_id)
+            if not task:
+                candidates = store.all_tasks(status="in_progress", assignee=node_id)
+                if len(candidates) == 1:
+                    chain_id = candidates[0].get("chain_id", chain_id)
+                elif candidates:
+                    for c in candidates:
+                        if c.get("chain_id", "").startswith(chain_id):
+                            chain_id = c["chain_id"]
+                            break
+        if not chain_id:
+            chain_id = (
+                self._runtime.get_current_chain_id(org_id, node_id)
+                or _now_iso()
+            )
 
         if not to_node:
             org = self._runtime.get_org(org_id)
@@ -993,7 +1138,12 @@ class OrgToolHandler:
         self._runtime.get_event_store(org_id).emit(
             "task_delivered",
             node_id,
-            {"to": to_node, "chain_id": chain_id, "deliverable_preview": deliverable[:100]},
+            {
+                "to": to_node,
+                "chain_id": chain_id,
+                "task_id": self._task_id_for_chain(org_id, chain_id),
+                "deliverable_preview": deliverable[:100],
+            },
         )
 
         if ok:
@@ -1008,11 +1158,29 @@ class OrgToolHandler:
                 },
             )
             self._link_project_task(org_id, chain_id, status="delivered")
+            self._update_task_runtime_state(
+                org_id,
+                chain_id,
+                runtime_phase="delivered",
+                current_owner_node_id=node_id,
+                waiting_on_nodes=[],
+                last_event="task_delivered",
+            )
             self._append_execution_log(
                 org_id,
                 chain_id,
                 f"提交交付物给 {to_node}: {summary[:80]}",
                 node_id,
+            )
+            from .models import InboxPriority
+
+            self._runtime._inbox.push(
+                org_id,
+                title=f"交付物提交: {node_id} → {to_node}",
+                body=f"{summary[:200]}" if summary else deliverable[:200],
+                source_node=node_id,
+                category="deliverable",
+                priority=InboxPriority.NOTICE,
             )
             return f"交付物已提交给 {to_node}，等待验收。"
         return "提交失败"
@@ -1029,6 +1197,22 @@ class OrgToolHandler:
             return "不能验收自己的交付物"
 
         chain_id = args.get("task_chain_id", "")
+
+        if chain_id:
+            from openakita.orgs.project_store import ProjectStore
+            mgr = self._runtime._manager
+            store = ProjectStore(mgr._org_dir(org_id))
+            task = store.find_task_by_chain(chain_id)
+            if not task:
+                candidates = store.all_tasks(status="delivered", assignee=from_node)
+                if len(candidates) == 1:
+                    chain_id = candidates[0].get("chain_id", chain_id)
+                elif candidates:
+                    for c in candidates:
+                        if c.get("chain_id", "").startswith(chain_id):
+                            chain_id = c["chain_id"]
+                            break
+
         if chain_id:
             events = self._runtime.get_event_store(org_id)
             if events:
@@ -1061,7 +1245,11 @@ class OrgToolHandler:
         self._runtime.get_event_store(org_id).emit(
             "task_accepted",
             node_id,
-            {"from": from_node, "chain_id": chain_id},
+            {
+                "from": from_node,
+                "chain_id": chain_id,
+                "task_id": self._task_id_for_chain(org_id, chain_id),
+            },
         )
         await self._runtime._broadcast_ws(
             "org:task_accepted",
@@ -1075,6 +1263,14 @@ class OrgToolHandler:
         )
         if chain_id:
             self._link_project_task(org_id, chain_id, status="accepted")
+            self._update_task_runtime_state(
+                org_id,
+                chain_id,
+                runtime_phase="accepted",
+                current_owner_node_id=node_id,
+                waiting_on_nodes=[],
+                last_event="task_accepted",
+            )
             self._append_execution_log(
                 org_id,
                 chain_id,
@@ -1134,7 +1330,12 @@ class OrgToolHandler:
         self._runtime.get_event_store(org_id).emit(
             "task_rejected",
             node_id,
-            {"from": from_node, "chain_id": chain_id, "reason": reason[:100]},
+            {
+                "from": from_node,
+                "chain_id": chain_id,
+                "task_id": self._task_id_for_chain(org_id, chain_id),
+                "reason": reason[:100],
+            },
         )
         await self._runtime._broadcast_ws(
             "org:task_rejected",
@@ -1148,6 +1349,14 @@ class OrgToolHandler:
         )
         if chain_id:
             self._link_project_task(org_id, chain_id, status="rejected")
+            self._update_task_runtime_state(
+                org_id,
+                chain_id,
+                runtime_phase="rejected",
+                current_owner_node_id=node_id,
+                waiting_on_nodes=[],
+                last_event="task_rejected",
+            )
             self._append_execution_log(
                 org_id,
                 chain_id,
@@ -1894,3 +2103,17 @@ class OrgToolHandler:
         except Exception as e:
             logger.debug("org_create_project_task failed: %s", e)
             return f"创建失败: {e}"
+
+    async def _handle_org_cancel_chain(self, args: dict, org_id: str, node_id: str) -> str:
+        chain_id = args.get("chain_id", "")
+        if not chain_id:
+            return "需要提供 chain_id"
+        result = await self._runtime.cancel_chain(org_id, chain_id)
+        if "error" in result:
+            return result["error"]
+        n_chains = result.get("cancelled_chains", 0)
+        nodes = result.get("cancelled_nodes", [])
+        return (
+            f"已取消 {n_chains} 条任务链，终止了节点: {', '.join(nodes) if nodes else '无运行中节点'}。"
+            f"相关项目任务状态已更新。"
+        )

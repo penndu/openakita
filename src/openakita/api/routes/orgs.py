@@ -12,7 +12,7 @@ import json
 import logging
 import time
 import uuid
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -586,6 +586,8 @@ async def send_command(request: Request, org_id: str):
         "error": None,
         "created_at": time.time(),
         "updated_at": time.time(),
+        "chain_id": None,
+        "progress_events": [],
     }
 
     sm = getattr(request.app.state, "session_manager", None)
@@ -593,9 +595,24 @@ async def send_command(request: Request, org_id: str):
     async def _run() -> None:
         from openakita.api.routes.websocket import broadcast_event
 
+        def _on_progress(event_type: str, data: dict) -> None:
+            if data.get("org_id") and data["org_id"] != org_id:
+                return
+            evts = _command_store[command_id]["progress_events"]
+            evts.append({"t": time.time(), "event": event_type, **data})
+            if len(evts) > 200:
+                _command_store[command_id]["progress_events"] = evts[-100:]
+            _command_store[command_id]["updated_at"] = time.time()
+
+        rt.set_command_progress_callback(command_id, _on_progress)
         try:
             result = await rt.send_command(org_id, target_node, content)
-            _command_store[command_id].update(status="done", result=result, updated_at=time.time())
+            _command_store[command_id].update(
+                status="done",
+                result=result,
+                chain_id=result.get("chain_id") if isinstance(result, dict) else None,
+                updated_at=time.time(),
+            )
             _bridge_command_to_session(sm, org_id, target_node, content, result)
             await broadcast_event(
                 "org:command_done",
@@ -624,6 +641,8 @@ async def send_command(request: Request, org_id: str):
                     "error": str(exc),
                 },
             )
+        finally:
+            rt.remove_command_progress_callback(command_id)
 
     from openakita.core.engine_bridge import get_engine_loop
 
@@ -648,6 +667,8 @@ async def get_command_status(request: Request, org_id: str, command_id: str):
         "result": cmd["result"],
         "error": cmd["error"],
         "elapsed_s": round(time.time() - cmd["created_at"], 1),
+        "chain_id": cmd.get("chain_id"),
+        "progress_events": cmd.get("progress_events", [])[-20:],
     }
 
 
@@ -1028,17 +1049,21 @@ async def query_events(request: Request, org_id: str):
 
 @router.get("/{org_id}/messages")
 async def query_messages(request: Request, org_id: str):
+    """Query organization message history from communication log."""
     mgr = _get_manager(request)
     org_dir = mgr._org_dir(org_id)
     comm_log = org_dir / "logs" / "communications.jsonl"
     if not comm_log.is_file():
-        return {"messages": [], "count": 0}
+        return {"messages": [], "total": 0}
     import json as _json
 
-    messages: list[dict] = []
-    limit = _safe_int(request.query_params.get("limit"), 100)
+    node_id = request.query_params.get("node_id")
     from_node = request.query_params.get("from_node")
     to_node = request.query_params.get("to_node")
+    msg_type = request.query_params.get("msg_type")
+    limit = _safe_int(request.query_params.get("limit"), 50)
+
+    messages: list[dict] = []
     try:
         lines = comm_log.read_text(encoding="utf-8").strip().split("\n")
         for line in reversed(lines):
@@ -1048,16 +1073,20 @@ async def query_messages(request: Request, org_id: str):
                 msg = _json.loads(line)
             except Exception:
                 continue
+            if node_id and msg.get("from_node") != node_id and msg.get("to_node") != node_id:
+                continue
             if from_node and msg.get("from_node") != from_node:
                 continue
             if to_node and msg.get("to_node") != to_node:
+                continue
+            if msg_type and msg.get("msg_type") != msg_type:
                 continue
             messages.append(msg)
             if len(messages) >= limit:
                 break
     except Exception:
         pass
-    return {"messages": messages, "count": len(messages)}
+    return {"messages": messages, "total": len(messages)}
 
 
 # ---- Policies ----
@@ -1508,15 +1537,20 @@ async def get_org_stats(request: Request, org_id: str):
     store = _get_project_store(request, org_id)
     for n in org.nodes:
         cache_key = f"{org_id}:{n.id}"
-        cached = agent_cache.get(cache_key) if isinstance(agent_cache, dict) else None
-        idle_secs = None
-        if cached:
-            try:
-                last = cached.last_used
-                if isinstance(last, (int, float)) and last > 0:
-                    idle_secs = now_mono - last
-            except Exception:
-                pass
+        idle_since_map = getattr(rt, "_node_idle_since", None) or {}
+        idle_since = idle_since_map.get(cache_key)
+        if idle_since is not None:
+            idle_secs = now_mono - idle_since
+        else:
+            cached = agent_cache.get(cache_key) if isinstance(agent_cache, dict) else None
+            idle_secs = None
+            if cached:
+                try:
+                    last = cached.last_used
+                    if isinstance(last, (int, float)) and last > 0:
+                        idle_secs = now_mono - last
+                except Exception:
+                    pass
         node_pending = messenger.get_pending_count(n.id) if messenger else 0
 
         assigned = store.all_tasks(assignee=n.id)
@@ -1643,30 +1677,38 @@ async def get_org_stats(request: Request, org_id: str):
         for evt in task_events:
             et = evt.get("event_type", "")
             if et not in (
+                "task_assigned",
                 "task_delegated",
                 "task_delivered",
                 "task_accepted",
                 "task_rejected",
                 "task_timeout",
+                "task_cancel_requested",
+                "task_cancelled",
             ):
                 continue
             d = evt.get("data", {})
+            flow_type = "task_delegated" if et == "task_assigned" else et
             recent_tasks.append(
                 {
                     "t": evt.get("timestamp"),
-                    "type": et,
+                    "type": flow_type,
+                    "chain_id": d.get("chain_id"),
+                    "task_id": d.get("task_id"),
                     "from": d.get("from_node") or evt.get("actor", ""),
-                    "to": d.get("to_node", ""),
+                    "to": d.get("to_node") or d.get("to", ""),
                     "task": (d.get("task") or d.get("content") or "")[:80],
                     "status": (
                         "accepted"
-                        if et == "task_accepted"
+                        if flow_type == "task_accepted"
                         else "rejected"
-                        if et == "task_rejected"
+                        if flow_type == "task_rejected"
                         else "timeout"
-                        if et == "task_timeout"
+                        if flow_type == "task_timeout"
+                        else "cancelled"
+                        if flow_type == "task_cancelled"
                         else "delivered"
-                        if et == "task_delivered"
+                        if flow_type == "task_delivered"
                         else "running"
                     ),
                 }
@@ -1717,15 +1759,282 @@ _project_stores: dict[str, Any] = {}
 def _get_project_store(request: Request, org_id: str, *, must_exist: bool = False):
     from openakita.orgs.project_store import ProjectStore
 
+    mgr = _get_manager(request)
     if must_exist:
-        mgr = _get_manager(request)
         if not mgr.get(org_id):
             raise HTTPException(404, "Organization not found")
-    if org_id not in _project_stores:
-        mgr = _get_manager(request)
-        org_dir = mgr._org_dir(org_id)
+    org_dir = mgr._org_dir(org_id)
+    expected_path = org_dir / "projects.json"
+    cached = _project_stores.get(org_id)
+    if cached is None or getattr(cached, "_path", None) != expected_path:
         _project_stores[org_id] = ProjectStore(org_dir)
     return _project_stores[org_id]
+
+
+def _build_task_timeline(task_data: Any, events: list[dict]) -> list[dict]:
+    timeline: list[dict] = []
+    for entry in task_data.execution_log or []:
+        e = entry if isinstance(entry, dict) else {}
+        timeline.append(
+            {
+                "ts": e.get("at", e.get("ts", "")),
+                "event": e.get("event", "execution"),
+                "actor": e.get("by", e.get("actor", "")),
+                "detail": e.get("entry", e.get("detail", "")),
+                "source": "execution_log",
+            }
+        )
+    for ev in events:
+        data = ev.get("data", {})
+        timeline.append(
+            {
+                "ts": ev.get("timestamp", ""),
+                "event": ev.get("event_type", ""),
+                "actor": ev.get("actor", ""),
+                "detail": str(data),
+                "source": "event_store",
+                "data": data,
+            }
+        )
+    timeline.sort(key=lambda x: x.get("ts", ""))
+    return timeline
+
+
+def _read_chain_messages(request: Request, org_id: str, chain_id: str | None, limit: int = 20) -> list[dict]:
+    if not chain_id:
+        return []
+    mgr = _get_manager(request)
+    org_dir = mgr._org_dir(org_id)
+    comm_log = org_dir / "logs" / "communications.jsonl"
+    if not comm_log.is_file():
+        return []
+    import json as _json
+
+    messages: list[dict] = []
+    try:
+        lines = comm_log.read_text(encoding="utf-8").strip().split("\n")
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            try:
+                msg = _json.loads(line)
+            except Exception:
+                continue
+            metadata = msg.get("metadata") or {}
+            msg_chain_id = metadata.get("task_chain_id")
+            parent_chain_id = metadata.get("parent_chain_id")
+            if msg_chain_id != chain_id and parent_chain_id != chain_id:
+                continue
+            messages.append(msg)
+            if len(messages) >= limit:
+                break
+    except Exception:
+        return []
+    messages.reverse()
+    return messages
+
+
+def _summarize_chain_communications(messages: list[dict]) -> dict:
+    if not messages:
+        return {
+            "messages": [],
+            "routes": [],
+            "pending_replies": 0,
+            "replied_messages": 0,
+        }
+
+    def _parse_ts(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    replies_by_parent: dict[str, list[dict]] = {}
+    for msg in messages:
+        reply_to = msg.get("reply_to")
+        if reply_to:
+            replies_by_parent.setdefault(reply_to, []).append(msg)
+
+    normalized: list[dict] = []
+    route_map: dict[tuple[str, str], dict] = {}
+    pending_replies = 0
+    replied_messages = 0
+    wait_reply_types = {"task_assign", "question", "escalate", "task_delivered"}
+
+    for msg in messages:
+        msg_id = msg.get("id")
+        from_node = msg.get("from_node")
+        to_node = msg.get("to_node")
+        replies = replies_by_parent.get(msg_id, [])
+        latest_reply = replies[-1] if replies else None
+        needs_reply = bool(to_node and msg.get("msg_type") in wait_reply_types)
+        awaiting_reply = needs_reply and latest_reply is None
+        response_latency_s: float | None = None
+        if latest_reply is not None:
+            replied_messages += 1
+            t0 = _parse_ts(msg.get("created_at"))
+            t1 = _parse_ts(latest_reply.get("created_at"))
+            if t0 and t1:
+                response_latency_s = round(max(0.0, (t1 - t0).total_seconds()), 1)
+        elif awaiting_reply:
+            pending_replies += 1
+
+        normalized_msg = {
+            **msg,
+            "awaiting_reply": awaiting_reply,
+            "reply_count": len(replies),
+            "replied_by_message_id": latest_reply.get("id") if latest_reply else None,
+            "replied_by_node": latest_reply.get("from_node") if latest_reply else None,
+            "response_latency_s": response_latency_s,
+        }
+        normalized.append(normalized_msg)
+
+        if not from_node or not to_node:
+            continue
+        key = (from_node, to_node)
+        route = route_map.setdefault(
+            key,
+            {
+                "from_node": from_node,
+                "to_node": to_node,
+                "edge_id": msg.get("edge_id"),
+                "message_count": 0,
+                "last_message_at": msg.get("created_at"),
+                "last_message_type": msg.get("msg_type"),
+                "last_message_preview": str(msg.get("content") or "")[:80],
+                "status": "active",
+                "awaiting_reply": False,
+            },
+        )
+        route["message_count"] += 1
+        route["last_message_at"] = msg.get("created_at")
+        route["last_message_type"] = msg.get("msg_type")
+        route["last_message_preview"] = str(msg.get("content") or "")[:80]
+        route["edge_id"] = route.get("edge_id") or msg.get("edge_id")
+        if awaiting_reply:
+            route["status"] = "waiting_reply"
+            route["awaiting_reply"] = True
+        elif latest_reply is not None and route.get("status") != "waiting_reply":
+            route["status"] = "replied"
+
+    return {
+        "messages": normalized,
+        "routes": sorted(route_map.values(), key=lambda item: item.get("last_message_at") or ""),
+        "pending_replies": pending_replies,
+        "replied_messages": replied_messages,
+    }
+
+
+def _child_chain_summary(runtime: Any, org_id: str, chain_id: str | None) -> dict:
+    if not chain_id or not hasattr(runtime, "get_child_chains"):
+        return {"items": [], "pending_count": 0, "completed_count": 0, "failed_count": 0}
+    items = list(runtime.get_child_chains(chain_id) or [])
+    pending = 0
+    completed = 0
+    failed = 0
+    normalized: list[dict] = []
+    for item in items:
+        status = item.get("status", "pending")
+        if status in ("pending", "running"):
+            pending += 1
+        elif status == "completed":
+            completed += 1
+        else:
+            failed += 1
+        normalized.append(
+            {
+                "chain_id": item.get("sub_chain_id"),
+                "node_id": item.get("node_id"),
+                "status": status,
+                "result": item.get("result"),
+                "partial_result": item.get("partial_result"),
+            }
+        )
+    return {
+        "items": normalized,
+        "pending_count": pending,
+        "completed_count": completed,
+        "failed_count": failed,
+    }
+
+
+def _task_runtime_summary(request: Request, org_id: str, task_data: Any) -> dict:
+    runtime = _get_runtime(request)
+    chain_id = task_data.chain_id
+    current_owner = getattr(task_data, "current_owner_node_id", None)
+    waiting_on = list(getattr(task_data, "waiting_on_nodes", []) or [])
+    runtime_phase = getattr(task_data, "runtime_phase", None)
+    if chain_id and not current_owner:
+        owner = getattr(runtime, "_get_chain_owner", lambda cid: None)(chain_id)
+        if owner and owner[0] == org_id:
+            current_owner = owner[1]
+    if chain_id and (runtime_phase in (None, "", "running", "waiting_children", "gathering")):
+        child_chains = runtime.get_child_chains(chain_id) if hasattr(runtime, "get_child_chains") else []
+        if child_chains:
+            waiting_on = [c.get("node_id", "") for c in child_chains if c.get("status") not in ("completed", "cancelled", "failed", "timeout")]
+            runtime_phase = "waiting_children" if waiting_on else (runtime_phase or "gathering")
+    if task_data.status.value == "cancelled" and runtime_phase in (None, "", "cancel_requested"):
+        runtime_phase = "cancelled"
+    if task_data.status.value == "blocked" and runtime_phase in (None, "", "running"):
+        runtime_phase = "failed"
+    if task_data.status.value == "delivered" and not runtime_phase:
+        runtime_phase = "delivered"
+    if task_data.status.value == "accepted" and not runtime_phase:
+        runtime_phase = "accepted"
+    if task_data.status.value == "rejected" and not runtime_phase:
+        runtime_phase = "rejected"
+    return {
+        "business_status": task_data.status.value,
+        "runtime_phase": runtime_phase,
+        "current_owner_node_id": current_owner,
+        "waiting_on_nodes": waiting_on,
+        "last_error": getattr(task_data, "last_error", None),
+        "last_event": getattr(task_data, "last_event", None),
+        "cancel_requested_at": getattr(task_data, "cancel_requested_at", None),
+        "cancelled_at": getattr(task_data, "cancelled_at", None),
+        "runtime_updated_at": getattr(task_data, "runtime_updated_at", None),
+    }
+
+
+def _task_observability_payload(request: Request, org_id: str, task_data: Any, events: list[dict]) -> dict:
+    runtime = _get_runtime(request)
+    chain_id = task_data.chain_id
+    runtime_info = _task_runtime_summary(request, org_id, task_data)
+    child_summary = _child_chain_summary(runtime, org_id, chain_id)
+    communication = _summarize_chain_communications(_read_chain_messages(request, org_id, chain_id, limit=20))
+    recent_messages = communication["messages"]
+    waiting_on = runtime_info.get("waiting_on_nodes") or []
+    if not waiting_on and child_summary["pending_count"] > 0:
+        waiting_on = [
+            item.get("node_id")
+            for item in child_summary["items"]
+            if item.get("status") in ("pending", "running") and item.get("node_id")
+        ]
+        runtime_info["waiting_on_nodes"] = waiting_on
+        if runtime_info.get("runtime_phase") in (None, "", "running"):
+            runtime_info["runtime_phase"] = "waiting_children"
+
+    latest_message = recent_messages[-1] if recent_messages else None
+    return {
+        "runtime": runtime_info,
+        "child_chains": child_summary["items"],
+        "collaboration": {
+            "pending_children": child_summary["pending_count"],
+            "completed_children": child_summary["completed_count"],
+            "failed_children": child_summary["failed_count"],
+            "waiting_on_nodes": waiting_on,
+            "recent_messages": recent_messages,
+            "latest_message": latest_message,
+            "communication_summary": {
+                "routes": communication["routes"],
+                "pending_replies": communication["pending_replies"],
+                "replied_messages": communication["replied_messages"],
+            },
+        },
+        "timeline": _build_task_timeline(task_data, events),
+    }
 
 
 @router.get("/{org_id}/projects")
@@ -1832,16 +2141,78 @@ async def dispatch_task(request: Request, org_id: str, project_id: str, task_id:
         f"描述: {task_data.description}"
     )
 
-    store.update_task(project_id, task_id, {"status": "in_progress"})
+    store.update_task(
+        project_id,
+        task_id,
+        {
+            "status": "in_progress",
+            "runtime_phase": "queued",
+            "last_event": "dispatch_requested",
+            "runtime_updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    )
 
     chain_id = f"dispatch:{task_id}:{uuid.uuid4().hex[:8]}"
     store.update_task(project_id, task_id, {"chain_id": chain_id})
 
     import asyncio
 
-    asyncio.ensure_future(to_engine(runtime.send_command(org_id, None, prompt, chain_id=chain_id)))
+    async def _run_dispatch() -> None:
+        try:
+            await to_engine(runtime.send_command(org_id, None, prompt, chain_id=chain_id))
+        except Exception as exc:
+            store.update_task(
+                project_id,
+                task_id,
+                {
+                    "status": "blocked",
+                    "runtime_phase": "failed",
+                    "last_event": "dispatch_failed",
+                    "last_error": str(exc),
+                    "runtime_updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                },
+            )
+            runtime.get_event_store(org_id).emit(
+                "task_dispatch_failed",
+                "system",
+                {
+                    "task_id": task_id,
+                    "project_id": project_id,
+                    "chain_id": chain_id,
+                    "error": str(exc),
+                },
+            )
+
+    asyncio.ensure_future(_run_dispatch())
 
     return {"ok": True, "task_id": task_id, "chain_id": chain_id, "dispatched": True}
+
+
+@router.post("/{org_id}/projects/{project_id}/tasks/{task_id}/cancel")
+async def cancel_task(request: Request, org_id: str, project_id: str, task_id: str):
+    """Cancel a dispatched or running project task by task_id."""
+    store = _get_project_store(request, org_id)
+    task_data, _ = store.get_task(task_id)
+    if not task_data:
+        raise HTTPException(404, "Task not found")
+    if task_data.project_id != project_id:
+        raise HTTPException(404, "Task not found in this project")
+    if not task_data.chain_id:
+        raise HTTPException(409, "Task has not been dispatched")
+
+    runtime = _get_runtime(request)
+    result = await to_engine(runtime.cancel_chain(org_id, task_data.chain_id))
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    refreshed, _ = store.get_task(task_id)
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "chain_id": task_data.chain_id,
+        "cancelled": True,
+        "result": result,
+        "task": refreshed.to_dict() if refreshed else None,
+    }
 
 
 @router.put("/{org_id}/projects/{project_id}/tasks/{task_id}")
@@ -1865,7 +2236,15 @@ async def update_task(request: Request, org_id: str, project_id: str, task_id: s
         if key in body:
             updates[key] = body[key]
     if "status" in body:
-        updates["status"] = TaskStatus(body["status"])
+        status = TaskStatus(body["status"])
+        updates["status"] = status
+        # Keep completion semantics aligned with status changes made from the UI.
+        if status in {TaskStatus.DELIVERED, TaskStatus.ACCEPTED} and "progress_pct" not in updates:
+            updates["progress_pct"] = 100
+        if status == TaskStatus.DELIVERED and "delivered_at" not in updates:
+            updates["delivered_at"] = datetime.now(UTC).isoformat()
+        if status == TaskStatus.ACCEPTED and "completed_at" not in updates:
+            updates["completed_at"] = datetime.now(UTC).isoformat()
     store = _get_project_store(request, org_id)
     task = store.update_task(project_id, task_id, updates)
     if not task:
@@ -1908,9 +2287,21 @@ async def get_task_detail(request: Request, org_id: str, task_id: str):
     task_data, _ = store.get_task(task_id)
     if not task_data:
         raise HTTPException(404, "Task not found")
+    runtime = _get_runtime(request)
+    chain_id = task_data.chain_id
+    events: list[dict] = []
+    if chain_id:
+        events = runtime.get_event_store(org_id).query(chain_id=chain_id, limit=100)
+    else:
+        events = runtime.get_event_store(org_id).query(task_id=task_id, limit=100)
     result = task_data.to_dict()
+    observability = _task_observability_payload(request, org_id, task_data, events)
+    result["runtime"] = observability["runtime"]
+    result["child_chains"] = observability["child_chains"]
+    result["collaboration"] = observability["collaboration"]
     result["subtasks"] = [t.to_dict() for t in store.get_subtasks(task_id)]
     result["ancestors"] = [t.to_dict() for t in store.get_ancestors(task_id)]
+    result["timeline"] = observability["timeline"]
     return result
 
 
@@ -1931,19 +2322,9 @@ async def get_task_timeline(request: Request, org_id: str, task_id: str):
     task_data, _ = store.get_task(task_id)
     if not task_data:
         raise HTTPException(404, "Task not found")
-    timeline: list[dict] = []
-    for entry in task_data.execution_log or []:
-        e = entry if isinstance(entry, dict) else {}
-        timeline.append(
-            {
-                "ts": e.get("at", e.get("ts", "")),
-                "event": e.get("event", "execution"),
-                "actor": e.get("by", e.get("actor", "")),
-                "detail": e.get("entry", e.get("detail", "")),
-            }
-        )
     runtime = _get_runtime(request)
     event_store = runtime.get_event_store(org_id)
+    events: list[dict] = []
     if event_store:
         chain_id = task_data.chain_id
         events = event_store.query(
@@ -1951,16 +2332,7 @@ async def get_task_timeline(request: Request, org_id: str, task_id: str):
             task_id=task_id if not chain_id else None,
             limit=100,
         )
-        for ev in events:
-            timeline.append(
-                {
-                    "ts": ev.get("timestamp", ""),
-                    "event": ev.get("event_type", ""),
-                    "actor": ev.get("actor", ""),
-                    "detail": str(ev.get("data", "")),
-                }
-            )
-    timeline.sort(key=lambda x: x.get("ts", ""))
+    timeline = _build_task_timeline(task_data, events)
     return {"task_id": task_id, "timeline": timeline}
 
 

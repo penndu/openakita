@@ -10,7 +10,8 @@ import pytest
 
 from openakita.orgs.manager import OrgManager
 from openakita.orgs.runtime import OrgRuntime
-from openakita.orgs.models import NodeStatus, OrgStatus
+from openakita.orgs.models import NodeStatus, OrgProject, OrgStatus, ProjectTask, ProjectStatus, TaskStatus
+from openakita.orgs.project_store import ProjectStore
 from .conftest import make_org
 
 
@@ -353,5 +354,70 @@ class TestStateTransitions:
             org_manager.invalidate_cache(org.id)
             loaded = org_manager.get(org.id)
             assert loaded.status in (OrgStatus.ACTIVE, OrgStatus.RUNNING)
+        finally:
+            await runtime.shutdown()
+
+
+class TestCancelChain:
+    async def test_cancel_chain_cancels_root_owner_and_updates_tasks(
+        self, runtime: OrgRuntime, org_manager: OrgManager,
+    ):
+        with patch("openakita.orgs.templates.ensure_builtin_templates"):
+            await runtime.start()
+        try:
+            org = org_manager.create(make_org(name="取消测试").to_dict())
+            await runtime.start_org(org.id)
+
+            store = ProjectStore(org_manager._org_dir(org.id))
+            proj = OrgProject(id="proj_cancel", org_id=org.id, name="取消项目", status=ProjectStatus.ACTIVE)
+            store.create_project(proj)
+            root_task = ProjectTask(
+                id="task_root",
+                project_id=proj.id,
+                title="根任务",
+                status=TaskStatus.IN_PROGRESS,
+                assignee_node_id="node_ceo",
+                chain_id="dispatch:root",
+            )
+            child_task = ProjectTask(
+                id="task_child",
+                project_id=proj.id,
+                title="子任务",
+                status=TaskStatus.IN_PROGRESS,
+                assignee_node_id="node_cto",
+                chain_id="dispatch:root:child",
+                parent_task_id="task_root",
+                depth=1,
+            )
+            store.add_task(proj.id, root_task)
+            store.add_task(proj.id, child_task)
+
+            runtime.set_current_chain_id(org.id, "node_ceo", "dispatch:root")
+            runtime.set_current_chain_id(org.id, "node_cto", "dispatch:root:child")
+            runtime._register_child_chain(org.id, "dispatch:root", "dispatch:root:child", "node_cto")
+
+            root_running = asyncio.create_task(asyncio.sleep(60))
+            child_running = asyncio.create_task(asyncio.sleep(60))
+            runtime._running_tasks.setdefault(org.id, {})["node_ceo:rootmsg"] = root_running
+            runtime._running_tasks.setdefault(org.id, {})["node_cto:childmsg"] = child_running
+            runtime._cancel_events[f"{org.id}:node_ceo"] = asyncio.Event()
+            runtime._cancel_events[f"{org.id}:node_cto"] = asyncio.Event()
+
+            result = await runtime.cancel_chain(org.id, "dispatch:root")
+            await asyncio.sleep(0)
+
+            assert "node_ceo" in result["cancelled_nodes"]
+            assert "node_cto" in result["cancelled_nodes"]
+            assert runtime._cancel_events[f"{org.id}:node_ceo"].is_set()
+            assert runtime._cancel_events[f"{org.id}:node_cto"].is_set()
+            assert root_running.cancelled()
+            assert child_running.cancelled()
+
+            updated_root, _ = store.get_task("task_root")
+            updated_child, _ = store.get_task("task_child")
+            assert updated_root is not None and updated_root.status == TaskStatus.CANCELLED
+            assert updated_child is not None and updated_child.status == TaskStatus.CANCELLED
+            assert updated_root.runtime_phase == "cancelled"
+            assert updated_child.runtime_phase == "cancelled"
         finally:
             await runtime.shutdown()

@@ -264,7 +264,7 @@ class OrgMessenger:
             return await self._broadcast(msg)
 
         chain_id = msg.metadata.get("task_chain_id")
-        if chain_id:
+        if chain_id and msg.msg_type == MsgType.TASK_ASSIGN:
             affinity_node = self._task_affinity.get(chain_id)
             if affinity_node and affinity_node != msg.to_node:
                 actual = self._org.get_node(affinity_node)

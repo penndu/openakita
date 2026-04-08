@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -123,6 +124,8 @@ class OrgRuntime:
 
         self._chain_delegation_depth: dict[str, int] = {}  # chain_id -> delegation depth
         self._node_current_chain: dict[str, str] = {}  # org_id:node_id -> chain_id
+        self._chain_owners: dict[str, str] = {}  # chain_id -> org_id:node_id
+        self._cancelled_chains: set[str] = set()
         self.max_concurrent_per_node: int = 2
         self._idle_tasks: dict[str, asyncio.Task] = {}
 
@@ -140,11 +143,31 @@ class OrgRuntime:
         self._save_locks: dict[str, asyncio.Lock] = {}
 
         self._node_consecutive_failures: dict[str, int] = {}
+        self._node_idle_since: dict[str, float] = {}
+
+        self._command_callbacks: dict[str, Callable] = {}
+        self._cancel_events: dict[str, asyncio.Event] = {}
 
         self._started = False
+        self._is_recovering = False
+        self._stopping_orgs: set[str] = set()
 
         global _runtime_instance
         _runtime_instance = self
+
+    def set_command_progress_callback(self, command_id: str, cb: Callable) -> None:
+        self._command_callbacks[command_id] = cb
+
+    def remove_command_progress_callback(self, command_id: str) -> None:
+        self._command_callbacks.pop(command_id, None)
+
+    def _fire_command_progress(self, event_type: str, data: dict) -> None:
+        """Notify all registered command callbacks."""
+        for cb in self._command_callbacks.values():
+            try:
+                cb(event_type, data)
+            except Exception:
+                pass
 
     def _get_org_semaphore(self, org_id: str) -> asyncio.Semaphore:
         """获取组织级并发信号量（限制同时激活的节点数）。"""
@@ -163,6 +186,7 @@ class OrgRuntime:
         if self._started:
             return
         self._started = True
+        self._is_recovering = True
         logger.info("[OrgRuntime] Starting...")
 
         for info in self._manager.list_orgs(include_archived=False):
@@ -175,6 +199,7 @@ class OrgRuntime:
                 await self._recover_pending_tasks(org)
                 logger.info(f"[OrgRuntime] Recovered org: {org.name} ({org.status.value})")
 
+        self._is_recovering = False
         logger.info("[OrgRuntime] Started.")
 
     async def shutdown(self) -> None:
@@ -225,6 +250,8 @@ class OrgRuntime:
         self._save_locks.clear()
         self._node_busy_since.clear()
         self._node_current_chain.clear()
+        self._chain_owners.clear()
+        self._cancelled_chains.clear()
         self._chain_delegation_depth.clear()
 
         self._started = False
@@ -292,7 +319,13 @@ class OrgRuntime:
         mode = getattr(org, "operation_mode", "command") or "command"
         if mode == "autonomous":
             if org.core_business and org.core_business.strip():
-                asyncio.ensure_future(self._auto_kickoff(org))
+                if not self._is_recovering:
+                    asyncio.ensure_future(self._auto_kickoff(org))
+                else:
+                    logger.info(
+                        f"[OrgRuntime] Skipping auto-kickoff for {org_id} "
+                        f"during startup recovery"
+                    )
             self._idle_tasks[org_id] = asyncio.ensure_future(self._idle_probe_loop(org_id))
         else:
             self._idle_tasks[org_id] = asyncio.ensure_future(self._health_check_loop(org_id))
@@ -321,6 +354,10 @@ class OrgRuntime:
             except (asyncio.CancelledError, Exception):
                 pass
 
+        for key, evt in list(self._cancel_events.items()):
+            if key.startswith(f"{org_id}:"):
+                evt.set()
+
         org_tasks = self._running_tasks.pop(org_id, {})
         for _node_id, task in org_tasks.items():
             if not task.done():
@@ -339,17 +376,21 @@ class OrgRuntime:
 
         self._check_transition(org, OrgStatus.DORMANT)
 
-        await self._stop_org_services(org_id)
-        await self._cancel_org_tasks(org_id)
+        self._stopping_orgs.add(org_id)
+        try:
+            await self._stop_org_services(org_id)
+            await self._cancel_org_tasks(org_id)
 
-        for node in org.nodes:
-            if node.status in (NodeStatus.BUSY, NodeStatus.WAITING, NodeStatus.ERROR):
-                self._set_node_status(org, node, NodeStatus.IDLE, "org_stopped")
+            for node in org.nodes:
+                if node.status in (NodeStatus.BUSY, NodeStatus.WAITING, NodeStatus.ERROR):
+                    self._set_node_status(org, node, NodeStatus.IDLE, "org_stopped")
 
-        org.status = OrgStatus.DORMANT
-        org.updated_at = _now_iso()
-        self._manager.update(org_id, {"status": org.status.value})
-        await self._save_org(org)
+            org.status = OrgStatus.DORMANT
+            org.updated_at = _now_iso()
+            self._manager.update(org_id, {"status": org.status.value})
+            await self._save_org(org)
+        finally:
+            self._stopping_orgs.discard(org_id)
 
         self.get_event_store(org_id).emit("org_stopped", "system")
         await self._deactivate_org(org_id)
@@ -583,6 +624,14 @@ class OrgRuntime:
                 "child_count": len(events),
             },
         )
+        self._tool_handler._update_task_runtime_state(
+            org.id,
+            parent_chain_id,
+            runtime_phase="waiting_children",
+            current_owner_node_id=root_node_id,
+            waiting_on_nodes=[child.get("node_id", "") for child, _ in events if child.get("node_id")],
+            last_event="gather_started",
+        )
 
         done_count = 0
         per_node_timeout = gather_timeout / max(len(events), 1)
@@ -606,6 +655,15 @@ class OrgRuntime:
                 )
             elapsed = time.monotonic() - t0
             remaining = max(remaining - elapsed, 0)
+
+        if parent_chain_id in self._cancelled_chains:
+            self._cleanup_chain_tracking(parent_chain_id, children)
+            return {
+                "node_id": root_node_id,
+                "chain_id": parent_chain_id,
+                "cancelled": True,
+                "error": "任务已取消",
+            }
 
         summary_parts = []
         for child in self.get_child_chains(parent_chain_id):
@@ -636,6 +694,14 @@ class OrgRuntime:
                 "total": len(children),
             },
         )
+        self._tool_handler._update_task_runtime_state(
+            org.id,
+            parent_chain_id,
+            runtime_phase="gathering",
+            current_owner_node_id=root_node_id,
+            waiting_on_nodes=[],
+            last_event="gather_complete",
+        )
 
         org = self._active_orgs.get(org.id) or org
         root_node = org.get_node(root_node_id) or root_node
@@ -656,11 +722,21 @@ class OrgRuntime:
         children: list[dict],
     ) -> None:
         """Remove completed chain tracking data to prevent unbounded memory growth."""
+        org_id = (children[0].get("org_id") if children else None) or self._get_org_id_for_chain(
+            parent_chain_id
+        )
+        messenger = self.get_messenger(org_id) if org_id else None
         for child in children:
             scid = child["sub_chain_id"]
             self._chain_completion_events.pop(scid, None)
             self._chain_results.pop(scid, None)
+            self._chain_owners.pop(scid, None)
+            self._cancelled_chains.discard(scid)
+            if messenger:
+                messenger.release_task_affinity(scid)
         self._child_chains.pop(parent_chain_id, None)
+        self._chain_owners.pop(parent_chain_id, None)
+        self._cancelled_chains.discard(parent_chain_id)
 
     async def _auto_kickoff(self, org: Organization) -> None:
         """Auto-activate the root node with a mission briefing when org starts
@@ -678,16 +754,15 @@ class OrgRuntime:
                 f"{persona_label}委托你全权负责以下核心业务：\n\n"
                 f"---\n{org.core_business.strip()}\n---\n\n"
                 f"## 你现在需要做的\n\n"
-                f"1. **制定工作策略**：根据核心业务目标，拟定具体的行动计划和阶段性目标\n"
-                f"2. **分解和委派**：将工作拆解为具体任务，用 org_delegate_task 分派给合适的下属\n"
-                f"3. **启动执行**：不要等待进一步指令，立即开始推进最优先的工作\n"
-                f"4. **记录决策**：将工作策略、任务分工、阶段目标写入黑板（org_write_blackboard）\n\n"
-                f"## 工作原则\n\n"
-                f"- 你是本组织的最高负责人，应自主判断、持续推进，不需要等{persona_label}下达每一步指令\n"
-                f"- {persona_label}的指令是方向性调整和补充，日常工作由你全权决策\n"
-                f"- 遇到重大决策或风险时，通过黑板记录，{persona_label}会在查看组织状态时看到\n"
-                f"- 定期复盘进度，调整策略，确保持续向目标推进\n\n"
-                f"现在开始工作。"
+                f"1. **分析和规划**：分析核心业务目标，制定工作策略\n"
+                f"2. **记录到黑板**：用 org_write_blackboard 记录你的工作计划和任务分工\n"
+                f"3. **持续推进**：完成首轮规划后，立即启动最关键的下一步，并持续跟进结果\n\n"
+                f"## 重要约束\n\n"
+                f"- **不要立即委派大量任务**——先制定计划写入黑板，再从 1-2 个最高优先级动作开始\n"
+                f"- 每次最多委派 1-2 个最优先的任务，完成后再委派下一批\n"
+                f"- 不要自主启动可能耗时很长的工作（如搜索、写文件、创建项目）\n"
+                f"- 遇到重大分歧或不确定性时，通过黑板记录并同步{persona_label}，但不要无故停滞等待\n\n"
+                f"请先制定你的工作计划。"
             )
 
             self.get_event_store(org.id).emit(
@@ -713,6 +788,31 @@ class OrgRuntime:
         key = f"{org_id}:{node_id}"
         if chain_id:
             self._node_current_chain[key] = chain_id
+            self._chain_owners[chain_id] = key
+        else:
+            self._node_current_chain.pop(key, None)
+
+    def _get_chain_owner(self, chain_id: str) -> tuple[str, str] | None:
+        owner = self._chain_owners.get(chain_id)
+        if owner and ":" in owner:
+            org_key, node_id = owner.split(":", 1)
+            return org_key, node_id
+        for key, current_chain in self._node_current_chain.items():
+            if current_chain == chain_id and ":" in key:
+                org_key, node_id = key.split(":", 1)
+                self._chain_owners[chain_id] = key
+                return org_key, node_id
+        return None
+
+    def _clear_chain_tracking(self, org_id: str, node_id: str, chain_id: str | None) -> None:
+        key = f"{org_id}:{node_id}"
+        current = self._node_current_chain.get(key)
+        if chain_id:
+            if current == chain_id:
+                self._node_current_chain.pop(key, None)
+            if self._chain_owners.get(chain_id) == key:
+                self._chain_owners.pop(chain_id, None)
+            self._cancelled_chains.discard(chain_id)
         else:
             self._node_current_chain.pop(key, None)
 
@@ -760,9 +860,160 @@ class OrgRuntime:
         if evt:
             evt.set()
 
+        if status in ("completed", "timeout", "cancelled", "failed"):
+            org_id = self._get_org_id_for_chain(sub_chain_id)
+            if org_id:
+                try:
+                    self._tool_handler._recalc_parent_progress(org_id, sub_chain_id)
+                except Exception:
+                    pass
+
+    def _get_org_id_for_chain(self, chain_id: str) -> str | None:
+        """Reverse-lookup org_id from child chain entries."""
+        for children in self._child_chains.values():
+            for c in children:
+                if c["sub_chain_id"] == chain_id:
+                    return c.get("org_id")
+        return None
+
     def get_child_chains(self, parent_chain_id: str) -> list[dict]:
         """Return the list of child chain entries for a parent chain."""
         return list(self._child_chains.get(parent_chain_id, []))
+
+    async def cancel_chain(self, org_id: str, chain_id: str) -> dict:
+        """Cancel a task chain and all its sub-chains recursively.
+
+        Cancels running asyncio tasks for all nodes involved, marks chain
+        entries as cancelled, updates project task statuses, and resets
+        node states to idle.
+        """
+        org = self.get_org(org_id)
+        if not org:
+            return {"error": "组织未找到"}
+
+        cancelled_nodes: list[str] = []
+        all_chain_ids = self._collect_chain_tree(chain_id)
+        self._cancelled_chains.update(all_chain_ids)
+        self._tool_handler._update_task_runtime_state(
+            org_id,
+            chain_id,
+            runtime_phase="cancel_requested",
+            waiting_on_nodes=[],
+            last_event="cancel_requested",
+            cancel_requested=True,
+        )
+        self.get_event_store(org_id).emit(
+            "task_cancel_requested",
+            "user",
+            {"chain_id": chain_id, "cancelled_chain_ids": all_chain_ids},
+        )
+
+        org_tasks = self._running_tasks.get(org_id, {})
+        for cid in all_chain_ids:
+            owner = self._get_chain_owner(cid)
+            if owner and owner[0] == org_id:
+                _, nid = owner
+                evt = self._cancel_events.get(f"{org_id}:{nid}")
+                if evt:
+                    evt.set()
+                for task_key, task in list(org_tasks.items()):
+                    if task_key.startswith(f"{nid}:") and not task.done():
+                        task.cancel()
+                        cancelled_nodes.append(nid)
+                self._tool_handler._update_task_runtime_state(
+                    org_id,
+                    cid,
+                    runtime_phase="cancel_requested",
+                    current_owner_node_id=nid,
+                    waiting_on_nodes=[],
+                    last_event="cancel_requested",
+                    cancel_requested=True,
+                )
+            children = self._child_chains.get(cid, [])
+            for child in children:
+                nid = child.get("node_id", "")
+                evt = self._cancel_events.get(f"{org_id}:{nid}")
+                if evt:
+                    evt.set()
+                for task_key, task in list(org_tasks.items()):
+                    if task_key.startswith(f"{nid}:") and not task.done():
+                        task.cancel()
+                        cancelled_nodes.append(nid)
+                self._complete_child_chain(
+                    child["sub_chain_id"], status="cancelled", partial_result="用户取消"
+                )
+                self._tool_handler._update_task_runtime_state(
+                    org_id,
+                    child["sub_chain_id"],
+                    runtime_phase="cancelled",
+                    current_owner_node_id=nid or None,
+                    waiting_on_nodes=[],
+                    last_event="cancelled",
+                    cancelled=True,
+                )
+
+        for nid in set(cancelled_nodes):
+            node = org.get_node(nid)
+            if node and node.status == NodeStatus.BUSY:
+                self._set_node_status(org, node, NodeStatus.IDLE, "chain_cancelled")
+
+        self._update_project_tasks_on_cancel(org_id, all_chain_ids)
+        for cid in all_chain_ids:
+            self._tool_handler._update_task_runtime_state(
+                org_id,
+                cid,
+                runtime_phase="cancelled",
+                waiting_on_nodes=[],
+                last_event="cancelled",
+                cancelled=True,
+            )
+        self.get_event_store(org_id).emit(
+            "task_cancelled",
+            "system",
+            {
+                "chain_id": chain_id,
+                "cancelled_chain_ids": all_chain_ids,
+                "nodes": list(set(cancelled_nodes)),
+            },
+        )
+
+        await self._save_org(org)
+        logger.info(
+            f"[OrgRuntime] Cancelled chain {chain_id[:20]} and "
+            f"{len(all_chain_ids) - 1} sub-chains, affected nodes: {cancelled_nodes}"
+        )
+        return {
+            "cancelled_chains": len(all_chain_ids),
+            "cancelled_nodes": list(set(cancelled_nodes)),
+        }
+
+    def _collect_chain_tree(self, root_chain_id: str) -> list[str]:
+        """Recursively collect all chain IDs in the tree rooted at *root_chain_id*."""
+        result = [root_chain_id]
+        children = self._child_chains.get(root_chain_id, [])
+        for child in children:
+            result.extend(self._collect_chain_tree(child["sub_chain_id"]))
+        return result
+
+    def _update_project_tasks_on_cancel(
+        self, org_id: str, chain_ids: list[str]
+    ) -> None:
+        """Mark in-progress project tasks as cancelled for the given chain IDs."""
+        try:
+            from openakita.orgs.project_store import ProjectStore
+
+            mgr = self._manager
+            store = ProjectStore(mgr._org_dir(org_id))
+            for cid in chain_ids:
+                task = store.find_task_by_chain(cid)
+                if task and task.status in ("in_progress", "todo"):
+                    store.update_task(
+                        task.project_id,
+                        task.id,
+                        {"status": "cancelled", "progress_pct": 0},
+                    )
+        except Exception as e:
+            logger.debug(f"[OrgRuntime] Failed to update project tasks on cancel: {e}")
 
     async def _activate_and_run(
         self,
@@ -772,6 +1023,8 @@ class OrgRuntime:
         chain_id: str | None = None,
     ) -> dict:
         """Activate a node agent and run a task (with org-level concurrency limit)."""
+        if org.id in self._stopping_orgs or org.id not in self._active_orgs:
+            return {"error": "组织已停止或正在停止，拒绝新任务"}
         if node.status == NodeStatus.FROZEN:
             return {"error": f"{node.role_title} 已被冻结，无法执行任务"}
         if node.status == NodeStatus.OFFLINE:
@@ -789,6 +1042,8 @@ class OrgRuntime:
         chain_id: str | None = None,
     ) -> dict:
         """_activate_and_run 的内部实现（已在 org semaphore 保护下）。"""
+        if org.id in self._stopping_orgs or org.id not in self._active_orgs:
+            return {"error": "组织已停止，任务被拒绝"}
         if node.status == NodeStatus.FROZEN:
             return {"error": f"{node.role_title} 已被冻结，无法执行任务"}
         if node.status == NodeStatus.OFFLINE:
@@ -805,8 +1060,18 @@ class OrgRuntime:
         self.set_current_chain_id(org.id, node.id, chain_id)
         if hasattr(agent, "_org_context"):
             agent._org_context["current_chain_id"] = chain_id or ""
+        if chain_id:
+            self._tool_handler._update_task_runtime_state(
+                org.id,
+                chain_id,
+                runtime_phase="running",
+                current_owner_node_id=node.id,
+                waiting_on_nodes=[],
+                last_event="node_activated",
+            )
 
-        self._set_node_status(org, node, NodeStatus.BUSY, "task_started")
+        task_desc = prompt[:120].replace("\n", " ")
+        self._set_node_status(org, node, NodeStatus.BUSY, task_desc)
         await self._save_org(org)
 
         if org.id not in self._active_orgs:
@@ -815,17 +1080,12 @@ class OrgRuntime:
         self.get_event_store(org.id).emit(
             "node_activated",
             node.id,
-            {"prompt": prompt[:200]},
+                {"prompt": prompt[:200], "chain_id": chain_id, "task_id": self._tool_handler._task_id_for_chain(org.id, chain_id)},
         )
-        await self._broadcast_ws(
-            "org:node_status",
-            {
-                "org_id": org.id,
-                "node_id": node.id,
-                "status": "busy",
-                "current_task": prompt[:120],
-            },
-        )
+
+        cancel_key = f"{org.id}:{node.id}"
+        cancel_event = asyncio.Event()
+        self._cancel_events[cancel_key] = cancel_event
 
         try:
             session_id = f"org:{org.id}:node:{node.id}"
@@ -856,15 +1116,10 @@ class OrgRuntime:
             self.get_event_store(org.id).emit(
                 "task_completed",
                 node.id,
-                {"result_preview": result_text[:200] if result_text else ""},
-            )
-            await self._broadcast_ws(
-                "org:node_status",
                 {
-                    "org_id": org.id,
-                    "node_id": node.id,
-                    "status": "idle",
-                    "current_task": "",
+                    "result_preview": result_text[:200] if result_text else "",
+                    "chain_id": chain_id,
+                    "task_id": self._tool_handler._task_id_for_chain(org.id, chain_id),
                 },
             )
             await self._broadcast_ws(
@@ -876,7 +1131,47 @@ class OrgRuntime:
                 },
             )
 
+            self._inbox.push_task_complete(
+                org.id,
+                node.id,
+                task_name=task_desc[:80],
+                result_summary=result_text[:300] if result_text else "(无结果)",
+            )
+
             if chain_id:
+                self._tool_handler._update_task_runtime_state(
+                    org.id,
+                    chain_id,
+                    runtime_phase="completed",
+                    current_owner_node_id=node.id,
+                    waiting_on_nodes=[],
+                    last_event="task_completed",
+                )
+                children_nodes = org.get_children(node.id)
+                child_chains = self.get_child_chains(chain_id)
+                is_substantive_task = len(prompt or "") > 20
+                if children_nodes and not child_chains and is_substantive_task:
+                    try:
+                        child_names = ", ".join(
+                            c.role_title or c.id for c in children_nodes[:5]
+                        )
+                        followup = (
+                            f"你有 {len(children_nodes)} 个直属下级"
+                            f"（{child_names}），但刚才你没有委派任何子任务。\n\n"
+                            f"如果这个任务需要下属协助，请用 org_delegate_task "
+                            f"委派给最相关的 1-2 个下属。不需要一次性委派给所有人。\n"
+                            f"如果任务已由你直接完成，请说明原因。"
+                        )
+                        followup_result = await self._run_agent_task(
+                            agent, followup, session_id, org, node,
+                        )
+                        if followup_result:
+                            result_text = followup_result
+                    except Exception as followup_err:
+                        logger.warning(
+                            f"[OrgRuntime] Delegation followup failed for {node.id}: {followup_err}"
+                        )
+
                 self._complete_child_chain(
                     chain_id,
                     status="completed",
@@ -890,6 +1185,7 @@ class OrgRuntime:
 
         except _NodeTimeoutError as te:
             timeout_msg = f"节点 {node.role_title or node.id} 执行超时（{te.timeout_s}s）"
+            was_cancelled = "(用户取消)" in (te.partial or "") or "(任务已取消)" in (te.partial or "")
             logger.warning(f"[OrgRuntime] {timeout_msg}")
             try:
                 self._set_node_status(org, node, NodeStatus.IDLE, "task_timeout")
@@ -901,9 +1197,14 @@ class OrgRuntime:
                 pass
             try:
                 self.get_event_store(org.id).emit(
-                    "task_timeout",
+                    "task_cancelled" if was_cancelled else "task_timeout",
                     node.id,
-                    {"timeout_s": te.timeout_s},
+                    {
+                        "timeout_s": te.timeout_s,
+                        "chain_id": chain_id,
+                        "task_id": self._tool_handler._task_id_for_chain(org.id, chain_id),
+                        "partial": te.partial,
+                    },
                 )
             except Exception:
                 pass
@@ -922,9 +1223,36 @@ class OrgRuntime:
             if chain_id:
                 self._complete_child_chain(
                     chain_id,
-                    status="timeout",
+                    status="cancelled" if was_cancelled else "timeout",
                     partial_result=te.partial or timeout_msg,
                 )
+                self._tool_handler._link_project_task(
+                    org.id,
+                    chain_id,
+                    status="cancelled" if was_cancelled else "blocked",
+                )
+                self._tool_handler._update_task_runtime_state(
+                    org.id,
+                    chain_id,
+                    runtime_phase="cancelled" if was_cancelled else "failed",
+                    current_owner_node_id=node.id,
+                    waiting_on_nodes=[],
+                    last_error=None if was_cancelled else timeout_msg,
+                    last_event="task_cancelled" if was_cancelled else "task_timeout",
+                    cancelled=was_cancelled,
+                )
+                try:
+                    if not was_cancelled:
+                        await self._notify_delegator_on_failure(
+                            org, node, "task_timeout", timeout_msg, chain_id=chain_id
+                        )
+                except Exception:
+                    pass
+            self._inbox.push_warning(
+                org.id, node.id,
+                title=f"任务超时: {node.role_title}",
+                body=timeout_msg[:300],
+            )
             return {"node_id": node.id, "error": timeout_msg, "timeout": True}
 
         except Exception as e:
@@ -948,6 +1276,14 @@ class OrgRuntime:
                 except Exception:
                     node.status = NodeStatus.FROZEN
                 self._schedule_auto_unfreeze(org.id, node.id)
+                try:
+                    await self._notify_delegator_on_failure(
+                        org, node, "circuit_breaker_frozen",
+                        node.frozen_reason or str(e)[:200],
+                        chain_id=chain_id or "",
+                    )
+                except Exception:
+                    pass
             else:
                 try:
                     self._set_node_status(org, node, NodeStatus.ERROR, str(e)[:200])
@@ -960,7 +1296,15 @@ class OrgRuntime:
             try:
                 es = self.get_event_store(org.id)
                 if es:
-                    es.emit("task_failed", node.id, {"error": str(e)[:200]})
+                    es.emit(
+                        "task_failed",
+                        node.id,
+                        {
+                            "error": str(e)[:200],
+                            "chain_id": chain_id,
+                            "task_id": self._tool_handler._task_id_for_chain(org.id, chain_id),
+                        },
+                    )
             except Exception:
                 pass
             try:
@@ -976,6 +1320,11 @@ class OrgRuntime:
             except Exception:
                 pass
 
+            cb_triggered = (
+                self._node_consecutive_failures.get(fail_key, 0)
+                >= _CIRCUIT_BREAKER_THRESHOLD
+            )
+
             if chain_id:
                 partial = self._extract_partial_result(e)
                 self._complete_child_chain(
@@ -984,10 +1333,34 @@ class OrgRuntime:
                     result=None,
                     partial_result=partial,
                 )
+                self._tool_handler._link_project_task(org.id, chain_id, status="blocked")
+                self._tool_handler._update_task_runtime_state(
+                    org.id,
+                    chain_id,
+                    runtime_phase="failed",
+                    current_owner_node_id=node.id,
+                    waiting_on_nodes=[],
+                    last_error=str(e)[:200],
+                    last_event="task_failed",
+                )
+                self._inbox.push_warning(
+                    org.id, node.id,
+                    title=f"任务异常: {node.role_title}",
+                    body=str(e)[:300],
+                )
+                if not cb_triggered:
+                    try:
+                        await self._notify_delegator_on_failure(
+                            org, node, "task_failed", str(e)[:200], chain_id=chain_id
+                        )
+                    except Exception:
+                        pass
 
             return {"node_id": node.id, "error": str(e)}
 
         finally:
+            self._cancel_events.pop(cancel_key, None)
+            self._clear_chain_tracking(org.id, node.id, chain_id)
             self._emit_llm_usage(agent, org, node)
 
     async def _auto_send_result(
@@ -999,8 +1372,10 @@ class OrgRuntime:
     ) -> None:
         """Auto-send a TASK_RESULT message to the delegating parent."""
         try:
+            if chain_id in self._cancelled_chains:
+                return
             parent = org.get_parent(node.id)
-            if not parent:
+            if not parent or parent.id == node.id:
                 return
             messenger = self.get_messenger(org.id)
             if not messenger:
@@ -1031,24 +1406,37 @@ class OrgRuntime:
         org: Organization,
         node: OrgNode,
     ) -> str:
-        """Run a single agent task with per-node timeout protection.
+        """Run a single agent task with per-node timeout and cancel-event support.
 
-        Raises ``_NodeTimeoutError`` on timeout so the caller can
-        distinguish it from normal completion.
+        Raises ``_NodeTimeoutError`` on timeout or cancellation so the caller
+        can distinguish it from normal completion.
         """
         timeout_s = getattr(node, "timeout_s", None) or 300
+        cancel_key = f"{org.id}:{node.id}"
+        cancel_event = self._cancel_events.get(cancel_key)
+
+        chat_task = asyncio.ensure_future(agent.chat(prompt, session_id=session_id))
         try:
-            response = await asyncio.wait_for(
-                agent.chat(prompt, session_id=session_id),
-                timeout=timeout_s,
-            )
-            return response or ""
-        except (asyncio.TimeoutError, TimeoutError):
-            logger.warning(f"[OrgRuntime] Agent task timed out for {node.id} after {timeout_s}s")
-            raise _NodeTimeoutError(node.id, timeout_s)
+            check_interval = 5
+            elapsed = 0.0
+            while not chat_task.done():
+                wait_time = min(check_interval, timeout_s - elapsed)
+                if wait_time <= 0:
+                    chat_task.cancel()
+                    raise _NodeTimeoutError(node.id, timeout_s)
+                done, _ = await asyncio.wait({chat_task}, timeout=wait_time)
+                if done:
+                    break
+                elapsed += wait_time
+                if cancel_event and cancel_event.is_set():
+                    chat_task.cancel()
+                    raise _NodeTimeoutError(node.id, elapsed, partial="(用户取消)")
+            return chat_task.result() or ""
         except asyncio.CancelledError:
             logger.info(f"[OrgRuntime] Task cancelled for {node.id}")
             raise _NodeTimeoutError(node.id, timeout_s, partial="(任务已取消)")
+        except _NodeTimeoutError:
+            raise
         except Exception as e:
             logger.error(f"[OrgRuntime] Agent task error: {e}")
             raise
@@ -1186,6 +1574,10 @@ class OrgRuntime:
             "tool_handler": self._tool_handler,
         }
 
+        # Org node agents should behave like sub-agents: skip IntentAnalyzer,
+        # force TASK intent, and always use tools (org_delegate_task, etc.)
+        agent._is_sub_agent_call = True
+
         if hasattr(agent, "brain") and hasattr(agent.brain, "set_trace_context"):
             agent.brain.set_trace_context(
                 {
@@ -1198,11 +1590,7 @@ class OrgRuntime:
             )
 
         if hasattr(agent, "reasoning_engine"):
-            from ..config import settings as _settings
-
-            agent.reasoning_engine._force_tool_override = max(
-                1, int(getattr(_settings, "force_tool_call_max_retries", 1))
-            )
+            agent.reasoning_engine._force_tool_override = 0
 
         self._register_org_tool_handler(agent, org.id, node.id)
 
@@ -1400,6 +1788,16 @@ class OrgRuntime:
             logger.debug(f"Skipping expired message {msg.id}")
             return
 
+        if msg.from_node == node_id and msg.msg_type in (
+            MsgType.TASK_RESULT,
+            MsgType.TASK_DELIVERED,
+        ):
+            logger.warning(
+                f"[OrgRuntime] Dropping self-referencing {msg.msg_type.value} "
+                f"for {node_id} (msg_id={msg.id})"
+            )
+            return
+
         org = self._active_orgs.get(org_id) or self._manager.get(org_id)
         if not org:
             return
@@ -1407,12 +1805,14 @@ class OrgRuntime:
         if not node or node.status in (NodeStatus.FROZEN, NodeStatus.OFFLINE):
             return
 
-        active_count = self._node_active_count(org_id, node_id)
+        self_key = f"{node_id}:{msg.id}"
+        active_count = self._node_active_count(org_id, node_id, exclude_key=self_key)
 
         messenger = self.get_messenger(org_id)
         pending = messenger.get_pending_count(node_id) if messenger else 0
 
-        if active_count >= self.max_concurrent_per_node:
+        node_max = getattr(node, "max_concurrent_tasks", None) or self.max_concurrent_per_node
+        if active_count >= node_max:
             target_clone = self._try_route_to_clone(org, node, msg, pending)
             if target_clone:
                 task_prompt = self._format_incoming_message(msg)
@@ -1602,7 +2002,7 @@ class OrgRuntime:
         new_status: NodeStatus,
         reason: str = "",
     ) -> None:
-        """Set node status with audit trail (event_store + log)."""
+        """Set node status with audit trail (event_store + log + WebSocket)."""
         old_status = node.status
         if old_status == new_status:
             return
@@ -1613,8 +2013,11 @@ class OrgRuntime:
         key = f"{org.id}:{node.id}"
         if new_status == NodeStatus.BUSY:
             self._node_busy_since[key] = time.monotonic()
+            self._node_idle_since.pop(key, None)
         elif old_status == NodeStatus.BUSY:
             self._node_busy_since.pop(key, None)
+        if new_status == NodeStatus.IDLE:
+            self._node_idle_since[key] = time.monotonic()
         node.status = new_status
         self.get_event_store(org.id).emit(
             "node_status_change",
@@ -1625,6 +2028,21 @@ class OrgRuntime:
             f"[OrgRuntime] Node {node.id}: {old_status.value} -> {new_status.value}"
             + (f" ({reason})" if reason else "")
         )
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                self._broadcast_ws(
+                    "org:node_status",
+                    {
+                        "org_id": org.id,
+                        "node_id": node.id,
+                        "status": new_status.value,
+                        "current_task": reason[:120] if new_status == NodeStatus.BUSY else "",
+                    },
+                )
+            )
+        except RuntimeError:
+            pass
 
     def unfreeze_node(self, org: Organization, node: OrgNode) -> None:
         """Unfreeze a node: reset status, clear frozen metadata, and reset failure counter."""
@@ -1741,6 +2159,10 @@ class OrgRuntime:
         for k in list(self._node_current_chain.keys()):
             if k.startswith(f"{org_id}:"):
                 self._node_current_chain.pop(k, None)
+        for cid, owner in list(self._chain_owners.items()):
+            if owner.startswith(f"{org_id}:"):
+                self._chain_owners.pop(cid, None)
+                self._cancelled_chains.discard(cid)
 
     def _get_save_lock(self, org_id: str) -> asyncio.Lock:
         lock = self._save_locks.get(org_id)
@@ -1834,17 +2256,76 @@ class OrgRuntime:
             project_id = task_dict.get("project_id", "")
             if not task_id or not project_id:
                 continue
-            store.update_task(project_id, task_id, {"status": TaskStatus.TODO})
+            chain_id = task_dict.get("chain_id", "")
+            chain_alive = chain_id and chain_id in self._child_chains
+            if chain_alive:
+                store.update_task(project_id, task_id, {
+                    "status": TaskStatus.TODO,
+                    "runtime_phase": "orphan_reset",
+                    "progress_pct": 0,
+                    "current_owner_node_id": None,
+                    "waiting_on_nodes": [],
+                })
+                logger.info(
+                    "[OrgRuntime] Reset orphan task %s (assignee=%s) to todo in org %s",
+                    task_id[:12], assignee, org.name,
+                )
+            else:
+                store.update_task(project_id, task_id, {
+                    "status": TaskStatus.CANCELLED,
+                    "runtime_phase": "orphan_cancelled",
+                    "cancelled_at": _now_iso(),
+                    "current_owner_node_id": None,
+                    "waiting_on_nodes": [],
+                })
+                logger.info(
+                    "[OrgRuntime] Cancelled orphan task %s (assignee=%s, dead chain) in org %s",
+                    task_id[:12], assignee, org.name,
+                )
             reset_count += 1
-            logger.info(
-                "[OrgRuntime] Reset orphan task %s (assignee=%s) to todo in org %s",
-                task_id[:12],
-                assignee,
-                org.name,
-            )
 
         if reset_count > 0:
             logger.info("[OrgRuntime] Reset %d orphan tasks for org %s", reset_count, org.name)
+
+        self._fixup_stale_tasks(store, org)
+
+    def _fixup_stale_tasks(self, store: Any, org: Organization) -> None:
+        """Second-pass cleanup for tasks with inconsistent state."""
+        from openakita.orgs.models import TaskStatus
+
+        fixup_count = 0
+        for task_dict in store.all_tasks():
+            tid = task_dict.get("id", "")
+            pid = task_dict.get("project_id", "")
+            status = task_dict.get("status", "")
+            phase = task_dict.get("runtime_phase", "")
+            pct = task_dict.get("progress_pct", 0)
+            chain = task_dict.get("chain_id", "")
+            if not tid or not pid:
+                continue
+            updates: dict[str, Any] = {}
+
+            if status == "todo" and phase in ("running", "waiting_children"):
+                chain_alive = chain and chain in self._child_chains
+                if not chain_alive:
+                    updates["status"] = TaskStatus.CANCELLED
+                    updates["runtime_phase"] = "orphan_cancelled"
+                    updates["cancelled_at"] = _now_iso()
+
+            if status == "accepted" and pct < 100:
+                updates["progress_pct"] = 100
+            elif status == "delivered" and pct < 90:
+                updates["progress_pct"] = 90
+
+            if updates:
+                store.update_task(pid, tid, updates)
+                fixup_count += 1
+                logger.info(
+                    "[OrgRuntime] Fixup task %s: %s in org %s",
+                    tid[:12], {k: str(v)[:30] for k, v in updates.items()}, org.name,
+                )
+        if fixup_count:
+            logger.info("[OrgRuntime] Fixed up %d stale tasks for org %s", fixup_count, org.name)
 
     def _evict_expired_agents(self) -> None:
         expired = [k for k, v in self._agent_cache.items() if v.expired]
@@ -1888,10 +2369,14 @@ class OrgRuntime:
     # Task completion hook & idle probe
     # ------------------------------------------------------------------
 
-    def _node_active_count(self, org_id: str, node_id: str) -> int:
+    def _node_active_count(self, org_id: str, node_id: str, *, exclude_key: str = "") -> int:
         """Count running (not-done) tasks for a node."""
         running = self._running_tasks.get(org_id, {})
-        return sum(1 for k, t in running.items() if k.startswith(f"{node_id}:") and not t.done())
+        return sum(
+            1
+            for k, t in running.items()
+            if k.startswith(f"{node_id}:") and not t.done() and k != exclude_key
+        )
 
     async def _drain_node_pending(
         self,
@@ -1913,7 +2398,8 @@ class OrgRuntime:
             return 0
 
         active = self._node_active_count(org.id, node.id)
-        slots = self.max_concurrent_per_node - active
+        node_max = getattr(node, "max_concurrent_tasks", None) or self.max_concurrent_per_node
+        slots = node_max - active
         if slots <= 0:
             return 0
         if max_msgs > 0:
@@ -2040,6 +2526,42 @@ class OrgRuntime:
                 f"该节点已重置为空闲状态，之前的任务已被中断。"
                 f"如有未完成的委派任务，请重新分配或跟进。"
             ),
+        )
+        await messenger.send(msg)
+
+    async def _notify_delegator_on_failure(
+        self,
+        org: Organization,
+        node: OrgNode,
+        reason: str,
+        error_detail: str,
+        chain_id: str = "",
+    ) -> None:
+        """Notify the parent node when a delegated task fails, times out, or is frozen."""
+        parent = org.get_parent(node.id)
+        if not parent:
+            return
+        messenger = self.get_messenger(org.id)
+        if not messenger:
+            return
+        reason_text = {
+            "task_failed": "任务执行异常",
+            "task_timeout": "任务执行超时",
+            "circuit_breaker_frozen": "连续失败已触发熔断冻结（5分钟后自动恢复）",
+        }.get(reason, reason)
+        chain_hint = f"\n任务链: {chain_id[:16]}" if chain_id else ""
+        msg = OrgMessage(
+            org_id=org.id,
+            from_node="system",
+            to_node=parent.id,
+            msg_type=MsgType.FEEDBACK,
+            content=(
+                f"[任务异常通知] 您委派给 {node.role_title}({node.id}) 的任务遇到问题。\n"
+                f"原因: {reason_text}\n"
+                f"详情: {error_detail[:200]}{chain_hint}\n"
+                f"请决定是否需要重新分配任务或采取其他措施。"
+            ),
+            metadata={"task_chain_id": chain_id, "_failure_notify": True},
         )
         await messenger.send(msg)
 
@@ -2251,6 +2773,7 @@ class OrgRuntime:
             await broadcast_event(event, data)
         except Exception:
             pass
+        self._fire_command_progress(event, data)
 
     # ------------------------------------------------------------------
     # Tool call integration
@@ -2263,7 +2786,13 @@ class OrgRuntime:
         return await self._tool_handler.handle(tool_name, arguments, org_id, node_id)
 
     def _register_org_tool_handler(self, agent: Any, org_id: str, node_id: str) -> None:
-        """Patch agent's ToolExecutor to intercept org_* tool calls and bridge plan tools."""
+        """Patch agent's ToolExecutor to intercept org_* tool calls and bridge plan tools.
+
+        The patch targets ``_execute_tool_impl`` — the single bottleneck that
+        both ``execute_batch`` (non-streaming) and ``execute_tool_with_policy``
+        (streaming) converge on.  Patching the higher-level ``execute_tool``
+        is insufficient because the reasoning engine never calls it directly.
+        """
         if not hasattr(agent, "reasoning_engine"):
             return
         engine = agent.reasoning_engine
@@ -2271,19 +2800,35 @@ class OrgRuntime:
             return
         executor = engine._tool_executor
 
-        original_execute = executor.execute_tool
+        original_impl = executor._execute_tool_impl
         tool_handler = self._tool_handler
 
-        async def _patched_execute(tool_name: str, tool_input: dict, **kwargs) -> str:
+        async def _patched_impl(tool_name: str, tool_input: dict) -> str:
+            await self._broadcast_ws("org:node_tool_call", {
+                "org_id": org_id,
+                "node_id": node_id,
+                "tool_name": tool_name,
+                "args_preview": str(tool_input)[:200],
+            })
+
             if tool_name.startswith("org_"):
-                return await tool_handler.handle(tool_name, tool_input, org_id, node_id)
-            result = await original_execute(tool_name, tool_input, **kwargs)
-            if tool_name in ("create_todo", "update_todo_step", "complete_todo"):
-                chain_id = getattr(agent, "_org_context", {}).get("current_chain_id") or ""
-                if chain_id:
-                    tool_handler._bridge_plan_to_task(
-                        org_id, node_id, tool_name, tool_input, result, chain_id=chain_id
-                    )
+                logger.info(f"Executing tool: {tool_name} with {tool_input}")
+                result = await tool_handler.handle(tool_name, tool_input, org_id, node_id)
+            else:
+                result = await original_impl(tool_name, tool_input)
+                if tool_name in ("create_todo", "update_todo_step", "complete_todo"):
+                    chain_id = getattr(agent, "_org_context", {}).get("current_chain_id") or ""
+                    if chain_id:
+                        tool_handler._bridge_plan_to_task(
+                            org_id, node_id, tool_name, tool_input, result, chain_id=chain_id
+                        )
+
+            await self._broadcast_ws("org:node_tool_result", {
+                "org_id": org_id,
+                "node_id": node_id,
+                "tool_name": tool_name,
+                "result_preview": str(result)[:200],
+            })
             return result
 
-        executor.execute_tool = _patched_execute
+        executor._execute_tool_impl = _patched_impl

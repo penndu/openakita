@@ -174,8 +174,13 @@ class OrgIdentity:
                 child_lines.append(f"  - **{c.role_title}** (id: `{c.id}`){goal_hint}")
             rel_parts.append("- 直属下级：\n" + "\n".join(child_lines))
             rel_parts.append(
-                "\n**重要：你是管理者。收到复杂任务时，首先拆解并用 org_delegate_task 委派给合适的下属，"
-                "而非自己动手执行。只有简单协调沟通才自己处理。**"
+                "\n**管理者职责约束：**\n"
+                "1. 收到任务后，首先分析是否可以拆分给下属——**默认应该委派**\n"
+                "2. 使用 org_delegate_task 将每个子任务分配给具体下属，不要笼统地一次委派所有内容\n"
+                "3. 委派后**不要立即汇报完成**——使用 org_list_delegated_tasks 跟踪子任务状态\n"
+                "4. 等所有子任务的下属通过 org_submit_deliverable 提交结果后，再汇总向上级交付\n"
+                "5. 只有简单的协调/沟通/查询类工作才自己直接处理\n"
+                "6. **严禁**：编造下属的工作结果、在子任务完成前声称整体完成"
             )
         else:
             rel_parts.append(

@@ -153,7 +153,7 @@ class OrgHeartbeat:
             return {"skipped": True, "reason": "root_busy"}
 
         running = self._runtime._running_tasks.get(org.id, {})
-        if root.id in running and not running[root.id].done():
+        if any(task_key.startswith(f"{root.id}:") and not task.done() for task_key, task in running.items()):
             logger.debug(f"[Heartbeat] Skipping: root {root.id} has running task")
             return {"skipped": True, "reason": "root_has_task"}
 

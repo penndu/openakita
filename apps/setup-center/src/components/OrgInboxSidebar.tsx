@@ -59,6 +59,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   progress: "进度",
   warning: "警告",
   scaling: "扩编",
+  deliverable: "交付物",
+  escalation: "问题上报",
 };
 
 export function OrgInboxSidebar({
@@ -66,11 +68,13 @@ export function OrgInboxSidebar({
   orgId,
   visible,
   onClose,
+  onCountsChange,
 }: {
   apiBaseUrl: string;
   orgId: string;
   visible: boolean;
   onClose: () => void;
+  onCountsChange?: (summary: { unreadCount: number; pendingApprovals: number }) => void;
 }) {
   const [messages, setMessages] = useState<InboxMsg[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -95,13 +99,17 @@ export function OrgInboxSidebar({
         setMessages(data.messages);
         setUnreadCount(data.unread_count);
         setPendingApprovals(data.pending_approvals);
+        onCountsChange?.({
+          unreadCount: data.unread_count,
+          pendingApprovals: data.pending_approvals,
+        });
       }
     } catch (e) {
       console.error("Failed to fetch inbox", e);
     } finally {
       setLoading(false);
     }
-  }, [apiBaseUrl, orgId, filter]);
+  }, [apiBaseUrl, orgId, filter, onCountsChange]);
 
   useEffect(() => {
     if (visible && orgId) {

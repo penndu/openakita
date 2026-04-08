@@ -129,7 +129,23 @@ class OrgManager:
                 setattr(org, key, val)
 
         if nodes_raw is not None:
-            org.nodes = [OrgNode.from_dict(n) for n in nodes_raw]
+            old_nodes = {n.id: n for n in org.nodes}
+            _RUNTIME_FIELDS = frozenset(
+                {"status", "frozen_by", "frozen_reason", "frozen_at"}
+            )
+            merged: list[OrgNode] = []
+            for nd in nodes_raw:
+                existing = old_nodes.get(nd.get("id", ""))
+                if existing is not None:
+                    for k, v in nd.items():
+                        if k == "id" or k in _RUNTIME_FIELDS:
+                            continue
+                        if hasattr(existing, k):
+                            setattr(existing, k, v)
+                    merged.append(existing)
+                else:
+                    merged.append(OrgNode.from_dict(nd))
+            org.nodes = merged
         if edges_raw is not None:
             from .models import OrgEdge
 

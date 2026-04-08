@@ -6,6 +6,7 @@ They verify request/response contracts without running actual LLM calls.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,7 +18,8 @@ except ImportError:
     pytest.skip("httpx not installed", allow_module_level=True)
 
 from openakita.orgs.manager import OrgManager
-from openakita.orgs.models import OrgStatus
+from openakita.orgs.models import MsgType, OrgMessage, OrgProject, OrgStatus, ProjectTask, ProjectStatus, TaskStatus
+from openakita.orgs.project_store import ProjectStore
 
 
 @pytest.fixture()
@@ -209,3 +211,141 @@ class TestInboxRoutes:
             assert "total_unread" in resp.json()
         finally:
             await runtime.shutdown()
+
+
+class TestProjectTaskRuntimeRoutes:
+    async def test_dispatch_task_failure_updates_task_runtime(self, app_client):
+        client, manager, runtime = app_client
+        from .conftest import make_org
+
+        with patch("openakita.orgs.templates.ensure_builtin_templates"):
+            await runtime.start()
+        try:
+            org = manager.create(make_org(id="org_dispatch_fail_api").to_dict())
+            await runtime.start_org(org.id)
+
+            store = ProjectStore(manager._org_dir(org.id))
+            proj = OrgProject(id="proj_dispatch_fail", org_id=org.id, name="项目", status=ProjectStatus.ACTIVE)
+            store.create_project(proj)
+            task = ProjectTask(
+                id="task_dispatch_fail",
+                project_id=proj.id,
+                title="派发失败任务",
+                status=TaskStatus.TODO,
+            )
+            store.add_task(proj.id, task)
+
+            async def passthrough(coro):
+                return await coro
+
+            with patch("openakita.api.routes.orgs.to_engine", new_callable=AsyncMock, side_effect=passthrough):
+                with patch.object(runtime, "send_command", new_callable=AsyncMock, side_effect=RuntimeError("dispatch boom")):
+                    resp = await client.post(
+                        f"/api/orgs/{org.id}/projects/{proj.id}/tasks/{task.id}/dispatch"
+                    )
+                    assert resp.status_code == 200
+                    await asyncio.sleep(0.05)
+
+            updated_task, _ = store.get_task(task.id)
+            assert updated_task is not None
+            assert updated_task.status == TaskStatus.BLOCKED
+            assert updated_task.runtime_phase == "failed"
+            assert updated_task.last_event == "dispatch_failed"
+            assert updated_task.last_error == "dispatch boom"
+        finally:
+            await runtime.shutdown()
+
+    async def test_get_task_detail_includes_runtime_and_timeline(self, app_client):
+        client, manager, runtime = app_client
+        from .conftest import make_org
+
+        with patch("openakita.orgs.templates.ensure_builtin_templates"):
+            await runtime.start()
+        try:
+            org = manager.create(make_org(id="org_task_detail_api").to_dict())
+            await runtime.start_org(org.id)
+
+            store = ProjectStore(manager._org_dir(org.id))
+            proj = OrgProject(id="proj_1", org_id=org.id, name="项目", status=ProjectStatus.ACTIVE)
+            store.create_project(proj)
+            task = ProjectTask(
+                id="task_1",
+                project_id=proj.id,
+                title="整理方案",
+                status=TaskStatus.IN_PROGRESS,
+                assignee_node_id="node_ceo",
+                chain_id="dispatch:task_1:abcd",
+                runtime_phase="running",
+                current_owner_node_id="node_ceo",
+                last_event="node_activated",
+                execution_log=[{"at": "2026-04-07T10:00:00+00:00", "by": "node_ceo", "entry": "开始处理"}],
+            )
+            store.add_task(proj.id, task)
+            runtime._register_child_chain(org.id, "dispatch:task_1:abcd", "dispatch:task_1:abcd:cto", "node_cto")
+            runtime._running_tasks.setdefault(org.id, {})
+            messenger = runtime.get_messenger(org.id)
+            assert messenger is not None
+            messenger._log_message(
+                OrgMessage(
+                    org_id=org.id,
+                    from_node="node_ceo",
+                    to_node="node_cto",
+                    msg_type=MsgType.TASK_ASSIGN,
+                    content="请拆解并推进",
+                    metadata={
+                        "task_chain_id": "dispatch:task_1:abcd:cto",
+                        "parent_chain_id": "dispatch:task_1:abcd",
+                    },
+                )
+            )
+            runtime.get_event_store(org.id).emit(
+                "task_delivered",
+                "node_ceo",
+                {"chain_id": "dispatch:task_1:abcd", "task_id": "task_1", "to": "node_user"},
+            )
+
+            resp = await client.get(f"/api/orgs/{org.id}/tasks/task_1")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["runtime"]["runtime_phase"] == "waiting_children"
+            assert data["runtime"]["current_owner_node_id"] == "node_ceo"
+            assert data["collaboration"]["pending_children"] == 1
+            assert data["collaboration"]["waiting_on_nodes"] == ["node_cto"]
+            assert len(data["collaboration"]["recent_messages"]) == 1
+            assert data["collaboration"]["recent_messages"][0]["awaiting_reply"] is True
+            assert data["collaboration"]["communication_summary"]["pending_replies"] == 1
+            assert data["collaboration"]["communication_summary"]["routes"][0]["status"] == "waiting_reply"
+            assert data["child_chains"][0]["node_id"] == "node_cto"
+            assert len(data["timeline"]) >= 2
+        finally:
+            await runtime.shutdown()
+
+    async def test_cancel_task_route_calls_runtime_cancel_chain(self, app_client):
+        client, manager, runtime = app_client
+        from .conftest import make_org
+
+        org = manager.create(make_org(id="org_cancel_api").to_dict())
+        store = ProjectStore(manager._org_dir(org.id))
+        proj = OrgProject(id="proj_2", org_id=org.id, name="项目", status=ProjectStatus.ACTIVE)
+        store.create_project(proj)
+        task = ProjectTask(
+            id="task_2",
+            project_id=proj.id,
+            title="执行任务",
+            status=TaskStatus.IN_PROGRESS,
+            chain_id="dispatch:task_2:abcd",
+        )
+        store.add_task(proj.id, task)
+
+        async def passthrough(coro):
+            return await coro
+
+        with patch("openakita.api.routes.orgs.to_engine", new_callable=AsyncMock, side_effect=passthrough) as _:
+            with patch.object(runtime, "cancel_chain", new_callable=AsyncMock, return_value={"cancelled_chains": 1, "cancelled_nodes": ["node_ceo"]}) as mock_cancel:
+                resp = await client.post(f"/api/orgs/{org.id}/projects/{proj.id}/tasks/{task.id}/cancel")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["chain_id"] == "dispatch:task_2:abcd"
+        mock_cancel.assert_awaited_once_with(org.id, "dispatch:task_2:abcd")

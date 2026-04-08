@@ -83,39 +83,45 @@ class SessionContext:
     sub_agent_records: list[dict] = field(default_factory=list)
     _msg_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
-    _DEDUP_WINDOW = 8
+    _DEDUP_TIME_WINDOW_SECONDS = 30
 
-    def add_message(self, role: str, content: str, **metadata) -> None:
-        """添加消息（含滑动窗口去重，防止重试/重连导致的重复消息）"""
+    def add_message(self, role: str, content: str, **metadata) -> bool:
+        """添加消息（含去重：连续相同 + 时间窗口内相同）。
+
+        Returns:
+            True if the message was actually added, False if deduped.
+        """
         with self._msg_lock:
             if self.messages:
                 last = self.messages[-1]
                 if last.get("role") == role and last.get("content") == content:
-                    return
+                    return False
 
-            import hashlib
-
-            fingerprint = hashlib.md5(
-                f"{role}:{content[:200]}".encode(errors="replace")
-            ).hexdigest()
-            window = self.messages[-self._DEDUP_WINDOW :]
-            for msg in window:
-                fp = hashlib.md5(
-                    f"{msg.get('role', '')}:{(msg.get('content', '') or '')[:200]}".encode(
-                        errors="replace"
-                    )
-                ).hexdigest()
-                if fp == fingerprint:
-                    return
+            now = datetime.now()
+            for msg in reversed(self.messages[-8:]):
+                if msg.get("role") != role:
+                    continue
+                msg_content = msg.get("content", "") or ""
+                if msg_content != content:
+                    continue
+                ts_str = msg.get("timestamp", "")
+                if ts_str:
+                    try:
+                        msg_time = datetime.fromisoformat(ts_str)
+                        if (now - msg_time).total_seconds() < self._DEDUP_TIME_WINDOW_SECONDS:
+                            return False
+                    except (ValueError, TypeError):
+                        pass
 
             self.messages.append(
                 {
                     "role": role,
                     "content": content,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": now.isoformat(),
                     **metadata,
                 }
             )
+            return True
 
     def mark_topic_boundary(self) -> None:
         """在当前消息位置标记话题边界。
@@ -360,10 +366,11 @@ class Session:
             key += f":{self.thread_id}"
         return key
 
-    def add_message(self, role: str, content: str, **metadata) -> None:
-        """添加消息并更新活跃时间"""
-        self.context.add_message(role, content, **metadata)
+    def add_message(self, role: str, content: str, **metadata) -> bool:
+        """添加消息并更新活跃时间。返回 True 表示消息被添加，False 表示被去重跳过。"""
+        added = self.context.add_message(role, content, **metadata)
         self.touch()
+        return added
 
         # 检查是否需要截断历史
         if len(self.context.messages) > self.config.max_history:

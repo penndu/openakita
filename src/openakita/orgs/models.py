@@ -109,6 +109,7 @@ class TaskStatus(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     BLOCKED = "blocked"
+    CANCELLED = "cancelled"
 
 
 # ---------------------------------------------------------------------------
@@ -709,6 +710,14 @@ class ProjectTask:
     execution_log: list = field(default_factory=list)
     priority: int = 0
     progress_pct: int = 0
+    runtime_phase: str | None = None
+    current_owner_node_id: str | None = None
+    waiting_on_nodes: list[str] = field(default_factory=list)
+    last_error: str | None = None
+    last_event: str | None = None
+    cancel_requested_at: str | None = None
+    cancelled_at: str | None = None
+    runtime_updated_at: str | None = None
     created_at: str = field(default_factory=_now_iso)
     started_at: str | None = None
     delivered_at: str | None = None
@@ -736,6 +745,14 @@ class ProjectTask:
             "execution_log": list(self.execution_log) if self.execution_log else [],
             "priority": self.priority,
             "progress_pct": self.progress_pct,
+            "runtime_phase": self.runtime_phase,
+            "current_owner_node_id": self.current_owner_node_id,
+            "waiting_on_nodes": list(self.waiting_on_nodes) if self.waiting_on_nodes else [],
+            "last_error": self.last_error,
+            "last_event": self.last_event,
+            "cancel_requested_at": self.cancel_requested_at,
+            "cancelled_at": self.cancelled_at,
+            "runtime_updated_at": self.runtime_updated_at,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "delivered_at": self.delivered_at,

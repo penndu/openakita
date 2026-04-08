@@ -32,6 +32,12 @@ export interface OrgNodeData {
   auto_clone_threshold?: number;
   auto_clone_max?: number;
   current_task?: string;
+  /** 仅前端编排视图：当前选中任务链在画布上的高亮（不入库） */
+  _task_chain_focus?: {
+    owner_node_id: string | null;
+    waiting_node_ids: string[];
+    delegated_node_ids: string[];
+  } | null;
 }
 
 export interface OrgEdgeData {

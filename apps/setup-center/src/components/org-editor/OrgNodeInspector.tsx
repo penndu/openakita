@@ -1,4 +1,4 @@
-import { useState, useEffect, type ComponentType } from "react";
+import { useState, useEffect, useCallback, type ComponentType } from "react";
 import type { Node } from "@xyflow/react";
 import { IconX, IconCheck, IconChevronDown } from "../../icons";
 import { safeFetch } from "../../providers";
@@ -102,40 +102,51 @@ export function OrgNodeInspector({
     setAvatarError(null);
   }, [selectedNodeId, currentOrg?.id]);
 
-  useEffect(() => {
+  const fetchNodeTasks = useCallback(async () => {
     if (!selectedNodeId || !currentOrg || propsTab !== "tasks") {
       setNodeTasks(null);
       setNodeActivePlan(null);
       return;
     }
     setNodeTasksLoading(true);
-    const fetchNodeTasks = async () => {
-      try {
-        const [tasksRes, planRes] = await Promise.all([
-          safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/nodes/${selectedNodeId}/tasks`),
-          safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/nodes/${selectedNodeId}/active-plan`),
-        ]);
-        if (tasksRes.ok) {
-          const data = await tasksRes.json();
-          setNodeTasks({ assigned: data.assigned || [], delegated: data.delegated || [] });
-        } else {
-          setNodeTasks({ assigned: [], delegated: [] });
-        }
-        if (planRes.ok) {
-          const planData = await planRes.json();
-          setNodeActivePlan(planData.task_id ? planData : null);
-        } else {
-          setNodeActivePlan(null);
-        }
-      } catch (e) {
+    try {
+      const [tasksRes, planRes] = await Promise.all([
+        safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/nodes/${selectedNodeId}/tasks`),
+        safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/nodes/${selectedNodeId}/active-plan`),
+      ]);
+      if (tasksRes.ok) {
+        const data = await tasksRes.json();
+        setNodeTasks({ assigned: data.assigned || [], delegated: data.delegated || [] });
+      } else {
         setNodeTasks({ assigned: [], delegated: [] });
-        setNodeActivePlan(null);
-      } finally {
-        setNodeTasksLoading(false);
       }
-    };
-    fetchNodeTasks();
+      if (planRes.ok) {
+        const planData = await planRes.json();
+        setNodeActivePlan(planData.task_id ? planData : null);
+      } else {
+        setNodeActivePlan(null);
+      }
+    } catch (e) {
+      setNodeTasks({ assigned: [], delegated: [] });
+      setNodeActivePlan(null);
+    } finally {
+      setNodeTasksLoading(false);
+    }
   }, [selectedNodeId, currentOrg, propsTab, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!selectedNodeId || !currentOrg || propsTab !== "tasks") {
+      setNodeTasks(null);
+      setNodeActivePlan(null);
+      return;
+    }
+    void fetchNodeTasks();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void fetchNodeTasks();
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [selectedNodeId, currentOrg, propsTab, fetchNodeTasks]);
 
   return (
     <>

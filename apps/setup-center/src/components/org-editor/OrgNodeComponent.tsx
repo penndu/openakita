@@ -23,6 +23,18 @@ export function OrgNodeComponent({ data, selected }: { data: OrgNodeData; select
   const pendingMsgs = rt?.pending_messages;
   const isAnomaly = rt?.anomaly;
 
+  const tcf = data._task_chain_focus;
+  const chainRole =
+    tcf && data.id
+      ? tcf.owner_node_id === data.id
+        ? "owner"
+        : tcf.waiting_node_ids?.includes(data.id)
+          ? "waiting"
+          : tcf.delegated_node_ids?.includes(data.id)
+            ? "delegated"
+            : null
+      : null;
+
   return (
     <div
       ref={nodeRef}
@@ -30,14 +42,36 @@ export function OrgNodeComponent({ data, selected }: { data: OrgNodeData; select
       onMouseLeave={() => setHovered(false)}
       style={{
         background: "var(--card-bg, #fff)",
-        border: `2px solid ${selected ? "var(--primary)" : isAnomaly ? "#f59e0b" : isError ? "var(--danger)" : isBusy ? statusColor : "var(--line)"}`,
+        border: `2px solid ${
+          selected
+            ? "var(--primary)"
+            : chainRole === "owner"
+              ? "#06b6d4"
+              : chainRole === "waiting"
+                ? "#f59e0b"
+                : chainRole === "delegated"
+                  ? "#a78bfa"
+                  : isAnomaly
+                    ? "#f59e0b"
+                    : isError
+                      ? "var(--danger)"
+                      : isBusy
+                        ? statusColor
+                        : "var(--line)"
+        }`,
         borderRadius: "var(--radius)",
         padding: 0,
         minWidth: 180,
         maxWidth: 220,
         boxShadow: selected
           ? "0 0 0 2px var(--primary)"
-          : isAnomaly
+          : chainRole === "owner"
+            ? "0 0 14px rgba(6,182,212,0.45)"
+            : chainRole === "waiting"
+              ? "0 0 12px rgba(245,158,11,0.35)"
+              : chainRole === "delegated"
+                ? "0 0 10px rgba(167,139,250,0.35)"
+                : isAnomaly
           ? "0 0 12px rgba(245,158,11,0.35)"
           : isBusy
           ? `0 0 16px ${statusColor}50`
@@ -117,6 +151,30 @@ export function OrgNodeComponent({ data, selected }: { data: OrgNodeData; select
                 background: `${deptColor}15`, color: deptColor, fontWeight: 500,
               }}>
                 {data.department}
+              </span>
+            )}
+            {chainRole === "owner" && (
+              <span style={{
+                fontSize: 9, padding: "1px 6px", borderRadius: 4,
+                background: "#ecfeff", color: "#0891b2", fontWeight: 600,
+              }}>
+                链上执行
+              </span>
+            )}
+            {chainRole === "waiting" && (
+              <span style={{
+                fontSize: 9, padding: "1px 6px", borderRadius: 4,
+                background: "#fffbeb", color: "#d97706", fontWeight: 600,
+              }}>
+                等待协作
+              </span>
+            )}
+            {chainRole === "delegated" && (
+              <span style={{
+                fontSize: 9, padding: "1px 6px", borderRadius: 4,
+                background: "#f5f3ff", color: "#7c3aed", fontWeight: 600,
+              }}>
+                子链
               </span>
             )}
             {data.status !== "idle" && (
