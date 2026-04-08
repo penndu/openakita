@@ -65,10 +65,7 @@ class OrgIdentity:
         return ResolvedIdentity(soul=soul, agent=agent, role=role, level=level)
 
     def build_org_context_prompt(
-        self,
-        node: OrgNode,
-        org: Organization,
-        identity: ResolvedIdentity,
+        self, node: OrgNode, org: Organization, identity: ResolvedIdentity,
         blackboard_summary: str = "",
         dept_summary: str = "",
         node_summary: str = "",
@@ -86,6 +83,7 @@ class OrgIdentity:
         """
         parent = org.get_parent(node.id)
         children = org.get_children(node.id)
+        is_root = (node.level == 0 or not parent)
 
         connected_peers: list[str] = []
         for e in org.edges:
@@ -116,15 +114,12 @@ class OrgIdentity:
 
         # Role description
         dept_label = f"（{node.department}）" if node.department else ""
-        role_section = (
-            f"## 你的组织角色\n你在「{org.name}」中担任 **{node.role_title}**{dept_label}。"
-        )
+        role_section = f"## 你的组织角色\n你在「{org.name}」中担任 **{node.role_title}**{dept_label}。"
         if identity.role:
             role_section += f"\n{identity.role}"
         parts.append(role_section)
 
         if org.core_business:
-            is_root = node.level == 0 or not parent
             persona_label = org.user_persona.label if org.user_persona else "负责人"
             biz_section = f"## 核心业务\n{org.core_business}"
             if is_root:
@@ -154,10 +149,8 @@ class OrgIdentity:
             "- 一个任务完成后立即开始下一个，保持连续工作节奏"
         )
 
-        parts.append(
-            f"## 组织架构概览\n{org_chart}\n"
-            f"需要详情时用 org_get_org_chart 查看完整架构，不确定找谁时用 org_find_colleague 搜索。"
-        )
+        parts.append(f"## 组织架构概览\n{org_chart}\n"
+                     f"需要详情时用 org_get_org_chart 查看完整架构，不确定找谁时用 org_find_colleague 搜索。")
 
         # Relationships with enhanced delegation guidance
         rel_parts = []
@@ -166,7 +159,9 @@ class OrgIdentity:
             rel_parts.append(f"- 直属上级：**{parent.role_title}** (id: `{parent.id}`)")
         elif persona and persona.label:
             desc = f"（{persona.description}）" if persona.description else "（用户）"
-            rel_parts.append(f"- 直属上级：{persona.label}{desc}")
+            rel_parts.append(
+                f"- 指挥者：{persona.label}{desc}（通过指挥台下达指令，不是组织内节点）"
+            )
         if children:
             child_lines = []
             for c in children:
@@ -174,20 +169,22 @@ class OrgIdentity:
                 child_lines.append(f"  - **{c.role_title}** (id: `{c.id}`){goal_hint}")
             rel_parts.append("- 直属下级：\n" + "\n".join(child_lines))
             rel_parts.append(
-                "\n**管理者职责约束：**\n"
-                "1. 收到任务后，首先分析是否可以拆分给下属——**默认应该委派**\n"
-                "2. 使用 org_delegate_task 将每个子任务分配给具体下属，不要笼统地一次委派所有内容\n"
-                "3. 委派后**不要立即汇报完成**——使用 org_list_delegated_tasks 跟踪子任务状态\n"
-                "4. 等所有子任务的下属通过 org_submit_deliverable 提交结果后，再汇总向上级交付\n"
-                "5. 只有简单的协调/沟通/查询类工作才自己直接处理\n"
-                "6. **严禁**：编造下属的工作结果、在子任务完成前声称整体完成"
+                "\n**重要：你是管理者。收到复杂任务时，首先拆解并用 org_delegate_task 委派给合适的下属，"
+                "而非自己动手执行。只有简单协调沟通才自己处理。**"
             )
         else:
-            rel_parts.append(
-                "\n你是执行者（没有下属）。收到任务后**自己完成**，"
-                "完成后用 org_submit_deliverable 提交交付物。"
-                "需要同事协助时，用 org_send_message 与他们沟通（不要用 org_delegate_task，那是给有下属的管理者用的）。"
-            )
+            if is_root:
+                rel_parts.append(
+                    "\n你是独立执行者（无上级节点、无下属）。收到任务后**自己完成**，"
+                    "完成后直接在回复中总结成果即可，结果会自动返回给指挥者。"
+                    "需要同事协助时，用 org_send_message 与他们沟通。"
+                )
+            else:
+                rel_parts.append(
+                    "\n你是执行者（没有下属）。收到任务后**自己完成**，"
+                    "完成后用 org_submit_deliverable 提交交付物。"
+                    "需要同事协助时，用 org_send_message 与他们沟通（不要用 org_delegate_task，那是给有下属的管理者用的）。"
+                )
         if connected_peers:
             rel_parts.append(f"- 协作伙伴：{', '.join(connected_peers)}")
         if rel_parts:
@@ -212,20 +209,29 @@ class OrgIdentity:
         if policy_index:
             parts.append(f"制度索引：\n{policy_index}")
 
-        delivery_flow = (
-            "任务交付流程：\n"
-            "1. 收到任务后开始工作\n"
-            "2. 完成后用 **org_submit_deliverable** 提交交付物（to_node 可省略，系统自动提交给直属上级）\n"
-            "3. 委派人用 org_accept_deliverable（通过）或 org_reject_deliverable（打回）验收\n"
-            "4. 被打回时根据反馈修改后重新提交\n"
-            "5. 验收通过后任务完结\n\n"
-            "缺少工具时，用 org_request_tools 向上级申请。"
-        )
+        if is_root:
+            delivery_flow = (
+                "任务完成流程：\n"
+                "1. 收到指挥者指令后开始工作（可委派下属、也可自己执行）\n"
+                "2. 完成后直接在回复中总结成果，结果会自动返回给指挥者\n"
+                "3. 重要成果同时写入 org_write_blackboard 供团队查阅\n"
+                "4. **不要**使用 org_submit_deliverable，你没有上级节点可提交\n\n"
+                "验收下属交付物时，用 org_accept_deliverable（通过）或 org_reject_deliverable（打回）。"
+            )
+        else:
+            delivery_flow = (
+                "任务交付流程：\n"
+                "1. 收到任务后开始工作\n"
+                "2. 完成后用 **org_submit_deliverable** 提交交付物（to_node 可省略，系统自动提交给直属上级）\n"
+                "3. 委派人用 org_accept_deliverable（通过）或 org_reject_deliverable（打回）验收\n"
+                "4. 被打回时根据反馈修改后重新提交\n"
+                "5. 验收通过后任务完结\n\n"
+                "缺少工具时，用 org_request_tools 向上级申请。"
+            )
 
         has_external = bool(node.external_tools)
         if has_external:
             from .tool_categories import TOOL_CATEGORIES, expand_tool_categories
-
             ext_names = expand_tool_categories(node.external_tools)
             cat_labels = [c for c in node.external_tools if c in TOOL_CATEGORIES]
             ext_desc = "、".join(cat_labels) if cat_labels else "、".join(sorted(ext_names)[:5])
@@ -237,7 +243,8 @@ class OrgIdentity:
                 "- 外部工具得到的重要结果，用 org_write_blackboard 写入黑板共享给同事\n"
                 "- 优先通过直接连线关系沟通（上下级、协作伙伴）\n"
                 "- 非必要不跨级沟通\n"
-                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n" + delivery_flow
+                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n"
+                + delivery_flow
             )
         else:
             parts.append(
@@ -248,7 +255,8 @@ class OrgIdentity:
                 "- 优先通过直接连线关系沟通（上下级、协作伙伴）\n"
                 "- 非必要不跨级沟通\n"
                 "- 重要决策和方案写入 org_write_blackboard，写之前先 org_read_blackboard 检查避免重复\n"
-                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n" + delivery_flow
+                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n"
+                + delivery_flow
             )
 
         if getattr(org, "operation_mode", "") == "command" and not project_tasks_summary:
@@ -306,7 +314,9 @@ class OrgIdentity:
             dept_members = [m for m in members if m.id not in root_ids]
             if not dept_members:
                 continue
-            member_str = ", ".join(f"{m.role_title}(`{m.id}`)" for m in dept_members[:6])
+            member_str = ", ".join(
+                f"{m.role_title}(`{m.id}`)" for m in dept_members[:6]
+            )
             if len(dept_members) > 6:
                 member_str += f" 等{len(dept_members)}人"
             lines.append(f"  - {dept_name}: {member_str}")
@@ -329,7 +339,6 @@ class OrgIdentity:
     def _get_profile_prompt(self, profile_id: str) -> str | None:
         try:
             from openakita.main import _orchestrator
-
             if _orchestrator and hasattr(_orchestrator, "_profile_store"):
                 profile = _orchestrator._profile_store.get(profile_id)
                 return profile.custom_prompt if profile else None
@@ -337,7 +346,6 @@ class OrgIdentity:
             pass
         try:
             from openakita.agents.profile import get_profile_store
-
             store = get_profile_store()
             profile = store.get(profile_id)
             return profile.custom_prompt if profile else None

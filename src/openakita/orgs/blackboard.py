@@ -16,6 +16,14 @@ from .models import MemoryScope, MemoryType, OrgMemoryEntry
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_float(v: object, default: float = 0.0) -> float:
+    try:
+        return float(v)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return default
+
+
 MAX_ORG_MEMORIES = 200
 MAX_DEPT_MEMORIES = 100
 MAX_NODE_MEMORIES = 50
@@ -33,8 +41,9 @@ class OrgBlackboard:
     def clear(self) -> None:
         """Remove all blackboard/memory data (used during org reset)."""
         import shutil
-
-        logger.warning(f"[Blackboard] Clearing ALL memory for org {self._org_id}")
+        logger.warning(
+            f"[Blackboard] Clearing ALL memory for org {self._org_id}"
+        )
         if self._memory_dir.exists():
             shutil.rmtree(self._memory_dir, ignore_errors=True)
             self._memory_dir.mkdir(parents=True, exist_ok=True)
@@ -44,7 +53,9 @@ class OrgBlackboard:
     # ------------------------------------------------------------------
 
     def read_org(self, limit: int = 20, tag: str | None = None) -> list[OrgMemoryEntry]:
-        return self._read_scope(self._memory_dir / "blackboard.jsonl", limit=limit, tag=tag)
+        return self._read_scope(
+            self._memory_dir / "blackboard.jsonl", limit=limit, tag=tag
+        )
 
     def read_department(
         self, dept_name: str, limit: int = 20, tag: str | None = None
@@ -70,6 +81,7 @@ class OrgBlackboard:
         tags: list[str] | None = None,
         importance: float = 0.5,
         source_message_id: str | None = None,
+        attachments: list[dict] | None = None,
     ) -> OrgMemoryEntry | None:
         bb_path = self._memory_dir / "blackboard.jsonl"
         if self._is_duplicate(bb_path, content):
@@ -86,6 +98,7 @@ class OrgBlackboard:
             source_message_id=source_message_id,
             tags=tags or [],
             importance=importance,
+            attachments=attachments or [],
         )
         self._append(bb_path, entry, MAX_ORG_MEMORIES)
         logger.info(
@@ -121,7 +134,8 @@ class OrgBlackboard:
         )
         self._append(p, entry, MAX_DEPT_MEMORIES)
         logger.info(
-            f"[Blackboard] write_dept dept={dept_name} by={source_node} content={content[:80]!r}"
+            f"[Blackboard] write_dept dept={dept_name} by={source_node} "
+            f"content={content[:80]!r}"
         )
         return entry
 
@@ -146,7 +160,9 @@ class OrgBlackboard:
         p = self._memory_dir / "nodes" / f"{node_id}.jsonl"
         p.parent.mkdir(parents=True, exist_ok=True)
         self._append(p, entry, MAX_NODE_MEMORIES)
-        logger.info(f"[Blackboard] write_node node={node_id} content={content[:80]!r}")
+        logger.info(
+            f"[Blackboard] write_node node={node_id} content={content[:80]!r}"
+        )
         return entry
 
     # ------------------------------------------------------------------
@@ -289,8 +305,8 @@ class OrgBlackboard:
                 entries.append(e)
         except Exception as exc:
             logger.warning(f"Failed to read memory {path}: {exc}")
-        entries.sort(key=lambda e: e.importance, reverse=True)
-        return entries[:limit]
+        entries.sort(key=lambda e: _safe_float(e.importance), reverse=True)
+        return entries[:int(limit)]
 
     @staticmethod
     def _is_duplicate(path: Path, content: str, prefix_len: int = 100) -> bool:
@@ -336,12 +352,14 @@ class OrgBlackboard:
                 if self._is_expired(entry):
                     expired_count += 1
                     continue
-                live_entries.append((d.get("importance", 0.5), line))
+                live_entries.append((_safe_float(entry.importance), line))
             except Exception:
                 continue
 
         if expired_count > 0:
-            logger.info(f"[Blackboard] Removed {expired_count} expired entries from {path.name}")
+            logger.info(
+                f"[Blackboard] Removed {expired_count} expired entries from {path.name}"
+            )
 
         if len(live_entries) <= max_entries and expired_count == 0:
             return

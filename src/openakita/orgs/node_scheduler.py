@@ -122,9 +122,6 @@ class OrgNodeScheduler:
                         if wait > 0:
                             await asyncio.sleep(wait)
                     await self._execute_schedule(org_id, node_id, sched)
-                    # 清理自身在 _tasks 中的条目，防止内存泄漏
-                    key = f"{org_id}:{node_id}:{sched.id}"
-                    self._tasks.pop(key, None)
                     break
 
                 await asyncio.sleep(current_interval)
@@ -139,18 +136,7 @@ class OrgNodeScheduler:
 
                 result = await self._execute_schedule(org_id, node_id, sched)
 
-                result_text = (
-                    str(result.get("result", "")) if isinstance(result, dict) else str(result)
-                )
-                keyword_check = (
-                    "异常" in result_text or "错误" in result_text or "error" in result_text.lower()
-                )
-                if isinstance(result, dict) and "error" in result:
-                    has_issue = True
-                elif isinstance(result, dict) and "success" in result:
-                    has_issue = result["success"] is False
-                else:
-                    has_issue = keyword_check
+                has_issue = "异常" in str(result) or "错误" in str(result) or "error" in str(result).lower()
 
                 if has_issue:
                     sched.consecutive_clean = 0
@@ -180,20 +166,21 @@ class OrgNodeScheduler:
                 logger.error(f"[Scheduler] Error in {node_id}/{sched.name}: {e}")
                 await asyncio.sleep(60)
 
-    async def _execute_schedule(self, org_id: str, node_id: str, sched: NodeSchedule) -> dict:
+    async def _execute_schedule(
+        self, org_id: str, node_id: str, sched: NodeSchedule
+    ) -> dict:
         """Execute a single scheduled task."""
         es = self._runtime.get_event_store(org_id)
-        es.emit(
-            "schedule_triggered",
-            node_id,
-            {
-                "schedule_id": sched.id,
-                "name": sched.name,
-            },
-        )
+        es.emit("schedule_triggered", node_id, {
+            "schedule_id": sched.id,
+            "name": sched.name,
+        })
 
         prompt = (
-            f"[定时任务] {sched.name}\n时间: {_now_iso()}\n指令: {sched.prompt}\n\n请执行上述任务。"
+            f"[定时任务] {sched.name}\n"
+            f"时间: {_now_iso()}\n"
+            f"指令: {sched.prompt}\n\n"
+            f"请执行上述任务。"
         )
 
         if sched.report_condition == "on_issue":
@@ -211,14 +198,10 @@ class OrgNodeScheduler:
         sched.last_result_summary = result_text[:200] if result_text else None
         self._save_schedule(org_id, node_id, sched)
 
-        es.emit(
-            "schedule_completed",
-            node_id,
-            {
-                "schedule_id": sched.id,
-                "result_preview": result_text[:100] if result_text else "",
-            },
-        )
+        es.emit("schedule_completed", node_id, {
+            "schedule_id": sched.id,
+            "result_preview": result_text[:100] if result_text else "",
+        })
 
         return result
 

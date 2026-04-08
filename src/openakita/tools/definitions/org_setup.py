@@ -61,8 +61,9 @@ _NODE_SCHEMA = {
         "agent_profile_id": {
             "type": "string",
             "description": (
-                "关联的系统 Agent ID（非常重要！决定节点的专业能力。"
-                "从 get_resources 返回的 agents 列表中选择最合适的）"
+                "关联的 Agent Profile ID（可选）。"
+                "从 get_resources 返回的 agents/custom_agents 列表中选择，"
+                "或留空并用 custom_prompt 直接定义全新角色"
             ),
         },
         "parent_role_title": {
@@ -73,12 +74,16 @@ _NODE_SCHEMA = {
             "type": "array",
             "items": {"type": "string"},
             "description": (
-                "外部工具（类目名或工具名，如 'research'、'filesystem'、'planning'、'browser'）"
+                "外部工具（类目名或工具名，如 "
+                "'research'、'filesystem'、'planning'、'browser'）"
             ),
         },
         "custom_prompt": {
             "type": "string",
-            "description": "自定义提示词（可选，用于精细控制节点行为）",
+            "description": (
+                "自定义提示词。可独立使用（不设 agent_profile_id）来创建全新角色，"
+                "也可与 agent_profile_id 配合使用来追加指令"
+            ),
         },
     },
     "required": ["role_title"],
@@ -89,24 +94,23 @@ ORG_SETUP_TOOLS = [
         "name": "setup_organization",
         "category": "Organization",
         "description": (
-            "Create, manage, and operate organizational structures for multi-agent collaboration. "
+            "Create and manage organizational structures for multi-agent collaboration. "
             "Supports: listing available agents/templates (get_resources), "
             "listing existing orgs (list_orgs), viewing an org (get_org), "
             "previewing before creation (preview), creating (create), "
             "creating from template (create_from_template), "
-            "modifying an existing org (update_org), deleting (delete_org), "
-            "and sending tasks/commands to an org (send_command). "
+            "modifying an existing org (update_org), deleting (delete_org). "
             "For CREATION: call get_resources first, ask clarifying questions, then create. "
             "For MODIFICATION: call list_orgs to find the org, get_org to see its structure, "
-            "then update_org with incremental changes. "
-            "For TASK DISPATCH: use send_command to assign a task to an active org."
+            "then update_org with incremental changes."
         ),
         "detail": (
             "通过自然语言创建和管理组织编排架构。\n\n"
             "## 创建流程\n\n"
-            "1. **get_resources** — 获取可用 Agent、模板、工具类目\n"
+            "1. **get_resources** — 获取可用 Agent（预设+用户自建）、模板、工具类目\n"
             "2. **向用户了解需求** — 信息不足时主动询问\n"
-            "3. **为每个节点匹配系统 Agent**（agent_profile_id）— 最重要的配置\n"
+            "3. **为每个节点配置角色** — 选择现有 Agent（agent_profile_id），"
+            "或用 custom_prompt 直接定义全新角色\n"
             "4. **preview** — 展示草案给用户确认\n"
             "5. **create** — 用户确认后正式创建\n\n"
             "## 修改流程\n\n"
@@ -115,11 +119,6 @@ ORG_SETUP_TOOLS = [
             "3. **理解用户修改意图** — 确认要增删改哪些节点或连线\n"
             "4. **向用户描述变更方案** — 先用文本说明，让用户确认\n"
             "5. **update_org** — 提交增量修改（保留现有节点 ID）\n\n"
-            "## 任务下发（send_command）\n\n"
-            "当用户希望让组织执行任务时，使用 send_command：\n"
-            "1. 用 list_orgs 找到目标组织（需要 running 状态）\n"
-            "2. 用 send_command 下发命令，指定 org_id 和 command（自然语言描述任务）\n"
-            "3. 系统会将命令路由到合适的节点执行并汇报结果\n\n"
             "## 连线类型\n\n"
             "组织支持 4 种连线关系：\n"
             "- **hierarchy** — 层级（上下级），通过节点的 parent_role_title 自动创建\n"
@@ -142,15 +141,9 @@ ORG_SETUP_TOOLS = [
                 "action": {
                     "type": "string",
                     "enum": [
-                        "get_resources",
-                        "list_orgs",
-                        "get_org",
-                        "preview",
-                        "create",
-                        "create_from_template",
-                        "update_org",
-                        "delete_org",
-                        "send_command",
+                        "get_resources", "list_orgs", "get_org",
+                        "preview", "create", "create_from_template",
+                        "update_org", "delete_org",
                     ],
                     "description": (
                         "操作类型："
@@ -161,8 +154,7 @@ ORG_SETUP_TOOLS = [
                         "create=创建组织；"
                         "create_from_template=从模板创建；"
                         "update_org=修改现有组织（增量）；"
-                        "delete_org=删除组织；"
-                        "send_command=向运行中的组织下发任务/命令"
+                        "delete_org=删除组织"
                     ),
                 },
                 "org_id": {
@@ -193,13 +185,6 @@ ORG_SETUP_TOOLS = [
                         "非层级连线列表（create/preview 时可选）。"
                         "用于定义子节点之间的协作/上报/咨询关系。"
                         "层级关系不需要在此指定，由节点的 parent_role_title 自动生成"
-                    ),
-                },
-                "command": {
-                    "type": "string",
-                    "description": (
-                        "要发送给组织的命令/任务描述（send_command 时必填）。"
-                        "用自然语言描述任务内容，系统会自动路由到合适的节点执行"
                     ),
                 },
                 "template_id": {
@@ -329,15 +314,6 @@ ORG_SETUP_TOOLS = [
                 "scenario": "删除组织",
                 "params": {"action": "delete_org", "org_id": "org_xxx"},
                 "expected": "永久删除组织及其所有数据",
-            },
-            {
-                "scenario": "向组织下发任务",
-                "params": {
-                    "action": "send_command",
-                    "org_id": "org_xxx",
-                    "command": "设计一个用户登录页面的原型",
-                },
-                "expected": "命令路由到合适节点执行，返回执行结果",
             },
         ],
     },

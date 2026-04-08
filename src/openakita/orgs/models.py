@@ -18,7 +18,6 @@ from openakita.memory.types import normalize_tags
 # Enums
 # ---------------------------------------------------------------------------
 
-
 class OrgStatus(StrEnum):
     DORMANT = "dormant"
     ACTIVE = "active"
@@ -116,7 +115,6 @@ class TaskStatus(StrEnum):
 # Helpers
 # ---------------------------------------------------------------------------
 
-
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -129,7 +127,6 @@ def _new_id(prefix: str = "") -> str:
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
-
 
 @dataclass
 class OrgNode:
@@ -296,23 +293,26 @@ class OrgEdge:
 @dataclass
 class UserPersona:
     """The human user's identity within an organization."""
-
     title: str = "负责人"
     display_name: str = ""
     description: str = ""
 
     def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "display_name": self.display_name,
-            "description": self.description,
-        }
+        return {"title": self.title, "display_name": self.display_name,
+                "description": self.description}
 
     @classmethod
     def from_dict(cls, d: dict | None) -> UserPersona:
         if not d:
             return cls()
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        cleaned = {}
+        for k, v in d.items():
+            if k not in cls.__dataclass_fields__:
+                continue
+            if isinstance(v, str) and "\ufffd" in v:
+                v = v.replace("\ufffd", "")
+            cleaned[k] = v
+        return cls(**cleaned)
 
     @property
     def label(self) -> str:
@@ -353,7 +353,7 @@ class Organization:
     scaling_approval: str = "user"
 
     # Notifications
-    notify_enabled: bool = True
+    notify_enabled: bool = False
     notify_channel: str | None = None
     notify_webhook_url: str | None = None
     notify_im_channel: str | None = None
@@ -389,6 +389,9 @@ class Organization:
 
     # Operation mode
     operation_mode: str = "command"
+
+    # Workspace — custom output directory for file-producing tools
+    workspace_dir: str = ""
 
     # Watchdog
     watchdog_enabled: bool = True
@@ -445,6 +448,7 @@ class Organization:
             "token_budget": self.token_budget,
             "token_budget_period": self.token_budget_period,
             "operation_mode": self.operation_mode,
+            "workspace_dir": self.workspace_dir,
             "watchdog_enabled": self.watchdog_enabled,
             "watchdog_interval_s": self.watchdog_interval_s,
             "watchdog_stuck_threshold_s": self.watchdog_stuck_threshold_s,
@@ -466,7 +470,10 @@ class Organization:
         filtered = {k: v for k, v in d.items() if k in known and k not in ("nodes", "edges")}
         org = cls(**filtered)
         org.nodes = [OrgNode.from_dict(n) for n in raw_nodes]
-        org.edges = [OrgEdge.from_dict(e) for e in raw_edges if e.get("source") != e.get("target")]
+        org.edges = [
+            OrgEdge.from_dict(e) for e in raw_edges
+            if e.get("source") != e.get("target")
+        ]
         if isinstance(raw_persona, dict):
             org.user_persona = UserPersona.from_dict(raw_persona)
         return org
@@ -488,9 +495,8 @@ class Organization:
             title_norm = title.replace(" ", "").replace("　", "").lower()
             if query == title or query in title or title in query:
                 return n
-            if query_norm and (
-                query_norm == title_norm or query_norm in title_norm or title_norm in query_norm
-            ):
+            if query_norm and (query_norm == title_norm or query_norm in title_norm
+                              or title_norm in query_norm):
                 return n
         if len(query_norm) >= 3:
             for n in self.nodes:
@@ -509,13 +515,15 @@ class Organization:
     def get_children(self, node_id: str) -> list[OrgNode]:
         child_ids: set[str] = set()
         for e in self.edges:
-            if e.edge_type == EdgeType.HIERARCHY and e.source == node_id and e.target != node_id:
+            if (e.edge_type == EdgeType.HIERARCHY
+                    and e.source == node_id and e.target != node_id):
                 child_ids.add(e.target)
         return [n for n in self.nodes if n.id in child_ids]
 
     def get_parent(self, node_id: str) -> OrgNode | None:
         for e in self.edges:
-            if e.edge_type == EdgeType.HIERARCHY and e.target == node_id and e.source != node_id:
+            if (e.edge_type == EdgeType.HIERARCHY
+                    and e.target == node_id and e.source != node_id):
                 return self.get_node(e.source)
         return None
 
@@ -578,6 +586,7 @@ class OrgMemoryEntry:
     source_node: str = ""
     source_message_id: str | None = None
     tags: list[str] = field(default_factory=list)
+    attachments: list[dict] = field(default_factory=list)
     importance: float = 0.5
     ttl_hours: int | None = None
     created_at: str = field(default_factory=_now_iso)
@@ -598,7 +607,7 @@ class OrgMemoryEntry:
                 self.ttl_hours = None
 
     def to_dict(self) -> dict:
-        return {
+        d: dict = {
             "id": self.id,
             "org_id": self.org_id,
             "scope": self.scope.value,
@@ -614,6 +623,9 @@ class OrgMemoryEntry:
             "last_accessed_at": self.last_accessed_at,
             "access_count": self.access_count,
         }
+        if self.attachments:
+            d["attachments"] = self.attachments
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> OrgMemoryEntry:
@@ -693,7 +705,6 @@ class InboxMessage:
 # Project / Task tracking
 # ---------------------------------------------------------------------------
 
-
 @dataclass
 class ProjectTask:
     id: str = field(default_factory=lambda: _new_id("task_"))
@@ -710,14 +721,6 @@ class ProjectTask:
     execution_log: list = field(default_factory=list)
     priority: int = 0
     progress_pct: int = 0
-    runtime_phase: str | None = None
-    current_owner_node_id: str | None = None
-    waiting_on_nodes: list[str] = field(default_factory=list)
-    last_error: str | None = None
-    last_event: str | None = None
-    cancel_requested_at: str | None = None
-    cancelled_at: str | None = None
-    runtime_updated_at: str | None = None
     created_at: str = field(default_factory=_now_iso)
     started_at: str | None = None
     delivered_at: str | None = None
@@ -745,14 +748,6 @@ class ProjectTask:
             "execution_log": list(self.execution_log) if self.execution_log else [],
             "priority": self.priority,
             "progress_pct": self.progress_pct,
-            "runtime_phase": self.runtime_phase,
-            "current_owner_node_id": self.current_owner_node_id,
-            "waiting_on_nodes": list(self.waiting_on_nodes) if self.waiting_on_nodes else [],
-            "last_error": self.last_error,
-            "last_event": self.last_event,
-            "cancel_requested_at": self.cancel_requested_at,
-            "cancelled_at": self.cancelled_at,
-            "runtime_updated_at": self.runtime_updated_at,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "delivered_at": self.delivered_at,

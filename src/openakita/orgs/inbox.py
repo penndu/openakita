@@ -60,6 +60,13 @@ class OrgInbox:
         if org:
             org_name = org.name
 
+        source_display = source_node
+        if org and source_node:
+            for n in org.nodes:
+                if n.id == source_node:
+                    source_display = n.role_title or source_node
+                    break
+
         msg = InboxMessage(
             id=_new_id("inbox_"),
             org_id=org_id,
@@ -67,11 +74,10 @@ class OrgInbox:
             title=title,
             body=body,
             priority=priority,
-            source_node=source_node,
+            source_node=source_display,
             category=category,
             requires_approval=requires_approval,
-            approval_options=approval_options
-            or (["approve", "reject"] if requires_approval else []),
+            approval_options=approval_options or (["approve", "reject"] if requires_approval else []),
             approval_id=approval_id,
             metadata=metadata or {},
         )
@@ -80,23 +86,17 @@ class OrgInbox:
         bucket.append(msg)
 
         if len(bucket) > self.MAX_MESSAGES_PER_ORG:
-            bucket.sort(
-                key=lambda m: (
-                    0 if m.requires_approval and m.status != "acted" else 1,
-                    m.created_at,
-                )
-            )
-            bucket[:] = bucket[-self.MAX_MESSAGES_PER_ORG :]
+            bucket.sort(key=lambda m: (
+                0 if m.requires_approval and m.status != "acted" else 1,
+                m.created_at,
+            ))
+            bucket[:] = bucket[-self.MAX_MESSAGES_PER_ORG:]
 
         self._notify_listeners(org_id, msg)
         return msg
 
     def push_task_complete(
-        self,
-        org_id: str,
-        node_id: str,
-        task_name: str,
-        result_summary: str,
+        self, org_id: str, node_id: str, task_name: str, result_summary: str,
     ) -> InboxMessage:
         return self.push(
             org_id,
@@ -107,11 +107,8 @@ class OrgInbox:
         )
 
     def push_approval_request(
-        self,
-        org_id: str,
-        node_id: str,
-        title: str,
-        body: str,
+        self, org_id: str, node_id: str,
+        title: str, body: str,
         options: list[str] | None = None,
         metadata: dict | None = None,
     ) -> InboxMessage:
@@ -128,35 +125,21 @@ class OrgInbox:
         )
 
     def push_progress(
-        self,
-        org_id: str,
-        node_id: str,
-        title: str,
-        body: str,
+        self, org_id: str, node_id: str, title: str, body: str,
     ) -> InboxMessage:
         return self.push(
-            org_id,
-            title=title,
-            body=body,
+            org_id, title=title, body=body,
             priority=InboxPriority.INFO,
-            source_node=node_id,
-            category="progress",
+            source_node=node_id, category="progress",
         )
 
     def push_warning(
-        self,
-        org_id: str,
-        node_id: str,
-        title: str,
-        body: str,
+        self, org_id: str, node_id: str, title: str, body: str,
     ) -> InboxMessage:
         return self.push(
-            org_id,
-            title=title,
-            body=body,
+            org_id, title=title, body=body,
             priority=InboxPriority.WARNING,
-            source_node=node_id,
-            category="warning",
+            source_node=node_id, category="warning",
         )
 
     # ------------------------------------------------------------------
@@ -192,13 +175,11 @@ class OrgInbox:
             InboxPriority.INFO: 0,
         }
 
-        result.sort(
-            key=lambda m: (
-                -priority_order.get(m.priority, 0),
-                0 if m.status != "acted" else 1,
-                m.created_at,
-            )
-        )
+        result.sort(key=lambda m: (
+            -priority_order.get(m.priority, 0),
+            0 if m.status != "acted" else 1,
+            m.created_at,
+        ))
 
         return result[offset : offset + limit]
 
@@ -234,7 +215,8 @@ class OrgInbox:
 
     def pending_approval_count(self, org_id: str) -> int:
         return sum(
-            1 for m in self._messages.get(org_id, []) if m.requires_approval and m.status != "acted"
+            1 for m in self._messages.get(org_id, [])
+            if m.requires_approval and m.status != "acted"
         )
 
     # ------------------------------------------------------------------
@@ -259,8 +241,7 @@ class OrgInbox:
             self._execute_approval_side_effects(org_id, msg)
 
         self._runtime.get_event_store(org_id).emit(
-            "approval_resolved",
-            by,
+            "approval_resolved", by,
             {"msg_id": msg.id, "approval_id": msg.approval_id, "decision": decision},
         )
 
@@ -283,7 +264,6 @@ class OrgInbox:
         if meta.get("action_type") == "create_schedule":
             try:
                 from .models import NodeSchedule, ScheduleType
-
                 params = meta.get("schedule_params", {})
                 target_node = meta.get("node_id", "")
                 if params and target_node:
