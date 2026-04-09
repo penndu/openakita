@@ -253,10 +253,10 @@ class QQBotAdapter(ChannelAdapter):
             dest = upload_dir / unique_name
             shutil.copy2(src, dest)
             url = f"{self.public_api_url}/api/uploads/{unique_name}"
-            logger.info(f"Local image served as public URL: {url}")
+            logger.info(f"Local file served as public URL: {url}")
             return url
         except Exception as e:
-            logger.warning(f"Failed to make local image publicly accessible: {e}")
+            logger.warning(f"Failed to make local file publicly accessible: {e}")
             return None
 
     @staticmethod
@@ -765,10 +765,12 @@ class QQBotAdapter(ChannelAdapter):
             }.get(media_type, "application/octet-stream")
 
             media = MediaFile.create(filename=filename, mime_type=mime, url=url)
-            if media_type == "image":
-                content.images.append(media)
-            elif media_type == "audio":
+
+            if media_type == "audio":
+                QQBotAdapter._enrich_voice_media(att, media, is_dict=True)
                 content.voices.append(media)
+            elif media_type == "image":
+                content.images.append(media)
             elif media_type == "video":
                 content.videos.append(media)
             else:
@@ -822,6 +824,29 @@ class QQBotAdapter(ChannelAdapter):
         return "file"
 
     @staticmethod
+    def _enrich_voice_media(att: Any, media: "MediaFile", *, is_dict: bool = True) -> None:
+        """从 QQ 语音附件中提取平台特有字段。
+
+        QQ 语音附件提供:
+        - voice_wav_url: WAV 格式下载链接（比默认 SILK 更通用）
+        - asr_refer_text: QQ 平台侧的 ASR 转写结果
+        """
+        _get = (lambda k, d="": att.get(k, d)) if is_dict else (lambda k, d="": getattr(att, k, d))
+
+        wav_url = _get("voice_wav_url")
+        if wav_url:
+            media.extra["voice_wav_url"] = wav_url
+
+        asr_text = (_get("asr_refer_text") or "").strip()
+        if asr_text:
+            media.transcription = asr_text
+            logger.info(f"QQ voice ASR (platform): {asr_text[:80]}")
+
+        size = _get("size")
+        if size:
+            media.extra["size"] = size
+
+    @staticmethod
     def _parse_attachments(attachments: list | None, content: MessageContent) -> None:
         """
         解析 botpy 消息附件，填充到 MessageContent。
@@ -861,10 +886,11 @@ class QQBotAdapter(ChannelAdapter):
 
             media = MediaFile.create(filename=filename, mime_type=ct, url=url)
 
-            if media_type == "image":
-                content.images.append(media)
-            elif media_type == "audio":
+            if media_type == "audio":
+                QQBotAdapter._enrich_voice_media(att, media, is_dict=isinstance(att, dict))
                 content.voices.append(media)
+            elif media_type == "image":
+                content.images.append(media)
             elif media_type == "video":
                 content.videos.append(media)
             else:
@@ -1060,6 +1086,7 @@ class QQBotAdapter(ChannelAdapter):
         file_type: int,
         file_data: str,
         srv_send_msg: bool = False,
+        file_name: str | None = None,
     ) -> dict:
         """通过 file_data (base64) 直接上传富媒体到 QQ 服务器，绕过 botpy SDK。
 
@@ -1077,15 +1104,23 @@ class QQBotAdapter(ChannelAdapter):
         else:
             url = f"{base_url}/v2/users/{target_id}/files"
 
-        payload = {
+        payload: dict[str, Any] = {
             "file_type": file_type,
             "file_data": file_data,
             "srv_send_msg": srv_send_msg,
         }
+        if file_name:
+            payload["file_name"] = file_name
         async with hx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
-            return resp.json()
+            result = resp.json()
+            logger.debug(
+                f"QQ Official Bot: rich_media_base64 upload result: "
+                f"file_type={file_type}, file_name={file_name}, "
+                f"keys={list(result.keys()) if isinstance(result, dict) else type(result)}"
+            )
+            return result
 
     async def _send_media_message_via_http(
         self,
@@ -1186,17 +1221,20 @@ class QQBotAdapter(ChannelAdapter):
             发送后的消息 ID
         """
         import base64 as b64
+        from pathlib import Path as _P
 
         # Step 1: 上传富媒体资源获取 file_info
         if local_path:
             with open(local_path, "rb") as f:
                 file_data = b64.standard_b64encode(f.read()).decode("ascii")
+            _fname = _P(local_path).name if file_type == 4 else None
             upload_result = await self._upload_rich_media_base64(
                 chat_type,
                 target_id,
                 file_type=file_type,
                 file_data=file_data,
                 srv_send_msg=False,
+                file_name=_fname,
             )
         elif url:
             upload_result = await self._upload_rich_media(
@@ -1748,7 +1786,11 @@ class QQBotAdapter(ChannelAdapter):
         caption: str | None = None,
         **kwargs,
     ) -> str:
-        """发送文件（file_type=4），支持群聊和 C2C。"""
+        """发送文件（file_type=4），支持群聊和 C2C。
+
+        优先将本地文件转为公网 URL 上传（QQ API 可从 URL 获取扩展名），
+        当 public_api_url 未配置时降级为 base64 上传（QQ 可能无法识别文件类型）。
+        """
         chat_type = self._resolve_chat_type(chat_id)
         if chat_type == "channel":
             raise NotImplementedError("QQ 频道暂不支持通过富媒体 API 发送文件")
@@ -1771,13 +1813,28 @@ class QQBotAdapter(ChannelAdapter):
                 logger.warning(f"QQ: send file caption failed: {e}")
 
         api = self._client.api if self._client and self._client.api else None
+
+        # 优先走 URL 上传：QQ 从 URL 路径识别扩展名，文件可正常打开。
+        # URL 上传需要 SDK api 实例（_upload_rich_media 依赖 botpy SDK），
+        # Webhook 模式下 api 为 None，只能走 base64。
+        if api is not None:
+            public_url = self._local_path_to_public_url(file_path)
+            if public_url:
+                return await self._send_rich_media(
+                    api, chat_type, chat_id,
+                    file_type=4, url=public_url, msg_id=msg_id,
+                )
+
+        # 降级：base64 上传（QQ 无法从二进制推断文件扩展名，接收方可能无法打开）
+        if not self.public_api_url:
+            logger.warning(
+                "QQ: send_file falling back to base64 upload — "
+                "file may be unopenable without extension. "
+                "Configure public_api_url for reliable file delivery."
+            )
         return await self._send_rich_media(
-            api,
-            chat_type,
-            chat_id,
-            file_type=4,
-            msg_id=msg_id,
-            local_path=file_path,
+            api, chat_type, chat_id,
+            file_type=4, msg_id=msg_id, local_path=file_path,
         )
 
     async def send_voice(
@@ -1876,7 +1933,8 @@ class QQBotAdapter(ChannelAdapter):
     async def send_typing(self, chat_id: str, thread_id: str | None = None) -> None:
         """发送输入状态提示。
 
-        C2C 单聊使用 msg_type=6 原生输入状态通知（每次调用都续期，不幂等）。
+        C2C 单聊先发 msg_type=6 原生输入状态通知（每次调用续期），同时发送
+        一条可见的"正在思考中..."占位消息（幂等，只发一次），在 clear_typing 时撤回。
         群聊/频道使用 msg_type=0 文本消息"正在思考中..."（幂等，只发一次）。
         """
         # 记录 typing 开始时间（仅首次）
@@ -1892,9 +1950,9 @@ class QQBotAdapter(ChannelAdapter):
                 await self._send_input_notify(chat_id)
             except Exception as e:
                 logger.debug(f"QQ Official Bot: send_typing (input_notify) failed: {e}")
-            return
+            # 同时 fall-through 发送可见的占位消息，防止 input_notify 过期后用户无感知
 
-        # 群聊/频道: 幂等发送文本消息
+        # 群聊/频道/C2C: 幂等发送文本消息
         if chat_id in self._typing_msg_ids:
             return
 
@@ -1981,8 +2039,8 @@ class QQBotAdapter(ChannelAdapter):
     async def clear_typing(self, chat_id: str, thread_id: str | None = None) -> None:
         """清除输入状态提示。
 
-        C2C: msg_type=6 自动过期，只需清理内部状态。
-        群聊/频道: 撤回之前发送的"正在思考中..."消息（2 分钟内有效）。
+        C2C/群聊/频道: 撤回之前发送的"正在思考中..."占位消息（2 分钟内有效）。
+        C2C 的 msg_type=6 输入状态通知自动过期，此处仅清理内部标记。
         """
         self._typing_c2c_active.discard(chat_id)
         self._typing_start_time.pop(chat_id, None)
@@ -2008,6 +2066,8 @@ class QQBotAdapter(ChannelAdapter):
                         channel_id=chat_id,
                         message_id=sent_id,
                     )
+                elif chat_type == "c2c":
+                    await self._recall_message_via_http(chat_id, chat_type, sent_id)
         except Exception as e:
             logger.debug(f"QQ Official Bot: clear_typing (recall) failed: {e}")
 
@@ -2039,32 +2099,49 @@ class QQBotAdapter(ChannelAdapter):
     # ==================== 媒体下载/上传 ====================
 
     async def download_media(self, media: MediaFile) -> Path:
-        """下载媒体文件"""
+        """下载媒体文件。
+
+        语音文件优先使用 voice_wav_url（WAV 格式，STT 兼容性更好）。
+        所有请求携带 Bot Token 鉴权头以防 QQ CDN 要求验证。
+        """
         if media.local_path and Path(media.local_path).exists():
             return Path(media.local_path)
 
-        if media.url:
-            try:
-                import httpx as hx
-            except ImportError:
-                raise ImportError("httpx not installed. Run: pip install httpx")
+        # 语音优先用 WAV URL（比 SILK 更通用）
+        download_url = media.extra.get("voice_wav_url") or media.url
+        if not download_url:
+            raise ValueError("Media has no url")
 
-            async with hx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(media.url)
-                response.raise_for_status()
+        try:
+            import httpx as hx
+        except ImportError:
+            raise ImportError("httpx not installed. Run: pip install httpx")
 
-                from openakita.channels.base import sanitize_filename
+        headers = await self._build_api_headers(content_type="")
 
-                safe_name = sanitize_filename(Path(media.filename).name or "download")
-                local_path = self.media_dir / safe_name
-                with open(local_path, "wb") as f:
-                    f.write(response.content)
+        async with hx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(download_url, headers=headers)
+            if response.status_code in (401, 403) and download_url != media.url:
+                logger.debug("QQ: voice_wav_url auth failed, retrying with original url")
+                response = await client.get(media.url, headers=headers)
+            if response.status_code in (401, 403):
+                logger.debug("QQ: retrying media download without auth headers")
+                response = await client.get(download_url)
+            response.raise_for_status()
 
-                media.local_path = str(local_path)
-                media.status = MediaStatus.READY
-                return local_path
+            from openakita.channels.base import sanitize_filename
 
-        raise ValueError("Media has no url")
+            fname = Path(media.filename).name or "download"
+            if download_url != media.url and not fname.endswith(".wav"):
+                fname = Path(fname).stem + ".wav"
+            safe_name = sanitize_filename(fname)
+            local_path = self.media_dir / safe_name
+            with open(local_path, "wb") as f:
+                f.write(response.content)
+
+            media.local_path = str(local_path)
+            media.status = MediaStatus.READY
+            return local_path
 
     async def upload_media(self, path: Path, mime_type: str) -> MediaFile:
         """上传媒体文件"""

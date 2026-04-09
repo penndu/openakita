@@ -66,7 +66,6 @@ DEFER_INDIVIDUAL_TOOLS: frozenset[str] = frozenset(
     {
         "edit_notebook",
         "switch_mode",
-        "generate_image",
         "enable_thinking",
         "get_session_logs",
         "set_task_timeout",

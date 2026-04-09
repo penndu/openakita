@@ -79,6 +79,7 @@ def _create_feishu(creds: dict, *, channel_name: str, bot_id: str, agent_profile
         agent_profile_id=agent_profile_id,
         streaming_enabled=_cred_bool(creds.get("streaming_enabled")),
         group_streaming=_cred_bool(creds.get("group_streaming")),
+        streaming_throttle_ms=_safe_int(creds.get("streaming_throttle_ms"), None),
         group_response_mode=creds.get("group_response_mode") or None,
         footer_elapsed=_cred_bool(creds.get("footer_elapsed")),
         footer_status=_cred_bool(creds.get("footer_status")),

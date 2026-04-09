@@ -620,7 +620,7 @@ export function OrgEditorView({
   apiBaseUrl?: string;
   visible?: boolean;
 }) {
-  useTranslation();
+  const { t } = useTranslation();
   const mdModules = useMdModules();
 
   // State
@@ -1648,7 +1648,7 @@ export function OrgEditorView({
             boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
           }}>
             <div style={{ padding: "12px 12px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontWeight: 600, fontSize: 14 }}>组织编排</span>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>{t("orgEditor.title", "组织编排")}</span>
               <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
@@ -1739,14 +1739,14 @@ export function OrgEditorView({
             }}>
               <img
                 src={agentOrgImg}
-                alt="组织编排示意"
+                alt={t("orgEditor.title", "组织编排")}
                 style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 8 }}
               />
             </div>
             <div style={{ padding: "16px 20px", borderTop: "1px solid var(--line)", flexShrink: 0 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>欢迎使用组织编排</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{t("orgEditor.welcomeTitle", "欢迎使用组织编排")}</h3>
               <p style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.8 }}>
-                组织编排可以让多个 AI Agent 协同工作——你可以设计组织架构、定义节点角色、配置协作关系，然后一键启动，让整个 AI 团队自动运转。
+                {t("orgEditor.welcomeDesc", "组织编排可以让多个 AI Agent 协同工作——你可以设计组织架构、定义节点角色、配置协作关系，然后一键启动，让整个 AI 团队自动运转。")}
               </p>
             </div>
           </div>
@@ -1782,7 +1782,7 @@ export function OrgEditorView({
         }}
       >
         <div style={{ padding: "12px 12px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>组织编排</span>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>{t("orgEditor.title", "组织编排")}</span>
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             <TooltipProvider delayDuration={300}>
               <Tooltip>
@@ -4249,7 +4249,7 @@ export function OrgEditorView({
               )}
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, lineHeight: 1.5 }}>
-              组织编排产出的文件将保存在此目录。留空则使用默认路径。
+              {t("orgEditor.outputPathHint", "组织编排产出的文件将保存在此目录。留空则使用默认路径。")}
             </div>
           </div>
 

@@ -365,7 +365,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
                   color: TYPE_COLORS[t] || "var(--foreground)",
                 })),
               ].map((item, i) => (
-                <div key={i} className="flex flex-1 min-w-[100px] flex-col items-center justify-center p-4">
+                <div key={i} className="flex flex-1 min-w-[80px] flex-col items-center justify-center p-3 md:p-4">
                   <div className="text-2xl font-bold tracking-tight" style={{ color: item.color }}>
                     {item.value}
                   </div>
@@ -382,9 +382,9 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       {/* Toolbar */}
       <Card className="gap-0 border-border/80 py-0 shadow-sm shrink-0">
         <CardContent className="p-4">
-          <div className="flex items-center justify-between gap-3 overflow-x-auto">
-            <div className="flex min-w-max items-center gap-2 md:gap-3">
-              <div className="relative w-[220px] min-w-[180px] md:w-[280px]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 md:gap-3">
+              <div className="relative w-full min-w-[160px] max-w-[280px] sm:w-[220px] md:w-[280px]">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 <Input
                   placeholder="搜索记忆内容..."

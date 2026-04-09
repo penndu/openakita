@@ -358,7 +358,9 @@ def _decrypt_file(encrypted: bytes, aes_key_b64: str) -> bytes:
     """解密企业微信文件 (AES-256-CBC, PKCS#7 pad to 32-byte block)."""
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-    key = base64.b64decode(aes_key_b64)
+    # WeCom WS protocol may omit trailing '=' padding in base64 aeskey
+    padded_b64 = aes_key_b64 + "=" * (-len(aes_key_b64) % 4)
+    key = base64.b64decode(padded_b64)
     if len(key) != 32:
         raise ValueError(f"AES key must be 32 bytes, got {len(key)}")
     iv = key[:16]
@@ -624,6 +626,7 @@ class WeWorkWsAdapter(ChannelAdapter):
         self._chat_to_req: dict[str, str] = {}
         self._typing_start_time: dict[str, float] = {}
         self._streaming_thinking: dict[str, str] = {}
+        self._streaming_thinking_ms: dict[str, int] = {}
         self._streaming_chain: dict[str, list[str]] = {}
         self._streaming_buffers: dict[str, str] = {}
         self._streaming_last_patch: dict[str, float] = {}
@@ -1304,13 +1307,15 @@ class WeWorkWsAdapter(ChannelAdapter):
         thinking = self._streaming_thinking.get(sk, "")
         chain = self._streaming_chain.get(sk, [])
         reply = self._streaming_buffers.get(sk, "")
+        dur_ms = self._streaming_thinking_ms.get(sk, 0)
 
         think_parts: list[str] = []
         if thinking:
-            preview = thinking.strip().replace("\n", " ")[:200]
-            if len(thinking) > 200:
+            dur_str = f" ({dur_ms / 1000:.1f}s)" if dur_ms else ""
+            preview = thinking.strip()[:600]
+            if len(thinking.strip()) > 600:
                 preview += "..."
-            think_parts.append(f"💭 {preview}")
+            think_parts.append(f"💭 思考过程{dur_str}\n{preview}")
         if chain:
             think_parts.extend(chain[-8:])
 
@@ -1358,7 +1363,7 @@ class WeWorkWsAdapter(ChannelAdapter):
     ) -> None:
         """Receive thinking content delta and update the stream display."""
         sk = self._make_session_key(chat_id, thread_id)
-        self._streaming_thinking[sk] = self._streaming_thinking.get(sk, "") + thinking_text
+        self._streaming_thinking[sk] = thinking_text
         req_id = self._chat_to_req.get(chat_id)
         if not req_id:
             return
@@ -1427,6 +1432,7 @@ class WeWorkWsAdapter(ChannelAdapter):
         """Remove all streaming state entries for a given session."""
         self._chat_to_req.pop(chat_id, None)
         self._streaming_thinking.pop(sk, None)
+        self._streaming_thinking_ms.pop(sk, None)
         self._streaming_chain.pop(sk, None)
         self._streaming_buffers.pop(sk, None)
         self._streaming_last_patch.pop(sk, None)
@@ -1453,8 +1459,8 @@ class WeWorkWsAdapter(ChannelAdapter):
         if thinking or chain:
             think_lines: list[str] = []
             if thinking:
-                preview = thinking.strip()[:500]
-                if len(preview) < len(thinking.strip()):
+                preview = thinking.strip()[:1000]
+                if len(thinking.strip()) > 1000:
                     preview += "..."
                 think_lines.append(f"💭 {preview}")
             think_lines.extend(chain)
