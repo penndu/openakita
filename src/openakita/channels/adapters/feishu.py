@@ -641,6 +641,19 @@ class FeishuAdapter(ChannelAdapter):
             self._cardkit_available = False
 
         logger.info(f"Feishu capabilities: {self._capabilities}")
+        _stream_detail = (
+            f"streaming={self._streaming_enabled}"
+            f", group_streaming={self._group_streaming}"
+            f", cardkit={self._cardkit_available}"
+            f", throttle={self._streaming_throttle_ms}ms"
+        )
+        if self._streaming_enabled:
+            logger.info(f"Feishu: 流式输出已启用 ({_stream_detail})")
+        else:
+            logger.info(
+                f"Feishu: 流式输出未启用 ({_stream_detail})。"
+                "如需启用，请在 bot 配置中添加 streaming_enabled=true 或设置环境变量 FEISHU_STREAMING_ENABLED=true"
+            )
 
     def start_websocket(self, blocking: bool = True) -> None:
         """
@@ -1398,7 +1411,7 @@ class FeishuAdapter(ChannelAdapter):
         if not self._client:
             return
         self._typing_start_time[sk] = time.time()
-        self._typing_status[sk] = "思考中"
+        self._typing_status[sk] = "处理中"
         reply_to = self._last_user_msg.pop(sk, None) or thread_id
         card_msg_id = await self._send_thinking_card(chat_id, reply_to=reply_to, sk=sk)
         if card_msg_id:
@@ -1646,7 +1659,10 @@ class FeishuAdapter(ChannelAdapter):
         is_group: bool = False,
         duration_ms: int = 0,
     ) -> None:
-        """接收思考内容，PATCH 到卡片显示思考过程。"""
+        """接收思考内容，节流后 PATCH 到卡片显示思考过程。
+
+        当 duration_ms > 0 时表示思考阶段结束，强制刷新不受节流限制。
+        """
         if not self.is_streaming_enabled(is_group):
             return
 
@@ -1660,10 +1676,18 @@ class FeishuAdapter(ChannelAdapter):
         if not card_id:
             return
 
+        now = time.time()
+        is_final = duration_ms > 0
+        if not is_final:
+            last_t = self._streaming_last_patch.get(sk, 0.0)
+            throttle_s = self._streaming_throttle_ms / 1000.0
+            if now - last_t < throttle_s:
+                return
+
         display = self._compose_thinking_display(sk)
         try:
             await self._patch_card_content(card_id, display, sk)
-            self._streaming_last_patch[sk] = time.time()
+            self._streaming_last_patch[sk] = now
         except Exception as e:
             logger.debug(f"Feishu: stream_thinking patch failed (non-fatal): {e}")
 
@@ -1698,6 +1722,8 @@ class FeishuAdapter(ChannelAdapter):
             except Exception as e:
                 logger.debug(f"Feishu: stream_chain_text patch failed (non-fatal): {e}")
 
+    _THINKING_DISPLAY_MAX = 800
+
     def _compose_thinking_display(self, sk: str) -> str:
         """根据当前 thinking + chain + reply buffer 构建卡片显示内容"""
         thinking = self._streaming_thinking.get(sk, "")
@@ -1709,8 +1735,9 @@ class FeishuAdapter(ChannelAdapter):
         if thinking:
             dur_str = f" ({dur_ms / 1000:.1f}s)" if dur_ms else ""
             preview = thinking.strip()
-            if len(preview) > 600:
-                preview = preview[:600] + "..."
+            limit = self._THINKING_DISPLAY_MAX
+            if len(preview) > limit:
+                preview = "..." + preview[-limit:]
             parts.append(f"💭 **思考过程**{dur_str}\n> {preview.replace(chr(10), chr(10) + '> ')}")
 
         if chain_lines:

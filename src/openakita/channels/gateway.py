@@ -2028,6 +2028,8 @@ class MessageGateway:
             await adapter.stop()
         except Exception as e:
             logger.error(f"Error stopping adapter {name} during unregister: {e}")
+        adapter._message_callback = None
+        adapter._failure_callback = None
         logger.info(f"Unregistered adapter: {name}")
         return True
 

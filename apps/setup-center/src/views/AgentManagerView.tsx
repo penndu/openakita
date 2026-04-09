@@ -31,6 +31,8 @@ type AgentProfile = {
   identity_mode?: string;
   memory_mode?: string;
   memory_inherit_global?: boolean;
+  name_i18n?: Record<string, string>;
+  description_i18n?: Record<string, string>;
 };
 
 type SkillItem = {
@@ -573,6 +575,10 @@ export function AgentManagerView({
     return i18nMap[catId] ? t(`agentManager.${i18nMap[catId]}`) : catId;
   };
 
+  const langKey = i18n.language?.startsWith("zh") ? "zh" : "en";
+  const getI18nName = (agent: AgentProfile) => agent.name_i18n?.[langKey] || agent.name;
+  const getI18nDesc = (agent: AgentProfile) => agent.description_i18n?.[langKey] || agent.description;
+
   const getCategoryColor = (catId: string): string => {
     const found = categories.find((c) => c.id === catId);
     return found?.color || "var(--primary, #3b82f6)";
@@ -854,12 +860,12 @@ export function AgentManagerView({
                   {agent.icon.startsWith("svg:") ? <SvgIcon name={agent.icon.slice(4)} size={28} color={agent.color || "currentColor"} /> : agent.icon}
                 </span>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{agent.name}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getI18nName(agent)}</div>
                   <div style={{ fontSize: 11, opacity: 0.45, fontFamily: "monospace" }}>{agent.id}</div>
                 </div>
               </div>
               <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 10, minHeight: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {agent.description || "\u2014"}
+                {getI18nDesc(agent) || "\u2014"}
               </div>
 
               {/* Actions */}
@@ -975,7 +981,7 @@ export function AgentManagerView({
                       {agent.icon.startsWith("svg:") ? <SvgIcon name={agent.icon.slice(4)} size={28} color={agent.color || "currentColor"} /> : agent.icon}
                     </span>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{agent.name}</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getI18nName(agent)}</div>
                     </div>
                   </div>
                   <button
@@ -1057,7 +1063,7 @@ export function AgentManagerView({
           <SheetHeader className="px-6 pt-6 pb-2">
             <SheetTitle>{isCreating ? t("agentManager.create") : t("agentManager.edit")}</SheetTitle>
             <SheetDescription className="sr-only">
-              {isCreating ? "Create a new agent profile" : "Edit agent profile"}
+              {isCreating ? t("agentManager.create") : t("agentManager.edit")}
             </SheetDescription>
           </SheetHeader>
 

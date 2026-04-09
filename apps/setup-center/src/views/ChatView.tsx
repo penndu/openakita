@@ -2016,23 +2016,28 @@ export function ChatView({
               case "thinking_delta":
                 currentThinking += event.content;
                 currentThinkingContent += event.content;
+                if (currentChainGroup) {
+                  const grp = currentChainGroup;
+                  const entries = [...grp.entries];
+                  if (entries.length > 0 && entries[entries.length - 1].kind === "thinking") {
+                    entries[entries.length - 1] = { kind: "thinking", content: currentThinkingContent };
+                  } else {
+                    entries.push({ kind: "thinking", content: currentThinkingContent });
+                  }
+                  currentChainGroup = { ...grp, entries, hasThinking: true };
+                  chainGroups = chainGroups.map((g, i) => i === chainGroups.length - 1 ? currentChainGroup! : g);
+                }
                 break;
               case "thinking_end": {
                 isThinking = false;
                 const _thinkDuration = event.duration_ms || (Date.now() - thinkingStartTime);
                 const _hasThinking = event.has_thinking ?? (currentThinkingContent.length > 0);
                 if (currentChainGroup) {
-                  const grp: ChainGroup = currentChainGroup;
-                  if (_hasThinking && currentThinkingContent) {
-                    currentChainGroup = {
-                      ...grp,
-                      entries: [...grp.entries, { kind: "thinking" as const, content: currentThinkingContent }],
-                      hasThinking: true,
-                      durationMs: _thinkDuration,
-                    };
-                  } else {
-                    currentChainGroup = { ...grp, durationMs: _thinkDuration };
-                  }
+                  currentChainGroup = {
+                    ...currentChainGroup,
+                    durationMs: _thinkDuration,
+                    hasThinking: _hasThinking,
+                  };
                   chainGroups = chainGroups.map((g, i) => i === chainGroups.length - 1 ? currentChainGroup! : g);
                 }
                 break;

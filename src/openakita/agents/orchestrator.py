@@ -430,7 +430,7 @@ class AgentOrchestrator:
                 session,
                 message,
                 agent_profile_id,
-                pass_gateway=(depth == 0),
+                pass_gateway=True,
                 depth=depth,
                 isolated_browser=isolated_browser,
                 pre_state_key=pre_state_key,

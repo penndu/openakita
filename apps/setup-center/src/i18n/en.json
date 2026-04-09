@@ -28,7 +28,8 @@
     "groupMonitor": "Monitor",
     "groupMultiAgent": "Agents",
     "groupStore": "Store",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "pixelOffice": "Pixel Office"
   },
   "topbar": {
     "workspace": "Workspace",
@@ -81,6 +82,8 @@
     "sessions": "By Session",
     "disclaimer": "⚠ Local token counts may differ from provider billing. Actual usage is subject to the provider's data. Stats here are for reference only.",
     "estimatedCost": "Estimated Cost",
+    "disabledHint": "Module disabled. Toggle the switch above to enable.",
+    "shareOfTotal": "{{pct}} of total tokens",
     "period1d": "1D",
     "period3d": "3D",
     "period1w": "1W",
@@ -1502,6 +1505,16 @@
     "identitySaveSuccess": "Identity file saved",
     "identitySaveFailed": "Failed to save identity file",
     "semanticCount": "{{count}} semantic memories"
+  },
+  "orgEditor": {
+    "title": "Orchestration",
+    "welcomeTitle": "Welcome to Orchestration",
+    "welcomeDesc": "Orchestration enables multiple AI Agents to collaborate — design org structure, define node roles, configure relationships, then launch with one click.",
+    "outputPathHint": "Output files from orchestration will be saved here. Leave empty for default path."
+  },
+  "pixelOffice": {
+    "title": "Pixel Office",
+    "switchMode": "Switch mode"
   },
   "dashboard": {
     "title": "Agent Dashboard",

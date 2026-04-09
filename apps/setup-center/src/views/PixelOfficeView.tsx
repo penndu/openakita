@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { PhaserGame, type GameRef } from '../components/pixel-office/PhaserGame';
 import { PixelOfficeEventLog, type EventLogEntry } from '../components/pixel-office/PixelOfficeEventLog';
 import { PixelOfficeAgentList, type AgentListItem } from '../components/pixel-office/PixelOfficeAgentList';
@@ -42,6 +43,7 @@ export function PixelOfficeView({
   apiBaseUrl?: string;
   visible?: boolean;
 }) {
+  const { t } = useTranslation();
   const [themeId, setThemeId] = useState('office');
   const [orgData, setOrgData] = useState<OrgData | null>(null);
   const [agents, setAgents] = useState<AgentListItem[]>([]);
@@ -248,13 +250,13 @@ export function PixelOfficeView({
               {orgData && <span className="poNodeCount">{orgData.nodes.length} 节点</span>}
             </>
           ) : (
-            <h2 className="poOrgName">像素办公室</h2>
+            <h2 className="poOrgName">{t("pixelOffice.title", "像素办公室")}</h2>
           )}
           <div className="poOrgSwitcher">
             <button
               className="poOrgSwitchBtn"
               onClick={() => setOrgDropdownOpen(!orgDropdownOpen)}
-              title="切换模式"
+              title={t("pixelOffice.switchMode", "切换模式")}
             >
               <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor">
                 <path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>

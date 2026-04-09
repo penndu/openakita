@@ -268,6 +268,30 @@ class Checkpoint:
     tool_names: list[str] = field(default_factory=list)  # 该决策调用的工具
 
 
+def _get_action_claim_re() -> "re.Pattern[str]":
+    """Compiled regex that detects Chinese action-claim phrases.
+
+    Matches patterns like "已帮你保存", "已完成", "成功发送", "已经删除" — these
+    indicate the LLM is *claiming* it performed an operation rather than merely
+    analysing or describing content.  Used by the implicit-REPLY heuristic to
+    avoid accepting hallucinated action descriptions.
+    """
+    import re as _re
+
+    pat = getattr(_get_action_claim_re, "_cached", None)
+    if pat is not None:
+        return pat
+    verbs = (
+        "保存|发送|创建|删除|修改|上传|下载|执行|生成|导出|复制|移动|"
+        "写入|添加|设置|配置|安装|部署|打包|编译|构建|启动|重启|停止|关闭"
+    )
+    pat = _re.compile(
+        rf"(?:已[经]?|成功|顺利)(?:帮你?|为你|给你)?(?:{verbs})"
+    )
+    _get_action_claim_re._cached = pat  # type: ignore[attr-defined]
+    return pat
+
+
 class ReasoningEngine:
     """
     显式推理-行动引擎。
@@ -435,6 +459,13 @@ class ReasoningEngine:
         if not gateway or not session_key:
             # CLI 模式或无 gateway，不做等待
             return None
+
+        # 先 flush 进度缓冲区，确保思考/工具进度在问题之前送达
+        if hasattr(gateway, "flush_progress"):
+            try:
+                await gateway.flush_progress(session)
+            except Exception:
+                pass
 
         # 发送问题到用户
         try:
@@ -1101,10 +1132,11 @@ class ReasoningEngine:
 
             # === IM 进度: thinking 内容 ===
             if decision.thinking_content:
-                _think_preview = decision.thinking_content[:200].strip().replace("\n", " ")
-                if len(decision.thinking_content) > 200:
-                    _think_preview += "..."
-                await _emit_progress(f"💭 {_think_preview}")
+                _raw = decision.thinking_content[:600].strip()
+                if len(decision.thinking_content) > 600:
+                    _raw += "..."
+                _think_preview = "> " + _raw.replace("\n", "\n> ")
+                await _emit_progress(f"💭 **思考中**\n{_think_preview}")
 
             # === IM 进度: LLM 推理意图 ===
             _decision_text_run = (decision.text_content or "").strip().replace("\n", " ")
@@ -4859,6 +4891,26 @@ class ReasoningEngine:
             logger.info(
                 "[IntentTag] REPLY intent with substantial text, "
                 "accepting as valid response (no ForceToolCall)"
+            )
+            return clean_llm_response(stripped_text)
+
+        # No intent tag but text is long enough to be a genuine analysis / knowledge
+        # response.  Accept as implicit REPLY **only if** the text does not look like
+        # an action-claim hallucination (e.g. "已帮你保存/删除/发送…" without any
+        # actual tool calls).
+        _IMPLICIT_REPLY_THRESHOLD = 200
+        _ACTION_CLAIM_RE = _get_action_claim_re()
+        _txt = (stripped_text or "").strip()
+        if (
+            intent is None
+            and _txt
+            and len(_txt) > _IMPLICIT_REPLY_THRESHOLD
+            and not _ACTION_CLAIM_RE.search(_txt)
+        ):
+            logger.info(
+                f"[IntentTag] No intent tag but substantial text "
+                f"({len(_txt)} chars > {_IMPLICIT_REPLY_THRESHOLD}), "
+                f"no action-claim detected — accepting as implicit REPLY"
             )
             return clean_llm_response(stripped_text)
 

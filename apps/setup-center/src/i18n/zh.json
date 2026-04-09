@@ -28,7 +28,8 @@
     "groupMonitor": "监控",
     "groupMultiAgent": "Agents",
     "groupStore": "市场",
-    "plugins": "插件"
+    "plugins": "插件",
+    "pixelOffice": "像素办公室"
   },
   "topbar": {
     "workspace": "工作区",
@@ -81,6 +82,8 @@
     "sessions": "按会话",
     "disclaimer": "⚠ 本地 token 计算与服务商算法无法保证完全一致，实际用量以服务商账单为准，此处统计仅供参考。",
     "estimatedCost": "预估费用",
+    "disabledHint": "此模块已禁用，点击上方开关启用",
+    "shareOfTotal": "占本时段总 Token {{pct}}",
     "period1d": "1天",
     "period3d": "3天",
     "period1w": "1周",
@@ -1502,6 +1505,16 @@
     "identitySaveSuccess": "身份文件已保存",
     "identitySaveFailed": "身份文件保存失败",
     "semanticCount": "{{count}} 条语义记忆"
+  },
+  "orgEditor": {
+    "title": "组织编排",
+    "welcomeTitle": "欢迎使用组织编排",
+    "welcomeDesc": "组织编排可以让多个 AI Agent 协同工作——你可以设计组织架构、定义节点角色、配置协作关系，然后一键启动，让整个 AI 团队自动运转。",
+    "outputPathHint": "组织编排产出的文件将保存在此目录。留空则使用默认路径。"
+  },
+  "pixelOffice": {
+    "title": "像素办公室",
+    "switchMode": "切换模式"
   },
   "dashboard": {
     "title": "Agent 仪表盘",

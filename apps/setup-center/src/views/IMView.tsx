@@ -311,6 +311,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const isFirstLoad = useRef(true);
+  const isNearBottomRef = useRef(true);
   const oldestLoadedOffset = useRef(0);
 
   const [inlineEditSessionId, setInlineEditSessionId] = useState<string | null>(null);
@@ -380,7 +381,10 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
       setMessages(data.messages || []);
       setTotalMessages(data.total || 0);
       oldestLoadedOffset.current = data.offset ?? 0;
-    } catch { /* ignore */ }
+    } catch {
+      setMessages([]);
+      setTotalMessages(0);
+    }
   }, [serviceRunning, apiBase]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
@@ -457,20 +461,25 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     setSelectedChannel(ch);
     setSelectedSessionId(null);
     setMessages([]);
+    setTotalMessages(0);
     const list = await fetchSessions(ch);
     if (list.length > 0) {
       const first = list[0];
       setSelectedSessionId(first.sessionId);
       isFirstLoad.current = true;
+      isNearBottomRef.current = true;
       fetchMessages(first.sessionId, 50, 0, undefined, undefined, true);
     }
   }, [fetchSessions, fetchMessages]);
 
   const handleSelectSession = useCallback((sid: string) => {
     setSelectedSessionId(sid);
+    setMessages([]);
+    setTotalMessages(0);
     setSelectMode(false);
     setSelectedMsgIds(new Set());
     isFirstLoad.current = true;
+    isNearBottomRef.current = true;
     fetchMessages(sid, 50, 0, undefined, undefined, true);
   }, [fetchMessages]);
 
@@ -534,12 +543,20 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     });
   }, []);
 
+  const handleMessagesScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+  }, []);
+
   useEffect(() => {
-    if (isFirstLoad.current && messages.length > 0 && scrollContainerRef.current) {
+    const el = scrollContainerRef.current;
+    if (!el || messages.length === 0) return;
+    if (isFirstLoad.current || isNearBottomRef.current) {
       isFirstLoad.current = false;
       requestAnimationFrame(() => {
-        const el = scrollContainerRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
+        const container = scrollContainerRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
       });
     }
   }, [messages]);
@@ -936,7 +953,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
                 )}
               </div>
               {/* Messages list */}
-              <div ref={scrollContainerRef} className="flex-1 overflow-auto px-4 py-3 space-y-3">
+              <div ref={scrollContainerRef} onScroll={handleMessagesScroll} className="flex-1 overflow-auto px-4 py-3 space-y-3">
                 {/* Top sentinel for infinite scroll */}
                 <div ref={topSentinelRef} className="h-px" />
                 {oldestLoadedOffset.current > 0 && (
