@@ -2,11 +2,12 @@
  * Organization Blackboard Panel — standalone second-layer drawer.
  * Manages its own data fetching, scope filtering, and WebSocket refresh.
  */
-import { useState, useEffect, useCallback, useImperativeHandle, forwardRef, type ComponentType } from "react";
+import { useState, useEffect, useCallback, useImperativeHandle, forwardRef } from "react";
 import { safeFetch } from "../providers";
 import { saveAttachment } from "../platform";
 import type { Node } from "@xyflow/react";
 import { fmtShortDate, BB_TYPE_COLORS, BB_TYPE_LABELS } from "../views/orgEditorConstants";
+import { useMdModules } from "../views/chat/hooks/useMdModules";
 
 function fmtFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -26,16 +27,10 @@ function getFileIcon(filename: string): string {
   return FILE_ICON_MAP[ext] || "📎";
 }
 
-type MdModules = {
-  ReactMarkdown: ComponentType<{ children: string; remarkPlugins?: any[] }>;
-  remarkGfm?: any;
-} | null;
-
 export interface OrgBlackboardPanelProps {
   orgId: string;
   apiBaseUrl: string;
   nodes: Node[];
-  mdModules: MdModules;
 }
 
 export interface OrgBlackboardPanelHandle {
@@ -43,7 +38,8 @@ export interface OrgBlackboardPanelHandle {
 }
 
 export const OrgBlackboardPanel = forwardRef<OrgBlackboardPanelHandle, OrgBlackboardPanelProps>(
-  function OrgBlackboardPanel({ orgId, apiBaseUrl, nodes, mdModules }, ref) {
+  function OrgBlackboardPanel({ orgId, apiBaseUrl, nodes }, ref) {
+    const mdModules = useMdModules();
     const [entries, setEntries] = useState<any[]>([]);
     const [scope, setScope] = useState<"all" | "org" | "department" | "node">("all");
     const [loading, setLoading] = useState(false);
@@ -180,7 +176,7 @@ export const OrgBlackboardPanel = forwardRef<OrgBlackboardPanelHandle, OrgBlackb
                     </div>
                     <div className="bb-entry-content">
                       {mdModules ? (
-                        <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]}>
+                        <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>
                           {entry.content}
                         </mdModules.ReactMarkdown>
                       ) : (

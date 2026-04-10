@@ -2,7 +2,7 @@
  * Organization Monitor Panel — runtime monitoring for a selected node.
  * Manages its own data fetching (events, schedules, thinking, tasks).
  */
-import { useState, useEffect, useMemo, type ComponentType } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { safeFetch } from "../providers";
 import type { Node } from "@xyflow/react";
 import {
@@ -12,18 +12,13 @@ import {
   DATA_KEY_LABELS, translateDataValue,
   type OrgNodeData,
 } from "../views/orgEditorConstants";
-
-type MdModules = {
-  ReactMarkdown: ComponentType<{ children: string; remarkPlugins?: any[] }>;
-  remarkGfm?: any;
-} | null;
+import { useMdModules } from "../views/chat/hooks/useMdModules";
 
 export interface OrgMonitorPanelProps {
   orgId: string;
   nodeId: string;
   apiBaseUrl: string;
   nodes: Node[];
-  mdModules: MdModules;
   visible: boolean;
 }
 
@@ -138,7 +133,8 @@ const MSG_TYPE_COLORS: Record<string, string> = {
   escalation: "#dc2626", deliverable: "#d97706",
 };
 
-export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, mdModules, visible }: OrgMonitorPanelProps) {
+export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, visible }: OrgMonitorPanelProps) {
+  const mdModules = useMdModules();
   const [nodeEvents, setNodeEvents] = useState<any[]>([]);
   const [nodeSchedules, setNodeSchedules] = useState<any[]>([]);
   const [nodeThinking, setNodeThinking] = useState<any[]>([]);
@@ -333,7 +329,7 @@ export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, mdModules, v
                         overflow: isEvtExpanded ? "visible" : "hidden",
                       }}>
                         {mdModules ? (
-                          <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]}>{fullText}</mdModules.ReactMarkdown>
+                          <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>{fullText}</mdModules.ReactMarkdown>
                         ) : <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit" }}>{fullText}</pre>}
                       </div>
                     )}
@@ -401,7 +397,7 @@ export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, mdModules, v
                         overflow: isExpanded ? "visible" : "hidden",
                       }}>
                         {mdModules ? (
-                          <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]}>
+                          <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>
                             {isExpanded
                               ? (item.content || "")
                               : (item.content || "").length > 150
@@ -453,7 +449,7 @@ export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, mdModules, v
                         return (
                           <div className="bb-entry-content" style={{ fontSize: 10, marginTop: 2, marginLeft: 12 }}>
                             {mdModules ? (
-                              <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]}>{mdText}</mdModules.ReactMarkdown>
+                              <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>{mdText}</mdModules.ReactMarkdown>
                             ) : <span style={{ color: "var(--muted)" }}>{mdText}</span>}
                           </div>
                         );

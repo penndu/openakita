@@ -212,7 +212,7 @@ export function OrgDashboard({ orgId, apiBaseUrl, orgName, onNodeClick }: OrgDas
   const FeedTip = ({ text }: { text: string }) => (
     <div className="db-tip-content">
       {mdModules ? (
-        <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]}>
+        <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>
           {text}
         </mdModules.ReactMarkdown>
       ) : (

@@ -3,37 +3,10 @@
  * Renders a scrollable message list, input box, and real-time WS progress.
  * Messages are persisted to backend session API (same as main ChatView).
  */
-import { useState, useRef, useEffect, useCallback, type ComponentType } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { safeFetch } from "../providers";
 import { onWsEvent } from "../platform";
-
-// ── Lazy-loaded markdown modules (same pattern as ChatView) ──
-type MdMods = {
-  ReactMarkdown: ComponentType<{ children: string; remarkPlugins?: any[]; rehypePlugins?: any[] }>;
-  remarkGfm: any;
-  rehypeHighlight: any;
-};
-let _md: MdMods | null = null;
-let _mdTried = false;
-
-function useMd(): MdMods | null {
-  const [m, setM] = useState<MdMods | null>(() => _md);
-  useEffect(() => {
-    if (_md) { setM(_md); return; }
-    if (_mdTried) return;
-    _mdTried = true;
-    try { new RegExp("\\p{L}", "u"); new RegExp("(?<=a)b"); } catch { return; }
-    Promise.all([
-      import("react-markdown"),
-      import("remark-gfm"),
-      import("rehype-highlight"),
-    ]).then(([md, gfm, hl]) => {
-      _md = { ReactMarkdown: md.default, remarkGfm: gfm.default, rehypeHighlight: hl.default };
-      setM(_md);
-    }).catch(() => {});
-  }, []);
-  return m;
-}
+import { useMdModules } from "../views/chat/hooks/useMdModules";
 
 interface ChatMsg {
   id: string;
@@ -91,7 +64,7 @@ function loadFromLocalStorage(cid: string): ChatMsg[] {
 }
 
 export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, title, onClose, nodeNames }: OrgChatPanelProps) {
-  const md = useMd();
+  const md = useMdModules();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -489,7 +462,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
               {m.role === "user" ? (
                 m.content
               ) : md ? (
-                <md.ReactMarkdown remarkPlugins={[md.remarkGfm]} rehypePlugins={[md.rehypeHighlight]}>
+                <md.ReactMarkdown remarkPlugins={md.remarkPlugins} rehypePlugins={md.rehypePlugins}>
                   {m.content}
                 </md.ReactMarkdown>
               ) : (

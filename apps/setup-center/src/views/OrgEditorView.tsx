@@ -2208,7 +2208,7 @@ export function OrgEditorView({
               const FeedTip = ({ text }: { text: string }) => (
                 <div className="org-feed-tip-content">
                   {mdModules ? (
-                    <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]}>
+                    <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>
                       {text}
                     </mdModules.ReactMarkdown>
                   ) : (
@@ -2947,7 +2947,6 @@ export function OrgEditorView({
           nodeId={selectedNode.id}
           apiBaseUrl={apiBaseUrl}
           nodes={nodes}
-          mdModules={mdModules}
           visible={visible}
         />
       )}
@@ -3197,7 +3196,7 @@ export function OrgEditorView({
                             </div>
                             <div className="bb-entry-content" style={{ marginTop: 3 }}>
                               {mdModules ? (
-                                <mdModules.ReactMarkdown remarkPlugins={[mdModules.remarkGfm]}>
+                                <mdModules.ReactMarkdown remarkPlugins={mdModules.remarkPlugins} rehypePlugins={mdModules.rehypePlugins}>
                                   {bb.content}
                                 </mdModules.ReactMarkdown>
                               ) : (
@@ -4166,7 +4165,6 @@ export function OrgEditorView({
           orgId={currentOrg.id}
           apiBaseUrl={apiBaseUrl}
           nodes={nodes}
-          mdModules={mdModules}
         />
       )}
 

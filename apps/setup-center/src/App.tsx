@@ -151,7 +151,10 @@ export function App() {
   if (window.location.pathname === '/pet') {
     return <Suspense fallback={null}><PetView /></Suspense>;
   }
+  return <MainApp />;
+}
 
+function MainApp() {
   const { t, i18n } = useTranslation();
 
   // ── Web / Capacitor auth gate ──
