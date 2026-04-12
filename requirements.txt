@@ -79,7 +79,8 @@ dingtalk-stream>=0.24.3    # 钉钉 Stream SDK
 websockets>=15.0.1         # OneBot WebSocket 支持
 
 # QQ 官方机器人
-qq-botpy>=1.2.1            # QQ 开放平台官方 Bot SDK
+# websockets>=15.0.1       # QQ Gateway WebSocket（已在 OneBot 行列出）
+# aiohttp>=3.11.0          # QQ Webhook 模式（已在企业微信行列出）
 pilk>=0.2.1                # SILK 语音编解码（QQ 语音格式）
 
 # =====================================================

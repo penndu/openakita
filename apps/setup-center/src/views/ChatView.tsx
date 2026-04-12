@@ -78,7 +78,15 @@ import {
   MessageBubble, FlatMessageItem,
   MessageList,
 } from "./chat/components";
+import type { SecurityCloseInfo } from "./chat/components";
 import type { MessageListHandle } from "./chat/components";
+
+/** Extract "cmd subcommand" prefix — mirrors backend `_command_to_pattern`. */
+function _cmdPrefix(cmd: string): string {
+  const parts = cmd.trim().split(/\s+/);
+  if (parts.length >= 2) return `${parts[0]} ${parts[1]}`;
+  return parts[0] || "";
+}
 
 // ─── 主组件 ───
 
@@ -165,11 +173,34 @@ export function ChatView({
   const [securityConfirm, setSecurityConfirm] = useState<SecurityConfirmData | null>(null);
   const securityQueueRef = useRef<SecurityConfirmData[]>([]);
   const securityTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const handleSecurityClose = useCallback(() => {
+  const handleSecurityClose = useCallback((info?: SecurityCloseInfo) => {
     if (securityTimerRef.current) clearInterval(securityTimerRef.current);
+
+    if (info?.decision === "allow_always" && securityQueueRef.current.length > 0) {
+      const decidedPrefix = _cmdPrefix(info.command);
+      const isShell = info.tool === "run_shell" || info.tool === "run_powershell";
+      const remaining: typeof securityQueueRef.current = [];
+      for (const item of securityQueueRef.current) {
+        const sameToolType = item.tool === info.tool;
+        const match = sameToolType && (
+          !isShell || (decidedPrefix !== "" && _cmdPrefix(String(item.args.command ?? "")) === decidedPrefix)
+        );
+        if (match) {
+          fetch(`${apiBaseUrl}/api/chat/security-confirm`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm_id: item.toolId, decision: "allow_once" }),
+          }).catch(() => {});
+        } else {
+          remaining.push(item);
+        }
+      }
+      securityQueueRef.current = remaining;
+    }
+
     const next = securityQueueRef.current.shift();
     setSecurityConfirm(next ?? null);
-  }, []);
+  }, [apiBaseUrl]);
   const [winSize, setWinSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   useEffect(() => {
     if (!lightbox) return;

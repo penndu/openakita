@@ -102,7 +102,8 @@ onebot = [
 
 # QQ 官方机器人
 qqbot = [
-    "qq-botpy>=1.2.1",
+    "websockets>=15.0.1",       # QQ Gateway WebSocket 连接
+    "aiohttp>=3.11.0",          # Webhook 模式 HTTP 回调服务器
     "pilk>=0.2.1",              # SILK 语音编解码（QQ 语音格式）
 ]
 
@@ -129,7 +130,6 @@ all = [
     "pycryptodome>=3.19.0",
     "websockets>=15.0.1",
     "cryptography>=46.0.5",
-    "qq-botpy>=1.2.1",
     "pilk>=0.2.1",
     # -- 桌面自动化 --
     "mss>=9.0.0",

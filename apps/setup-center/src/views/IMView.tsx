@@ -34,7 +34,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ, LogoOneBot, LogoWechat } from "../icons";
-import { AlertCircle, ArrowLeft, ArrowRight, Bot, BotOff, Check, Dices, Loader2, MoreHorizontal, Pencil, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Bot, BotOff, Check, Dices, Loader2, MoreHorizontal, Pencil, RefreshCw, Sparkles, Terminal, Trash2, X } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -119,6 +119,13 @@ const BOT_TYPE_LABEL_KEYS: Record<string, string> = {
 
 const WEWORK_TYPES = new Set(["wework", "wework_ws"]);
 const ONEBOT_TYPES = new Set(["onebot", "onebot_reverse"]);
+
+const CLI_SKILL_HINTS: Record<string, { name: string; cmd: string }> = {
+  feishu: { name: "飞书 CLI (lark-cli)", cmd: "npm install -g @larksuite/cli && npx skills add larksuite/cli -y -g" },
+  dingtalk: { name: "钉钉 CLI (dws)", cmd: "npm install -g dingtalk-workspace-cli && npx skills add DingTalk-Real-AI/dingtalk-workspace-cli -y -g" },
+  wework: { name: "企微 CLI (wecom-cli)", cmd: "npm install -g @wecom/cli && npx skills add WeComTeam/wecom-cli -y -g" },
+  wework_ws: { name: "企微 CLI (wecom-cli)", cmd: "npm install -g @wecom/cli && npx skills add WeComTeam/wecom-cli -y -g" },
+};
 
 const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; secret?: boolean; placeholder?: string }[]> = {
   feishu: [
@@ -1751,6 +1758,22 @@ export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, ven
               <Button variant="outline" className="w-full border-dashed border-primary text-primary" onClick={() => setShowPluginOnboard(true)}>
                 {t("im.waQrScan", { defaultValue: "Scan QR to connect WhatsApp" })}
               </Button>
+            )}
+
+            {/* 6b. CLI Skill recommendation */}
+            {CLI_SKILL_HINTS[editingBot.type] && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50/50 dark:border-blue-800/50 dark:bg-blue-950/30 p-3 space-y-1.5">
+                <p className="text-xs font-medium text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+                  <Terminal size={13} />
+                  {t("im.cliSkillHint")}
+                </p>
+                <p className="text-[11px] text-blue-700/80 dark:text-blue-400/80">
+                  {CLI_SKILL_HINTS[editingBot.type].name}
+                </p>
+                <code className="block text-[10px] bg-blue-100/80 dark:bg-blue-900/40 rounded px-2 py-1.5 text-blue-900 dark:text-blue-200 select-all break-all leading-relaxed">
+                  {CLI_SKILL_HINTS[editingBot.type].cmd}
+                </code>
+              </div>
             )}
 
             {/* 7. Credentials */}

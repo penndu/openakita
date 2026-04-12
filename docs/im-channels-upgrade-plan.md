@@ -14,7 +14,7 @@
 | **企业微信 HTTP** | `aiohttp>=3.9.0` | aiohttp **v3.13.5** (2026-03-31) | 平台侧新增长连接多媒体推送能力 | 🔴 高 |
 | **企业微信 WS** | `websockets>=15.0.1` | websockets **v16.0** (2026-01-10) | v16 要求 Python≥3.10，有新特性 | 🟡 中 |
 | **OneBot** | `websockets>=15.0.1` | websockets **v16.0** | NapCat 已至 v4.17.55，建议 ID 字段改 str | 🟡 中 |
-| **QQ 官方机器人** | `qq-botpy>=1.2.1` | **v1.2.1** (2024-03) | SDK 停更超一年，需评估替代方案 | 🟠 中高 |
+| **QQ 官方机器人** | `websockets + httpx` (自建) | ✅ 已去 botpy 化 | 自建 WS Gateway + REST，不再依赖 qq-botpy | ✅ 已完成 |
 | **WhatsApp 插件** | `@whiskeysockets/baileys ^6.7.0` | **v7.0.0-rc.9** (2025-11) | 7.0 大版本重构，LID 系统全面变更 | 🔴 高 |
 | **微信个人号** | httpx + pycryptodome（无独立 extra） | — | pyproject.toml 缺 `wechat` extra 定义 | 🟠 中高 |
 

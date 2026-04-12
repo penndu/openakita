@@ -188,24 +188,6 @@ class OneBotAdapter(ChannelAdapter):
 
     # ==================== 反向 WebSocket (reverse 模式) ====================
 
-    async def _run_reverse_server(self) -> None:
-        try:
-            if not self._server:
-                self._server = await websockets.serve(
-                    self._reverse_ws_handler,
-                    self.config.reverse_host,
-                    self.config.reverse_port,
-                )
-                logger.info(
-                    f"OneBot reverse WS server listening on "
-                    f"ws://{self.config.reverse_host}:{self.config.reverse_port}"
-                )
-            await self._server.wait_closed()
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            logger.error(f"OneBot reverse WS server error: {e}")
-
     async def _reverse_ws_handler(self, ws) -> None:
         """处理反向 WS 客户端连入"""
         if not self._verify_access_token(ws):

@@ -236,7 +236,6 @@ apps/setup-center/android/.gradle/
 apps/setup-center/android/app/src/main/assets/public/
 apps/setup-center/android/app/src/main/assets/capacitor.config.json
 $null
-botpy.log*
 OPENAKITA_RESEARCH_REPORT.md
 openakita-release.keystore
 ppt_build/
