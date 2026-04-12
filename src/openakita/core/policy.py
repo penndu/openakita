@@ -1226,6 +1226,67 @@ class PolicyEngine:
         self._consecutive_denials = 0
         logger.info("[Policy] 只读模式已重置")
 
+    # ----- Smart Approval (LLM-assisted risk assessment) ---------------------
+
+    async def smart_approve(
+        self,
+        tool_name: str,
+        params: dict[str, Any],
+        context: str = "",
+    ) -> tuple[str, str]:
+        """
+        Use a lightweight LLM call to assess risk of a CONFIRM-level operation.
+
+        Returns:
+            ("APPROVE"|"DENY"|"ESCALATE", reason)
+            - APPROVE: auto-approve, low risk in context
+            - DENY: block, high risk detected
+            - ESCALATE: still needs human confirmation
+        """
+        try:
+            from ..core.brain import Brain
+
+            brain = Brain()
+
+            command = params.get("command", "")
+            path = params.get("path", "")
+
+            prompt = (
+                "You are a security reviewer. Assess the risk of this tool call:\n\n"
+                f"Tool: {tool_name}\n"
+                f"Command/Path: {command or path}\n"
+                f"Parameters: {params}\n"
+            )
+            if context:
+                prompt += f"Context: {context}\n"
+
+            prompt += (
+                "\nRespond with exactly one of:\n"
+                "APPROVE - if the operation is clearly safe and routine\n"
+                "DENY - if it's clearly dangerous (rm -rf /, DROP TABLE, etc.)\n"
+                "ESCALATE - if you're unsure and human should decide\n\n"
+                "Format: DECISION: reason"
+            )
+
+            response = await brain.think_lightweight(prompt, max_tokens=256)
+            text = response.content.strip().upper()
+
+            if text.startswith("APPROVE"):
+                reason = response.content.strip().split(":", 1)[-1].strip() if ":" in response.content else "LLM assessed as safe"
+                logger.info(f"[SmartApproval] APPROVE for {tool_name}: {reason}")
+                return "APPROVE", reason
+            elif text.startswith("DENY"):
+                reason = response.content.strip().split(":", 1)[-1].strip() if ":" in response.content else "LLM assessed as dangerous"
+                logger.warning(f"[SmartApproval] DENY for {tool_name}: {reason}")
+                return "DENY", reason
+            else:
+                reason = response.content.strip().split(":", 1)[-1].strip() if ":" in response.content else "LLM uncertain"
+                return "ESCALATE", reason
+
+        except Exception as e:
+            logger.warning(f"[SmartApproval] LLM call failed: {e}, escalating")
+            return "ESCALATE", f"LLM assessment failed: {e}"
+
     # ----- Confirmation cache & allowlists -----------------------------------
 
     def _confirm_cache_key(self, tool_name: str, params: dict[str, Any]) -> str:

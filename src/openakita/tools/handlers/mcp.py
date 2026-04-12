@@ -106,7 +106,10 @@ class MCPHandler:
             self._sync_catalog(server)
 
         if result.success:
-            return f"✅ MCP 工具调用成功:\n{result.data}"
+            from ...utils.credential_redact import redact_credentials
+
+            safe_data = redact_credentials(str(result.data)) if result.data else ""
+            return f"✅ MCP 工具调用成功:\n{safe_data}"
         else:
             return f"❌ MCP 工具调用失败: {result.error}"
 

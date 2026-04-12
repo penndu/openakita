@@ -235,6 +235,7 @@ class ResponseHandler:
         assistant_response: str,
         executed_tools: list[str],
         delivery_receipts: list[dict] | None = None,
+        tool_results: list[dict] | None = None,
         conversation_id: str | None = None,
         bypass: bool = False,
     ) -> bool:
@@ -248,6 +249,7 @@ class ResponseHandler:
             assistant_response: 助手当前响应
             executed_tools: 已执行的工具列表
             delivery_receipts: 交付回执
+            tool_results: 累积的工具执行结果（含 is_error 标记）
             conversation_id: 对话 ID（用于 Plan 检查）
             bypass: 当 Supervisor 已介入时跳过验证
 
@@ -270,6 +272,7 @@ class ResponseHandler:
                 assistant_response=assistant_response,
                 executed_tools=executed_tools or [],
                 delivery_receipts=delivery_receipts,
+                tool_results=tool_results or [],
                 conversation_id=conversation_id or "",
             )
             registry = create_default_registry()

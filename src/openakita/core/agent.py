@@ -696,6 +696,10 @@ class Agent:
         if self._is_sub_agent_call:
             tools = [t for t in tools if t.get("name") not in self._agent_tool_names]
 
+        cron_disabled = getattr(self, "_cron_disabled_tools", None)
+        if cron_disabled:
+            tools = [t for t in tools if t.get("name") not in cron_disabled]
+
         intent = getattr(self, "_current_intent", None)
         intent_hints = set(intent.tool_hints) if intent and intent.tool_hints else set()
 
@@ -1373,8 +1377,9 @@ class Agent:
 
         # F8: register conditional skills
         for skill in self.skill_registry.list_enabled():
-            if skill.paths:
+            if skill.paths or skill.fallback_for_toolsets:
                 self._skill_activation.register_conditional(skill)
+        self._sync_available_toolsets()
 
         # F9: start skill file watcher
         self._start_skill_watcher()
@@ -1386,6 +1391,17 @@ class Agent:
             notify_skills_changed(SkillEvent.LOAD)
         except Exception:
             pass
+
+    def _sync_available_toolsets(self) -> None:
+        """Collect tool category names from the active tool list and push them
+        into the activation manager so ``fallback_for_toolsets`` skills can
+        react to the current tool availability."""
+        categories: set[str] = set()
+        for tool_def in self._tools:
+            cat = tool_def.get("category") or ""
+            if cat:
+                categories.add(cat.lower())
+        self._skill_activation.update_available_toolsets(categories)
 
     def _start_skill_watcher(self) -> None:
         """F9: Start watching skill directories for hot-reload."""
@@ -1419,8 +1435,9 @@ class Agent:
             if hasattr(self, "_skill_activation"):
                 self._skill_activation.clear()
                 for skill in self.skill_registry.list_enabled():
-                    if skill.paths:
+                    if skill.paths or skill.fallback_for_toolsets:
                         self._skill_activation.register_conditional(skill)
+                self._sync_available_toolsets()
 
             from ..skills.events import SkillEvent, notify_skills_changed
 
@@ -1891,7 +1908,36 @@ class Agent:
         except Exception as e:
             logger.warning(f"Failed to register proactive_heartbeat task: {e}")
 
-        # 任务 4: 工作区定时备份（根据用户设置）
+        # 任务 4: 记忆回顾（Memory Nudge）
+        try:
+            nudge_task_id = "system_memory_nudge"
+            if settings.memory_nudge_enabled and settings.memory_nudge_interval > 0:
+                interval_min = max(5, settings.memory_nudge_interval * 3)
+                if nudge_task_id not in existing_ids:
+                    nudge_task = ScheduledTask(
+                        id=nudge_task_id,
+                        name="记忆回顾",
+                        trigger_type=TriggerType.INTERVAL,
+                        trigger_config={"interval_minutes": interval_min},
+                        action="system:memory_nudge_review",
+                        prompt="审视最近对话，提取遗漏的重要记忆",
+                        description=f"每 {interval_min} 分钟审视最近对话提取遗漏记忆",
+                        task_type=TaskType.TASK,
+                        enabled=True,
+                        deletable=False,
+                        metadata={"notify_on_start": False, "notify_on_complete": False},
+                    )
+                    await self.task_scheduler.add_task(nudge_task)
+                    logger.info(f"Registered system task: memory_nudge (every {interval_min} min)")
+            else:
+                existing_nudge = self.task_scheduler.get_task(nudge_task_id)
+                if existing_nudge and existing_nudge.enabled:
+                    await self.task_scheduler.disable_task(nudge_task_id)
+                    logger.info("Disabled memory_nudge task (feature disabled in settings)")
+        except Exception as e:
+            logger.warning(f"Failed to register memory_nudge task: {e}")
+
+        # 任务 5: 工作区定时备份（根据用户设置）
         try:
             from ..workspace.backup import read_backup_settings
 
@@ -3389,6 +3435,10 @@ class Agent:
                         content = before + after[next_section:] if next_section != -1 else before
                 if content.startswith("[执行摘要]") or content.startswith("[子Agent工作总结]"):
                     content = ""
+                # 从 metadata 还原 tool_summary（跨轮工具上下文恢复）
+                _tool_summary = msg.get("tool_summary")
+                if _tool_summary and isinstance(_tool_summary, str) and content:
+                    content = content.rstrip() + "\n\n" + _tool_summary
             if role in ("user", "assistant") and content:
                 if ts and isinstance(content, str):
                     try:

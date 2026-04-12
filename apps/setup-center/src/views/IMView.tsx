@@ -796,7 +796,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
                       )}
                   onClick={() => handleSelectSession(s.sessionId)}
                       title={[
-                        s.alias ? `✏ ${s.alias}` : null,
+                        s.alias ? `[${s.alias}]` : null,
                         s.chatType === "group"
                           ? (s.chatName || s.chatId || s.sessionId)
                           : (s.displayName || s.userId || s.chatId || s.sessionId),
@@ -1526,7 +1526,9 @@ export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, ven
                 </Badge>
               </div>
               <div className="flex items-center gap-2.5 mb-1.5">
-                <span className="text-2xl leading-none shrink-0">{agentProfile?.icon || "🤖"}</span>
+                <span className="inline-flex items-center justify-center shrink-0 text-2xl leading-none">
+                  {agentProfile?.icon ? agentProfile.icon : <IconBot size={22} />}
+                </span>
                 <div className="min-w-0">
                   <div className="font-bold text-sm truncate" title={bot.name || bot.id}>{bot.name || bot.id}</div>
                   <div className="text-[11px] text-muted-foreground/45 font-mono truncate" title={bot.id}>{bot.id}</div>

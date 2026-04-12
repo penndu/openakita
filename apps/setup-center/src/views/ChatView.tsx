@@ -45,6 +45,7 @@ import {
   IconMask, IconBot, IconUsers, IconHelp, IconEdit, IconDownload,
   IconPin, IconSearch, IconCircleDot, IconXCircle,
   IconBuilding, IconShield, IconAlertCircle,
+  IconHourglass, IconTarget, IconCheckCircle, IconPlug, IconClock, IconBarChart, IconGlobe, IconMail,
   getFileTypeIcon,
 } from "../icons";
 
@@ -1496,37 +1497,37 @@ export function ChatView({
               return m;
             });
             if (st === "busy") {
-              pushProgress(`🟢 **${nodeId}** 开始处理${task ? `：${task.slice(0, 60)}` : ""}`);
+              pushProgress(`● **${nodeId}** 开始处理${task ? `：${task.slice(0, 60)}` : ""}`);
             } else if (st === "idle") {
-              pushProgress(`✅ **${nodeId}** 完成`);
+              pushProgress(`✓ **${nodeId}** 完成`);
             } else if (st === "error") {
-              pushProgress(`❌ **${nodeId}** 出错`);
+              pushProgress(`✗ **${nodeId}** 出错`);
             }
           } else if (event === "org:task_delegated") {
             const task = (d.task || "") as string;
             setOrgDelegations(prev => [...prev.slice(-20), { from: nodeId, to: toNode, task, ts: Date.now() }]);
-            pushProgress(`📋 **${nodeId}** → **${toNode}** 分配任务：${(task as string).slice(0, 50)}`);
+            pushProgress(`→ **${nodeId}** → **${toNode}** 分配任务：${(task as string).slice(0, 50)}`);
           } else if (event === "org:message") {
             const msgType = d.msg_type as string || "消息";
-            pushProgress(`💬 **${nodeId}** → **${toNode}** ${msgType}`);
+            pushProgress(`→ **${nodeId}** → **${toNode}** ${msgType}`);
           } else if (event === "org:escalation") {
-            pushProgress(`⬆️ **${nodeId}** 向上汇报`);
+            pushProgress(`↑ **${nodeId}** 向上汇报`);
           } else if (event === "org:blackboard_update") {
-            pushProgress(`📝 **${nodeId}** 更新黑板`);
+            pushProgress(`~ **${nodeId}** 更新黑板`);
           } else if (event === "org:task_complete") {
             setOrgNodeStates(prev => {
               const m = new Map(prev);
               m.set(nodeId, { status: "done", ts: Date.now() });
               return m;
             });
-            pushProgress(`🎯 **${nodeId}** 任务完成`);
+            pushProgress(`✓ **${nodeId}** 任务完成`);
           } else if (event === "org:task_timeout") {
             setOrgNodeStates(prev => {
               const m = new Map(prev);
               m.set(nodeId, { status: "timeout", ts: Date.now() });
               return m;
             });
-            pushProgress(`⏰ **${nodeId}** 任务超时`);
+            pushProgress(`! **${nodeId}** 任务超时`);
           }
         });
 
@@ -1604,7 +1605,7 @@ export function ChatView({
               } catch { /* poll failed, retry next cycle */ }
 
               if (!resolved && Date.now() - lastProgressAt > stallThreshold) {
-                pushProgress("⏳ 执行时间较长，组织仍在处理中...");
+                pushProgress("... 执行时间较长，组织仍在处理中...");
                 lastProgressAt = Date.now();
               }
             }
@@ -1616,7 +1617,7 @@ export function ChatView({
                 : "";
               updateOrgMessages((prev) => prev.map(m =>
                 m.id === placeholderId
-                  ? { ...m, content: `${progressSummary}**[${orgOrgName}]** ⏱️ 命令执行超时（已等待 10 分钟），请稍后手动检查结果。`, streaming: false }
+                  ? { ...m, content: `${progressSummary}**[${orgOrgName}]** 命令执行超时（已等待 10 分钟），请稍后手动检查结果。`, streaming: false }
                   : m
               ));
             }
@@ -2525,7 +2526,7 @@ export function ChatView({
           m.id === assistantMsg.id
             ? {
                 ...m,
-                content: m.content || (m.askUser ? "" : "⚠️ 未收到有效回复，请重试。"),
+                content: m.content || (m.askUser ? "" : "未收到有效回复，请重试。"),
                 streaming: false,
               }
             : m
@@ -3332,7 +3333,7 @@ export function ChatView({
         onContextMenu={(e) => { e.preventDefault(); (e.nativeEvent as any)._handled = true; setCtxMenu({ x: e.clientX, y: e.clientY, convId: conv.id }); }}
       >
         <div className="convItemIcon">
-          <span title={agentProfile?.name || ""} style={{ fontSize: 16 }}>{agentProfile?.icon || "💬"}</span>
+          <span title={agentProfile?.name || ""} style={{ fontSize: 16, display: "inline-flex", alignItems: "center" }}>{agentProfile?.icon || <IconMessageCircle size={16} />}</span>
         </div>
         <div className="convItemBody">
           {renamingId === conv.id ? (
@@ -3362,7 +3363,7 @@ export function ChatView({
         <div className="convItemRight">
           <span className="convItemTime">{timeAgo(conv.timestamp)}</span>
           {isConvBusyOnOtherDevice(conv.id)
-            ? <span className="convStatusDot" style={{ color: "var(--warning, #eab308)", fontSize: 10, whiteSpace: "nowrap" }} title={t("chat.busyOnOtherDevice")}>⏳</span>
+            ? <span className="convStatusDot" style={{ color: "var(--warning, #eab308)", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center" }} title={t("chat.busyOnOtherDevice")}><IconHourglass size={10} /></span>
             : statusIcon(conv.status)}
         </div>
       </div>
@@ -3474,7 +3475,7 @@ export function ChatView({
                       onMouseLeave={() => setOrbitTip(null)}
                     >
                       <span className="agentOrbitIcon">
-                        {ap?.icon || "💬"}
+                        {ap?.icon || <IconMessageCircle size={16} />}
                       </span>
                       {isRunning && <span className="agentOrbitPulse" />}
                     </button>
@@ -3495,7 +3496,7 @@ export function ChatView({
                     className={`subAgentChip ${sub.status === "delegating" ? "subAgentActive" : sub.status === "error" ? "subAgentError" : "subAgentDone"}`}
                     title={sp?.name || sub.agentId}
                   >
-                    <span className="subAgentChipIcon"><RenderIcon icon={sp?.icon || "🤖"} size={14} /></span>
+                    <span className="subAgentChipIcon">{sp?.icon ? <RenderIcon icon={sp.icon} size={14} /> : <IconBot size={14} />}</span>
                     <span className="subAgentChipName">{sp?.name || sub.agentId}</span>
                     {sub.status === "delegating" && <span className="subAgentSpinner" />}
                     {sub.status === "done" && <span className="subAgentCheck">✓</span>}
@@ -3583,7 +3584,7 @@ export function ChatView({
         {/* 离线横幅 */}
         {!serviceRunning && (
           <div className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-600 dark:text-amber-400">
-            <span style={{ fontSize: 14 }}>⚠️</span>
+            <IconAlertCircle size={14} />
             {t("chat.offline", "后端服务未连接，部分功能暂不可用")}
           </div>
         )}
@@ -3613,10 +3614,10 @@ export function ChatView({
               </div>
               <div className="grid w-full max-w-[520px] grid-cols-1 gap-3 sm:grid-cols-2">
                 {[
-                  { id: "research", icon: "📊", text: t("chat.quickStart.research", "做一份 XX 领域的市场调研报告") },
-                  { id: "ppt", icon: "📝", text: t("chat.quickStart.ppt", "帮我做一个项目汇报 PPT 大纲") },
-                  { id: "search", icon: "🌐", text: t("chat.quickStart.search", "打开百度搜索 XX") },
-                  { id: "email", icon: "✉️", text: t("chat.quickStart.email", "帮我写一封商务邮件") },
+                  { id: "research", icon: <IconBarChart size={20} />, text: t("chat.quickStart.research", "做一份 XX 领域的市场调研报告") },
+                  { id: "ppt", icon: <IconPlan size={20} />, text: t("chat.quickStart.ppt", "帮我做一个项目汇报 PPT 大纲") },
+                  { id: "search", icon: <IconGlobe size={20} />, text: t("chat.quickStart.search", "打开百度搜索 XX") },
+                  { id: "email", icon: <IconMail size={20} />, text: t("chat.quickStart.email", "帮我写一封商务邮件") },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -3630,7 +3631,7 @@ export function ChatView({
                       transition: "border-color 0.15s, background 0.15s",
                     }}
                   >
-                    <span style={{ fontSize: 20, flexShrink: 0 }}>{item.icon}</span>
+                    <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>{item.icon}</span>
                     <span style={{ color: "var(--text)", lineHeight: 1.4 }}>{item.text}</span>
                   </button>
                 ))}
@@ -3712,7 +3713,7 @@ export function ChatView({
         {/* 长闲置回归提示 (6.7) */}
         {idleReturnPrompt && (
           <div className="flex items-center gap-3 border-t border-amber-500/20 bg-amber-500/10 px-4 py-2.5 text-sm">
-            <span>⏰</span>
+            <IconClock size={16} />
             <span style={{ flex: 1 }}>{t("chat.idleReturnHint", "你已离开较长时间，当前会话上下文较长。建议使用 /clear 节省 token 或新建会话。")}</span>
             <button
               onClick={() => { setIdleReturnPrompt(false); newConversation(); }}
@@ -3809,14 +3810,14 @@ export function ChatView({
               <div style={{ padding: "4px 14px 12px", display: "flex", flexWrap: "wrap", gap: 8, maxHeight: 120, overflowY: "auto" }}>
                 {Array.from(orgNodeStates.entries()).map(([nid, ns]) => {
                   const color = ns.status === "busy" ? "#22c55e" : ns.status === "done" || ns.status === "idle" ? "#3b82f6" : ns.status === "error" ? "#ef4444" : ns.status === "timeout" ? "#f59e0b" : "#6b7280";
-                  const icon = ns.status === "busy" ? "🟢" : ns.status === "done" || ns.status === "idle" ? "🔵" : ns.status === "error" ? "🔴" : ns.status === "timeout" ? "🟡" : "⚪";
+                  const dotColor = ns.status === "busy" ? "#22c55e" : ns.status === "done" || ns.status === "idle" ? "#3b82f6" : ns.status === "error" ? "#ef4444" : ns.status === "timeout" ? "#eab308" : "#9ca3af";
                   return (
                     <div key={nid} style={{
                       display: "flex", alignItems: "center", gap: 6,
                       padding: "4px 10px", borderRadius: 8, fontSize: 12,
                       background: `${color}15`, border: `1px solid ${color}30`,
                     }}>
-                      <span>{icon}</span>
+                      <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: dotColor }} />
                       <span style={{ fontWeight: 600 }}>{nid}</span>
                       {ns.task && <span style={{ opacity: 0.7, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ns.task}</span>}
                     </div>
@@ -3825,7 +3826,7 @@ export function ChatView({
                 {orgDelegations.length > 0 && (
                   <div style={{ width: "100%", marginTop: 4, fontSize: 11, opacity: 0.6 }}>
                     {orgDelegations.slice(-5).map((d, i) => (
-                      <div key={i}>📋 {d.from} → {d.to}: {d.task.slice(0, 40)}</div>
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}><IconClipboard size={11} /> {d.from} → {d.to}: {d.task.slice(0, 40)}</div>
                     ))}
                   </div>
                 )}
@@ -3843,7 +3844,7 @@ export function ChatView({
             background: "rgba(239,68,68,0.10)", color: "var(--text)",
             border: "1px solid rgba(239,68,68,0.25)",
           }}>
-            <span style={{ fontSize: 16 }}>🔌</span>
+            <IconPlug size={16} />
             <span style={{ flex: 1 }}>
               {t("chat.imChannelDisconnected", { channel: a.channel, defaultValue: `IM 通道 "${a.channel}" 已断开` })}
             </span>
@@ -3865,7 +3866,7 @@ export function ChatView({
             background: "rgba(34,197,94,0.10)", color: "var(--text)",
             border: "1px solid rgba(34,197,94,0.25)",
           }}>
-            <span style={{ fontSize: 14 }}>✅</span>
+            <IconCheckCircle size={14} />
             <span>{t("chat.imChannelReconnected", { channel: a.channel, defaultValue: `IM 通道 "${a.channel}" 已重连` })}</span>
           </div>
         ))}
@@ -3879,7 +3880,7 @@ export function ChatView({
             background: "rgba(234,179,8,0.12)", color: "var(--text)",
             border: "1px solid rgba(234,179,8,0.25)",
           }}>
-            <span style={{ fontSize: 16 }}>⏳</span>
+            <IconHourglass size={16} />
             <span style={{ flex: 1 }}>{t("chat.busyOnOtherDevice")}</span>
             <button
               onClick={newConversation}
@@ -3948,7 +3949,7 @@ export function ChatView({
                     onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(37,99,235,0.08)"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = i === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent"; }}
                   >
-                    <span style={{ fontSize: 16 }}>{a.icon || "🤖"}</span>
+                    <span style={{ fontSize: 16, display: "inline-flex", alignItems: "center" }}>{a.icon || <IconBot size={16} />}</span>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{a.name}</div>
                       {a.description && <div style={{ fontSize: 11, opacity: 0.5 }}>{a.description}</div>}
@@ -4059,14 +4060,14 @@ export function ChatView({
                   </div>
                   {endpoints.map((ep) => {
                     const hs = ep.health?.status;
-                    const dot = hs === "healthy" ? "🟢" : hs === "degraded" ? "🟡" : hs === "unhealthy" ? "🔴" : "⚪";
+                    const dotColor = hs === "healthy" ? "#22c55e" : hs === "degraded" ? "#eab308" : hs === "unhealthy" ? "#ef4444" : "#9ca3af";
                     return (
                       <div
                         key={ep.name}
                         className={`chatModelMenuItem ${selectedEndpoint === ep.name ? "chatModelMenuItemActive" : ""}`}
                         onClick={() => { setSelectedEndpoint(ep.name); setModelMenuOpen(false); }}
                       >
-                        <span style={{ fontSize: 8, marginRight: 6, lineHeight: 1 }}>{dot}</span>
+                        <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: dotColor, marginRight: 6 }} />
                         <span style={{ fontWeight: 600 }}>{ep.model}</span>
                         <span style={{ fontSize: 11, opacity: 0.5, marginLeft: 6 }}>{ep.name}</span>
                       </div>
@@ -4097,7 +4098,7 @@ export function ChatView({
                           className={`chatModelMenuItem ${selectedAgent === "default" ? "chatModelMenuItemActive" : ""}`}
                           onClick={() => { setSelectedAgent("default"); setAgentMenuOpen(false); }}
                         >
-                          <span style={{ marginRight: 6 }}>🎯</span>
+                          <IconTarget size={14} style={{ marginRight: 6 }} />
                           <span style={{ fontWeight: 600 }}>{t("chat.agentDefault")}</span>
                         </div>
                       )}

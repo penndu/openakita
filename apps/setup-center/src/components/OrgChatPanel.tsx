@@ -288,17 +288,17 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         if (st === "busy") {
           const task = (d.current_task || "") as string;
           const taskBrief = task.length > 80 ? task.slice(0, 80) + "…" : task;
-          pushProgress(`🔄 **${nn(nid)}** 开始处理${taskBrief ? `：${taskBrief}` : ""}`);
-        } else if (st === "idle") pushProgress(`✅ **${nn(nid)}** 完成`);
-        else if (st === "error") pushProgress(`❌ **${nn(nid)}** 出错`);
+          pushProgress(`● **${nn(nid)}** 开始处理${taskBrief ? `：${taskBrief}` : ""}`);
+        } else if (st === "idle") pushProgress(`✓ **${nn(nid)}** 完成`);
+        else if (st === "error") pushProgress(`✗ **${nn(nid)}** 出错`);
       } else if (event === "org:task_delegated") {
         const task = ((d.task || "") as string);
         const taskBrief = task.length > 80 ? task.slice(0, 80) + "…" : task;
-        pushProgress(`📋 **${nn(nid)}** → **${nn(toN)}** 分配任务：${taskBrief}`);
+        pushProgress(`→ **${nn(nid)}** → **${nn(toN)}** 分配任务：${taskBrief}`);
       } else if (event === "org:task_complete") {
-        pushProgress(`✅ **${nn(nid)}** 任务完成`);
+        pushProgress(`✓ **${nn(nid)}** 任务完成`);
       } else if (event === "org:blackboard_update") {
-        pushProgress(`📝 **${nn(nid)}** 更新黑板`);
+        pushProgress(`~ **${nn(nid)}** 更新黑板`);
       }
     });
 

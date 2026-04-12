@@ -52,6 +52,7 @@ class ContextManager:
         self._cancel_event = cancel_event
         self._token_cache: dict[int, int] = {}
         self._tools_tokens_cache: int | None = None
+        self._previous_summary: str = ""
 
     def set_cancel_event(self, event: asyncio.Event | None) -> None:
         """更新 cancel_event（每次任务开始时由 Agent 设置）"""
@@ -398,7 +399,8 @@ class ContextManager:
         )
 
         def _end_ctx_span(result_msgs: list[dict]) -> list[dict]:
-            """结束 ctx_span 并返回结果"""
+            """结束 ctx_span，修复 tool 配对，并返回结果"""
+            result_msgs = self._sanitize_tool_pairs(result_msgs)
             result_tokens = self.estimate_messages_tokens(result_msgs)
             ctx_span.set_attribute("tokens_after", result_tokens)
             ctx_span.set_attribute("compression_ratio", result_tokens / max(current_tokens, 1))
@@ -462,10 +464,14 @@ class ContextManager:
             f"Split into {len(early_groups)} early groups and {len(recent_groups)} recent groups"
         )
 
-        # Step 3: LLM 分块摘要早期对话
+        # Step 3: LLM 分块摘要早期对话（支持迭代式更新）
         early_tokens = self.estimate_messages_tokens(early_messages)
         target_summary_tokens = max(int(early_tokens * _settings.context_compression_ratio), 200)
-        summary = await self._summarize_messages_chunked(early_messages, target_summary_tokens)
+        summary = await self._summarize_messages_chunked(
+            early_messages, target_summary_tokens, previous_summary=self._previous_summary,
+        )
+        if summary:
+            self._previous_summary = summary
 
         if summary and memory_manager is not None:
             try:
@@ -839,8 +845,14 @@ class ContextManager:
 
         return ""
 
-    async def _summarize_messages_chunked(self, messages: list[dict], target_tokens: int) -> str:
-        """分块 LLM 摘要消息列表"""
+    async def _summarize_messages_chunked(
+        self,
+        messages: list[dict],
+        target_tokens: int,
+        previous_summary: str = "",
+    ) -> str:
+        """分块 LLM 摘要消息列表。支持迭代式更新：当存在 previous_summary 时
+        走「更新摘要」路径而非从零开始，避免多次压缩后早期信息逐渐稀释。"""
         if not messages:
             return ""
 
@@ -881,20 +893,35 @@ class ContextManager:
             try:
                 from ..prompt.compact import format_compact_summary, get_compact_prompt
 
+                if previous_summary and i == 0:
+                    _system = get_compact_prompt(
+                        custom_instructions=(
+                            "这是一次迭代式摘要更新。下方包含上一次压缩的摘要和新增对话。"
+                            "请保留上次摘要中仍然相关的所有信息，整合新对话中的进展。"
+                            "已完成的工作从「待处理」移到「已完成」。"
+                            "已回答的问题移到「已解决的问题」。"
+                            "仅删除明确过时的信息。"
+                        ),
+                    )
+                    _content = (
+                        f"上次摘要:\n{previous_summary}\n\n"
+                        f"新增对话（第 {i + 1}/{len(chunks)} 块，"
+                        f"约 {chunk_tokens} tokens）:\n\n{chunk}\n\n"
+                        f"请更新摘要，压缩到 {chunk_target * CHARS_PER_TOKEN} 字以内。"
+                    )
+                else:
+                    _system = get_compact_prompt()
+                    _content = (
+                        f"请将以下对话片段（第 {i + 1}/{len(chunks)} 块，"
+                        f"约 {chunk_tokens} tokens）压缩到 "
+                        f"{chunk_target * CHARS_PER_TOKEN} 字以内:\n\n{chunk}"
+                    )
+
                 response = await self._cancellable_llm(
                     model=self._brain.model,
                     max_tokens=chunk_target,
-                    system=get_compact_prompt(),
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": (
-                                f"请将以下对话片段（第 {i + 1}/{len(chunks)} 块，"
-                                f"约 {chunk_tokens} tokens）压缩到 "
-                                f"{chunk_target * CHARS_PER_TOKEN} 字以内:\n\n{chunk}"
-                            ),
-                        }
-                    ],
+                    system=_system,
+                    messages=[{"role": "user", "content": _content}],
                     use_thinking=False,
                 )
 
@@ -1001,6 +1028,101 @@ class ContextManager:
         return compressed
 
     @staticmethod
+    def _sanitize_tool_pairs(messages: list[dict]) -> list[dict]:
+        """修复压缩/截断后可能出现的 tool_use/tool_result 孤儿配对。
+
+        Anthropic API 要求每个 tool_use 必须有对应的 tool_result。
+        压缩或截断可能破坏这种对应关系，导致 API 400 错误。
+
+        处理两种情况：
+        1. 孤儿 tool_result（引用的 tool_use 已被删除）→ 移除
+        2. 孤儿 tool_use（对应的 tool_result 已被删除）→ 插入 stub
+        """
+        if not messages:
+            return messages
+
+        # Collect all tool_use IDs from assistant messages
+        tool_use_ids: set[str] = set()
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tid = block.get("id", "")
+                    if tid:
+                        tool_use_ids.add(tid)
+
+        # Collect all tool_result IDs from user messages
+        tool_result_ids: set[str] = set()
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    tid = block.get("tool_use_id", "")
+                    if tid:
+                        tool_result_ids.add(tid)
+
+        orphan_results = tool_result_ids - tool_use_ids
+        missing_results = tool_use_ids - tool_result_ids
+
+        if not orphan_results and not missing_results:
+            return messages
+
+        result: list[dict] = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content")
+
+            # Remove orphaned tool_results from user messages
+            if role == "user" and isinstance(content, list) and orphan_results:
+                filtered = [
+                    block for block in content
+                    if not (
+                        isinstance(block, dict)
+                        and block.get("type") == "tool_result"
+                        and block.get("tool_use_id", "") in orphan_results
+                    )
+                ]
+                if not filtered:
+                    continue
+                if len(filtered) != len(content):
+                    msg = {**msg, "content": filtered}
+
+            result.append(msg)
+
+            # Insert stub tool_results after assistant messages with orphaned tool_uses
+            if role == "assistant" and isinstance(content, list) and missing_results:
+                stubs = []
+                for block in content:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("type") == "tool_use"
+                        and block.get("id", "") in missing_results
+                    ):
+                        stubs.append({
+                            "type": "tool_result",
+                            "tool_use_id": block["id"],
+                            "content": "[结果来自早期对话，已被压缩 — 参见上方摘要]",
+                        })
+                if stubs:
+                    result.append({"role": "user", "content": stubs})
+
+        if orphan_results or missing_results:
+            logger.info(
+                f"[Sanitize] Removed {len(orphan_results)} orphan result(s), "
+                f"added {len(missing_results)} stub result(s)"
+            )
+
+        return result
+
+    @staticmethod
     def _inject_summary_into_recent(summary: str, recent_messages: list[dict]) -> list[dict]:
         """将摘要注入到 recent_messages 中，避免插入假 assistant 回复。
 
@@ -1011,8 +1133,12 @@ class ContextManager:
             return list(recent_messages)
 
         summary_prefix = (
-            f"[之前的对话摘要]\n{summary}\n\n"
-            "请直接从中断处继续，不要确认摘要、不要回顾之前的工作。\n\n---\n"
+            "[上下文压缩 -- 仅供参考]\n"
+            "以下是之前对话的结构化摘要，是上一段上下文的交接记录。\n"
+            "不要回答或重新处理摘要中提到的问题（它们已经被处理过了），"
+            "只响应摘要之后出现的最新用户消息。\n"
+            "当前会话状态可能已反映摘要中描述的工作，避免重复执行。\n\n"
+            f"{summary}\n\n---\n"
         )
         result = list(recent_messages)
 

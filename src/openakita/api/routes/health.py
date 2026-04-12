@@ -48,6 +48,47 @@ def _get_lan_ip() -> str:
     return ip
 
 
+def _safe_int(val: str, default: int) -> int:
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+_all_ips_cache: tuple[list[str], float] | None = None
+
+
+def _get_all_lan_ips() -> list[str]:
+    """Return all non-loopback IPv4 addresses on this host (cached 60s)."""
+    global _all_ips_cache
+    now = time.time()
+    if _all_ips_cache and (now - _all_ips_cache[1]) < _LAN_IP_TTL:
+        return _all_ips_cache[0]
+
+    import socket
+
+    ips: list[str] = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            addr = info[4][0]
+            if addr.startswith("127.") or addr.startswith("169.254."):
+                continue
+            if addr not in ips:
+                ips.append(addr)
+    except Exception:
+        pass
+
+    primary = _get_lan_ip()
+    if primary not in ips and primary != "127.0.0.1":
+        ips.insert(0, primary)
+    elif primary in ips:
+        ips.remove(primary)
+        ips.insert(0, primary)
+
+    _all_ips_cache = (ips, now)
+    return ips
+
+
 @router.get("/api/health")
 async def health(request: Request):
     """Basic health check - returns 200 if server is running."""
@@ -67,6 +108,9 @@ async def health(request: Request):
         "agent_initialized": hasattr(request.app.state, "agent")
         and request.app.state.agent is not None,
         "local_ip": _get_lan_ip(),
+        "all_ips": _get_all_lan_ips(),
+        "api_host": os.environ.get("API_HOST", "127.0.0.1"),
+        "api_port": _safe_int(os.environ.get("API_PORT", "18900"), 18900),
     }
 
 

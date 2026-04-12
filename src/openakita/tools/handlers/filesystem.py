@@ -191,6 +191,39 @@ class FilesystemHandler:
     # run_shell 成功输出最大行数
     SHELL_MAX_LINES = 200
 
+    _EXIT_CODE_SEMANTICS: dict[str, dict[int, str]] = {
+        "grep": {1: "无匹配结果（非错误）"},
+        "egrep": {1: "无匹配结果（非错误）"},
+        "fgrep": {1: "无匹配结果（非错误）"},
+        "rg": {1: "无匹配结果（非错误）"},
+        "diff": {1: "文件存在差异（非错误）"},
+        "test": {1: "条件不成立（非错误）"},
+        "find": {1: "部分路径无法访问（非错误）"},
+        "cmp": {1: "文件不同（非错误）"},
+        "where": {1: "未找到命令（非错误）"},
+    }
+
+    @classmethod
+    def _interpret_exit_code(cls, command: str, exit_code: int) -> str | None:
+        """Return a human-readable meaning if the exit code is a known
+        non-error for the given command, or ``None`` otherwise."""
+        stripped = command.strip()
+        if not stripped:
+            return None
+        # Extract the first command segment, handling pipes / && / ;
+        first_segment = (
+            stripped.split("|")[0].strip().split("&&")[0].strip().split(";")[0].strip()
+        )
+        # Split into tokens; skip leading env-var assignments (VAR=val)
+        tokens = first_segment.split()
+        while tokens and "=" in tokens[0]:
+            tokens = tokens[1:]
+        if not tokens:
+            return None
+        cmd_name = Path(tokens[0]).stem
+        meanings = cls._EXIT_CODE_SEMANTICS.get(cmd_name, {})
+        return meanings.get(exit_code)
+
     async def _run_shell(self, params: dict) -> str:
         """Execute shell command with persistent session + background support."""
         command = params.get("command", "")
@@ -266,6 +299,22 @@ class FilesystemHandler:
             full_text = f"命令执行成功 (exit code: 0):\n{output}"
             return self._truncate_shell_output(full_text)
         else:
+            # Check for known non-error exit codes before treating as failure
+            exit_meaning = self._interpret_exit_code(command, result.returncode)
+            if exit_meaning:
+                log_buffer.add_log(
+                    level="INFO",
+                    module="shell",
+                    message=f"$ {command}\n[exit: {result.returncode}, {exit_meaning}]\n{result.stdout}",
+                )
+                output = result.stdout or ""
+                if result.stderr:
+                    output += f"\n[信息]:\n{result.stderr}"
+                full_text = (
+                    f"命令执行完成 (exit code: {result.returncode}, {exit_meaning}):\n{output}"
+                )
+                return self._truncate_shell_output(full_text)
+
             log_buffer.add_log(
                 level="ERROR",
                 module="shell",
@@ -379,7 +428,12 @@ class FilesystemHandler:
                 logger.warning(msg)
                 return msg
         await self.agent.file_tool.write(path, content)
-        result = f"文件已写入: {path}"
+        try:
+            file_path = self.agent.file_tool._resolve_path(path)
+            size = file_path.stat().st_size
+            result = f"文件已写入: {path} ({size} bytes)"
+        except OSError:
+            result = f"文件已写入: {path}"
 
         from ...core.im_context import get_im_session
 
@@ -495,9 +549,15 @@ class FilesystemHandler:
                 replace_all=replace_all,
             )
             replaced = result["replaced"]
+            try:
+                file_path = self.agent.file_tool._resolve_path(path)
+                size = file_path.stat().st_size
+                size_info = f" ({size} bytes)"
+            except OSError:
+                size_info = ""
             if replace_all and replaced > 1:
-                return f"文件已编辑: {path}（替换了 {replaced} 处匹配）"
-            return f"文件已编辑: {path}"
+                return f"文件已编辑: {path}（替换了 {replaced} 处匹配）{size_info}"
+            return f"文件已编辑: {path}{size_info}"
         except FileNotFoundError:
             return f"❌ 文件不存在: {path}"
         except ValueError as e:
@@ -534,16 +594,19 @@ class FilesystemHandler:
 
         total = len(files)
         if total <= max_items:
-            return f"目录内容 ({total} 条):\n" + "\n".join(files)
+            result = f"目录内容 ({total} 条):\n" + "\n".join(files)
+        else:
+            shown = files[:max_items]
+            result = f"目录内容 (显示前 {max_items} 条，共 {total} 条):\n" + "\n".join(shown)
+            result += (
+                f"\n\n[OUTPUT_TRUNCATED] 目录共 {total} 条目，已显示前 {max_items} 条。\n"
+                f'如需查看更多，请使用 list_directory(path="{path}", max_items={total}) '
+                f"或缩小查询范围。"
+            )
 
-        shown = files[:max_items]
-        result = f"目录内容 (显示前 {max_items} 条，共 {total} 条):\n" + "\n".join(shown)
-        result += (
-            f"\n\n[OUTPUT_TRUNCATED] 目录共 {total} 条目，已显示前 {max_items} 条。\n"
-            f'如需查看更多，请使用 list_directory(path="{path}", max_items={total}) '
-            f"或缩小查询范围。"
-        )
-        return result
+        from ...utils.subdir_context import inject_subdir_context
+
+        return inject_subdir_context(result, path)
 
     # grep 最大结果条目数
     GREP_MAX_RESULTS = 200
@@ -703,9 +766,12 @@ class FilesystemHandler:
                     f"请确认是否确实需要删除此目录及其所有内容。"
                 )
 
+        is_dir = file_path.is_dir()
         success = await self.agent.file_tool.delete(path)
         if success:
-            kind = "目录" if file_path.is_dir() else "文件"
+            if file_path.exists():
+                return f"⚠️ 删除操作返回成功但路径仍存在: {path}"
+            kind = "目录" if is_dir else "文件"
             return f"{kind}已删除: {path}"
         return f"❌ 删除失败: {path}"
 

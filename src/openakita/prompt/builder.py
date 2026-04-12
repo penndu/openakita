@@ -547,6 +547,9 @@ def build_system_prompt(
     if prompt_mode in (PromptMode.FULL, PromptMode.MINIMAL) and mode != "ask":
         agents_md_content = _cached_section("agents_md", _read_agents_md)
         if agents_md_content:
+            from ..utils.context_scan import scan_context_content
+
+            agents_md_content, _ = scan_context_content(agents_md_content, source="AGENTS.md")
             developer_parts.append(
                 "## Project Guidelines (AGENTS.md)\n\n"
                 "以下是当前工作目录中的项目开发规范，执行开发任务时必须遵循：\n\n"
@@ -2025,6 +2028,13 @@ def _get_tools_guide_short() -> str:
 - **关键节点简要叙述**：多步骤任务、敏感操作、复杂判断时简要说明意图
 - **不要让用户自己跑命令**：直接使用工具执行，而不是输出命令让用户去终端跑
 - **不要编造工具结果**：未调用工具前不要声称已完成操作
+
+### 结果验证准则
+
+- **Grounding（事实落地）**：你的每个事实性声称必须有工具输出作为依据。若工具未返回预期结果，如实告知用户
+- **缺失上下文时不猜测**：若所需信息不足，说明缺什么并建议获取方式，不要编造答案
+- **完成前自查**：回复用户前确认——操作是否真的执行了？结果是否与声称一致？文件写了 ≠ 用户已收到（需 deliver_artifacts）
+- **区分宿主执行与用户可见**：工具在服务器执行成功 ≠ 用户本机可见。需要用户看到文件时，必须调用 deliver_artifacts
 
 ### 能力扩展
 

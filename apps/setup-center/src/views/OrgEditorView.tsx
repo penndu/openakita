@@ -53,6 +53,10 @@ import {
   IconAlertCircle,
   IconUpload,
   IconMessageCircle,
+  IconUnlock,
+  IconPin,
+  IconShuffle,
+  IconBot,
 } from "../icons";
 import { safeFetch } from "../providers";
 import { IS_CAPACITOR, saveFileDialog, IS_TAURI, writeTextFile, openFileDialog, onWsEvent, saveAttachment } from "../platform";
@@ -2122,40 +2126,40 @@ export function OrgEditorView({
                 {contextMenu.type === "node" && contextMenu.id && (<>
                   {liveMode && selectedOrgId && (
                     <button onClick={() => { setSelectedNodeId(contextMenu.id!); setSelectedEdgeId(null); setShowRightPanel(true); setShowNodeChat(true); setContextMenu(null); }}>
-                      <span className="org-ctx-icon">💬</span>与该节点对话
+                      <span className="org-ctx-icon"><IconMessageCircle size={14} /></span>与该节点对话
                     </button>
                   )}
                   {liveMode && selectedOrgId && (nodes.find(n => n.id === contextMenu.id)?.data as any)?.status === "frozen" && (
                     <button onClick={() => ctxUnfreezeNode(contextMenu.id!)}>
-                      <span className="org-ctx-icon">🔓</span>解除冻结
+                      <span className="org-ctx-icon"><IconUnlock size={14} /></span>解除冻结
                     </button>
                   )}
                   <button onClick={() => ctxCopyNode(contextMenu.id!)}>
-                    <span className="org-ctx-icon">📋</span>复制节点
+                    <span className="org-ctx-icon"><IconClipboard size={14} /></span>复制节点
                   </button>
                   <button onClick={() => ctxDeleteNode(contextMenu.id!)}>
-                    <span className="org-ctx-icon" style={{ color: "#ef4444" }}>🗑</span>删除节点
+                    <span className="org-ctx-icon" style={{ color: "#e74c3c" }}><IconTrash size={14} /></span>删除节点
                   </button>
                 </>)}
                 {contextMenu.type === "edge" && contextMenu.id && (<>
                   <button onClick={() => ctxReverseEdge(contextMenu.id!)}>
-                    <span className="org-ctx-icon">🔄</span>反转方向
+                    <span className="org-ctx-icon"><IconRefresh size={14} /></span>反转方向
                   </button>
                   <button onClick={() => ctxDeleteEdge(contextMenu.id!)}>
-                    <span className="org-ctx-icon" style={{ color: "#ef4444" }}>🗑</span>删除连线
+                    <span className="org-ctx-icon" style={{ color: "#e74c3c" }}><IconTrash size={14} /></span>删除连线
                   </button>
                 </>)}
                 {contextMenu.type === "pane" && (<>
                   <button onClick={() => ctxAddNodeAt()}>
-                    <span className="org-ctx-icon">➕</span>添加节点
+                    <span className="org-ctx-icon"><IconPlus size={14} /></span>添加节点
                   </button>
                   {clipboardNode && (
                     <button onClick={() => ctxPasteNode()}>
-                      <span className="org-ctx-icon">📌</span>粘贴节点
+                      <span className="org-ctx-icon"><IconPin size={14} /></span>粘贴节点
                     </button>
                   )}
                   <button onClick={() => { setNodes(computeTreeLayout(nodes, edges)); setContextMenu(null); }}>
-                    <span className="org-ctx-icon">🔀</span>自动布局
+                    <span className="org-ctx-icon"><IconShuffle size={14} /></span>自动布局
                   </button>
                   <button
                     onClick={() => {
@@ -3375,10 +3379,16 @@ export function OrgEditorView({
                           background: selectedNode.agent_profile_id ? undefined : "var(--bg-app)",
                         }}
                       >
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                           {(() => {
                             const ap = agentProfiles.find(p => p.id === selectedNode.agent_profile_id);
-                            return ap ? `${ap.icon || "🤖"} ${ap.name}` : "点击选择...";
+                            if (!ap) return "点击选择...";
+                            return (
+                              <>
+                                {ap.icon ? <span style={{ fontSize: 16, flexShrink: 0 }}>{ap.icon}</span> : <IconBot size={16} style={{ flexShrink: 0 }} />}
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{ap.name}</span>
+                              </>
+                            );
                           })()}
                         </span>
                         <IconChevronDown size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
@@ -3431,7 +3441,7 @@ export function OrgEditorView({
                                     onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover, rgba(0,0,0,0.04))")}
                                     onMouseLeave={(e) => (e.currentTarget.style.background = selectedNode.agent_profile_id === ap.id ? "rgba(14,165,233,0.08)" : "")}
                                   >
-                                    <span style={{ fontSize: 16, flexShrink: 0 }}>{ap.icon || "🤖"}</span>
+                                    {ap.icon ? <span style={{ fontSize: 16, flexShrink: 0 }}>{ap.icon}</span> : <IconBot size={16} style={{ flexShrink: 0 }} />}
                                     <div style={{ minWidth: 0, flex: 1 }}>
                                       <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ap.name}</div>
                                       {ap.description && <div style={{ fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ap.description}</div>}

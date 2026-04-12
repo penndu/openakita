@@ -1173,6 +1173,25 @@ class MemoryStorage:
             logger.warning(f"Failed to get recent turns for {session_id}: {e}")
             return []
 
+    def get_global_recent_turns(self, limit: int = 20) -> list[dict]:
+        """跨所有 session 按时间倒序获取最近 N 轮对话（用于 Memory Nudge）"""
+        if not self._conn:
+            return []
+        try:
+            cur = self._conn.execute(
+                "SELECT role, content, timestamp "
+                "FROM conversation_turns "
+                "WHERE role IN ('user', 'assistant') AND content IS NOT NULL "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            )
+            rows = self._rows_to_dicts(cur)
+            rows.reverse()
+            return rows
+        except Exception as e:
+            logger.warning(f"Failed to get global recent turns: {e}")
+            return []
+
     def list_turns(
         self,
         session_id: str,

@@ -73,6 +73,7 @@ class SkillMetadata:
     paths: list[str] = field(default_factory=list)
     hooks: dict = field(default_factory=dict)
     model: str | None = None
+    fallback_for_toolsets: list[str] = field(default_factory=list)
 
     # 国际化（由 agents/openai.yaml i18n 字段注入，兼容旧的 .openakita-i18n.json）
     # key 为语言代码 (如 "zh")，value 为该语言的显示名/描述
@@ -371,6 +372,10 @@ class SkillParser:
         hooks_raw = data.get("hooks", {})
         hooks = hooks_raw if isinstance(hooks_raw, dict) else {}
         model = data.get("model") or None
+        fbt_raw = data.get("fallback-for-toolsets", [])
+        fallback_for_toolsets = (
+            [str(t) for t in fbt_raw] if isinstance(fbt_raw, list) else []
+        )
 
         return SkillMetadata(
             name=name,
@@ -398,6 +403,7 @@ class SkillParser:
             paths=paths,
             hooks=hooks,
             model=model if isinstance(model, str) else None,
+            fallback_for_toolsets=fallback_for_toolsets,
         )
 
     def parse_directory(self, skill_dir: Path) -> ParsedSkill:

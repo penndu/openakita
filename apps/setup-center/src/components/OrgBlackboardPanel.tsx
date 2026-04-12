@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useImperativeHandle, forwardRef } from "react";
 import { safeFetch } from "../providers";
 import { saveAttachment } from "../platform";
+import { getFileTypeIcon } from "../icons";
 import type { Node } from "@xyflow/react";
 import { fmtShortDate, BB_TYPE_COLORS, BB_TYPE_LABELS } from "../views/orgEditorConstants";
 import { useMdModules } from "../views/chat/hooks/useMdModules";
@@ -13,18 +14,6 @@ function fmtFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-const FILE_ICON_MAP: Record<string, string> = {
-  md: "📄", txt: "📄", csv: "📊", json: "📋",
-  py: "🐍", js: "📜", ts: "📜", html: "🌐",
-  png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", webp: "🖼️", svg: "🎨",
-  pdf: "📑", xlsx: "📊", docx: "📝", zip: "📦",
-};
-
-function getFileIcon(filename: string): string {
-  const ext = filename.split(".").pop()?.toLowerCase() || "";
-  return FILE_ICON_MAP[ext] || "📎";
 }
 
 export interface OrgBlackboardPanelProps {
@@ -213,7 +202,7 @@ export const OrgBlackboardPanel = forwardRef<OrgBlackboardPanelHandle, OrgBlackb
                             }}
                           >
                             <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>
-                              {getFileIcon(att.filename)}
+                              {(() => { const Icon = getFileTypeIcon(att.filename); return <Icon size={16} />; })()}
                             </span>
                             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
                               {att.filename}

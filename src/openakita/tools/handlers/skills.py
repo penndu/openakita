@@ -341,6 +341,9 @@ class SkillsHandler:
             if args_block:
                 output += f"\n{args_block}\n"
 
+        from ...utils.context_scan import scan_context_content
+
+        body, threats = scan_context_content(body, source=f"skill:{skill_name}")
         output += "\n---\n\n"
         output += body
 

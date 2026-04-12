@@ -1291,19 +1291,36 @@ async def run_interactive():
 
     async def _process_message(user_input: str):
         """Process a single user message (extracted for early-input replay)."""
-        session_messages: list[dict] = []
         _active_session = getattr(agent_or_master, "_cli_session", None)
+
         if _active_session:
+            _active_session.add_message("user", user_input)
             session_messages = _active_session.context.get_messages()
         elif hasattr(agent_or_master, "_context"):
             session_messages = agent_or_master._context.messages
+        else:
+            session_messages = []
+
         _sid = _active_session.id if _active_session else _cli_chat_id
         event_stream = agent_or_master.chat_with_session_stream(
             message=user_input,
             session_messages=session_messages,
             session_id=_sid,
+            session=_active_session,
         )
-        await render_stream(event_stream, console, agent_name=agent_name)
+        reply_text = await render_stream(event_stream, console, agent_name=agent_name)
+
+        if _active_session and reply_text:
+            _meta: dict = {}
+            try:
+                _ts = getattr(agent_or_master, "build_tool_trace_summary", None)
+                if _ts:
+                    _tool_summary = _ts()
+                    if _tool_summary:
+                        _meta["tool_summary"] = _tool_summary
+            except Exception:
+                pass
+            _active_session.add_message("assistant", reply_text, **_meta)
 
     try:
         while not shutdown_event.is_set():

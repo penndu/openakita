@@ -362,7 +362,7 @@ export function OrgDashboard({ orgId, apiBaseUrl, orgName, onNodeClick }: OrgDas
         <GlassCard title={`异常告警${anomalies.length > 0 ? ` (${anomalies.length})` : ""}`} icon={<SvgAlert />} className="db-col-1" accent={anomalies.length > 0 ? "#ef4444" : undefined}>
           <div className="db-scroll-area">
             {anomalies.length === 0 ? (
-              <div className="db-all-good">✓ 一切正常</div>
+              <div className="db-all-good"><SvgCheck /> 一切正常</div>
             ) : anomalies.map((a, i) => (
               <div key={i} className="db-alert-item">
                 <span className="db-alert-icon" style={{ color: a.type === "error" ? "#ef4444" : a.type === "stuck" ? "#f59e0b" : "#3b82f6" }}>

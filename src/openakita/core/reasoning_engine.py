@@ -906,6 +906,7 @@ class ReasoningEngine:
         )
 
         react_trace: list[dict] = []
+        all_tool_results: list[dict] = []
         _trace_started_at = datetime.now().isoformat()
 
         _last_discovered_snapshot: frozenset = frozenset()
@@ -1260,6 +1261,7 @@ class ReasoningEngine:
                     tools_executed_in_task=tools_executed_in_task,
                     executed_tool_names=executed_tool_names,
                     delivery_receipts=delivery_receipts,
+                    all_tool_results=all_tool_results,
                     no_tool_call_count=no_tool_call_count,
                     verify_incomplete_count=verify_incomplete_count,
                     no_confirmation_text_count=no_confirmation_text_count,
@@ -1412,6 +1414,7 @@ class ReasoningEngine:
                             self._last_delivery_receipts = other_receipts
                         # 保留其他工具的 tool_result 内容
                         other_tool_results = other_results if other_results else []
+                        all_tool_results.extend(other_tool_results)
                     if _mode_blocked_results:
                         other_tool_results.extend(_mode_blocked_results)
 
@@ -1626,6 +1629,8 @@ class ReasoningEngine:
                         elif tid in _executed_by_id:
                             merged_results.append(_executed_by_id[tid])
                     tool_results = merged_results
+
+                all_tool_results.extend(tool_results)
 
                 if executed:
                     if any(t not in _ADMIN_TOOL_NAMES for t in executed):
@@ -2059,6 +2064,7 @@ class ReasoningEngine:
         self._budget = create_budget_from_settings()
         self._budget.start()
         react_trace: list[dict] = []
+        all_tool_results: list[dict] = []
         _trace_started_at = datetime.now().isoformat()
         _endpoint_switched = False
 
@@ -2685,6 +2691,7 @@ class ReasoningEngine:
                         tools_executed_in_task=tools_executed_in_task,
                         executed_tool_names=executed_tool_names,
                         delivery_receipts=delivery_receipts,
+                        all_tool_results=all_tool_results,
                         no_tool_call_count=no_tool_call_count,
                         verify_incomplete_count=verify_incomplete_count,
                         no_confirmation_text_count=no_confirmation_text_count,
@@ -2884,6 +2891,8 @@ class ReasoningEngine:
                                     "content": r,
                                 }
                             )
+
+                        all_tool_results.extend(tool_results_for_msg)
 
                         # ask_user 事件
                         ask_raw = ask_user_calls[0].get("input")
@@ -3345,13 +3354,14 @@ class ReasoningEngine:
                         elif tool_name == "complete_todo":
                             yield {"type": "todo_completed"}
 
-                        tool_results_for_msg.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tool_id,
-                                "content": result_text,
-                            }
-                        )
+                        _tr_entry: dict = {
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": result_text,
+                        }
+                        if _tool_is_error:
+                            _tr_entry["is_error"] = True
+                        tool_results_for_msg.append(_tr_entry)
 
                         # exit_plan_mode: stop the loop after this tool
                         if tool_name == "exit_plan_mode" and not _tool_is_error:
@@ -3399,6 +3409,8 @@ class ReasoningEngine:
                         return
 
                     if decision.tool_calls:
+                        all_tool_results.extend(tool_results_for_msg)
+
                         if _non_denied_tool_names:
                             if any(t not in _ADMIN_TOOL_NAMES for t in _non_denied_tool_names):
                                 tools_executed_in_task = True
@@ -4701,6 +4713,7 @@ class ReasoningEngine:
         tools_executed_in_task: bool,
         executed_tool_names: list[str],
         delivery_receipts: list[dict],
+        all_tool_results: list[dict] | None = None,
         no_tool_call_count: int,
         verify_incomplete_count: int,
         no_confirmation_text_count: int,
@@ -4728,6 +4741,7 @@ class ReasoningEngine:
                     assistant_response=cleaned_text,
                     executed_tools=executed_tool_names,
                     delivery_receipts=delivery_receipts,
+                    tool_results=all_tool_results,
                     conversation_id=conversation_id,
                     bypass=supervisor_intervened,
                 )

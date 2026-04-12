@@ -436,7 +436,7 @@ export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, visible }: O
                           background: isError ? "var(--danger)" : isComplete ? "var(--ok)" : isToolCall ? "#7c3aed" : "var(--primary)",
                         }} />
                         <span style={{ fontWeight: 500, fontSize: 10, color: isToolCall ? "#7c3aed" : undefined }}>
-                          {isToolCall ? "⚙ " : ""}{EVENT_TYPE_LABELS[evtType] || evtType.replace(/_/g, " ")}
+                          {isToolCall ? "[T] " : ""}{EVENT_TYPE_LABELS[evtType] || evtType.replace(/_/g, " ")}
                         </span>
                         <span style={{ color: "var(--muted)", fontSize: 10, marginLeft: "auto" }}>{tsLocal}</span>
                       </div>

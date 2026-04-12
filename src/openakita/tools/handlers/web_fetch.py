@@ -37,8 +37,11 @@ class WebFetchHandler:
         if not parsed.scheme or not parsed.netloc:
             return f"❌ 无效 URL：{url}（需要完整 URL，包含 https:// 等协议前缀）"
 
-        if parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
-            return "❌ web_fetch 不支持 localhost/本地 IP。请使用浏览器工具访问本地服务。"
+        from ...utils.url_safety import is_safe_url
+
+        safe, reason = await is_safe_url(url)
+        if not safe:
+            return f"❌ URL 安全检查失败：{reason}。请使用浏览器工具访问本地/内网服务。"
 
         try:
             import httpx

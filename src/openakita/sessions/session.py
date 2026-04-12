@@ -370,11 +370,9 @@ class Session:
         """添加消息并更新活跃时间。返回 True 表示消息被添加，False 表示被去重跳过。"""
         added = self.context.add_message(role, content, **metadata)
         self.touch()
-        return added
-
-        # 检查是否需要截断历史
-        if len(self.context.messages) > self.config.max_history:
+        if added and len(self.context.messages) > self.config.max_history:
             self._truncate_history()
+        return added
 
     _RULE_SIGNAL_WORDS = (
         "不要",

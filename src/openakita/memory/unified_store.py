@@ -315,6 +315,9 @@ class UnifiedStore:
     def get_recent_turns(self, session_id: str, limit: int = 20) -> list[dict]:
         return self.db.get_recent_turns(session_id, limit)
 
+    def get_global_recent_turns(self, limit: int = 20) -> list[dict]:
+        return self.db.get_global_recent_turns(limit)
+
     def delete_turns_for_session(self, session_id: str) -> int:
         return self.db.delete_turns_for_session(session_id)
 

@@ -951,6 +951,9 @@ class MessageGateway:
             str, list[str]
         ] = {}  # session_key -> accumulated progress lines (for card PATCH)
 
+        # ==================== DM Pairing 配对授权 ====================
+        self._dm_pairing: "DMPairingManager | None" = None
+
         # ==================== 群聊响应策略 ====================
         self._smart_throttle = SmartModeThrottle()
 
@@ -960,6 +963,128 @@ class MessageGateway:
         self._group_context_buffer: dict[str, collections.deque] = {}
         self._GROUP_CONTEXT_MAX_ITEMS = 20
         self._GROUP_CONTEXT_TTL = 600  # 10 分钟
+
+    def enable_dm_pairing(self, data_dir: "Path") -> None:
+        """Enable DM Pairing authorization."""
+        from .dm_pairing import DMPairingManager
+
+        self._dm_pairing = DMPairingManager(data_dir)
+        logger.info("DM Pairing enabled")
+
+    async def _handle_pair_command(
+        self, cmd: str, message: "UnifiedMessage"
+    ) -> str | None:
+        """Handle /pair command for DM Pairing."""
+        if not self._dm_pairing:
+            return "DM Pairing is not enabled."
+
+        parts = cmd.strip().split()
+        sub = parts[1] if len(parts) > 1 else "generate"
+
+        if sub == "generate":
+            code = self._dm_pairing.generate_code(
+                created_by=f"{message.channel}:{message.user_id}"
+            )
+            return (
+                f"🔑 配对码: **{code}**\n\n"
+                f"有效期 1 小时，发送给需要授权的用户即可。"
+            )
+        elif sub == "list":
+            authorized = self._dm_pairing.list_authorized()
+            if not authorized:
+                return "当前没有已授权的通道。"
+            return "已授权通道:\n" + "\n".join(f"- {a}" for a in authorized)
+        elif sub == "revoke" and len(parts) >= 3:
+            target = parts[2]
+            parts_t = target.split(":", 1)
+            if len(parts_t) == 2:
+                ok = self._dm_pairing.revoke(parts_t[0], parts_t[1])
+                return f"✅ 已撤销授权: {target}" if ok else f"❌ 未找到: {target}"
+            return "用法: /pair revoke channel:chat_id"
+        else:
+            return (
+                "/pair generate — 生成配对码\n"
+                "/pair list — 查看已授权通道\n"
+                "/pair revoke channel:chat_id — 撤销授权"
+            )
+
+    async def _handle_background_command(
+        self, text: str, message: "UnifiedMessage"
+    ) -> str | None:
+        """
+        Handle /background <prompt> — run a task in the background.
+
+        Creates an isolated agent session that runs without blocking the
+        current conversation. Results are delivered when complete.
+        """
+        parts = text.split(None, 1)
+        if len(parts) < 2:
+            return (
+                "用法: `/background <任务描述>`\n\n"
+                "示例:\n"
+                "- `/background 帮我整理今天的会议纪要`\n"
+                "- `/bg 查询最新的项目进度并生成报告`"
+            )
+
+        prompt = parts[1].strip()
+        if not prompt:
+            return "❌ 请提供要执行的任务描述。"
+
+        session_key = self._get_session_key(message)
+        bg_id = f"bg_{session_key}_{int(_time.time())}"
+
+        await self._send_feedback(
+            message,
+            f"⏳ 后台任务已启动: {prompt[:60]}...\n任务完成后会自动通知你。"
+        )
+
+        async def _run_background():
+            try:
+                from ..scheduler.executor import TaskExecutor
+                from ..scheduler.task import ScheduledTask, TaskType, TriggerType
+
+                executor = TaskExecutor(gateway=self, timeout_seconds=1200)
+
+                task = ScheduledTask(
+                    id=bg_id,
+                    name=f"后台任务: {prompt[:30]}",
+                    description=prompt,
+                    trigger_type=TriggerType.ONCE,
+                    trigger_config={},
+                    task_type=TaskType.TASK,
+                    prompt=prompt,
+                    channel_id=message.channel,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                )
+
+                success, result = await executor.execute(task)
+
+                if message.channel and message.chat_id:
+                    status = "✅ 后台任务完成" if success else "❌ 后台任务失败"
+                    result_text = f"{status}\n\n**任务**: {prompt[:80]}\n\n**结果**:\n{result}"
+                    try:
+                        await self.send(
+                            channel=message.channel,
+                            chat_id=message.chat_id,
+                            text=result_text,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to deliver background result: {e}")
+
+            except Exception as e:
+                logger.error(f"Background task {bg_id} failed: {e}", exc_info=True)
+                try:
+                    await self.send(
+                        channel=message.channel,
+                        chat_id=message.chat_id,
+                        text=f"❌ 后台任务异常: {e}",
+                    )
+                except Exception:
+                    pass
+
+        asyncio.create_task(_run_background())
+        return None
 
     async def _handle_feishu_command(self, cmd: str, message: "UnifiedMessage") -> str | None:
         """Handle ``/feishu start|auth|help``."""
@@ -1169,8 +1294,9 @@ class MessageGateway:
         return f"✅ 已切换到 **{p.icon} {p.name}** ({p.description})"
 
     def _format_system_help(self) -> str:
-        """格式化全局 /help 输出（所有模式可用）"""
+        """格式化全局 /help 输出（所有模式可用）——基于统一命令注册表"""
         from ..config import settings
+        from .slash_commands import format_help
 
         lines = [
             "📖 **快捷指令**\n",
@@ -1179,42 +1305,20 @@ class MessageGateway:
             "  `跳过` / `skip` / `/skip` — 跳过当前步骤",
             "  处理中直接发送新消息 — 自动注入当前任务上下文",
             "",
-            "**对话管理:**",
-            "  `/new` / `/新话题` — 开启新话题，清除对话上下文",
-            "  `/help` / `/帮助` — 查看所有可用指令",
-            "",
-            "**模型管理:**",
-            "  `/model` — 查看当前模型和可用列表",
-            "  `/switch [模型名]` — 临时切换模型",
-            "  `/restore` — 恢复默认模型",
-            "",
-            "**思考模式:**",
-            "  `/thinking [on|off|auto]` — 切换思考模式",
-            "  `/thinking_depth [low|medium|high]` — 设置思考深度",
-            "  `/chain [on|off]` — 思维链进度推送开关",
-            "",
-            "**模式:**",
-            "  `/模式` / `/mode` — 查看或切换单/多Agent模式",
         ]
+
+        lines.append(format_help(scope="im"))
 
         if settings.multi_agent_enabled:
             lines.extend(
                 [
-                    "",
                     "**多Agent:**",
                     "  `/切换` / `/switch` — 列出或切换 Agent",
                     "  `/状态` / `/status` — 查看当前 Agent 信息",
                     "  `/重置` / `/agent_reset` — 重置为默认 Agent",
+                    "",
                 ]
             )
-
-        lines.extend(
-            [
-                "",
-                "**系统:**",
-                "  `/restart` / `/重启` — 重启服务（需确认）",
-            ]
-        )
 
         return "\n".join(lines)
 
@@ -2272,6 +2376,28 @@ class MessageGateway:
                     )
                 return
 
+        # ==================== DM Pairing 配对授权检查 ====================
+        if self._dm_pairing:
+            channel = message.channel
+            chat_id = message.chat_id
+            if not self._dm_pairing.is_authorized(channel, chat_id):
+                stripped = _raw_text.strip()
+                is_pair_cmd = stripped.lower().startswith("/pair")
+                if is_pair_cmd:
+                    pass
+                else:
+                    result = self._dm_pairing.verify_code(
+                        _raw_text, channel, chat_id
+                    )
+                    if result[0]:
+                        await self._send_feedback(message, f"✅ {result[1]}")
+                    else:
+                        await self._send_feedback(
+                            message,
+                            f"🔒 未授权。请输入配对码或联系管理员获取。({result[1]})"
+                        )
+                    return
+
         # 正常入队
         await self._message_queue.put(message)
 
@@ -2660,6 +2786,20 @@ class MessageGateway:
                 if feishu_resp is not None:
                     await self._send_response(message, feishu_resp)
                     return
+
+            # /pair 命令（DM Pairing 配对授权）
+            if _cmd_lower.startswith("/pair"):
+                pair_resp = await self._handle_pair_command(_cmd_lower, message)
+                if pair_resp is not None:
+                    await self._send_response(message, pair_resp)
+                    return
+
+            # /background 命令：后台执行任务
+            if _cmd_lower.startswith("/background") or _cmd_lower.startswith("/bg"):
+                bg_resp = await self._handle_background_command(user_text, message)
+                if bg_resp:
+                    await self._send_response(message, bg_resp)
+                return
 
             # 全局帮助指令（所有模式可用）
             if _cmd_lower in ("/help", "/帮助"):

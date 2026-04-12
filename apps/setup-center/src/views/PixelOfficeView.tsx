@@ -8,6 +8,7 @@ import { EventBus } from '../components/pixel-office/EventBus';
 import type { OrgData } from '../components/pixel-office/OfficeScene';
 import type { AgentSpriteConfig } from '../components/pixel-office/AgentSprite';
 import { safeFetch } from '../providers';
+import { IconClipboard, IconSearch, IconFile, IconBot } from '../icons';
 import '../components/pixel-office/pixel-office.css';
 
 interface AgentDetailPanel {
@@ -270,7 +271,7 @@ export function PixelOfficeView({
                     className={`poOrgDropItem${isSoloMode ? ' active' : ''}`}
                     onClick={() => { setSelectedOrgId(SOLO_ID); setDataVersion(v => v + 1); setOrgDropdownOpen(false); }}
                   >
-                    🐕 个人工作室
+                    <IconBot size={14} /> 个人工作室
                   </button>
                   {orgList.length > 0 && <div className="poOrgDropDivider" />}
                   {orgList.map(o => (
@@ -387,12 +388,12 @@ export function PixelOfficeView({
             color: 'var(--text, #e0e0e0)', fontSize: 13,
           }}>
             {[
-              { label: '📋 分配任务', action: () => handleAssignTask(agentCtxMenu.nodeId) },
-              { label: '🔍 聚焦', action: () => { EventBus.emit('zoom-to-node', agentCtxMenu.nodeId); setAgentCtxMenu(null); } },
-              { label: '📄 查看详情', action: () => { setAgentDetail({ ...agentCtxMenu }); setAgentCtxMenu(null); } },
+              { key: 'assign', label: <><IconClipboard size={13} /> 分配任务</>, action: () => handleAssignTask(agentCtxMenu.nodeId) },
+              { key: 'focus', label: <><IconSearch size={13} /> 聚焦</>, action: () => { EventBus.emit('zoom-to-node', agentCtxMenu.nodeId); setAgentCtxMenu(null); } },
+              { key: 'detail', label: <><IconFile size={13} /> 查看详情</>, action: () => { setAgentDetail({ ...agentCtxMenu }); setAgentCtxMenu(null); } },
             ].map((item) => (
               <button
-                key={item.label}
+                key={item.key}
                 onClick={item.action}
                 style={{
                   display: 'block', width: '100%', padding: '6px 14px', border: 'none',

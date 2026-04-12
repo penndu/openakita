@@ -396,6 +396,36 @@ class Settings(BaseSettings):
         description="当前激活的人格预设名称 (default/business/tech_expert/butler/girlfriend/boyfriend/family/jarvis)",
     )
 
+    # === 记忆回顾（Memory Nudge）配置 ===
+    memory_nudge_enabled: bool = Field(
+        default=True,
+        description="是否启用周期性记忆回顾（每 N 轮对话后用 LLM 审视对话并提取值得记忆的内容）",
+    )
+    memory_nudge_interval: int = Field(
+        default=10,
+        description="每隔多少轮对话触发一次记忆回顾（0 表示禁用）",
+    )
+
+    # === Smart Approval 配置 ===
+    smart_approval_enabled: bool = Field(
+        default=False,
+        description="是否启用 LLM 辅助风险评估（对 CONFIRM 级操作用 LLM 做预判）",
+    )
+
+    # === Docker 执行后端配置 ===
+    docker_backend_enabled: bool = Field(
+        default=False,
+        description="是否启用 Docker 容器执行后端（需要本机安装 Docker）",
+    )
+    docker_image: str = Field(
+        default="python:3.12-slim",
+        description="Docker 执行后端使用的镜像",
+    )
+    docker_network: str = Field(
+        default="none",
+        description="Docker 网络模式: none(断网) | bridge(默认桥接) | host",
+    )
+
     # === 活人感引擎配置 ===
     proactive_enabled: bool = Field(default=True, description="是否启用活人感模式")
     proactive_max_daily_messages: int = Field(default=3, description="每日最多主动消息数")
@@ -747,6 +777,8 @@ class Settings(BaseSettings):
 # 需要持久化的 settings 字段名
 _PERSISTABLE_KEYS: list[str] = [
     "persona_name",
+    "memory_nudge_enabled",
+    "memory_nudge_interval",
     "proactive_enabled",
     "proactive_max_daily_messages",
     "proactive_min_interval_minutes",

@@ -181,8 +181,8 @@ export function TokenStatsView({
           <h2 className="truncate text-lg font-bold tracking-tight" title={t("tokenStats.title", "Token 用量统计")}>
             {t("tokenStats.title", "Token 用量统计")}
           </h2>
-          <p className="truncate text-xs text-muted-foreground leading-relaxed" title={t("tokenStats.disclaimer", "⚠ 本地 token 计算与服务商算法无法保证完全一致，实际用量以服务商账单为准，此处统计仅供参考。")}>
-            {t("tokenStats.disclaimer", "⚠ 本地 token 计算与服务商算法无法保证完全一致，实际用量以服务商账单为准，此处统计仅供参考。")}
+          <p className="truncate text-xs text-muted-foreground leading-relaxed" title={t("tokenStats.disclaimer", "注意：本地 token 计算与服务商算法无法保证完全一致，实际用量以服务商账单为准，此处统计仅供参考。")}>
+            {t("tokenStats.disclaimer", "注意：本地 token 计算与服务商算法无法保证完全一致，实际用量以服务商账单为准，此处统计仅供参考。")}
           </p>
         </div>
         {onToggleDisabled && (

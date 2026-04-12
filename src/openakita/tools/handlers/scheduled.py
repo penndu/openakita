@@ -151,6 +151,10 @@ class ScheduledHandler:
             chat_id=chat_id,
             task_source=TaskSource.CHAT,
         )
+        task.silent = bool(params.get("silent", False))
+        task.no_schedule_tools = bool(params.get("no_schedule_tools", False))
+        if params.get("skill_ids"):
+            task.skill_ids = list(params["skill_ids"])
         task.metadata["notify_on_start"] = params.get("notify_on_start", True)
         task.metadata["notify_on_complete"] = params.get("notify_on_complete", True)
 

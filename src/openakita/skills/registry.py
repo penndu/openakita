@@ -150,6 +150,7 @@ class SkillEntry:
     paths: list[str] = field(default_factory=list)
     hooks: dict = field(default_factory=dict)
     model: str | None = None
+    fallback_for_toolsets: list[str] = field(default_factory=list)
 
     # F12: 信任等级 ("builtin" | "local" | "marketplace" | "remote")
     # builtin: 随安装包分发的内置技能
@@ -264,6 +265,7 @@ class SkillEntry:
             paths=list(meta.paths),
             hooks=dict(meta.hooks) if meta.hooks else {},
             model=meta.model,
+            fallback_for_toolsets=list(meta.fallback_for_toolsets),
             trust_level=trust_level,
             skill_path=str(skill.path),
             source_url=source_url,
