@@ -354,6 +354,11 @@ class OrgRuntime:
         if not org:
             raise ValueError(f"Organization not found: {org_id}")
 
+        # 幂等：已经是 ACTIVE/RUNNING 就直接返回，避免双击启动按钮抛
+        # "无效状态转换: active -> active"。仍然拦住非法跳跃（如 ARCHIVED -> ACTIVE）。
+        if org.status in (OrgStatus.ACTIVE, OrgStatus.RUNNING):
+            return org
+
         self._check_transition(org, OrgStatus.ACTIVE)
 
         prev_status = org.status
@@ -460,11 +465,14 @@ class OrgRuntime:
         return True
 
     async def _cancel_busy_nodes(self, org: Organization, reason: str) -> None:
-        """在组织停止/删除前，主动取消所有 busy 节点的任务。
+        """在组织停止/删除前，主动取消所有未空闲节点的任务。
 
-        先走 cancel_node_task 触发协作式取消，让 _activate_and_run 有机会
-        退出并清理 node 状态；随后 _cancel_org_tasks 再做兜底强制取消。
+        BUSY 节点走 cancel_node_task 触发协作式取消，让 _activate_and_run
+        有机会退出并清理 node 状态；WAITING/ERROR 节点（cancel_node_task
+        早返回不处理）则在这里直接强制 IDLE + 清 mailbox + 补一次
+        org:node_status 广播，确保前端拿到最终状态。
         """
+        messenger = self._messengers.get(org.id)
         for node in list(org.nodes):
             if node.status == NodeStatus.BUSY:
                 try:
@@ -473,12 +481,58 @@ class OrgRuntime:
                     logger.debug(
                         f"[OrgRuntime] cancel_node_task failed for {node.id}: {e}"
                     )
+            elif node.status in (NodeStatus.WAITING, NodeStatus.ERROR):
+                # cancel_node_task 对非 BUSY 节点直接早返回，这里手动收尾，
+                # 否则 stop 之后这些节点还会留着 WAITING/ERROR 状态。
+                try:
+                    if messenger is not None:
+                        messenger.clear_node_pending(node.id)
+                except Exception as e:
+                    logger.debug(
+                        f"[OrgRuntime] clear_node_pending failed for {node.id}: {e}"
+                    )
+                try:
+                    self._set_node_status(org, node, NodeStatus.IDLE, reason)
+                    self._node_current_chain.pop(f"{org.id}:{node.id}", None)
+                except Exception as e:
+                    logger.debug(
+                        f"[OrgRuntime] _set_node_status failed for {node.id}: {e}"
+                    )
+                try:
+                    await self._broadcast_ws("org:node_status", {
+                        "org_id": org.id, "node_id": node.id,
+                        "status": "idle", "current_task": "",
+                    })
+                except Exception:
+                    pass
 
     async def stop_org(self, org_id: str) -> Organization:
         """Stop an organization."""
         org = self._active_orgs.get(org_id) or self._manager.get(org_id)
         if not org:
             raise ValueError(f"Organization not found: {org_id}")
+
+        # 幂等：已经 DORMANT 时不再抛 "无效状态转换: dormant -> dormant"，
+        # 而是再做一次兜底清理（防止之前残留的 busy 节点 / 后台任务 / mailbox），
+        # 并补播一次 status_change，让前端有机会把节点重置干净。
+        if org.status == OrgStatus.DORMANT:
+            self.mark_org_stopped(org_id)
+            try:
+                await self._cancel_busy_nodes(org, reason="org_stopped(idempotent)")
+            except Exception as e:
+                logger.debug(f"[OrgRuntime] idempotent stop cancel_busy_nodes: {e}")
+            try:
+                await self._stop_org_services(org_id)
+            except Exception as e:
+                logger.debug(f"[OrgRuntime] idempotent stop _stop_org_services: {e}")
+            try:
+                await self._cancel_org_tasks(org_id)
+            except Exception as e:
+                logger.debug(f"[OrgRuntime] idempotent stop _cancel_org_tasks: {e}")
+            await self._broadcast_ws("org:status_change", {
+                "org_id": org_id, "status": "dormant"
+            })
+            return org
 
         self._check_transition(org, OrgStatus.DORMANT)
 
@@ -637,6 +691,9 @@ class OrgRuntime:
         org = self._active_orgs.get(org_id) or self._manager.get(org_id)
         if not org:
             raise ValueError(f"Organization not found: {org_id}")
+        # 幂等：已经 PAUSED 直接返回
+        if org.status == OrgStatus.PAUSED:
+            return org
         self._check_transition(org, OrgStatus.PAUSED)
         org.status = OrgStatus.PAUSED
         org.updated_at = _now_iso()
@@ -651,6 +708,9 @@ class OrgRuntime:
         org = self._active_orgs.get(org_id) or self._manager.get(org_id)
         if not org:
             raise ValueError(f"Organization not found: {org_id}")
+        # 幂等：已经 ACTIVE/RUNNING 直接返回
+        if org.status in (OrgStatus.ACTIVE, OrgStatus.RUNNING):
+            return org
         self._check_transition(org, OrgStatus.ACTIVE)
         org.status = OrgStatus.ACTIVE
         org.updated_at = _now_iso()
