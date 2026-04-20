@@ -793,6 +793,63 @@ async def get_command_status(request: Request, org_id: str, command_id: str):
     }
 
 
+@router.post("/{org_id}/commands/{command_id}/cancel")
+async def cancel_command(request: Request, org_id: str, command_id: str):
+    """用户主动强制终止当前在跑的组织命令。
+
+    流程：
+      1. 校验 ``command_id`` 属于本 org，已完成/出错则幂等返回 ``already_done``。
+      2. 在 engine loop 上 await ``runtime.cancel_user_command(org_id, command_id)``：
+         置 tracker.user_cancelled+auto_stopped+completed.set() 并 soft_stop_org。
+      3. 后台 ``_run`` 会因 tracker.completed 触发，正常走完落库 + 广播
+         ``org:command_done``（result 含 ``cancelled_by_user=True``），前端
+         自动收尾，无需此处再清理 ``_command_store``。
+
+    组织保持 RUNNING，用户可立即再发送新指令。
+    """
+    cmd = _command_store.get(command_id)
+    if not cmd or cmd["org_id"] != org_id:
+        raise HTTPException(404, "Command not found")
+
+    if cmd["status"] != "running":
+        return {"ok": True, "command_id": command_id, "already_done": True}
+
+    rt = _get_runtime(request)
+    try:
+        result = await to_engine(
+            rt.cancel_user_command(org_id, command_id)
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.warning("[OrgCmd] cancel_command failed: %s", e, exc_info=True)
+        raise HTTPException(500, f"cancel failed: {e}")
+
+    # 标记请求来源，方便审计 / 后续可能的 UI 展示。状态字段沿用 _run 自身回写。
+    cmd["cancel_requested_by_user"] = True
+    cmd["cancel_requested_at"] = time.time()
+
+    try:
+        from openakita.api.routes.websocket import broadcast_event
+        await broadcast_event(
+            "org:command_cancelled",
+            {
+                "org_id": org_id,
+                "command_id": command_id,
+                "by": "user",
+                "cancelled_roots": result.get("cancelled_roots", []),
+            },
+        )
+    except Exception:
+        logger.debug("[OrgCmd] broadcast org:command_cancelled failed", exc_info=True)
+
+    return {
+        "ok": True,
+        "command_id": command_id,
+        "cancelled_roots": result.get("cancelled_roots", []),
+    }
+
+
 @router.post("/{org_id}/broadcast")
 async def broadcast_to_org(request: Request, org_id: str):
     rt = _get_runtime(request)

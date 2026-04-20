@@ -117,6 +117,11 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // 当前在跑命令的 command_id；用于"强制终止"按键判断启用状态。
+  // - 在 send_command 拿到 commandId 后置位
+  // - finalizeResult / send 异常 / 不可恢复重连完成时清空
+  // 与 _pendingCmds 解耦的目的：组件内的 React state 才能驱动按键 enable/disable。
+  const [pendingCmdId, setPendingCmdId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mountedRef = useRef(true);
@@ -210,6 +215,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       return [...prev, { id: phId, role: "assistant" as const, content: progress, timestamp: Date.now(), streaming: true }];
     });
     setSending(true);
+    setPendingCmdId(pending.commandId);
 
     const resumePoll = async () => {
       while (!cancelled && _pendingCmds.has(convId)) {
@@ -234,6 +240,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
             if (mountedRef.current) {
               setMessages(prev => prev.map(m => m.id === phId ? { ...m, content, streaming: false, attachments: pending.allFiles.length > 0 ? pending.allFiles : undefined } : m));
               setSending(false);
+              setPendingCmdId(null);
             }
             return;
           }
@@ -243,6 +250,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         const saved = loadFromLocalStorage(convId);
         if (saved.length > 0) setMessages(saved);
         setSending(false);
+        setPendingCmdId(null);
       }
     };
     resumePoll();
@@ -291,6 +299,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   const handleClear = useCallback(async () => {
     setMessages([]);
     _pendingCmds.delete(convId);
+    setPendingCmdId(null);
     try { localStorage.removeItem(LS_PREFIX + convId); } catch {}
     try {
       await safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}`, {
@@ -298,6 +307,26 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       });
     } catch {}
   }, [apiBaseUrl, convId]);
+
+  // 强制终止当前在跑命令：仅 POST 到后端 cancel 端点。
+  // 后端会让 send_command 走"stopped_by_watchdog + cancelled_by_user"分支
+  // 正常返回，从而触发 handleSend 中的 finalizeResult 收尾；此处不动本地
+  // _pendingCmds / 消息流，避免与 send_command 路径竞争产生重复消息。
+  const handleStop = useCallback(async () => {
+    if (!pendingCmdId) return;
+    const ok = window.confirm(
+      "确定要强制终止当前任务？已产出的中间结果会保留，但本次指令将立刻结束。",
+    );
+    if (!ok) return;
+    try {
+      await safeFetch(
+        `${apiBaseUrl}/api/orgs/${encodeURIComponent(orgId)}/commands/${encodeURIComponent(pendingCmdId)}/cancel`,
+        { method: "POST" },
+      );
+    } catch (e) {
+      console.warn("[OrgChat] cancel command failed", e);
+    }
+  }, [apiBaseUrl, orgId, pendingCmdId]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -631,6 +660,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         finalizeResult(finalContent);
       } else {
         _pendingCmds.set(convId, { commandId, orgId, placeholderId, lastRendered: "", segmentCount: 0, allFiles: [], finalContent: null });
+        setPendingCmdId(commandId);
 
         let resolved = false;
         const unsubDone = onWsEvent((evt, raw) => {
@@ -684,6 +714,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
     } finally {
       unsubProgress();
       setSending(false);
+      setPendingCmdId(null);
       if (mountedRef.current) {
         const all = messagesRef.current.filter(m => !m.streaming);
         if (all.length > 0) {
@@ -804,6 +835,19 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           rows={1}
           className="ocp-textarea"
         />
+        <button
+          data-slot="ocp"
+          type="button"
+          onClick={handleStop}
+          disabled={!pendingCmdId}
+          className="ocp-stop"
+          title={pendingCmdId ? "强制终止当前任务" : "当前没有正在执行的任务"}
+          aria-label="强制终止当前任务"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+        </button>
         <button
           data-slot="ocp"
           onClick={handleSend}
@@ -975,6 +1019,24 @@ const CHAT_CSS = `
 }
 .ocp-send:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 .ocp-send-busy { background: linear-gradient(135deg, #f59e0b, #f97316) !important; }
+
+/* 强制终止当前任务按键：常驻输入区，未运行时灰显 */
+.ocp-stop {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  border: 1px solid var(--line, rgba(100,116,139,0.3));
+  background: transparent;
+  color: var(--muted, #64748b);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.ocp-stop svg { fill: currentColor; }
+.ocp-stop:not(:disabled):hover {
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.55);
+  color: #ef4444;
+}
+.ocp-stop:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .ocp-send-spinner {
   width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
