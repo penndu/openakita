@@ -13,6 +13,7 @@
   <script src="/api/plugins/_sdk/ui-kit/task-panel.js"></script>
   <script src="/api/plugins/_sdk/ui-kit/onboard-wizard.js"></script>
   <script src="/api/plugins/_sdk/ui-kit/first-success-celebrate.js"></script>
+  <script src="/api/plugins/_sdk/ui-kit/dep-gate.js"></script>
   <style>
     body { padding: 16px; }
     h1 { margin:0 0 6px; font-size: 22px; display: inline-flex; align-items: center; gap: 10px; }
@@ -30,6 +31,9 @@
     <span data-i18n="header.title"></span>
   </h1>
   <div class="header-tip" data-i18n="header.tip"></div>
+
+  <!-- Dependency gate: ffmpeg is required for concatenating audio segments -->
+  <div data-oa-dep="ffmpeg"></div>
 
   <div class="oa-card">
     <h3>

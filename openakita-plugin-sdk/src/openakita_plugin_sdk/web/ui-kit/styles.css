@@ -516,3 +516,86 @@ details.oa-collapse[open] > summary.oa-collapse__summary .oa-collapse__chevron {
   border-bottom: 1px solid var(--oa-border);
 }
 .oa-settings-section__title > .oa-icon { color: var(--oa-text-muted); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 7) Dependency Gate banner — system component install / status surface.
+ *    Auto-rendered by dep-gate.js; plugins only declare:
+ *      <div data-oa-dep="ffmpeg,whisper.cpp"></div>
+ * ────────────────────────────────────────────────────────────────────────── */
+.oa-dep-banner-host { display: block; margin-bottom: 12px; }
+.oa-dep-banner-host > .oa-dep-banner + .oa-dep-banner { margin-top: 8px; }
+
+.oa-dep-banner {
+  border: 1px solid var(--oa-warning);
+  border-left-width: 4px;
+  background: rgba(245, 158, 11, 0.06);
+  border-radius: var(--oa-radius);
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--oa-text);
+}
+[data-theme="dark"] .oa-dep-banner { background: rgba(245, 158, 11, 0.10); }
+
+.oa-dep-banner--ready {
+  border-color: var(--oa-success);
+  background: rgba(22, 163, 74, 0.06);
+}
+[data-theme="dark"] .oa-dep-banner--ready { background: rgba(22, 163, 74, 0.10); }
+
+.oa-dep-banner--loading,
+.oa-dep-banner--error {
+  border-color: var(--oa-border);
+  background: var(--oa-surface);
+  color: var(--oa-text-muted);
+}
+.oa-dep-banner--error { border-color: var(--oa-danger); color: var(--oa-danger); }
+
+.oa-dep-banner__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap;
+}
+.oa-dep-banner__head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.oa-dep-banner__title { font-weight: 600; }
+.oa-dep-banner__ver { font-size: 11px; color: var(--oa-text-muted); }
+.oa-dep-banner__desc {
+  font-size: 12px; color: var(--oa-text-muted); margin-top: 6px;
+  line-height: 1.5;
+}
+
+.oa-dep-banner__actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.oa-dep-banner__strategy {
+  font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.oa-dep-banner__sudo {
+  font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+  color: #fff;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.oa-dep-banner__manual { background: var(--oa-surface); }
+.oa-dep-banner__no-method {
+  font-size: 12px; color: var(--oa-text-muted); font-style: italic;
+}
+
+.oa-dep-banner__log {
+  margin-top: 10px;
+  max-height: 220px; overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px; line-height: 1.45;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--oa-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+[data-theme="dark"] .oa-dep-banner__log { background: rgba(255, 255, 255, 0.03); }
+.oa-dep-banner__log-line { white-space: pre-wrap; word-break: break-word; }
+.oa-dep-banner__log-line--err { color: var(--oa-danger); }
+.oa-dep-banner__log-line--ok  { color: var(--oa-success); font-weight: 600; }

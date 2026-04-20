@@ -18,6 +18,7 @@ from .compat import check_compatibility
 from .hooks import HookRegistry
 from .manifest import ManifestError, PluginManifest, parse_manifest
 from .sandbox import PluginErrorTracker
+from .sdk_loader import ensure_plugin_sdk_on_path
 from .state import PluginState
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,12 @@ class PluginManager:
         state_path: Path | None = None,
         host_refs: dict[str, Any] | None = None,
     ) -> None:
+        # Make ``openakita_plugin_sdk`` importable for plugin code before
+        # any plugin entry module is exec'd. In a pip-installed deployment
+        # this is a no-op (SDK already on sys.path); in monorepo / bundled
+        # builds it injects the local source tree.
+        ensure_plugin_sdk_on_path()
+
         self._plugins_dir = plugins_dir
         self._state_path = state_path or (plugins_dir.parent / "plugin_state.json")
         self._host_refs = self._filter_host_refs(host_refs or {})
@@ -239,7 +246,26 @@ class PluginManager:
                 self._state.record_error(manifest.id, msg)
             except Exception as e:
                 msg = f"{type(e).__name__}: {e}"
-                logger.error("Plugin '%s' failed to load: %s", manifest.id, msg, exc_info=True)
+                if (
+                    isinstance(e, ModuleNotFoundError)
+                    and getattr(e, "name", "") == "openakita_plugin_sdk"
+                ):
+                    msg = (
+                        "openakita_plugin_sdk is not installed. "
+                        "Run `pip install \"openakita[plugins]\"` (production) or "
+                        "`pip install -e ./openakita-plugin-sdk` (monorepo dev), "
+                        "then reload this plugin."
+                    )
+                    logger.error(
+                        "Plugin '%s' failed to load: %s", manifest.id, msg
+                    )
+                else:
+                    logger.error(
+                        "Plugin '%s' failed to load: %s",
+                        manifest.id,
+                        msg,
+                        exc_info=True,
+                    )
                 self._failed[manifest.id] = msg
                 self._state.record_error(manifest.id, msg)
 

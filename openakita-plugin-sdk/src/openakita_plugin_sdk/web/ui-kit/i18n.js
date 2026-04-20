@@ -104,6 +104,40 @@
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Built-in `bridge.*` dictionary.
+  //
+  // The plugin bridge layer (download / clipboard / pick-folder / …) emits
+  // a small set of standard toasts that every plugin would otherwise have
+  // to translate in its own dictionary. Registering them here keeps each
+  // plugin's i18n surface focused on domain-specific strings.
+  //
+  // Plugins can still override any key by registering it again later —
+  // `register()` is a merge, not a replace.
+  // ---------------------------------------------------------------------------
+  register({
+    zh: {
+      "bridge.download.ok":        "已保存到: {path}",
+      "bridge.download.okFolder":  "已保存到 Downloads 文件夹",
+      "bridge.download.fail":      "下载失败: {msg}",
+      "bridge.download.started":   "下载已开始",
+      "bridge.clipboard.ok":       "已复制到剪贴板",
+      "bridge.clipboard.fail":     "复制失败",
+      "bridge.pickFolder.title":   "选择文件夹",
+      "bridge.unknownError":       "未知错误",
+    },
+    en: {
+      "bridge.download.ok":        "Saved to: {path}",
+      "bridge.download.okFolder":  "Saved to Downloads folder",
+      "bridge.download.fail":      "Download failed: {msg}",
+      "bridge.download.started":   "Download started",
+      "bridge.clipboard.ok":       "Copied to clipboard",
+      "bridge.clipboard.fail":     "Copy failed",
+      "bridge.pickFolder.title":   "Pick a folder",
+      "bridge.unknownError":       "Unknown error",
+    },
+  });
+
   function lookup(key) {
     const loc = currentLocale;
     const base = baseOf(loc);

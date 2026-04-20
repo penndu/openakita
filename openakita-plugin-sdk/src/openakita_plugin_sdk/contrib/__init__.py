@@ -23,6 +23,17 @@ from __future__ import annotations
 
 from .cost_estimator import CostBreakdown, CostEstimator, CostPreview
 from .delivery_promise import DeliveryPromise, validate_cuts
+from .dep_catalog import CATALOG as DEP_CATALOG
+from .dep_catalog import CATALOG_BY_ID as DEP_CATALOG_BY_ID
+from .dep_catalog import FFMPEG, WHISPER_CPP, YT_DLP
+from .dep_gate import (
+    DependencyGate,
+    DepStatus,
+    InstallEvent,
+    InstallMethod,
+    SystemDependency,
+    current_platform,
+)
 from .env_any_loader import EnvAnyEntry, load_env_any
 from .errors import ErrorCoach, ErrorPattern, RenderedError
 from .intent_verifier import IntentSummary, IntentVerifier
@@ -42,12 +53,19 @@ __all__ = [
     "CostBreakdown",
     "CostEstimator",
     "CostPreview",
+    "DEP_CATALOG",
+    "DEP_CATALOG_BY_ID",
     "DeliveryPromise",
+    "DepStatus",
+    "DependencyGate",
     "EnvAnyEntry",
     "ErrorCoach",
     "ErrorPattern",
+    "FFMPEG",
     "GateResult",
     "GateStatus",
+    "InstallEvent",
+    "InstallMethod",
     "IntentSummary",
     "IntentVerifier",
     "PromptOptimizer",
@@ -57,12 +75,16 @@ __all__ = [
     "RenderPipeline",
     "SlideshowRisk",
     "StorageStats",
+    "SystemDependency",
     "TaskRecord",
     "TaskStatus",
     "UIEventEmitter",
     "VendorError",
+    "WHISPER_CPP",
+    "YT_DLP",
     "build_render_pipeline",
     "collect_storage_stats",
+    "current_platform",
     "evaluate_slideshow_risk",
     "load_env_any",
     "score_providers",

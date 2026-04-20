@@ -112,6 +112,15 @@ wechat = [
     "pycryptodome>=3.19.0",
 ]
 
+# AI 媒体类插件脚手架（contrib 模块所需的 SDK 版本）
+# 装上后 plugins/ 下的 seedance-video / tongyi-image / avatar-speaker 等
+# 直接 `from openakita_plugin_sdk.contrib import ...` 不会再 ModuleNotFoundError。
+# Monorepo 开发时 src/openakita/plugins/sdk_loader.py 会兜底注入本地源码,
+# 这里是给 pip-install 场景显式声明的最低版本。
+plugins = [
+    "openakita-plugin-sdk>=0.3.0",
+]
+
 # Windows 桌面自动化
 windows = [
     "mss>=9.0.0",
@@ -121,7 +130,7 @@ windows = [
     "psutil>=5.9.0",
 ]
 
-# 全部可选依赖（core + 所有 IM 通道 + 桌面自动化）
+# 全部可选依赖（core + 所有 IM 通道 + 桌面自动化 + 插件 SDK）
 all = [
     # -- IM 通道 --
     "lark-oapi>=1.4.0",
@@ -137,6 +146,8 @@ all = [
     "pywinauto>=0.6.8; platform_system == 'Windows'",
     "pyperclip>=1.8.2",
     "psutil>=5.9.0",
+    # -- AI 媒体插件脚手架 --
+    "openakita-plugin-sdk>=0.3.0",
 ]
 
 # 开发依赖
