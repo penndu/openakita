@@ -172,6 +172,10 @@ plugins/*
 !plugins/video-bg-remove/ui/
 !plugins/video-bg-remove/ui/dist/
 !plugins/video-bg-remove/ui/dist/**
+!plugins/ppt-to-video/
+!plugins/ppt-to-video/ui/
+!plugins/ppt-to-video/ui/dist/
+!plugins/ppt-to-video/ui/dist/**
 !plugins/tts-studio/
 !plugins/tts-studio/ui/
 !plugins/tts-studio/ui/dist/
