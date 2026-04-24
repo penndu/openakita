@@ -67,19 +67,78 @@
     }
     .tab:hover { color: var(--text); }
     .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 500; }
-    .content { flex: 1; overflow: auto; padding: 18px 20px; background: var(--bg); }
+    .content { flex: 1; overflow: auto; padding: 18px 20px; background: var(--bg); display: flex; flex-direction: column; }
     .empty { color: var(--text-muted); font-size: 13px; padding: 32px 12px; text-align: center; }
     /* ── Split layout (left filter + right list) ── */
     .split-layout { display: flex; gap: 16px; height: 100%; }
-    /* ── Hero title (oa-hero-title) ── */
-    .oa-hero-title { display: inline-flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+    /* ── Stack layout (top filter bar + bottom content) ── */
+    .stack-layout { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+    .stack-layout > .card.grow { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .stack-layout > .card.grow > .card-body { flex: 1; overflow: auto; }
+    /* ── Hero title (oa-hero-title) — big gradient brand mark ── */
+    .oa-hero-title { display: inline-flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; }
     .oa-hero-title__icon {
-      width: 28px; height: 28px; border-radius: 6px;
-      background: linear-gradient(135deg, #0e7490 0%, #0f172a 100%);
+      width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+      background: linear-gradient(135deg, #0E7490 0%, #0C4A6E 55%, #0F172A 100%);
       color: #fff; display: inline-flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 12px rgba(14,116,144,.25), inset 0 0 0 1px rgba(255,255,255,.08);
+      position: relative; overflow: hidden;
     }
-    .oa-hero-title__text { display: inline-flex; flex-direction: column; line-height: 1.1; }
-    .oa-hero-title__sub { font-size: 11px; font-weight: 400; color: var(--text-muted); margin-top: 2px; }
+    .oa-hero-title__icon svg { width: 100%; height: 100%; display: block; }
+    .oa-hero-title__text { display: inline-flex; flex-direction: column; line-height: 1.15; }
+    .oa-hero-title__sub { font-size: 11px; font-weight: 400; color: var(--text-muted); margin-top: 3px; letter-spacing: .2px; }
+    /* ── Section title with leading accent bar ── */
+    .oa-section-title {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 16px; font-weight: 600; color: var(--text);
+      margin-bottom: 12px; line-height: 1.2;
+    }
+    .oa-section-title::before {
+      content: ""; width: 4px; height: 18px; border-radius: 2px;
+      background: linear-gradient(180deg, var(--primary) 0%, #22D3EE 100%);
+      display: inline-block;
+    }
+    .oa-section-title__count {
+      font-size: 12px; font-weight: 500; color: var(--text-muted);
+      padding: 2px 8px; border-radius: 999px; background: var(--bg-hover);
+    }
+    .oa-section-title__actions { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
+    /* ── Hint text (beginner-friendly description under a title) ── */
+    .oa-hint {
+      font-size: 12px; color: var(--text-muted); line-height: 1.6;
+      background: var(--bg-hover); padding: 8px 12px; border-radius: 6px;
+      border-left: 3px solid var(--primary);
+      margin-bottom: 10px;
+    }
+    .oa-hint code {
+      background: var(--bg-card); padding: 1px 6px; border-radius: 4px;
+      font-size: 11px; color: var(--primary); border: 1px solid var(--border);
+    }
+    /* ── Segmented button group (active-state aware) ── */
+    .seg-group { display: inline-flex; gap: 4px; padding: 3px;
+                 background: var(--bg-hover); border-radius: 8px; }
+    .seg-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; font-size: 12px; font-weight: 500;
+      color: var(--text-muted); background: transparent;
+      border: 1px solid transparent; border-radius: 6px; cursor: pointer;
+      transition: background .12s, color .12s, box-shadow .12s;
+    }
+    .seg-btn:hover { color: var(--text); }
+    .seg-btn.active {
+      color: var(--primary); background: var(--bg-card);
+      border-color: var(--border);
+      box-shadow: 0 1px 3px rgba(14,116,144,.15);
+    }
+    /* ── Filter bar (horizontal sticky strip for Today tab) ── */
+    .filter-bar {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px;
+      padding: 12px 14px; background: var(--bg-card);
+      border: 1px solid var(--border); border-radius: var(--radius);
+    }
+    .filter-bar__item { display: inline-flex; align-items: center; gap: 6px; }
+    .filter-bar__label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+    .filter-bar__sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
     /* ── Config banner (oa-config-banner) ── */
     .oa-config-banner {
       display: flex; align-items: center; gap: 10px;
@@ -222,9 +281,11 @@ const I18N_DICT = {
     "today.filters.window.24h": "近 24 小时",
     "today.filters.window.72h": "近 3 天",
     "today.filters.minScore": "最低 AI 评分",
+    "today.filters.sortLabel": "排序",
     "today.filters.sort.time": "按时间",
     "today.filters.sort.score": "按 AI 评分",
     "today.filters.reset": "重置",
+    "today.list.title": "今日新闻",
     "today.list.empty": "没有命中当前筛选条件的新闻",
     "today.list.loading": "加载中…",
     "today.list.refresh": "刷新",
@@ -233,10 +294,13 @@ const I18N_DICT = {
     "today.list.copied": "已复制到剪贴板",
     "today.list.score": "AI {score}",
     "digests.title": "早午晚报",
+    "digests.hint": "点击右上方「早报 / 午报 / 晚报」即可生成对应时段的财经速报；已生成的会出现在下方卡片，可预览或一键再推送到 IM 通道。",
     "digests.run": "立即生成",
+    "digests.runGroup": "生成早午晚报",
     "digests.session.morning": "早报",
     "digests.session.noon": "午报",
     "digests.session.evening": "晚报",
+    "digests.items": "条",
     "digests.empty": "尚未生成任何早午晚报",
     "digests.preview": "预览",
     "digests.resend": "再推一次",
@@ -245,13 +309,43 @@ const I18N_DICT = {
     "digests.resend.success": "已发送",
     "digests.resend.fail": "发送失败：{err}",
     "radar.editor.title": "关键词规则",
+    "radar.editor.hintHtml": "每行一个关键词 · <code>+必须</code> <code>!排除</code> <code>@alias</code> 别名 · 空行分组 · <code>[GLOBAL_FILTER]</code> 段表示对所有组生效的负面词。不熟悉语法？点「示例填写」快速开始，或点「AI 优化」让大脑替你写规则。",
     "radar.editor.hint": "每行一个关键词；`+` 必须、`!` 排除、`@alias` 别名、空行分组、`[GLOBAL_FILTER]` 全局排除",
+    "radar.window": "时间窗口",
     "radar.evaluate": "试运行",
     "radar.evaluate.loading": "正在评估…",
+    "radar.template": "示例填写",
+    "radar.template.tooltip": "点击后会把一段可读的示例规则追加到文本框",
+    "radar.template.filled": "已填入示例规则，可按需编辑",
+    "radar.ai": "AI 优化",
+    "radar.ai.tooltip": "用自然语言描述你的关注点，由大脑生成规则",
+    "radar.ai.title": "让 AI 帮你写规则",
+    "radar.ai.hint": "直接写你想追踪的内容即可，例如：「美联储政策动向 + 特朗普关税表态，但不要小道消息和论坛贴文」。AI 会输出可直接试运行的规则文本，你还可以继续手工微调。",
+    "radar.ai.placeholder": "我想追踪美联储的政策动向，以及特朗普对中国关税的任何最新表态；不要小道消息和论坛贴文…",
+    "radar.ai.go": "生成规则",
+    "radar.ai.loading": "AI 思考中…",
+    "radar.ai.ok": "已由 {source} 生成规则，已填入编辑器",
+    "radar.ai.fail": "AI 生成失败：{err}",
+    "radar.ai.source.brain": "大脑",
+    "radar.ai.source.fallback": "本地兜底",
     "radar.hits.title": "命中预览",
     "radar.hits.empty": "未命中任何新闻",
     "radar.hits.count": "共 {count} 条命中（{since_hours} 小时内）",
+    "radar.hits.subtitle": "{since_hours} 小时内",
     "radar.save": "保存规则",
+    "radar.save.short": "保存",
+    "radar.save.title": "命名并保存规则",
+    "radar.save.desc": "给这组规则取个名字，下次可以直接从「历史」一键调用。同时会把规则写入「当前启用的规则」。",
+    "radar.save.placeholder": "例如：美联储政策 + 关税风向",
+    "radar.save.confirm": "保存",
+    "radar.save.empty": "规则为空，请先填写再保存",
+    "radar.save.ok": "已保存为「{name}」",
+    "radar.save.fail": "保存失败：{err}",
+    "radar.history": "历史",
+    "radar.history.tooltip": "点击查看已保存的规则，选中即可一键填入编辑器",
+    "radar.history.empty": "暂无已保存的规则",
+    "radar.history.loaded": "已载入「{name}」",
+    "radar.history.delete": "删除",
     "radar.saved": "规则已保存到配置",
     "ask.title": "Agent 工具",
     "ask.intro": "这些工具会被 OpenAkita 的大脑在对话中自动调用。你也可以在左侧复制自然语言 Prompt，粘贴到主对话窗口直接使用。",
@@ -311,9 +405,11 @@ const I18N_DICT = {
     "today.filters.window.24h": "Last 24h",
     "today.filters.window.72h": "Last 3d",
     "today.filters.minScore": "Min AI score",
+    "today.filters.sortLabel": "Sort",
     "today.filters.sort.time": "By time",
     "today.filters.sort.score": "By score",
     "today.filters.reset": "Reset",
+    "today.list.title": "Today's news",
     "today.list.empty": "No articles match the current filters",
     "today.list.loading": "Loading…",
     "today.list.refresh": "Refresh",
@@ -322,10 +418,13 @@ const I18N_DICT = {
     "today.list.copied": "Copied to clipboard",
     "today.list.score": "AI {score}",
     "digests.title": "Daily Briefs",
+    "digests.hint": "Click Morning / Noon / Evening above to generate a brief for that slot. Generated briefs show up below — preview them or resend to any IM channel with one click.",
     "digests.run": "Generate now",
+    "digests.runGroup": "Run daily brief",
     "digests.session.morning": "Morning",
     "digests.session.noon": "Noon",
     "digests.session.evening": "Evening",
+    "digests.items": "items",
     "digests.empty": "No brief generated yet",
     "digests.preview": "Preview",
     "digests.resend": "Resend",
@@ -334,13 +433,43 @@ const I18N_DICT = {
     "digests.resend.success": "Sent",
     "digests.resend.fail": "Dispatch failed: {err}",
     "radar.editor.title": "Keyword rules",
+    "radar.editor.hintHtml": "One keyword per line · <code>+must</code> <code>!exclude</code> <code>@alias</code> · blank line = group · <code>[GLOBAL_FILTER]</code> applies negative filters to every group. New to this? Click &quot;Template&quot; for a starter, or &quot;AI optimise&quot; to let the brain draft rules for you.",
     "radar.editor.hint": "One keyword per line; `+` must, `!` exclude, `@alias` alias, blank line = group, `[GLOBAL_FILTER]` = global exclude.",
+    "radar.window": "Window",
     "radar.evaluate": "Dry run",
     "radar.evaluate.loading": "Evaluating…",
+    "radar.template": "Template",
+    "radar.template.tooltip": "Appends a readable sample ruleset to the editor",
+    "radar.template.filled": "Template inserted — edit freely",
+    "radar.ai": "AI optimise",
+    "radar.ai.tooltip": "Describe what you want to track in plain English; the brain will produce rules",
+    "radar.ai.title": "Let AI draft the rules",
+    "radar.ai.hint": "Describe what you want to track — e.g. \"Fed policy moves, Trump tariff remarks, but exclude rumours and forum posts\". The brain returns rules you can dry-run or hand-edit.",
+    "radar.ai.placeholder": "Track Fed policy moves and Trump tariff remarks; exclude rumours and forum posts…",
+    "radar.ai.go": "Generate",
+    "radar.ai.loading": "Thinking…",
+    "radar.ai.ok": "Rules drafted by {source}",
+    "radar.ai.fail": "AI draft failed: {err}",
+    "radar.ai.source.brain": "Brain",
+    "radar.ai.source.fallback": "local fallback",
     "radar.hits.title": "Preview hits",
     "radar.hits.empty": "No hits",
     "radar.hits.count": "{count} hit(s) within {since_hours}h",
+    "radar.hits.subtitle": "within {since_hours}h",
     "radar.save": "Save rules",
+    "radar.save.short": "Save",
+    "radar.save.title": "Name & save this ruleset",
+    "radar.save.desc": "Give this ruleset a name so you can pull it back from History later. It also becomes the active rule used by scheduled runs.",
+    "radar.save.placeholder": "e.g. Fed-policy-and-tariffs",
+    "radar.save.confirm": "Save",
+    "radar.save.empty": "Rules are empty — please write something first",
+    "radar.save.ok": "Saved as \"{name}\"",
+    "radar.save.fail": "Save failed: {err}",
+    "radar.history": "History",
+    "radar.history.tooltip": "View saved rulesets and load any of them into the editor",
+    "radar.history.empty": "No saved rulesets yet",
+    "radar.history.loaded": "Loaded \"{name}\"",
+    "radar.history.delete": "Delete",
     "radar.saved": "Rules saved to config",
     "ask.title": "Agent tools",
     "ask.intro": "These tools are called automatically by the OpenAkita Brain. You can also copy a natural-language prompt to paste into the main chat window.",
@@ -398,13 +527,61 @@ function useT() {
 const TAB_IDS = ["today", "digests", "radar", "ask", "settings"];
 const TAB_ICONS = { today: "news", digests: "doc", radar: "radar", ask: "chat", settings: "cog" };
 
-/* ── Icon shim (falls back to text when icons.js has no match) ── */
+/* ── Icon shim — binds to window.OpenAkitaIcons (from icons.js).
+   Short aliases keep call-sites terse while the bundle stays ~3KB. */
+const ICON_ALIAS = {
+  /* tabs */
+  news: "book", doc: "book", radar: "target", chat: "mic", cog: "settings",
+  /* actions */
+  play: "arrowRight", save: "download", plus: "arrowRight",
+  warn: "warning", eye: "info", send: "upload", copy: "listTask",
+  trash: "close", edit: "edit", history: "listTask", lib: "folder",
+  ai: "sparkles", template: "book",
+};
 function Ico(props) {
   const name = props.name || "";
-  if (window.OaIcons && typeof window.OaIcons.render === "function") {
-    return <span className="oa-icon" dangerouslySetInnerHTML={{__html: window.OaIcons.render(name) || ""}} />;
+  const lib = window.OpenAkitaIcons;
+  if (lib) {
+    const key = (typeof lib[name] === "function") ? name
+              : (typeof lib[ICON_ALIAS[name]] === "function") ? ICON_ALIAS[name] : "";
+    if (key) {
+      return <span className="oa-icon" dangerouslySetInnerHTML={{__html: lib[key]()}} />;
+    }
   }
   return <span className="oa-icon" aria-hidden="true">·</span>;
+}
+
+/* ── Brand mark — inline SVG matching icon.svg for pixel-perfect hero ── */
+const BRAND_SVG = (
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">' +
+    '<defs>' +
+      '<linearGradient id="hbg" x1="0%" y1="0%" x2="100%" y2="100%">' +
+        '<stop offset="0%" stop-color="#0E7490"/>' +
+        '<stop offset="55%" stop-color="#0C4A6E"/>' +
+        '<stop offset="100%" stop-color="#0F172A"/>' +
+      '</linearGradient>' +
+      '<linearGradient id="hline" x1="0%" y1="0%" x2="100%" y2="0%">' +
+        '<stop offset="0%" stop-color="#5EEAD4"/>' +
+        '<stop offset="55%" stop-color="#22D3EE"/>' +
+        '<stop offset="100%" stop-color="#FBBF24"/>' +
+      '</linearGradient>' +
+    '</defs>' +
+    '<rect x="2" y="2" width="60" height="60" rx="14" ry="14" fill="url(#hbg)"/>' +
+    '<g opacity="0.55">' +
+      '<rect x="14" y="36" width="5" height="12" rx="1" fill="#64748B"/>' +
+      '<rect x="22" y="30" width="5" height="18" rx="1" fill="#64748B"/>' +
+      '<rect x="30" y="26" width="5" height="22" rx="1" fill="#64748B"/>' +
+      '<rect x="38" y="22" width="5" height="26" rx="1" fill="#64748B"/>' +
+      '<rect x="46" y="18" width="5" height="30" rx="1" fill="#64748B"/>' +
+    '</g>' +
+    '<path d="M8 40 L18 40 L22 28 L28 46 L34 22 L40 34 L46 18 L56 18" ' +
+      'fill="none" stroke="url(#hline)" stroke-width="3" ' +
+      'stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<circle cx="56" cy="18" r="2.2" fill="#FBBF24"/>' +
+  '</svg>'
+);
+function BrandMark() {
+  return <span className="oa-hero-title__icon" dangerouslySetInnerHTML={{__html: BRAND_SVG}} />;
 }
 
 /* ── Host event subscription helper ── */
@@ -591,71 +768,76 @@ function TodayTab() {
   }, [ingesting, load]);
 
   return (
-    <div className="split-layout">
-      <div style={{width: 280, flexShrink: 0}}>
-        <div className="card">
-          <div className="card-title">{t("today.filters.title")}</div>
-          <div style={{display: "flex", flexDirection: "column", gap: 10}}>
-            <div>
-              <div className="label">{t("today.filters.source")}</div>
-              <select className="input"
-                      value={filters.source}
-                      onChange={function (e) { setFilters(Object.assign({}, filters, {source: e.target.value})); }}>
-                <option value="">{t("today.filters.source.all")}</option>
-                {KNOWN_SOURCES.map(function (s) { return <option key={s.id} value={s.id}>{s.name}</option>; })}
-              </select>
-            </div>
-            <div>
-              <div className="label">{t("today.filters.window")}</div>
-              <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
-                {[{h:6,k:"6h"},{h:24,k:"24h"},{h:72,k:"72h"}].map(function (w) {
-                  const active = filters.window === w.h;
-                  return <span key={w.h}
-                               className={"api-pill " + (active ? "" : "api-pill--missing")}
-                               onClick={function () { setFilters(Object.assign({}, filters, {window: w.h})); }}>
-                    {t("today.filters.window." + w.k)}
-                  </span>;
-                })}
-              </div>
-            </div>
-            <div>
-              <div className="label">{t("today.filters.minScore")}</div>
-              <input className="input" type="number" min="0" max="10" step="0.5"
-                     value={filters.minScore}
-                     onChange={function (e) { setFilters(Object.assign({}, filters, {minScore: parseFloat(e.target.value) || 0})); }} />
-            </div>
-            <div>
-              <div className="label">Sort</div>
-              <div style={{display: "flex", gap: 6}}>
-                {[{k:"time"},{k:"score"}].map(function (s) {
-                  const active = filters.sort === s.k;
-                  return <span key={s.k}
-                               className={"api-pill " + (active ? "" : "api-pill--missing")}
-                               onClick={function () { setFilters(Object.assign({}, filters, {sort: s.k})); }}>
-                    {t("today.filters.sort." + s.k)}
-                  </span>;
-                })}
-              </div>
-            </div>
-            <button className="btn btn-sm" onClick={function () { setFilters({source: "", window: 24, minScore: 0, sort: "time"}); }}>
-              {t("today.filters.reset")}
-            </button>
-            <button className="btn btn-primary" disabled={ingesting} onClick={onIngest}>
-              <Ico name="play"/> {ingesting ? t("today.list.loading") : t("today.list.ingest")}
-            </button>
+    <div className="stack-layout">
+      {/* Filter bar — horizontal, always visible at the top */}
+      <div className="filter-bar">
+        <div className="filter-bar__item">
+          <span className="filter-bar__label">{t("today.filters.source")}</span>
+          <select className="input" style={{width: 150, padding: "6px 10px"}}
+                  value={filters.source}
+                  onChange={function (e) { setFilters(Object.assign({}, filters, {source: e.target.value})); }}>
+            <option value="">{t("today.filters.source.all")}</option>
+            {KNOWN_SOURCES.map(function (s) { return <option key={s.id} value={s.id}>{s.name}</option>; })}
+          </select>
+        </div>
+        <span className="filter-bar__sep"/>
+        <div className="filter-bar__item">
+          <span className="filter-bar__label">{t("today.filters.window")}</span>
+          <div className="seg-group">
+            {[{h:6,k:"6h"},{h:24,k:"24h"},{h:72,k:"72h"}].map(function (w) {
+              const active = filters.window === w.h;
+              return <button key={w.h} type="button"
+                             className={"seg-btn " + (active ? "active" : "")}
+                             onClick={function () { setFilters(Object.assign({}, filters, {window: w.h})); }}>
+                {t("today.filters.window." + w.k)}
+              </button>;
+            })}
           </div>
         </div>
+        <span className="filter-bar__sep"/>
+        <div className="filter-bar__item">
+          <span className="filter-bar__label">{t("today.filters.minScore")}</span>
+          <input className="input" type="number" min="0" max="10" step="0.5"
+                 style={{width: 76, padding: "6px 8px"}}
+                 value={filters.minScore}
+                 onChange={function (e) { setFilters(Object.assign({}, filters, {minScore: parseFloat(e.target.value) || 0})); }} />
+        </div>
+        <span className="filter-bar__sep"/>
+        <div className="filter-bar__item">
+          <span className="filter-bar__label">{t("today.filters.sortLabel")}</span>
+          <div className="seg-group">
+            {[{k:"time"},{k:"score"}].map(function (s) {
+              const active = filters.sort === s.k;
+              return <button key={s.k} type="button"
+                             className={"seg-btn " + (active ? "active" : "")}
+                             onClick={function () { setFilters(Object.assign({}, filters, {sort: s.k})); }}>
+                {t("today.filters.sort." + s.k)}
+              </button>;
+            })}
+          </div>
+        </div>
+        <span style={{flex: 1}}/>
+        <button className="btn btn-sm" type="button"
+                onClick={function () { setFilters({source: "", window: 24, minScore: 0, sort: "time"}); }}>
+          <Ico name="refresh"/> {t("today.filters.reset")}
+        </button>
+        <button className="btn btn-primary" type="button" disabled={ingesting} onClick={onIngest}>
+          <Ico name="play"/> {ingesting ? t("today.list.loading") : t("today.list.ingest")}
+        </button>
       </div>
-      <div style={{flex: 1, minWidth: 0}}>
-        <div className="card">
-          <div style={{display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8}}>
-            <div className="card-title" style={{margin: 0}}>
-              {t("today.list.refresh")} · {total}
-            </div>
-            <button className="btn btn-sm" onClick={load}>
+
+      {/* News list — fills the remaining height */}
+      <div className="card grow">
+        <div className="oa-section-title">
+          {t("today.list.title")}
+          <span className="oa-section-title__count">{total}</span>
+          <span className="oa-section-title__actions">
+            <button className="btn btn-sm" type="button" onClick={load}>
               <Ico name="refresh"/> {loading ? t("today.list.loading") : t("today.list.refresh")}
             </button>
-          </div>
+          </span>
+        </div>
+        <div className="card-body">
           {loading && items.length === 0 && <div className="empty">{t("today.list.loading")}</div>}
           {!loading && items.length === 0 && <div className="empty">{t("today.list.empty")}</div>}
           {items.map(function (it) {
@@ -707,7 +889,7 @@ function DigestsTab() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
-  const [running, setRunning] = useState(false);
+  const [running, setRunning] = useState("");
   const [channels, setChannels] = useState([]);
 
   const load = useCallback(async function () {
@@ -725,13 +907,13 @@ function DigestsTab() {
 
   const onRun = useCallback(async function (session) {
     if (running) return;
-    setRunning(true);
+    setRunning(session);
     try {
       const resp = await api("POST", "/digest/run", {session: session, since_hours: 12, top_k: 20, lang: "zh"});
       window.oaToast({level: resp && resp.ok ? "success" : "error",
         message: resp && resp.ok ? "generated " + session : ("failed: " + (resp && resp.detail || ""))});
       load();
-    } finally { setRunning(false); }
+    } finally { setRunning(""); }
   }, [running, load]);
 
   const onResend = useCallback(async function (digest) {
@@ -761,50 +943,74 @@ function DigestsTab() {
     }
   }, [channels, t]);
 
+  /* Icon + session map — semantic icons, not generic "play" */
+  const SESSION_META = {
+    morning: {icon: "refresh"},
+    noon: {icon: "target"},
+    evening: {icon: "bell"},
+  };
+
   return (
-    <div>
-      <div className="card">
-        <div style={{display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10}}>
-          <div className="card-title" style={{margin: 0}}>{t("digests.title")}</div>
-          <div style={{display: "flex", gap: 8}}>
-            {["morning", "noon", "evening"].map(function (s) {
-              return <button key={s} className="btn btn-sm" disabled={running}
-                             onClick={function () { onRun(s); }}>
-                <Ico name="play"/> {t("digests.session." + s)}
-              </button>;
+    <div className="stack-layout">
+      <div className="card grow">
+        <div className="oa-section-title">
+          {t("digests.title")}
+          <span className="oa-section-title__count">{items.length}</span>
+          <span className="oa-section-title__actions">
+            <div className="seg-group" role="group" aria-label={t("digests.runGroup")}>
+              {["morning", "noon", "evening"].map(function (s) {
+                const meta = SESSION_META[s] || {icon: "refresh"};
+                const active = running === s;
+                return <button key={s} type="button"
+                               className={"seg-btn " + (active ? "active" : "")}
+                               disabled={!!running}
+                               title={t("digests.run")}
+                               onClick={function () { onRun(s); }}>
+                  <Ico name={meta.icon}/> {t("digests.session." + s)}
+                </button>;
+              })}
+            </div>
+          </span>
+        </div>
+        <div className="oa-hint">{t("digests.hint")}</div>
+
+        <div className="card-body">
+          {loading && items.length === 0 && <div className="empty">{t("today.list.loading")}</div>}
+          {!loading && items.length === 0 && <div className="empty">{t("digests.empty")}</div>}
+          <div style={{display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12}}>
+            {items.map(function (d) {
+              const sMeta = SESSION_META[d.session] || {icon: "refresh"};
+              return (
+                <div key={d.id}
+                     className="card"
+                     style={{margin: 0, cursor: "pointer", transition: "box-shadow .12s, transform .12s"}}
+                     onMouseEnter={function (e) { e.currentTarget.style.boxShadow = "0 4px 12px rgba(14,116,144,.15)"; }}
+                     onMouseLeave={function (e) { e.currentTarget.style.boxShadow = "none"; }}
+                     onClick={function () { setSelected(d); }}>
+                  <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "var(--text-muted)"}}>
+                    <span style={{display: "inline-flex", alignItems: "center", gap: 4, color: "var(--primary)", fontWeight: 500}}>
+                      <Ico name={sMeta.icon}/> {t("digests.session." + d.session) || d.session}
+                    </span>
+                    <span>{fmtDate(d.generated_at)}</span>
+                  </div>
+                  <div style={{fontSize: 14, fontWeight: 600, marginTop: 8, color: "var(--text)"}}>{d.title || d.session}</div>
+                  <div style={{fontSize: 11, color: "var(--text-muted)", marginTop: 4}}>
+                    {(d.stats && (d.stats.total_selected || 0)) || 0} {t("digests.items")}
+                  </div>
+                  <div style={{display: "flex", gap: 6, marginTop: 10}}>
+                    <button className="btn btn-sm"
+                            onClick={function (e) { e.stopPropagation(); setSelected(d); }}>
+                      <Ico name="eye"/> {t("digests.preview")}
+                    </button>
+                    <button className="btn btn-sm btn-primary"
+                            onClick={function (e) { e.stopPropagation(); onResend(d); }}>
+                      <Ico name="send"/> {t("digests.resend")}
+                    </button>
+                  </div>
+                </div>
+              );
             })}
           </div>
-        </div>
-        {loading && items.length === 0 && <div className="empty">{t("today.list.loading")}</div>}
-        {!loading && items.length === 0 && <div className="empty">{t("digests.empty")}</div>}
-        <div style={{display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12}}>
-          {items.map(function (d) {
-            return (
-              <div key={d.id}
-                   className="card"
-                   style={{margin: 0, cursor: "pointer"}}
-                   onClick={function () { setSelected(d); }}>
-                <div style={{display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)"}}>
-                  <span>{t("digests.session." + d.session) || d.session}</span>
-                  <span>{fmtDate(d.generated_at)}</span>
-                </div>
-                <div style={{fontSize: 14, fontWeight: 500, marginTop: 6}}>{d.title || d.session}</div>
-                <div style={{fontSize: 11, color: "var(--text-muted)", marginTop: 4}}>
-                  {(d.stats && (d.stats.total_selected || 0)) || 0} items
-                </div>
-                <div style={{display: "flex", gap: 6, marginTop: 10}}>
-                  <button className="btn btn-sm"
-                          onClick={function (e) { e.stopPropagation(); setSelected(d); }}>
-                    <Ico name="eye"/> {t("digests.preview")}
-                  </button>
-                  <button className="btn btn-sm btn-primary"
-                          onClick={function (e) { e.stopPropagation(); onResend(d); }}>
-                    <Ico name="send"/> {t("digests.resend")}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
         </div>
       </div>
       {selected && (
@@ -826,7 +1032,20 @@ function DigestsTab() {
   );
 }
 
-/* ── Radar Tab — rule editor + live hit preview ────────────────── */
+/* ── Radar Tab — rule editor + AI suggest + history ──────────── */
+const RADAR_TEMPLATE = (
+  "+美联储\n" +
+  "+降息\n" +
+  "!传闻\n" +
+  "\n" +
+  "+特朗普\n" +
+  "+关税\n" +
+  "\n" +
+  "[GLOBAL_FILTER]\n" +
+  "!小道消息\n" +
+  "!论坛\n"
+);
+
 function RadarTab() {
   const t = useT();
   const [rulesText, setRulesText] = useState("");
@@ -834,8 +1053,22 @@ function RadarTab() {
   const [meta, setMeta] = useState({total: 0, since_hours: 24});
   const [loading, setLoading] = useState(false);
   const [sinceHours, setSinceHours] = useState(24);
+  /* AI-suggest modal state */
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiDesc, setAiDesc] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  /* Save-rule naming modal state */
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  /* Rules library (saved presets) */
+  const [library, setLibrary] = useState([]);
+  const [libOpen, setLibOpen] = useState(false);
 
-  /* Preload stored rules if any */
+  /* Preload stored rules + library */
+  const loadLibrary = useCallback(async function () {
+    const resp = await api("GET", "/radar/library");
+    setLibrary((resp && resp.items) || []);
+  }, []);
   useEffect(function () {
     (async function () {
       const resp = await api("GET", "/config");
@@ -843,7 +1076,8 @@ function RadarTab() {
         setRulesText(String((resp.config || {})["radar_rules"] || ""));
       }
     })();
-  }, []);
+    loadLibrary();
+  }, [loadLibrary]);
 
   const onEvaluate = useCallback(async function () {
     setLoading(true);
@@ -863,65 +1097,246 @@ function RadarTab() {
     } finally { setLoading(false); }
   }, [rulesText, sinceHours]);
 
-  const onSave = useCallback(async function () {
-    const resp = await api("PUT", "/config", {updates: {radar_rules: rulesText}});
-    if (resp && resp.ok) window.oaToast({level: "success", message: t("radar.saved")});
-    else window.oaToast({level: "error", message: "save failed"});
+  const onFillTemplate = useCallback(function () {
+    setRulesText(function (prev) {
+      if (prev && prev.trim()) {
+        return prev.replace(/\s*$/, "\n") + "\n" + RADAR_TEMPLATE;
+      }
+      return RADAR_TEMPLATE;
+    });
+    window.oaToast({level: "success", message: t("radar.template.filled")});
+  }, [t]);
+
+  const onOpenAi = useCallback(function () {
+    setAiDesc("");
+    setAiOpen(true);
+  }, []);
+
+  const onAiRun = useCallback(async function () {
+    if (!aiDesc.trim()) return;
+    setAiBusy(true);
+    try {
+      const resp = await api("POST", "/radar/ai-suggest", {
+        description: aiDesc, existing: rulesText, lang: "zh",
+      });
+      if (resp && resp.ok && resp.rules_text) {
+        setRulesText(resp.rules_text);
+        setAiOpen(false);
+        const src = (resp.source === "brain") ? t("radar.ai.source.brain") : t("radar.ai.source.fallback");
+        window.oaToast({level: "success", message: tfmt(t("radar.ai.ok"), {source: src})});
+      } else {
+        window.oaToast({level: "error",
+          message: tfmt(t("radar.ai.fail"), {err: (resp && (resp.message || resp.detail || resp.error)) || "unknown"})});
+      }
+    } finally { setAiBusy(false); }
+  }, [aiDesc, rulesText, t]);
+
+  const onOpenSave = useCallback(function () {
+    if (!rulesText.trim()) {
+      window.oaToast({level: "warning", message: t("radar.save.empty")});
+      return;
+    }
+    setSaveName("");
+    setSaveOpen(true);
   }, [rulesText, t]);
 
+  const onSaveConfirm = useCallback(async function () {
+    const name = saveName.trim();
+    if (!name) return;
+    /* 1) persist as the "current" rule so radar runs pick it up */
+    await api("PUT", "/config", {updates: {radar_rules: rulesText}});
+    /* 2) also push into the library for future recall */
+    const resp = await api("POST", "/radar/library", {name: name, rules_text: rulesText});
+    if (resp && resp.ok) {
+      window.oaToast({level: "success", message: tfmt(t("radar.save.ok"), {name: name})});
+      setSaveOpen(false);
+      loadLibrary();
+    } else {
+      window.oaToast({level: "error",
+        message: tfmt(t("radar.save.fail"), {err: (resp && (resp.detail || resp.error)) || "unknown"})});
+    }
+  }, [saveName, rulesText, t, loadLibrary]);
+
+  const onLoadPreset = useCallback(function (entry) {
+    setRulesText(entry.rules_text || "");
+    setLibOpen(false);
+    window.oaToast({level: "success", message: tfmt(t("radar.history.loaded"), {name: entry.name})});
+  }, [t]);
+
+  const onDeletePreset = useCallback(async function (entry, e) {
+    if (e) e.stopPropagation();
+    const ok = await window.oaConfirm({
+      title: t("radar.history.delete"),
+      message: entry.name,
+      danger: true,
+      okText: t("radar.history.delete"),
+    });
+    if (!ok) return;
+    await api("DELETE", "/radar/library/" + encodeURIComponent(entry.name));
+    loadLibrary();
+  }, [t, loadLibrary]);
+
   return (
-    <div className="split-layout">
-      <div style={{width: 420, flexShrink: 0}}>
-        <div className="card">
-          <div className="card-title">{t("radar.editor.title")}</div>
-          <div style={{fontSize: 11, color: "var(--text-muted)", marginBottom: 8}}>{t("radar.editor.hint")}</div>
-          <textarea
-            className="input"
-            style={{minHeight: 260, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12}}
-            value={rulesText}
-            onChange={function (e) { setRulesText(e.target.value); }}
-            placeholder={"+美联储\n+降息\n!传闻\n\n+特朗普\n+关税"}/>
-          <div style={{display: "flex", gap: 8, marginTop: 10}}>
-            <select className="input" style={{width: 120}}
-                    value={sinceHours}
-                    onChange={function (e) { setSinceHours(parseInt(e.target.value, 10) || 24); }}>
-              <option value={6}>6h</option>
-              <option value={24}>24h</option>
-              <option value={72}>72h</option>
-              <option value={168}>7d</option>
-            </select>
-            <button className="btn btn-primary" disabled={loading} onClick={onEvaluate}>
-              <Ico name="play"/> {loading ? t("radar.evaluate.loading") : t("radar.evaluate")}
+    <div className="stack-layout">
+      {/* Rule editor on top */}
+      <div className="card">
+        <div className="oa-section-title">
+          {t("radar.editor.title")}
+          <span className="oa-section-title__actions">
+            <button className="btn btn-sm" type="button" onClick={onFillTemplate} title={t("radar.template.tooltip")}>
+              <Ico name="book"/> {t("radar.template")}
             </button>
-            <button className="btn btn-sm" onClick={onSave}>
-              <Ico name="save"/> {t("radar.save")}
+            <button className="btn btn-sm" type="button" onClick={onOpenAi} title={t("radar.ai.tooltip")}>
+              <Ico name="sparkles"/> {t("radar.ai")}
             </button>
-          </div>
+            <div style={{position: "relative"}}>
+              <button className="btn btn-sm" type="button"
+                      onClick={function () { setLibOpen(function (v) { return !v; }); }}
+                      title={t("radar.history.tooltip")}>
+                <Ico name="folder"/> {t("radar.history")} · {library.length}
+              </button>
+              {libOpen && (
+                <div style={{position: "absolute", top: "calc(100% + 4px)", right: 0, minWidth: 260, maxHeight: 320, overflow: "auto",
+                             background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 6,
+                             boxShadow: "0 6px 16px rgba(0,0,0,.15)", zIndex: 40, padding: 6}}>
+                  {library.length === 0 ? (
+                    <div className="empty" style={{padding: "12px 8px"}}>{t("radar.history.empty")}</div>
+                  ) : (
+                    library.map(function (p) {
+                      return (
+                        <div key={p.name}
+                             style={{display: "flex", alignItems: "center", gap: 6, padding: "6px 8px",
+                                     borderRadius: 4, cursor: "pointer"}}
+                             onMouseEnter={function (e) { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                             onMouseLeave={function (e) { e.currentTarget.style.background = "transparent"; }}
+                             onClick={function () { onLoadPreset(p); }}>
+                          <span style={{flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                                        fontSize: 13, color: "var(--text)"}}>{p.name}</span>
+                          <span style={{fontSize: 11, color: "var(--text-muted)"}}>
+                            {fmtDate(p.saved_at).slice(5, 16)}
+                          </span>
+                          <button className="btn btn-sm btn-danger"
+                                  style={{padding: "2px 6px", fontSize: 11}}
+                                  onClick={function (e) { onDeletePreset(p, e); }}>
+                            <Ico name="trash"/>
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          </span>
+        </div>
+        <div className="oa-hint" dangerouslySetInnerHTML={{__html: t("radar.editor.hintHtml")}}/>
+        <textarea
+          className="input"
+          style={{minHeight: 220, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, lineHeight: 1.6}}
+          value={rulesText}
+          onChange={function (e) { setRulesText(e.target.value); }}
+          placeholder={RADAR_TEMPLATE}/>
+        <div style={{display: "flex", gap: 8, marginTop: 10, alignItems: "center"}}>
+          <span style={{fontSize: 11, color: "var(--text-muted)"}}>{t("radar.window")}</span>
+          <select className="input" style={{width: 110, padding: "6px 8px"}}
+                  value={sinceHours}
+                  onChange={function (e) { setSinceHours(parseInt(e.target.value, 10) || 24); }}>
+            <option value={6}>6h</option>
+            <option value={24}>24h</option>
+            <option value={72}>72h</option>
+            <option value={168}>7d</option>
+          </select>
+          <button className="btn btn-primary" disabled={loading} onClick={onEvaluate}>
+            <Ico name="target"/> {loading ? t("radar.evaluate.loading") : t("radar.evaluate")}
+          </button>
+          <button className="btn" type="button" onClick={onOpenSave}>
+            <Ico name="download"/> {t("radar.save.short")}
+          </button>
         </div>
       </div>
-      <div style={{flex: 1, minWidth: 0}}>
-        <div className="card">
-          <div className="card-title">
-            {t("radar.hits.title")} — {tfmt(t("radar.hits.count"), {count: meta.total, since_hours: meta.since_hours})}
-          </div>
+
+      {/* Hit preview at the bottom — fills remaining height */}
+      <div className="card grow">
+        <div className="oa-section-title">
+          {t("radar.hits.title")}
+          <span className="oa-section-title__count">{meta.total}</span>
+          <span style={{fontSize: 11, color: "var(--text-muted)", fontWeight: 400}}>
+            {tfmt(t("radar.hits.subtitle"), {since_hours: meta.since_hours})}
+          </span>
+        </div>
+        <div className="card-body">
           {loading && hits.length === 0 && <div className="empty">{t("radar.evaluate.loading")}</div>}
           {!loading && hits.length === 0 && <div className="empty">{t("radar.hits.empty")}</div>}
           {hits.map(function (h) {
             return (
               <div key={h.id || h.url}
-                   style={{padding: "8px 0", borderBottom: "1px solid var(--border)"}}>
+                   style={{padding: "10px 0", borderBottom: "1px solid var(--border)"}}>
                 <a href={h.url} target="_blank" rel="noopener noreferrer"
                    style={{color: "var(--text)", fontSize: 13, fontWeight: 500, textDecoration: "none"}}>
                   {h.title}
                 </a>
-                <div style={{fontSize: 11, color: "var(--text-muted)", marginTop: 4}}>
-                  {h.source_id} · {fmtDate(h.fetched_at)}
+                <div style={{fontSize: 11, color: "var(--text-muted)", marginTop: 4, display: "flex", gap: 8, alignItems: "center"}}>
+                  <span className="api-pill" style={{fontSize: 11, padding: "1px 8px"}}>{h.source_id}</span>
+                  <span>{fmtDate(h.fetched_at)}</span>
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      {/* AI-suggest modal */}
+      {aiOpen && (
+        <div className="confirm-mask" onClick={function () { if (!aiBusy) setAiOpen(false); }}>
+          <div className="confirm-dialog" style={{maxWidth: 520, width: "92vw"}}
+               onClick={function (e) { e.stopPropagation(); }}>
+            <div className="oa-section-title" style={{marginBottom: 8}}>
+              <Ico name="sparkles"/> {t("radar.ai.title")}
+            </div>
+            <div className="oa-hint">{t("radar.ai.hint")}</div>
+            <textarea className="input" rows={4}
+                      placeholder={t("radar.ai.placeholder")}
+                      value={aiDesc}
+                      onChange={function (e) { setAiDesc(e.target.value); }}/>
+            <div className="confirm-actions">
+              <button className="btn btn-sm" type="button" disabled={aiBusy}
+                      onClick={function () { setAiOpen(false); }}>{t("confirm.cancel")}</button>
+              <button className="btn btn-sm btn-primary" type="button"
+                      disabled={aiBusy || !aiDesc.trim()} onClick={onAiRun}>
+                <Ico name="sparkles"/> {aiBusy ? t("radar.ai.loading") : t("radar.ai.go")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save-rule naming modal */}
+      {saveOpen && (
+        <div className="confirm-mask" onClick={function () { setSaveOpen(false); }}>
+          <div className="confirm-dialog" style={{maxWidth: 420, width: "92vw"}}
+               onClick={function (e) { e.stopPropagation(); }}>
+            <div className="oa-section-title" style={{marginBottom: 8}}>
+              <Ico name="download"/> {t("radar.save.title")}
+            </div>
+            <div style={{fontSize: 12, color: "var(--text-muted)", marginBottom: 8}}>
+              {t("radar.save.desc")}
+            </div>
+            <input className="input" type="text" autoFocus
+                   placeholder={t("radar.save.placeholder")}
+                   value={saveName}
+                   onKeyDown={function (e) { if (e.key === "Enter") onSaveConfirm(); }}
+                   onChange={function (e) { setSaveName(e.target.value); }}/>
+            <div className="confirm-actions">
+              <button className="btn btn-sm" type="button"
+                      onClick={function () { setSaveOpen(false); }}>{t("confirm.cancel")}</button>
+              <button className="btn btn-sm btn-primary" type="button"
+                      disabled={!saveName.trim()} onClick={onSaveConfirm}>
+                <Ico name="download"/> {t("radar.save.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1292,7 +1707,7 @@ function App() {
     <div className="app">
       <div className="header">
         <h1 className="oa-hero-title">
-          <span className="oa-hero-title__icon"><Ico name="news" /></span>
+          <BrandMark />
           <span className="oa-hero-title__text">
             {t("app.title")}
             <span className="oa-hero-title__sub">{t("app.subtitle")}</span>

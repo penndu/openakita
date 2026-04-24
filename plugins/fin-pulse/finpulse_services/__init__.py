@@ -11,6 +11,6 @@ plugin surface.
 
 from __future__ import annotations
 
-from finpulse_services import query
+from finpulse_services import query, radar_library
 
-__all__ = ["query"]
+__all__ = ["query", "radar_library"]

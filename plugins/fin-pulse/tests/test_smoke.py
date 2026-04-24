@@ -35,6 +35,22 @@ def test_assets_present() -> None:
     assert not missing, f"missing UI Kit assets: {missing}"
 
 
+def test_sidebar_icon_present() -> None:
+    """plugins/fin-pulse/icon.svg is auto-discovered by the host to render
+    the sidebar app-launcher icon (see api/routes/plugins.py _ICON_NAMES).
+    The file must exist, be non-trivial, and declare an <svg> root.
+    Also served from ui/dist/icon.svg so ``ui.icon`` resolves through the
+    PluginAppHost loading splash.
+    """
+    for candidate in (PLUGIN_DIR / "icon.svg", UI_DIR / "icon.svg"):
+        assert candidate.exists(), f"icon.svg missing: {candidate}"
+        blob = candidate.read_text("utf-8")
+        assert "<svg" in blob and "viewBox" in blob, f"{candidate} is not a valid SVG"
+        assert len(blob) > 256, f"{candidate} seems too small / empty"
+    manifest = json.loads(MANIFEST.read_text("utf-8"))
+    assert manifest["ui"]["icon"] == "icon.svg", "plugin.json ui.icon should be icon.svg"
+
+
 def test_index_html_exists_and_nonempty() -> None:
     assert INDEX_HTML.exists(), "ui/dist/index.html missing"
     html = INDEX_HTML.read_text("utf-8")
@@ -65,7 +81,13 @@ def test_ui_hard_contracts() -> None:
         r'"tabs\.settings"',
         r'oa-config-banner',
         r'oa-hero-title',
-        r'split-layout',
+        r'oa-section-title',
+        r'stack-layout',
+        r'seg-group',
+        r'seg-btn',
+        r'filter-bar',
+        r'oa-hint',
+        r'BrandMark',
         r'api-pill',
         r'ConfirmHost',
         r'setInterval',
@@ -143,6 +165,19 @@ def test_ui_tabs_are_hydrated() -> None:
     # Radar tab exercises the evaluate + config save paths.
     assert 'api("POST", "/radar/evaluate"' in html
     assert 'radar_rules' in html
+    # Phase 6b — AI optimise + template + history + naming-save tokens.
+    assert 'api("POST", "/radar/ai-suggest"' in html
+    assert 'api("GET", "/radar/library"' in html
+    assert 'api("POST", "/radar/library"' in html
+    assert 'api("DELETE", "/radar/library/"' in html
+    for key in (
+        "radar.template",
+        "radar.ai",
+        "radar.history",
+        "radar.save.title",
+        "radar.save.placeholder",
+    ):
+        assert key in html, f"Radar i18n key missing: {key}"
 
     # Ask tab surfaces the 7 agent tools.
     for tool in (

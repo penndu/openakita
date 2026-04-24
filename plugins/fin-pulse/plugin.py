@@ -799,6 +799,88 @@ class Plugin(PluginBase):
                 min_score=min_score_f,
             )
 
+        @router.post("/radar/ai-suggest")
+        async def radar_ai_suggest(
+            payload: dict[str, Any] = Body(default={}),
+        ) -> dict[str, Any]:
+            """Turn a plain-language description into a rules_text.
+
+            The host Brain is best-effort: when ``brain.access`` is not
+            granted or the LLM errors out we fall back to a deterministic
+            keyword splitter so the UI always gets a draft. The
+            ``source`` field tells the caller which path produced it.
+            """
+
+            description = payload.get("description") if isinstance(payload, dict) else None
+            if not isinstance(description, str) or not description.strip():
+                raise HTTPException(status_code=400, detail="description is required")
+            existing = payload.get("existing") if isinstance(payload, dict) else ""
+            lang = str(payload.get("lang") or "zh") or "zh"
+            try:
+                from finpulse_ai.rules_suggest import suggest_rules_text  # type: ignore
+            except ImportError as exc:
+                raise HTTPException(status_code=500, detail=f"ai_module_unavailable: {exc}") from exc
+            brain: Any = None
+            try:
+                brain = self._api.get_brain() if self._api is not None else None
+            except Exception:  # noqa: BLE001 — brain.access may be absent
+                brain = None
+            return await suggest_rules_text(
+                brain,
+                description=description,
+                existing=existing if isinstance(existing, str) else "",
+                lang=lang,
+            )
+
+        @router.get("/radar/library")
+        async def radar_library_list() -> dict[str, Any]:
+            """List saved rule presets (config key ``radar_rules_library``)."""
+
+            if self._tm is None:
+                raise HTTPException(status_code=503, detail="task_manager_unavailable")
+            from finpulse_services.radar_library import list_presets
+
+            items = await list_presets(self._tm)
+            return {"ok": True, "items": items}
+
+        @router.post("/radar/library")
+        async def radar_library_save(
+            payload: dict[str, Any] = Body(default={}),
+        ) -> dict[str, Any]:
+            """Save or upsert a rule preset under a user-chosen name.
+
+            Duplicates on ``name`` overwrite in place.
+            """
+
+            if self._tm is None:
+                raise HTTPException(status_code=503, detail="task_manager_unavailable")
+            from finpulse_services.radar_library import save_preset
+
+            name_raw = payload.get("name") if isinstance(payload, dict) else None
+            rules_raw = payload.get("rules_text") if isinstance(payload, dict) else None
+            if not isinstance(name_raw, str):
+                raise HTTPException(status_code=400, detail="name is required")
+            if not isinstance(rules_raw, str):
+                raise HTTPException(status_code=400, detail="rules_text is required")
+            try:
+                entry = await save_preset(
+                    self._tm, name=name_raw, rules_text=rules_raw
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return {"ok": True, "item": entry}
+
+        @router.delete("/radar/library/{name}")
+        async def radar_library_delete(name: str) -> dict[str, Any]:
+            if self._tm is None:
+                raise HTTPException(status_code=503, detail="task_manager_unavailable")
+            from finpulse_services.radar_library import delete_preset
+
+            removed = await delete_preset(self._tm, name)
+            if not removed:
+                return {"ok": False, "error": "not_found", "name": name}
+            return {"ok": True, "name": name}
+
         @router.post("/hot_radar/run")
         async def hot_radar_run(
             payload: dict[str, Any] = Body(default={}),
