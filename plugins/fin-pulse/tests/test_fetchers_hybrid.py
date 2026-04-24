@@ -22,7 +22,7 @@ if str(PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(PLUGIN_DIR))
 
 from finpulse_fetchers import cls as cls_mod
-from finpulse_fetchers import eastmoney as em_mod
+from finpulse_fetchers import eastmoney as em_mod  # noqa: F401 — kept for platform-id smoke
 from finpulse_fetchers import newsnow_base
 from finpulse_fetchers import wallstreetcn as wscn_mod
 from finpulse_fetchers import xueqiu as xq_mod
@@ -44,10 +44,16 @@ def _make_items(source_id: str, prefix: str, n: int = 2) -> list[NormalizedItem]
     ]
 
 
+# Eastmoney is deliberately NOT in this table. NewsNow answers
+# ``{error:true, message:"Invalid source id"}`` for every eastmoney
+# platform variant, so the fetcher goes direct (HTML scrape of
+# 证券聚焦) by default and opts into the NewsNow-first path only when
+# ``source.eastmoney.prefer_newsnow=true``. Hybrid coverage therefore
+# limits itself to the 3 sources that actually follow the pattern —
+# eastmoney gets its own targeted regression in ``test_fetchers_eastmoney.py``.
 FETCHER_CASES = [
     (wscn_mod.WallStreetCNFetcher, wscn_mod),
     (cls_mod.CLSFetcher, cls_mod),
-    (em_mod.EastmoneyFetcher, em_mod),
     (xq_mod.XueqiuFetcher, xq_mod),
 ]
 

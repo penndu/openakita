@@ -24,7 +24,7 @@ from typing import Any
 
 from finpulse_fetchers._http import fetch_text, make_client
 from finpulse_fetchers.base import BaseFetcher, NormalizedItem
-from finpulse_fetchers.newsnow_base import fetch_from_newsnow
+from finpulse_fetchers.newsnow_base import NewsNowTransportError, fetch_from_newsnow
 from finpulse_fetchers.rss import fetch_one_feed, parse_feed
 
 _RSS_URL = "https://wallstreetcn.com/feed"
@@ -51,8 +51,12 @@ class WallStreetCNFetcher(BaseFetcher):
         super().__init__(config=config, timeout_sec=timeout_sec)
         # The pipeline reads ``_last_via`` after ``fetch()`` resolves so
         # the Today tab can surface which code path served the rows.
-        # Values: ``"newsnow"`` / ``"direct"`` / ``"none"``.
+        # Values: ``"newsnow"`` / ``"direct"`` / ``"none"``. When the
+        # NewsNow probe raises, ``_last_via_reason`` carries the
+        # failure kind (e.g. ``cloudflare_blocked``) so the drawer can
+        # explain *why* we had to fall back.
         self._last_via: str = "none"
+        self._last_via_reason: str | None = None
 
     async def fetch(self, **_: Any) -> list[NormalizedItem]:
         # 1. Try NewsNow aggregator when enabled. Any error / empty
@@ -64,13 +68,23 @@ class WallStreetCNFetcher(BaseFetcher):
                 config=self._config,
                 timeout_sec=self._timeout_sec,
             )
+        except NewsNowTransportError as exc:
+            logger.info(
+                "wallstreetcn via newsnow failed (%s): %s — falling back to direct",
+                exc.kind,
+                exc,
+            )
+            self._last_via_reason = f"newsnow:{exc.kind}"
+            primary = []
         except Exception as exc:  # noqa: BLE001 — fallback is intentional
             logger.info(
                 "wallstreetcn via newsnow failed, will try direct: %s", exc
             )
+            self._last_via_reason = f"newsnow:error:{exc.__class__.__name__}"
             primary = []
         if primary:
             self._last_via = "newsnow"
+            self._last_via_reason = None
             return primary
 
         # 2. Respect a Settings opt-out for the direct path (advanced;

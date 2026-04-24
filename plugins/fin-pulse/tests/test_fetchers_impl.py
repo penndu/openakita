@@ -123,30 +123,43 @@ class TestCLSFetcher:
 
 
 class TestEastMoneyFetcher:
-    def test_parses_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        payload = {
-            "data": {
-                "list": [
-                    {
-                        "Art_Title": "上市公司公告速览",
-                        "Art_URL": "https://www.eastmoney.com/news/1",
-                        "Art_ShowTime": "2026-04-24 09:00:00",
-                        "Art_MediaName": "东方财富",
-                    },
-                    {"Art_Title": "", "Art_URL": ""},  # dropped
-                ]
-            }
-        }
+    def test_parses_html_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Covers the new ``finance.eastmoney.com/a/czqyw.html`` scrape.
+
+        The old private ``np-listapi`` JSON endpoint now rejects every
+        unsigned request (``Required String parameter 'mTypeAndCode' is
+        not present``), and NewsNow has no ``eastmoney`` platform, so
+        the fetcher falls back to scraping the rolling "证券聚焦" page
+        directly. This asserts the anchor-based extractor.
+        """
+        html = (
+            "<html><body><ul class='newsList'>"
+            "<li><p class='title'><a "
+            "href=\"//finance.eastmoney.com/a/202604240001.html\" "
+            "target=\"_blank\" title=\"A股三大指数低开高走\">"
+            "A股三大指数低开高走</a></p>"
+            "<span class='time'>2026-04-24 09:10</span></li>"
+            "<li><p class='title'><a "
+            "href=\"https://finance.eastmoney.com/a/202604240002.html\" "
+            "title=\"上市公司公告速览\">上市公司公告速览</a></p></li>"
+            "<li><p class='title'><a href=\"\" title=\"\">drop me</a></p>"
+            "</li>"
+            "</ul></body></html>"
+        )
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json=payload)
+            return httpx.Response(200, text=html)
 
         _patch_transport(monkeypatch, handler)
         items = _run(EastmoneyFetcher(config={}).fetch())
 
-        assert len(items) == 1
-        assert items[0].title == "上市公司公告速览"
-        assert items[0].extra.get("media") == "东方财富"
+        assert len(items) >= 2
+        titles = [it.title for it in items]
+        assert "A股三大指数低开高走" in titles
+        assert "上市公司公告速览" in titles
+        # Protocol-relative URLs get upgraded to https.
+        url_lookup = {it.title: it.url for it in items}
+        assert url_lookup["A股三大指数低开高走"].startswith("https://")
 
 
 # ── WallStreet CN ────────────────────────────────────────────────────────
@@ -382,6 +395,74 @@ class TestParseFeed:
         items = parse_feed("x", body)
         assert len(items) == 1
         assert items[0].url == "https://e.com/1"
+
+
+class TestParseFeedStdlibFallback:
+    """Stdlib ``xml.etree`` fallback parser that keeps nbs/fed_fomc/
+    sec_edgar/rss_generic working when the optional ``feedparser`` dep
+    is missing. Previously these sources surfaced the
+    ``dependency · feedparser is required`` banner and produced zero
+    rows — the regression reported by the user with five failing cards.
+    """
+
+    def test_rss_2_0_parses_without_feedparser(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Force the fallback path regardless of whether feedparser is
+        # actually installed in the dev env.
+        import finpulse_fetchers.rss as rss_mod
+
+        monkeypatch.setattr(rss_mod, "FEEDPARSER_AVAILABLE", False)
+
+        body = (
+            "<?xml version='1.0' encoding='UTF-8'?>"
+            "<rss version='2.0'><channel>"
+            "<title>x</title><link>https://e.com</link>"
+            "<item>"
+            "<title>Press Release</title>"
+            "<link>https://e.com/a</link>"
+            "<description>some &lt;b&gt;bold&lt;/b&gt; summary</description>"
+            "<pubDate>Mon, 22 Apr 2024 09:00:00 GMT</pubDate>"
+            "</item>"
+            "<item>"
+            "<title></title><link>https://e.com/skip</link>"
+            "</item>"
+            "</channel></rss>"
+        )
+
+        items = rss_mod.parse_feed("x", body)
+        assert len(items) == 1
+        assert items[0].title == "Press Release"
+        assert items[0].url == "https://e.com/a"
+        # HTML tags stripped, but text content retained.
+        assert items[0].summary and "bold" in items[0].summary
+        assert items[0].published_at and "2024" in items[0].published_at
+
+    def test_atom_parses_without_feedparser(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import finpulse_fetchers.rss as rss_mod
+
+        monkeypatch.setattr(rss_mod, "FEEDPARSER_AVAILABLE", False)
+
+        body = (
+            "<?xml version='1.0' encoding='UTF-8'?>"
+            "<feed xmlns='http://www.w3.org/2005/Atom'>"
+            "<title>SEC Filings</title>"
+            "<entry>"
+            "<title>8-K filed</title>"
+            "<link href='https://sec.gov/8k/1' />"
+            "<summary>material event</summary>"
+            "<updated>2024-05-01T12:00:00Z</updated>"
+            "</entry>"
+            "</feed>"
+        )
+
+        items = rss_mod.parse_feed("sec_edgar", body)
+        assert len(items) == 1
+        assert items[0].title == "8-K filed"
+        assert items[0].url == "https://sec.gov/8k/1"
+        assert items[0].published_at == "2024-05-01T12:00:00Z"
 
 
 # ── Smoke: every fetcher is importable & obeys BaseFetcher contract ──────

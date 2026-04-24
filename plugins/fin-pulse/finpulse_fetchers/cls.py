@@ -14,7 +14,7 @@ from typing import Any
 
 from finpulse_fetchers._http import fetch_json, make_client
 from finpulse_fetchers.base import BaseFetcher, NormalizedItem
-from finpulse_fetchers.newsnow_base import fetch_from_newsnow
+from finpulse_fetchers.newsnow_base import NewsNowTransportError, fetch_from_newsnow
 
 
 _CLS_ENDPOINT = (
@@ -34,6 +34,7 @@ class CLSFetcher(BaseFetcher):
     ) -> None:
         super().__init__(config=config, timeout_sec=timeout_sec)
         self._last_via: str = "none"
+        self._last_via_reason: str | None = None
 
     async def fetch(self, **_: Any) -> list[NormalizedItem]:
         try:
@@ -43,11 +44,21 @@ class CLSFetcher(BaseFetcher):
                 config=self._config,
                 timeout_sec=self._timeout_sec,
             )
+        except NewsNowTransportError as exc:
+            logger.info(
+                "cls via newsnow failed (%s): %s — falling back to direct",
+                exc.kind,
+                exc,
+            )
+            self._last_via_reason = f"newsnow:{exc.kind}"
+            primary = []
         except Exception as exc:  # noqa: BLE001
             logger.info("cls via newsnow failed, will try direct: %s", exc)
+            self._last_via_reason = f"newsnow:error:{exc.__class__.__name__}"
             primary = []
         if primary:
             self._last_via = "newsnow"
+            self._last_via_reason = None
             return primary
 
         if (self._config.get("source.cls.fallback_direct") or "true").lower() == "false":

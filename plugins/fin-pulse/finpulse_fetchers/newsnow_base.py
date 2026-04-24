@@ -21,13 +21,40 @@ our own canonical-item payload (``NormalizedItem``) so dedupe via
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
-from finpulse_fetchers._http import fetch_json, make_client
+from finpulse_fetchers._http import make_client
 from finpulse_fetchers.base import NormalizedItem
 
+try:  # pragma: no cover — httpx ships with the host.
+    import httpx  # type: ignore
+except ImportError:  # pragma: no cover
+    httpx = None  # type: ignore
+
 logger = logging.getLogger(__name__)
+
+
+class NewsNowTransportError(RuntimeError):
+    """Raised when the NewsNow upstream call surfaces a retryable problem.
+
+    Common causes observed in the wild:
+
+    - ``cloudflare_blocked`` — upstream returns an HTML challenge page
+      (we switched the shared UA to a real Chrome banner but the flag
+      stays so ops can eyeball Cloudflare re-classification).
+    - ``invalid_source_id`` — NewsNow responds 500 with
+      ``{"error": true, "message": "Invalid source id"}``; typically
+      means the ``platform_id`` never existed on the aggregator (e.g.
+      eastmoney) and we should stop retrying for that source.
+    - ``http_<status>`` — any other non-2xx; callers may choose to
+      retry or fall back.
+    """
+
+    def __init__(self, kind: str, message: str):
+        super().__init__(message)
+        self.kind = kind
 
 
 # The public NewsNow endpoint maintained by the open-source author. The
@@ -85,10 +112,74 @@ async def fetch_from_newsnow(
         return []
 
     url = f"{api_url}?id={platform_id}&latest"
-    async with make_client(timeout=timeout_sec) as client:
-        payload = await fetch_json(client, url)
+    # TrendRadar pattern: Chrome UA (already default) + explicit JSON
+    # Accept header keeps us off the Cloudflare bot list. One transparent
+    # retry absorbs the volunteer-run upstream's occasional cold-start
+    # 502/504s without flooding the failure drawer.
+    payload = await _call_newsnow(url, timeout_sec=timeout_sec)
 
     return _parse_envelope(payload, platform_id=platform_id, source_id=source_id)
+
+
+async def _call_newsnow(url: str, *, timeout_sec: float) -> Any:
+    """One HTTP call against the NewsNow endpoint with a single retry.
+
+    Raises :class:`NewsNowTransportError` on unambiguous transport
+    problems (Cloudflare challenge, invalid source id, persistent 5xx)
+    so the caller can classify them instead of swallowing them as an
+    empty-payload.
+    """
+    headers = {"Accept": "application/json, text/plain, */*"}
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            async with make_client(
+                timeout=timeout_sec, extra_headers=headers
+            ) as client:
+                resp = await client.get(url)
+            # Surface Cloudflare challenge pages (403/503 + HTML body)
+            # as a distinct error — swallowing them as "empty" hid the
+            # real cause from users for weeks before the UA bump.
+            if resp.status_code in (403, 503):
+                body_head = (resp.text or "")[:160].lower()
+                if "cloudflare" in body_head or "attention required" in body_head:
+                    raise NewsNowTransportError(
+                        "cloudflare_blocked",
+                        f"newsnow blocked by cloudflare ({resp.status_code})",
+                    )
+            if resp.status_code >= 400:
+                # NewsNow ships a JSON envelope for its own 500s
+                # (``{error:true, message:"Invalid source id"}``). Pull
+                # that out so the failure breadcrumb is useful.
+                detail = ""
+                try:
+                    body = resp.json()
+                    if isinstance(body, dict) and body.get("error"):
+                        detail = str(body.get("message") or "").strip()
+                        if detail.lower().startswith("invalid source id"):
+                            raise NewsNowTransportError(
+                                "invalid_source_id", detail or "invalid source id"
+                            )
+                except NewsNowTransportError:
+                    raise
+                except ValueError:
+                    pass
+                raise NewsNowTransportError(
+                    f"http_{resp.status_code}",
+                    detail or f"newsnow returned http {resp.status_code}",
+                )
+            return resp.json()
+        except NewsNowTransportError as exc:
+            # ``invalid_source_id`` is permanent — short-circuit the retry.
+            if exc.kind == "invalid_source_id":
+                raise
+            last_exc = exc
+        except Exception as exc:  # noqa: BLE001 — single retry on transport glitches
+            last_exc = exc
+        if attempt == 0:
+            await asyncio.sleep(1.5)
+    assert last_exc is not None
+    raise last_exc
 
 
 def _parse_envelope(
@@ -206,6 +297,7 @@ def _coerce_published(value: Any) -> str | None:
 
 __all__ = [
     "DEFAULT_NEWSNOW_URL",
+    "NewsNowTransportError",
     "fetch_from_newsnow",
     "newsnow_mode",
 ]

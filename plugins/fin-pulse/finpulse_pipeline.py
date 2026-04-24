@@ -93,8 +93,14 @@ async def _resolve_enabled_sources(
 # CN hot-list sources that tap the NewsNow aggregator first. Enabling
 # any of them auto-lifts ``newsnow.mode`` to ``"public"`` for the run so
 # the hybrid path works out of the box (still honouring the 300s floor).
+# ``eastmoney`` is NOT in this set: NewsNow consistently answers
+# ``{error:true, message:"Invalid source id"}`` for every eastmoney
+# variant, so the eastmoney fetcher goes direct (HTML scrape of the
+# "证券聚焦" rolling page) and skips NewsNow by default. The
+# ``source.eastmoney.prefer_newsnow="true"`` knob flips the route back
+# for operators who run a self-hosted NewsNow that does expose it.
 _NEWSNOW_BACKED_CN_SOURCES: frozenset[str] = frozenset(
-    {"wallstreetcn", "cls", "eastmoney", "xueqiu"}
+    {"wallstreetcn", "cls", "xueqiu"}
 )
 
 
@@ -131,11 +137,18 @@ async def _fetch_one(
         # tab drawer can render a NewsNow / Direct badge per source.
         via_raw = getattr(fetcher, "_last_via", None)
         via = via_raw if isinstance(via_raw, str) and via_raw else "direct"
+        via_reason_raw = getattr(fetcher, "_last_via_reason", None)
+        via_reason = (
+            via_reason_raw
+            if isinstance(via_reason_raw, str) and via_reason_raw
+            else None
+        )
         return FetchReport(
             source_id=source_id,
             items=list(items or []),
             duration_ms=(time.perf_counter() - t0) * 1000.0,
             via=via,
+            via_reason=via_reason,
         )
     except Exception as exc:  # noqa: BLE001 — intentional pipeline boundary
         kind, msg, _hints = map_exception(exc)
@@ -296,6 +309,8 @@ async def ingest(
             "duration_ms": round(report.duration_ms, 2),
             "via": via,
         }
+        if report.via_reason:
+            entry["via_reason"] = report.via_reason
         if report.error:
             entry["error_kind"] = report.error_kind
             entry["error"] = report.error
