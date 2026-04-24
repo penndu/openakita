@@ -15,11 +15,19 @@ from finpulse_ai.dedupe import (
     group_by_canonical_url,
     group_by_simhash,
 )
+from finpulse_ai.filter import (
+    extract_tags,
+    interests_digest,
+    score_batch,
+)
 
 __all__ = [
     "canonical_dedupe_key",
+    "extract_tags",
     "group_by_canonical_url",
     "group_by_simhash",
+    "interests_digest",
+    "score_batch",
     "simhash_distance",
     "simhash_title",
 ]
