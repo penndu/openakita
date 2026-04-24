@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fin Pulse · 财经脉动</title>
+  <!--
+    Self-contained plugin UI: bootstrap + shared UI Kit inlined under _assets/.
+    fin-pulse shares the same UI Kit as avatar-studio / subtitle-craft — the
+    five files below are the canonical 5-asset bundle, vendored from
+    plugins-archive/_shared/web-uikit/ at build time. React / ReactDOM / Babel
+    are loaded from unpkg; everything else is local.
+  -->
+  <script src="_assets/bootstrap.js"></script>
+  <link rel="stylesheet" href="_assets/styles.css">
+  <script src="_assets/icons.js"></script>
+  <script src="_assets/i18n.js"></script>
+  <script src="_assets/markdown-mini.js"></script>
+  <link rel="preload" as="script" crossorigin href="https://unpkg.com/react@18/umd/react.production.min.js" />
+  <link rel="preload" as="script" crossorigin href="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" />
+  <link rel="preload" as="script" href="https://unpkg.com/@babel/standalone/babel.min.js" />
+  <style>
+    /* ── Theme tokens (finance palette) ── */
+    :root {
+      --bg: #f8fafc; --bg-card: #ffffff; --bg-hover: #f1f5f9;
+      --text: #1e293b; --text-muted: #64748b; --text-dim: #94a3b8;
+      --primary: #0e7490; --primary-hover: #0369a1;
+      --success: #16a34a; --warning: #f59e0b; --danger: #dc2626;
+      --border: #e2e8f0; --radius: 8px;
+    }
+    [data-theme="dark"] {
+      --bg: #0f172a; --bg-card: #1e293b; --bg-hover: #334155;
+      --text: #f1f5f9; --text-muted: #94a3b8; --text-dim: #64748b;
+      --border: #334155;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0f172a; --bg-card: #1e293b; --bg-hover: #334155;
+        --text: #f1f5f9; --text-muted: #94a3b8; --text-dim: #64748b;
+        --border: #334155;
+      }
+    }
+    /* ── Reset + typography ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* ── Layout shell ── */
+    .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 18px; border-bottom: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .tabs {
+      display: flex; gap: 4px; padding: 0 18px; border-bottom: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+    .tab {
+      padding: 10px 14px; font-size: 13px; cursor: pointer;
+      color: var(--text-muted); border-bottom: 2px solid transparent;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: color .15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 500; }
+    .content { flex: 1; overflow: auto; padding: 18px 20px; background: var(--bg); }
+    .empty { color: var(--text-muted); font-size: 13px; padding: 32px 12px; text-align: center; }
+    /* ── Split layout (left filter + right list) ── */
+    .split-layout { display: flex; gap: 16px; height: 100%; }
+    /* ── Hero title (oa-hero-title) ── */
+    .oa-hero-title { display: inline-flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+    .oa-hero-title__icon {
+      width: 28px; height: 28px; border-radius: 6px;
+      background: linear-gradient(135deg, #0e7490 0%, #0f172a 100%);
+      color: #fff; display: inline-flex; align-items: center; justify-content: center;
+    }
+    .oa-hero-title__text { display: inline-flex; flex-direction: column; line-height: 1.1; }
+    .oa-hero-title__sub { font-size: 11px; font-weight: 400; color: var(--text-muted); margin-top: 2px; }
+    /* ── Config banner (oa-config-banner) ── */
+    .oa-config-banner {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; border-radius: var(--radius);
+      background: rgba(245,158,11,.12); color: var(--warning);
+      border: 1px solid rgba(245,158,11,.24);
+    }
+    .oa-config-banner__icon { display: inline-flex; align-items: center; }
+    .oa-config-banner__text { flex: 1; font-size: 13px; color: var(--text); }
+    .oa-config-banner__action {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 5px 10px; font-size: 12px;
+      border: none; border-radius: 6px; cursor: pointer;
+      background: var(--primary); color: #fff;
+    }
+    .oa-config-banner__action:hover { background: var(--primary-hover); }
+    .oa-icon { display: inline-flex; align-items: center; }
+    /* ── Label bar ── */
+    .label { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px;
+             display: flex; align-items: center; gap: 6px; }
+    .label::before {
+      content: ""; width: 3px; height: 14px; background: var(--primary);
+      border-radius: 1px; display: inline-block;
+    }
+    /* ── Form inputs (input + invalid tooltip) ── */
+    .field-wrap { position: relative; display: block; }
+    .input {
+      width: 100%; padding: 8px 10px; font-size: 13px;
+      color: var(--text); background: var(--bg-card);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      transition: border-color .15s;
+    }
+    .input:focus { outline: none; border-color: var(--primary); }
+    .input.is-invalid { border-color: var(--danger); padding-right: 28px; }
+    .field-warn-icon {
+      position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+      color: var(--danger); pointer-events: auto; cursor: help;
+    }
+    .field-warn-tip {
+      position: absolute; top: calc(100% + 4px); right: 0;
+      padding: 6px 10px; border-radius: 6px;
+      font-size: 12px; color: #fff; background: var(--danger);
+      white-space: nowrap; opacity: 0; pointer-events: none;
+      transition: opacity .15s;
+      z-index: 10;
+    }
+    .field-warn-icon:hover + .field-warn-tip,
+    .field-warn-tip:hover { opacity: .95; }
+    /* ── Cards ── */
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px; margin-bottom: 12px;
+    }
+    .card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px; font-size: 13px; font-weight: 500;
+      border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--text); border-radius: var(--radius); cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+    .btn:hover { background: var(--bg-hover); }
+    .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+    /* ── API pill (source status) ── */
+    .api-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 500;
+      background: rgba(22,163,74,.12); color: var(--success);
+      cursor: default;
+    }
+    .api-pill--missing {
+      background: rgba(245,158,11,.15); color: var(--warning); cursor: pointer;
+    }
+    .api-pill--missing:hover { filter: brightness(0.95); }
+    /* ── Error panel (used by PluginErrorBoundary) ── */
+    .err-panel { border: 1px solid var(--danger); border-radius: var(--radius); padding: 14px; background: rgba(220,38,38,0.08); }
+    .err-panel__title { font-weight: 600; color: var(--danger); display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+    .err-panel__msg { font-size: 12px; color: var(--text); margin-bottom: 8px; word-break: break-word; }
+    /* ── Confirm dialog (ConfirmHost / oaConfirm) ── */
+    .confirm-mask {
+      position: fixed; inset: 0; background: rgba(0,0,0,.35);
+      display: flex; align-items: center; justify-content: center; z-index: 999;
+    }
+    .confirm-dialog {
+      background: var(--bg-card); color: var(--text);
+      border-radius: var(--radius); border: 1px solid var(--border);
+      padding: 18px; max-width: 360px;
+    }
+    .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  </style>
+  <script>
+    /* Apply saved theme before React mounts to avoid a FOUC flash. */
+    (function () {
+      try {
+        var saved = localStorage.getItem('fp-theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = saved || (prefersDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { /* no-op */ }
+    })();
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+/* ── i18n dictionary (zh / en) ── */
+const I18N_DICT = {
+  zh: {
+    "app.title": "财经脉动",
+    "app.subtitle": "Fin Pulse · 早午晚报 · 热点雷达 · Agent 对话",
+    "tabs.today": "今日资讯",
+    "tabs.digests": "早午晚报",
+    "tabs.radar": "雷达预警",
+    "tabs.ask": "Agent 对话",
+    "tabs.settings": "设置",
+    "banner.noChannel.title": "尚未配置 IM 推送通道",
+    "banner.noChannel.desc": "请先在 OpenAkita 主程序配置至少一个 IM 通道（飞书/企微/钉钉）并授予 channel.send 权限。",
+    "banner.noChannel.cta": "前往设置",
+    "err.title": "界面渲染异常",
+    "err.retry": "重试",
+    "err.stackLabel": "错误堆栈",
+    "confirm.ok": "确认",
+    "confirm.cancel": "取消",
+    "empty.phase1": "Phase 1 骨架 — 数据源、AI 分析、推送等在后续 Phase 逐步落地",
+  },
+  en: {
+    "app.title": "Fin Pulse",
+    "app.subtitle": "Daily Brief · Hot Radar · Ask News",
+    "tabs.today": "Today",
+    "tabs.digests": "Digests",
+    "tabs.radar": "Radar",
+    "tabs.ask": "Ask",
+    "tabs.settings": "Settings",
+    "banner.noChannel.title": "No IM channel configured",
+    "banner.noChannel.desc": "Configure at least one IM channel in OpenAkita Settings and grant channel.send.",
+    "banner.noChannel.cta": "Open Settings",
+    "err.title": "UI render error",
+    "err.retry": "Retry",
+    "err.stackLabel": "Stack trace",
+    "confirm.ok": "Confirm",
+    "confirm.cancel": "Cancel",
+    "empty.phase1": "Phase 1 skeleton — sources, AI filter and dispatch land in later phases",
+  },
+};
+
+if (window.OpenAkitaI18n && typeof window.OpenAkitaI18n.register === "function") {
+  window.OpenAkitaI18n.register(I18N_DICT);
+}
+const _i18n = (window.OpenAkitaI18n && window.OpenAkitaI18n.api) || {
+  t: function (k) { var d = I18N_DICT.zh; return (d && d[k]) || k; },
+  locale: function () { return "zh"; },
+};
+function useT() {
+  const [, setTick] = useState(0);
+  useEffect(function () {
+    function onLoc() { setTick(function (n) { return n + 1; }); }
+    window.addEventListener("openakita:locale-change", onLoc);
+    return function () { window.removeEventListener("openakita:locale-change", onLoc); };
+  }, []);
+  return function (k) { return _i18n.t(k); };
+}
+
+/* ── Tab registry ── */
+const TAB_IDS = ["today", "digests", "radar", "ask", "settings"];
+const TAB_ICONS = { today: "news", digests: "doc", radar: "radar", ask: "chat", settings: "cog" };
+
+/* ── Icon shim (falls back to text when icons.js has no match) ── */
+function Ico(props) {
+  const name = props.name || "";
+  if (window.OaIcons && typeof window.OaIcons.render === "function") {
+    return <span className="oa-icon" dangerouslySetInnerHTML={{__html: window.OaIcons.render(name) || ""}} />;
+  }
+  return <span className="oa-icon" aria-hidden="true">·</span>;
+}
+
+/* ── Host event subscription helper ── */
+function onEvent(type, fn) {
+  function handler(e) { try { fn((e && e.detail) || {}); } catch (_) {} }
+  window.addEventListener(type, handler);
+  return function () { window.removeEventListener(type, handler); };
+}
+
+/* ── Plugin API wrapper ── */
+async function api(method, path, body) {
+  if (window.OpenAkita && typeof window.OpenAkita.api === "function") {
+    const res = await window.OpenAkita.api(method, path, body);
+    return res || { ok: false, error: "no-response" };
+  }
+  const url = "/api/plugins/fin-pulse" + path;
+  const resp = await fetch(url, {
+    method: method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  try { return await resp.json(); } catch (_) { return { ok: resp.ok }; }
+}
+
+/* ── Settings hook (Phase 1 placeholder — Phase 6 hydrates from /config) ── */
+function useSettings() {
+  const [settings, setSettings] = useState({ available_channels: [] });
+  const [loaded, setLoaded] = useState(false);
+  const refresh = useCallback(async function () {
+    const resp = await api("GET", "/available-channels");
+    setSettings(function (prev) {
+      return Object.assign({}, prev, { available_channels: (resp && resp.channels) || [] });
+    });
+    setLoaded(true);
+  }, []);
+  useEffect(function () { refresh().catch(function () { setLoaded(true); }); }, [refresh]);
+  return { settings: settings, loaded: loaded, refresh: refresh };
+}
+
+/* ── Global confirm (ConfirmHost / oaConfirm / oaToast) ── */
+let _confirmHostRef = null;
+window.oaConfirm = function (opts) {
+  if (!_confirmHostRef) return Promise.resolve(false);
+  return _confirmHostRef.open(opts || {});
+};
+window.oaToast = function (opts) {
+  try { if (window.OpenAkita && typeof window.OpenAkita.notify === "function") {
+    window.OpenAkita.notify({ level: (opts && opts.level) || "info", message: (opts && opts.message) || "" });
+  } } catch (_) {}
+};
+
+function ConfirmHost() {
+  const [pending, setPending] = useState(null);
+  useEffect(function () {
+    _confirmHostRef = {
+      open: function (opts) {
+        return new Promise(function (resolve) {
+          setPending(Object.assign({
+            title: "", message: "",
+            okText: _i18n.t("confirm.ok"),
+            cancelText: _i18n.t("confirm.cancel"),
+            danger: false,
+          }, opts, { _resolve: resolve }));
+        });
+      },
+    };
+    return function () { _confirmHostRef = null; };
+  }, []);
+  if (!pending) return null;
+  const close = function (ok) {
+    try { pending._resolve(ok); } catch (_) {}
+    setPending(null);
+  };
+  return (
+    <div className="confirm-mask" onClick={function () { close(false); }}>
+      <div className="confirm-dialog" onClick={function (e) { e.stopPropagation(); }}>
+        {pending.title ? <div className="card-title">{pending.title}</div> : null}
+        <div style={{fontSize: 13, color: "var(--text)"}}>{pending.message}</div>
+        <div className="confirm-actions">
+          <button className="btn btn-sm" onClick={function () { close(false); }}>{pending.cancelText}</button>
+          <button className={"btn btn-sm " + (pending.danger ? "btn-danger" : "btn-primary")}
+                  onClick={function () { close(true); }}>
+            {pending.okText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Placeholder tab bodies (Phase 6 hydrates real content) ── */
+function TodayTab() {
+  const t = useT();
+  const refreshRef = useRef(0);
+  useEffect(function () {
+    const off1 = onEvent("plugin:fin-pulse:task_update", function (d) { refreshRef.current += 1; });
+    const off2 = onEvent("plugin:fin-pulse:article_inserted", function (d) { refreshRef.current += 1; });
+    const timer = setInterval(function () {
+      /* soft refresh — Phase 2+ hydrates real articles from /articles. */
+    }, 8000);
+    return function () { off1(); off2(); clearInterval(timer); };
+  }, []);
+  return (
+    <div className="split-layout">
+      <div style={{width: 280, flexShrink: 0}}>
+        <div className="card">
+          <div className="card-title">{t("tabs.today")}</div>
+          <div className="empty">{t("empty.phase1")}</div>
+        </div>
+      </div>
+      <div style={{flex: 1}}>
+        <div className="card">
+          <div className="empty">{t("empty.phase1")}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function DigestsTab() {
+  const t = useT();
+  return <div className="card"><div className="empty">{t("empty.phase1")}</div></div>;
+}
+function RadarTab() {
+  const t = useT();
+  useEffect(function () {
+    const timer = setInterval(function () { /* Phase 4 evaluates rules via /radar/evaluate */ }, 4000);
+    return function () { clearInterval(timer); };
+  }, []);
+  return <div className="card"><div className="empty">{t("empty.phase1")}</div></div>;
+}
+function AskTab() {
+  const t = useT();
+  return <div className="card"><div className="empty">{t("empty.phase1")}</div></div>;
+}
+function SettingsTab() {
+  const t = useT();
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">{t("tabs.settings")}</div>
+        <div className="empty">{t("empty.phase1")}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── App shell ── */
+function App() {
+  const t = useT();
+  const [activeTab, setActiveTab] = useState(0);
+  const { settings, loaded } = useSettings();
+
+  /* theme sync from host ctx */
+  useEffect(function () {
+    return onEvent("openakita:theme-change", function (d) {
+      const theme = (d && d.theme) || "light";
+      document.documentElement.setAttribute("data-theme", theme.indexOf("dark") >= 0 ? "dark" : "light");
+    });
+  }, []);
+
+  /* shortcut keys (d → theme toggle, Esc → close modal) */
+  useEffect(function () {
+    function onKey(e) {
+      const tag = (e.target && e.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
+      if (e.key === "d") {
+        const current = document.documentElement.getAttribute("data-theme") || "light";
+        const next = current === "dark" ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("fp-theme", next); } catch (_) {}
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return function () { window.removeEventListener("keydown", onKey); };
+  }, []);
+
+  const hasAnyChannel = !!(settings.available_channels || []).length;
+  const showChannelBanner = loaded && !hasAnyChannel && TAB_IDS[activeTab] !== "settings";
+
+  return (
+    <div className="app">
+      <div className="header">
+        <h1 className="oa-hero-title">
+          <span className="oa-hero-title__icon"><Ico name="news" /></span>
+          <span className="oa-hero-title__text">
+            {t("app.title")}
+            <span className="oa-hero-title__sub">{t("app.subtitle")}</span>
+          </span>
+        </h1>
+        <div className="header-right" />
+      </div>
+      <div className="tabs">
+        {TAB_IDS.map(function (id, i) {
+          return (
+            <div key={id}
+                 className={"tab " + (activeTab === i ? "active" : "")}
+                 onClick={function () { setActiveTab(i); }}>
+              <Ico name={TAB_ICONS[id]} /> {t("tabs." + id)}
+            </div>
+          );
+        })}
+      </div>
+      {showChannelBanner ? (
+        <div className="oa-config-banner" role="alert" style={{margin: "12px 20px 0"}}>
+          <span className="oa-icon oa-config-banner__icon"><Ico name="warn" /></span>
+          <div className="oa-config-banner__text">
+            <strong>{t("banner.noChannel.title")}</strong>
+            <div style={{fontSize: 12, color: "var(--text-muted)", marginTop: 2}}>
+              {t("banner.noChannel.desc")}
+            </div>
+          </div>
+          <button className="oa-config-banner__action" type="button"
+                  onClick={function () { setActiveTab(TAB_IDS.indexOf("settings")); }}>
+            {t("banner.noChannel.cta")}
+            <span className="oa-icon"><Ico name="play" /></span>
+          </button>
+        </div>
+      ) : null}
+      <div className="content">
+        {activeTab === 0 && <TodayTab />}
+        {activeTab === 1 && <DigestsTab />}
+        {activeTab === 2 && <RadarTab />}
+        {activeTab === 3 && <AskTab />}
+        {activeTab === 4 && <SettingsTab />}
+      </div>
+      <ConfirmHost />
+    </div>
+  );
+}
+
+class PluginErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { error: null, info: null }; }
+  static getDerivedStateFromError(error) { return { error: error }; }
+  componentDidCatch(error, info) { this.setState({ info: info }); console.error("[fin-pulse] render error:", error, info); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const err = this.state.error;
+    const msg = (err && err.message) ? err.message : String(err);
+    return (
+      <div style={{padding: 24, maxWidth: 820, margin: "0 auto"}}>
+        <div className="err-panel">
+          <div className="err-panel__title"><Ico name="warn" /> {_i18n.t("err.title")}</div>
+          <div className="err-panel__msg">{msg}</div>
+          <button className="btn btn-sm" onClick={() => this.setState({ error: null, info: null })}>
+            {_i18n.t("err.retry")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <PluginErrorBoundary><App /></PluginErrorBoundary>
+);
+if (window.OpenAkita && typeof window.OpenAkita.ready === "function") {
+  window.OpenAkita.ready();
+}
+  </script>
+</body>
+</html>
