@@ -89,7 +89,6 @@ def test_ui_hard_contracts() -> None:
         r'BrandMark',
         r'api-pill',
         r'ConfirmHost',
-        r'setInterval',
         # P0 — api() must unwrap Bridge {ok,status,body} envelopes.
         r'"body"\s+in\s+res',
         # P0 — oaToast must send {type, body} for the host notify API.
@@ -176,7 +175,17 @@ def test_ui_tabs_are_hydrated() -> None:
     # /sources route to hydrate its dropdown (P0 — avoids drift with
     # finpulse_models.SOURCE_DEFS).
     assert 'api("GET", "/articles"' in html
-    assert 'api("POST", "/ingest"' in html
+    # The Today tab now calls /ingest via a dynamic ``path`` variable so
+    # the same code path covers both bulk and single-source runs. We
+    # still require either the literal POST string or the path-shaped
+    # call to prove the wiring is present.
+    assert (
+        'api("POST", "/ingest"' in html
+        or 'api("POST", path' in html
+    ), "Today tab missing POST /ingest call"
+    assert '/ingest/source/' in html, (
+        "Today tab must expose the single-source /ingest/source/{id} call"
+    )
     assert 'api("GET", "/sources"' in html
 
     # Digests tab lists + runs + iframes html blobs.
@@ -263,4 +272,34 @@ def test_ui_tabs_are_hydrated() -> None:
     # Settings IM-channels card, not at the App shell level.
     assert "showChannelBanner" not in html, (
         "the legacy App-shell channel banner should have been removed"
+    )
+
+    # Today hybrid-ingest UX — inline result drawer, smart toast, and
+    # split-button single-source ingest must all be wired up.
+    for key in (
+        "today.ingest.done.green",
+        "today.ingest.done.amber",
+        "today.drawer.title",
+        "today.drawer.via.newsnow",
+        "today.drawer.via.direct",
+        "today.drawer.via.cooldown",
+        "today.list.ingest.current",
+    ):
+        assert key in html, f"hybrid Today i18n missing: {key}"
+    # The drawer component + split-button dropdown markup.
+    assert 'IngestDrawer' in html
+    assert 'ingest-split' in html
+    assert 'api("POST", "/ingest/source/"' not in html or (
+        '"/ingest/source/"' in html
+    ), "single-source endpoint wiring expected"
+    assert '/ingest/source/' in html, (
+        "Today tab must expose the single-source /ingest/source/{id} call"
+    )
+    # Spinner + indeterminate progress styling tokens.
+    assert 'fp-spin' in html
+    assert 'fp-progress' in html
+    # The old 8-second poll MUST be gone (a plain comment about it is
+    # allowed; an actual ``setInterval(load`` invocation is not).
+    assert 'setInterval(load' not in html, (
+        "the legacy 8s ingest poll should have been removed"
     )
