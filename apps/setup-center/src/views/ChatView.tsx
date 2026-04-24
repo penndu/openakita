@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { setLanguage } from "../i18n";
-import { AgentIcon } from "../components/AgentIcon";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { Button } from "@/components/ui/button";
