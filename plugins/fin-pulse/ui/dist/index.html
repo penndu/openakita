@@ -20,24 +20,28 @@
   <link rel="preload" as="script" crossorigin href="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" />
   <link rel="preload" as="script" href="https://unpkg.com/@babel/standalone/babel.min.js" />
   <style>
-    /* ── Theme tokens (finance palette) ── */
+    /* ── Theme tokens (macaron-red palette) ──
+       A soft, pastel cherry/rose scheme: primary rose #E86A7B,
+       blush background, burgundy text, peach-coral accents.
+       Semantic success/warning/danger stay recognizable but muted. */
     :root {
-      --bg: #f8fafc; --bg-card: #ffffff; --bg-hover: #f1f5f9;
-      --text: #1e293b; --text-muted: #64748b; --text-dim: #94a3b8;
-      --primary: #0e7490; --primary-hover: #0369a1;
-      --success: #16a34a; --warning: #f59e0b; --danger: #dc2626;
-      --border: #e2e8f0; --radius: 8px;
+      --bg: #FDF4F5; --bg-card: #FFFFFF; --bg-hover: #FBE5E9;
+      --text: #4A1E27; --text-muted: #8A5560; --text-dim: #B58B94;
+      --primary: #E86A7B; --primary-hover: #D14D62;
+      --primary-soft: #FBCFD4;
+      --success: #5EA882; --warning: #E8A660; --danger: #B92E44;
+      --border: #F3D5DB; --radius: 8px;
     }
     [data-theme="dark"] {
-      --bg: #0f172a; --bg-card: #1e293b; --bg-hover: #334155;
-      --text: #f1f5f9; --text-muted: #94a3b8; --text-dim: #64748b;
-      --border: #334155;
+      --bg: #2B1821; --bg-card: #3D2430; --bg-hover: #4D3240;
+      --text: #FBE7EB; --text-muted: #D3A5B0; --text-dim: #9A7683;
+      --border: #4F2F3C;
     }
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
-        --bg: #0f172a; --bg-card: #1e293b; --bg-hover: #334155;
-        --text: #f1f5f9; --text-muted: #94a3b8; --text-dim: #64748b;
-        --border: #334155;
+        --bg: #2B1821; --bg-card: #3D2430; --bg-hover: #4D3240;
+        --text: #FBE7EB; --text-muted: #D3A5B0; --text-dim: #9A7683;
+        --border: #4F2F3C;
       }
     }
     /* ── Reset + typography ── */
@@ -79,9 +83,9 @@
     .oa-hero-title { display: inline-flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; }
     .oa-hero-title__icon {
       width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
-      background: linear-gradient(135deg, #0E7490 0%, #0C4A6E 55%, #0F172A 100%);
+      background: linear-gradient(135deg, #F8B4C0 0%, #E86A7B 55%, #7A1A2C 100%);
       color: #fff; display: inline-flex; align-items: center; justify-content: center;
-      box-shadow: 0 4px 12px rgba(14,116,144,.25), inset 0 0 0 1px rgba(255,255,255,.08);
+      box-shadow: 0 4px 12px rgba(232,106,123,.28), inset 0 0 0 1px rgba(255,255,255,.10);
       position: relative; overflow: hidden;
     }
     .oa-hero-title__icon svg { width: 100%; height: 100%; display: block; }
@@ -95,7 +99,7 @@
     }
     .oa-section-title::before {
       content: ""; width: 4px; height: 18px; border-radius: 2px;
-      background: linear-gradient(180deg, var(--primary) 0%, #22D3EE 100%);
+      background: linear-gradient(180deg, var(--primary) 0%, #F8B4C0 100%);
       display: inline-block;
     }
     .oa-section-title__count {
@@ -128,7 +132,7 @@
     .seg-btn.active {
       color: var(--primary); background: var(--bg-card);
       border-color: var(--border);
-      box-shadow: 0 1px 3px rgba(14,116,144,.15);
+      box-shadow: 0 1px 3px rgba(232,106,123,.22);
     }
     /* ── Filter bar (horizontal sticky strip for Today tab) ── */
     .filter-bar {
@@ -556,28 +560,28 @@ const BRAND_SVG = (
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">' +
     '<defs>' +
       '<linearGradient id="hbg" x1="0%" y1="0%" x2="100%" y2="100%">' +
-        '<stop offset="0%" stop-color="#0E7490"/>' +
-        '<stop offset="55%" stop-color="#0C4A6E"/>' +
-        '<stop offset="100%" stop-color="#0F172A"/>' +
+        '<stop offset="0%" stop-color="#F8B4C0"/>' +
+        '<stop offset="55%" stop-color="#E86A7B"/>' +
+        '<stop offset="100%" stop-color="#7A1A2C"/>' +
       '</linearGradient>' +
       '<linearGradient id="hline" x1="0%" y1="0%" x2="100%" y2="0%">' +
-        '<stop offset="0%" stop-color="#5EEAD4"/>' +
-        '<stop offset="55%" stop-color="#22D3EE"/>' +
-        '<stop offset="100%" stop-color="#FBBF24"/>' +
+        '<stop offset="0%" stop-color="#FFE1E6"/>' +
+        '<stop offset="55%" stop-color="#F48AA0"/>' +
+        '<stop offset="100%" stop-color="#F4A261"/>' +
       '</linearGradient>' +
     '</defs>' +
     '<rect x="2" y="2" width="60" height="60" rx="14" ry="14" fill="url(#hbg)"/>' +
     '<g opacity="0.55">' +
-      '<rect x="14" y="36" width="5" height="12" rx="1" fill="#64748B"/>' +
-      '<rect x="22" y="30" width="5" height="18" rx="1" fill="#64748B"/>' +
-      '<rect x="30" y="26" width="5" height="22" rx="1" fill="#64748B"/>' +
-      '<rect x="38" y="22" width="5" height="26" rx="1" fill="#64748B"/>' +
-      '<rect x="46" y="18" width="5" height="30" rx="1" fill="#64748B"/>' +
+      '<rect x="14" y="36" width="5" height="12" rx="1" fill="#FBE0E5"/>' +
+      '<rect x="22" y="30" width="5" height="18" rx="1" fill="#FBE0E5"/>' +
+      '<rect x="30" y="26" width="5" height="22" rx="1" fill="#FBE0E5"/>' +
+      '<rect x="38" y="22" width="5" height="26" rx="1" fill="#FBE0E5"/>' +
+      '<rect x="46" y="18" width="5" height="30" rx="1" fill="#FBE0E5"/>' +
     '</g>' +
     '<path d="M8 40 L18 40 L22 28 L28 46 L34 22 L40 34 L46 18 L56 18" ' +
       'fill="none" stroke="url(#hline)" stroke-width="3" ' +
       'stroke-linecap="round" stroke-linejoin="round"/>' +
-    '<circle cx="56" cy="18" r="2.2" fill="#FBBF24"/>' +
+    '<circle cx="56" cy="18" r="2.2" fill="#F4A261"/>' +
   '</svg>'
 );
 function BrandMark() {
@@ -984,7 +988,7 @@ function DigestsTab() {
                 <div key={d.id}
                      className="card"
                      style={{margin: 0, cursor: "pointer", transition: "box-shadow .12s, transform .12s"}}
-                     onMouseEnter={function (e) { e.currentTarget.style.boxShadow = "0 4px 12px rgba(14,116,144,.15)"; }}
+                     onMouseEnter={function (e) { e.currentTarget.style.boxShadow = "0 4px 12px rgba(232,106,123,.20)"; }}
                      onMouseLeave={function (e) { e.currentTarget.style.boxShadow = "none"; }}
                      onClick={function () { setSelected(d); }}>
                   <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "var(--text-muted)"}}>
