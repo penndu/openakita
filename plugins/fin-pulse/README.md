@@ -105,14 +105,28 @@ Open the plugin UI → **Settings** tab, in order:
 
 - **Today tab** — live article feed with source / window / min-score
   filters, copy-to-clipboard on each item, one-click `POST /ingest`.
+  The source dropdown is hydrated from `GET /sources` (matches
+  `finpulse_models.SOURCE_DEFS`), with a static fallback for the first
+  paint.
 - **Digests tab** — list of generated briefs; click for an iframe
   preview of the HTML blob, click **Resend** to fan out via the host
-  gateway.
+  gateway (channel dropdown is backed by the host `/api/scheduler/channels`).
 - **Radar tab** — keyword rule editor + **Dry run** button; saves to
   `config["radar_rules"]` so a scheduled hot_radar can read them.
+  The editor card stays compact (`.card--compact`, textarea capped at
+  120–180px) so the hit-preview card always gets the rest of the
+  vertical space.
 - **Ask tab** — 7 agent tool cards with JSON samples and
   "copy natural-language prompt" buttons. Paste into the OpenAkita
   main chat window to invoke via Brain.
+- **Settings tab** — 5 sections (Sources / IM channels / Schedules /
+  NewsNow wizard / LLM note). The IM-channels card is the **only**
+  place that shows the "no IM channel" warning banner — it no longer
+  leaks onto every tab. Schedules are created via 4 **template
+  buttons** (Morning / Noon / Evening / Radar) + a structured dialog;
+  the list below the buttons is **read-only** — manage rows from the
+  host Scheduler panel via the **"Open host Scheduler panel →"**
+  link.
 
 ---
 
@@ -131,6 +145,7 @@ Open the plugin UI → **Settings** tab, in order:
 | `POST` | `/tasks/{id}/cancel` | — | Idempotent |
 | `POST` | `/ingest` | `{sources?, since_hours?}` | Creates an `ingest` task |
 | `POST` | `/ingest/source/{source_id}` | — | Single-source probe |
+| `GET` | `/sources` | — | Serialises `finpulse_models.SOURCE_DEFS` for the Today-tab dropdown (id, display_zh, display_en, kind, default_enabled). |
 | `GET` | `/articles` | `?q&source_id&since&min_score&sort&offset&limit` | |
 | `GET` | `/articles/{id}` | — | Full raw_json |
 | `POST` | `/digest/run` | `{session, since_hours?, top_k?, lang?}` | |
@@ -138,12 +153,15 @@ Open the plugin UI → **Settings** tab, in order:
 | `GET` | `/digests/{id}` | — | Includes blobs |
 | `GET` | `/digests/{id}/html` | — | `text/html` for iframing |
 | `POST` | `/radar/evaluate` | `{rules_text, since_hours?, limit?, min_score?}` | Does not persist |
+| `POST` | `/radar/ai-suggest` | `{description, lang?}` | LLM-assisted rules drafting (uses host Brain; has deterministic fallback) |
+| `GET` / `POST` / `DELETE` | `/radar/library[/{name}]` | — | CRUD for saved rule presets (capped at `MAX_PRESETS`) |
 | `POST` | `/hot_radar/run` | `{rules_text, targets[], since_hours?, ...}` | Persists + dispatches |
 | `POST` | `/dispatch/send` | `{channel, chat_id, content, ...}` | Thin wrapper over `api.send_message` |
-| `GET` | `/available-channels` | — | Probes the host gateway |
-| `GET` | `/schedules` | — | Only `fin-pulse:` prefixed tasks |
-| `POST` | `/schedules` | `{mode, cron, channel, chat_id, ...}` | `mode=daily_brief|hot_radar` |
-| `DELETE` | `/schedules/{id}` | — | Refuses non-`fin-pulse:` names |
+| `GET` | `/scheduler/channels` | — | Proxies the host `GET /api/scheduler/channels` so the plugin IM dropdown matches `SchedulerView` (rich `{channel_id, chat_id, chat_name, ...}` entries). |
+| `GET` | `/available-channels` | — | Fallback adapter probe used when `/scheduler/channels` returns nothing. |
+| `GET` | `/schedules` | — | Returns tasks whose name starts with `fin-pulse ` (new canonical space-delimited form) or `fin-pulse:` (legacy — still accepted). |
+| `POST` | `/schedules` | `{mode, cron, channel, chat_id, ...}` | `mode=daily_brief|hot_radar`; created name is `fin-pulse {suffix}`. |
+| `DELETE` | `/schedules/{id}` | — | Refuses any task whose name isn't a fin-pulse-owned prefix. |
 
 ### Agent tools (same envelope as REST, dispatched via Brain)
 
@@ -169,6 +187,23 @@ so a misbehaving Brain cannot ask for `limit=99999` and hit the DB.
  "rules_text": "+美联储\n+降息\n!传闻",
  "channel": "feishu", "chat_id": "oc_xxx"}
 ```
+
+### Scheduler integration
+
+`POST /schedules` creates a task directly on the host's
+`TaskScheduler` (not a plugin-private job-runner). That means:
+
+- Rows show up in the main OpenAkita **Scheduler** panel — this is
+  where users should go to pause, resume, delete, or manually trigger
+  fin-pulse tasks.
+- Task names use the canonical `fin-pulse <suffix>` form (space
+  separator) so they stay legal in host UIs that reject `:`. The
+  legacy `fin-pulse:<suffix>` form is still recognised by the
+  `on_schedule` hook so existing installs keep working after an
+  upgrade.
+- `silent=True` is always set on the host task because fin-pulse sends
+  its own IM notification from the `on_schedule` handler; the host's
+  scheduler should not double-post.
 
 ---
 
