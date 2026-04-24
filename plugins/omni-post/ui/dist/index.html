@@ -319,10 +319,73 @@
     .kbd { font-family: monospace; font-size: 11px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-hover); }
     code.inline { font-family: monospace; font-size: 12px; padding: 1px 4px; background: var(--bg-hover); border-radius: 3px; }
     .divider { height: 1px; background: var(--border); margin: 12px 0; }
-    /* Placeholder for tabs not yet wired up (S2/S3/S4) */
+    /* Placeholder for tabs not yet wired up (S3/S4) */
     .stub { padding: 40px 20px; color: var(--text-muted); text-align: center; font-size: 13px; line-height: 1.8; }
     .stub h2 { font-size: 18px; color: var(--text); margin-bottom: 10px; }
     .stub code.inline { color: var(--primary); }
+    /* Accounts tab — matrix cards grouped by platform */
+    .acc-tab__header {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+      margin-bottom: 12px;
+    }
+    .acc-tab__header h2 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
+    .acc-tab__header p { font-size: 12px; color: var(--text-muted); margin: 0; max-width: 640px; }
+    .acc-group { margin-bottom: 18px; }
+    .acc-group__head {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+      font-size: 13px; color: var(--text); font-weight: 600;
+    }
+    .acc-group__count { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+    .acc-grid {
+      display: grid; gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    }
+    .acc-card {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .acc-card__top { display: flex; align-items: center; gap: 10px; }
+    .acc-card__avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: rgba(99,102,241,.2); color: var(--primary);
+      display: flex; align-items: center; justify-content: center; font-weight: 600;
+      flex-shrink: 0;
+    }
+    .acc-card__title { flex: 1; min-width: 0; }
+    .acc-card__name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+    .acc-card__meta { font-size: 11px; color: var(--text-muted); }
+    .acc-card__tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .acc-card__quota { display: flex; gap: 8px; font-size: 11px; }
+    .acc-card__quota > div { flex: 1; min-width: 0; }
+    .acc-card__quota .progress { margin-top: 2px; }
+    .acc-card__quota-label { display: flex; justify-content: space-between; color: var(--text-muted); }
+    .acc-card__quota-label b { color: var(--text); font-weight: 600; }
+    .acc-card__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .acc-card__history {
+      border-top: 1px dashed var(--border); padding-top: 8px; font-size: 12px;
+    }
+    .acc-card__history-empty { color: var(--text-muted); font-size: 11px; padding: 4px 0; }
+    /* Modal */
+    .ak-modal-mask {
+      position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 100;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ak-modal {
+      background: var(--bg-card); color: var(--text); border: 1px solid var(--border);
+      border-radius: 10px; width: min(560px, calc(100vw - 32px));
+      max-height: calc(100vh - 80px); overflow-y: auto;
+      box-shadow: 0 12px 48px rgba(0,0,0,.3);
+    }
+    .ak-modal__head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
+      font-weight: 600; font-size: 14px;
+    }
+    .ak-modal__body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+    .ak-modal__foot {
+      padding: 10px 16px; border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 8px;
+    }
   </style>
 </head>
 <body>
@@ -534,6 +597,42 @@ const I18N_DICT = {
     "omniPost.tasks.drawer.close": "关闭",
     "omniPost.accounts.coming.title": "账号矩阵 (S2)",
     "omniPost.accounts.coming.desc": "S2 将交付：每平台多账号卡片、头像、分类标签、日/周/月限额进度条、Cookie 健康状态懒加载、一键 Cookie 导入。",
+    "omniPost.accounts.header": "账号矩阵",
+    "omniPost.accounts.subtitle": "按平台聚合多账号、查看限额与已发素材，支持懒加载 Cookie 健康检查。",
+    "omniPost.accounts.empty.title": "还没有导入账号",
+    "omniPost.accounts.empty.desc": "点击“导入账号”粘贴 cookies.txt（Netscape）或浏览器导出的 JSON 数组。导入后可在此卡片查看健康状态和发布限额。",
+    "omniPost.accounts.action.add": "导入账号",
+    "omniPost.accounts.action.refresh": "刷新健康状态",
+    "omniPost.accounts.action.remove": "删除",
+    "omniPost.accounts.action.expand": "查看已发素材",
+    "omniPost.accounts.action.collapse": "收起",
+    "omniPost.accounts.quota.day": "今日",
+    "omniPost.accounts.quota.week": "本周",
+    "omniPost.accounts.quota.month": "本月",
+    "omniPost.accounts.history.empty": "该账号暂无已发素材",
+    "omniPost.accounts.history.col.time": "发布时间",
+    "omniPost.accounts.history.col.asset": "素材",
+    "omniPost.accounts.history.col.status": "状态",
+    "omniPost.accounts.history.col.url": "URL",
+    "omniPost.accounts.health.ok": "正常",
+    "omniPost.accounts.health.cookie_expired": "Cookie 失效",
+    "omniPost.accounts.health.unknown": "未知",
+    "omniPost.accounts.health.never_checked": "未检查",
+    "omniPost.accounts.add.title": "导入账号",
+    "omniPost.accounts.add.platform": "平台",
+    "omniPost.accounts.add.nickname": "昵称",
+    "omniPost.accounts.add.nicknamePlaceholder": "用于在账号矩阵中识别",
+    "omniPost.accounts.add.tags": "标签（逗号分隔）",
+    "omniPost.accounts.add.tagsPlaceholder": "官方号, 美食垂类",
+    "omniPost.accounts.add.cookies": "Cookie",
+    "omniPost.accounts.add.cookiesPlaceholder": "粘贴 cookies.txt 或 JSON 数组；内容将 Fernet 加密后落盘",
+    "omniPost.accounts.add.limits": "每日 / 每周 / 每月 限额",
+    "omniPost.accounts.add.confirm": "导入",
+    "omniPost.accounts.add.toast.ok": "已导入账号",
+    "omniPost.accounts.add.toast.fail": "导入失败：{msg}",
+    "omniPost.accounts.remove.confirm": "确认删除该账号？Cookie 与历史记录将一并移除。",
+    "omniPost.accounts.refresh.toast.ok": "已刷新健康状态：{status}",
+    "omniPost.accounts.refresh.toast.fail": "刷新失败：{msg}",
     "omniPost.calendar.coming.title": "发布日历 (S3)",
     "omniPost.calendar.coming.desc": "S3 将交付：月/周/日视图、拖拽改期、按平台配色、时区指示、同账号 30min 内冲突提示。",
     "omniPost.library.coming.title": "素材 / 模板库 (S3)",
@@ -623,6 +722,42 @@ const I18N_DICT = {
     "omniPost.tasks.drawer.close": "Close",
     "omniPost.accounts.coming.title": "Account matrix (S2)",
     "omniPost.accounts.coming.desc": "S2 delivers: per-platform multi-account cards, avatars, tag buckets, daily / weekly / monthly quota bars, lazy cookie-health probe, one-click cookie import.",
+    "omniPost.accounts.header": "Account matrix",
+    "omniPost.accounts.subtitle": "Group accounts by platform, inspect quotas and published assets, run cookie-health probes lazily.",
+    "omniPost.accounts.empty.title": "No accounts yet",
+    "omniPost.accounts.empty.desc": "Click Import account to paste a Netscape cookies.txt or a JSON cookie array. Imported accounts show up here with health, quotas and publish history.",
+    "omniPost.accounts.action.add": "Import account",
+    "omniPost.accounts.action.refresh": "Refresh health",
+    "omniPost.accounts.action.remove": "Remove",
+    "omniPost.accounts.action.expand": "Show published assets",
+    "omniPost.accounts.action.collapse": "Hide",
+    "omniPost.accounts.quota.day": "Today",
+    "omniPost.accounts.quota.week": "This week",
+    "omniPost.accounts.quota.month": "This month",
+    "omniPost.accounts.history.empty": "No published assets yet for this account",
+    "omniPost.accounts.history.col.time": "Published",
+    "omniPost.accounts.history.col.asset": "Asset",
+    "omniPost.accounts.history.col.status": "Status",
+    "omniPost.accounts.history.col.url": "URL",
+    "omniPost.accounts.health.ok": "OK",
+    "omniPost.accounts.health.cookie_expired": "Cookie expired",
+    "omniPost.accounts.health.unknown": "Unknown",
+    "omniPost.accounts.health.never_checked": "Never checked",
+    "omniPost.accounts.add.title": "Import account",
+    "omniPost.accounts.add.platform": "Platform",
+    "omniPost.accounts.add.nickname": "Nickname",
+    "omniPost.accounts.add.nicknamePlaceholder": "Used to identify this account in the matrix",
+    "omniPost.accounts.add.tags": "Tags (comma-separated)",
+    "omniPost.accounts.add.tagsPlaceholder": "official, food-vertical",
+    "omniPost.accounts.add.cookies": "Cookies",
+    "omniPost.accounts.add.cookiesPlaceholder": "Paste cookies.txt or a JSON array; encrypted with Fernet before disk",
+    "omniPost.accounts.add.limits": "Daily / weekly / monthly quota",
+    "omniPost.accounts.add.confirm": "Import",
+    "omniPost.accounts.add.toast.ok": "Account imported",
+    "omniPost.accounts.add.toast.fail": "Import failed: {msg}",
+    "omniPost.accounts.remove.confirm": "Remove this account? Cookies and history will be deleted too.",
+    "omniPost.accounts.refresh.toast.ok": "Health refreshed: {status}",
+    "omniPost.accounts.refresh.toast.fail": "Refresh failed: {msg}",
     "omniPost.calendar.coming.title": "Publish calendar (S3)",
     "omniPost.calendar.coming.desc": "S3 delivers: month / week / day views, drag to reschedule, colour by platform, timezone indicator, 30-min collision warnings per account.",
     "omniPost.library.coming.title": "Asset & template library (S3)",
@@ -691,6 +826,8 @@ const ICONS = {
   warn: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
+  "chevron-up": '<polyline points="18 15 12 9 6 15"/>',
 };
 function Ico(props) {
   const svg = ICONS[props.name] || "";
@@ -1479,6 +1616,347 @@ function TaskDrawer({ task, onClose }) {
   );
 }
 
+/* ─── Accounts tab (S2) ─────────────────────────────────────────────
+   AccountMatrixCard: per-platform multi-account cards grouped by
+   platform. Each card surfaces:
+     • avatar + nickname + tags
+     • Cookie health status (lazy — see /accounts/{id}/refresh + the
+       enable_playwright_probe setting)
+     • daily / weekly / monthly quota bars (fed by /accounts/{id}/quota)
+     • expand → published asset timeline (fed by /accounts/{id}/history)
+     • remove / refresh / import actions
+   We deliberately avoid background polling so the UI honours the
+   issue-#207 lesson: opening the tab triggers a single fetch wave, not
+   a timer.  */
+function useHealthLabel(t) {
+  return useCallback(function (status) {
+    if (!status) return t("omniPost.accounts.health.never_checked");
+    if (status === "ok") return t("omniPost.accounts.health.ok");
+    if (status === "cookie_expired") return t("omniPost.accounts.health.cookie_expired");
+    return t("omniPost.accounts.health.unknown");
+  }, [t]);
+}
+function healthBadge(status) {
+  if (status === "ok") return "badge badge-done";
+  if (status === "cookie_expired") return "badge badge-failed";
+  if (status === "unknown") return "badge badge-cancelled";
+  return "badge badge-pending";
+}
+function avatarText(s) {
+  if (!s) return "?";
+  const c = String(s).trim().charAt(0);
+  return c ? c.toUpperCase() : "?";
+}
+
+function useQuota(accountId) {
+  const [quota, setQuota] = useState(null);
+  const refresh = useCallback(function () {
+    if (!accountId) return;
+    pluginApi("GET", "/accounts/" + encodeURIComponent(accountId) + "/quota").then(function (r) {
+      if (r && r.ok && r.body) setQuota(r.body);
+    });
+  }, [accountId]);
+  useEffect(refresh, [refresh]);
+  return { quota, refresh };
+}
+
+function QuotaBars({ quota }) {
+  const t = useT();
+  if (!quota) return null;
+  function Bar({ labelKey, used, limit }) {
+    const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+    const color = pct >= 100 ? "var(--danger)" : pct >= 80 ? "var(--warning)" : "var(--primary)";
+    return (
+      <div>
+        <div className="acc-card__quota-label">
+          <span>{t(labelKey)}</span>
+          <span><b>{used}</b> / {limit}</span>
+        </div>
+        <div className="progress">
+          <div className="progress-fill" style={{ width: pct + "%", background: color }} />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="acc-card__quota">
+      <Bar labelKey="omniPost.accounts.quota.day"   used={quota.daily.used}   limit={quota.daily.limit} />
+      <Bar labelKey="omniPost.accounts.quota.week"  used={quota.weekly.used}  limit={quota.weekly.limit} />
+      <Bar labelKey="omniPost.accounts.quota.month" used={quota.monthly.used} limit={quota.monthly.limit} />
+    </div>
+  );
+}
+
+function AccountHistory({ accountId }) {
+  const t = useT();
+  const [rows, setRows] = useState(null);
+  useEffect(function () {
+    pluginApi("GET", "/accounts/" + encodeURIComponent(accountId) + "/history?limit=20").then(function (r) {
+      if (r && r.ok && r.body && Array.isArray(r.body.history)) setRows(r.body.history);
+      else setRows([]);
+    });
+  }, [accountId]);
+  if (rows === null) return <div className="acc-card__history"><span className="spinner-sm" /></div>;
+  if (!rows.length) return <div className="acc-card__history"><div className="acc-card__history-empty">{t("omniPost.accounts.history.empty")}</div></div>;
+  return (
+    <div className="acc-card__history">
+      <div className="table-wrapper" style={{ maxHeight: 180 }}>
+        <table className="ak-table">
+          <thead>
+            <tr>
+              <th>{t("omniPost.accounts.history.col.time")}</th>
+              <th>{t("omniPost.accounts.history.col.status")}</th>
+              <th>{t("omniPost.accounts.history.col.url")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(function (row) {
+              return (
+                <tr key={row.id}>
+                  <td className="mono text-xs">{row.published_at || row.created_at || "—"}</td>
+                  <td><span className={"badge " + (row.status === "succeeded" ? "badge-done" : row.status === "failed" ? "badge-failed" : "badge-pending")}>{row.status}</span></td>
+                  <td style={{ maxWidth: 160 }}>
+                    {row.published_url ? (
+                      <a href={row.published_url} target="_blank" rel="noreferrer" className="truncate" style={{ display: "inline-block", maxWidth: "100%" }}>
+                        {row.published_url}
+                      </a>
+                    ) : <span className="text-muted">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AccountMatrixCard({ account, platform, onChanged }) {
+  const t = useT();
+  const labelFor = useHealthLabel(t);
+  const { quota, refresh: refreshQuota } = useQuota(account.id);
+  const [expanded, setExpanded] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async function () {
+    setBusy(true);
+    const r = await pluginApi("POST", "/accounts/" + encodeURIComponent(account.id) + "/refresh", {});
+    setBusy(false);
+    if (r && r.ok && r.body) {
+      showToast(t("omniPost.accounts.refresh.toast.ok", { status: labelFor(r.body.health_status) }));
+      onChanged();
+      refreshQuota();
+    } else {
+      showToast(t("omniPost.accounts.refresh.toast.fail", { msg: (r && r.body && r.body.detail) || ("HTTP " + (r && r.status)) }), "error");
+    }
+  }, [account.id, labelFor, t, onChanged, refreshQuota]);
+
+  const remove = useCallback(async function () {
+    if (!window.confirm(t("omniPost.accounts.remove.confirm"))) return;
+    setBusy(true);
+    const r = await pluginApi("DELETE", "/accounts/" + encodeURIComponent(account.id));
+    setBusy(false);
+    if (r && r.ok) onChanged();
+  }, [account.id, t, onChanged]);
+
+  const tags = useMemo(function () {
+    try {
+      return Array.isArray(account.tags) ? account.tags : JSON.parse(account.tags_json || "[]");
+    } catch (_e) { return []; }
+  }, [account]);
+
+  return (
+    <div className="acc-card">
+      <div className="acc-card__top">
+        <div className="acc-card__avatar">{avatarText(account.nickname)}</div>
+        <div className="acc-card__title">
+          <div className="acc-card__name">{account.nickname || account.id}</div>
+          <div className="acc-card__meta">
+            <span className={healthBadge(account.health_status)}>{labelFor(account.health_status)}</span>
+            {account.last_health_check ? (
+              <span className="text-dim" style={{ marginLeft: 6 }}>· {account.last_health_check}</span>
+            ) : null}
+          </div>
+        </div>
+        <div className="acc-card__actions">
+          <button className="btn btn-sm" onClick={refresh} disabled={busy} aria-label={t("omniPost.accounts.action.refresh")}>
+            <Ico name="refresh" /> {t("omniPost.accounts.action.refresh")}
+          </button>
+          <button className="btn btn-sm btn-ghost" onClick={remove} disabled={busy} aria-label={t("omniPost.accounts.action.remove")}>
+            <Ico name="trash" /> {t("omniPost.accounts.action.remove")}
+          </button>
+        </div>
+      </div>
+      {tags.length ? (
+        <div className="acc-card__tags">
+          {tags.map(function (tag) {
+            return <span key={tag} className="tag tag-gray">{tag}</span>;
+          })}
+        </div>
+      ) : null}
+      <QuotaBars quota={quota} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <button className="btn btn-sm btn-ghost" onClick={function () { setExpanded(function (v) { return !v; }); }}>
+          <Ico name={expanded ? "chevron-up" : "chevron-down"} />{" "}
+          {expanded ? t("omniPost.accounts.action.collapse") : t("omniPost.accounts.action.expand")}
+        </button>
+        <span className="text-xs text-muted mono">{platform}</span>
+      </div>
+      {expanded ? <AccountHistory accountId={account.id} /> : null}
+    </div>
+  );
+}
+
+function AccountAddModal({ onClose, onAdded, platforms }) {
+  const t = useT();
+  const [platform, setPlatform] = useState(platforms[0] ? platforms[0].id : "douyin");
+  const [nickname, setNickname] = useState("");
+  const [tagsStr, setTagsStr] = useState("");
+  const [cookies, setCookies] = useState("");
+  const [daily, setDaily] = useState(5);
+  const [weekly, setWeekly] = useState(30);
+  const [monthly, setMonthly] = useState(100);
+  const [busy, setBusy] = useState(false);
+
+  const submit = useCallback(async function () {
+    if (!nickname.trim()) { showToast(t("omniPost.accounts.add.nicknamePlaceholder"), "warn"); return; }
+    if (!cookies.trim()) { showToast(t("omniPost.accounts.add.cookiesPlaceholder"), "warn"); return; }
+    setBusy(true);
+    const body = {
+      platform,
+      nickname: nickname.trim(),
+      cookie_raw: cookies,
+      tags: tagsStr.split(",").map(function (s) { return s.trim(); }).filter(Boolean),
+      daily_limit: Number(daily) || 0,
+      weekly_limit: Number(weekly) || 0,
+      monthly_limit: Number(monthly) || 0,
+    };
+    const r = await pluginApi("POST", "/accounts", body);
+    setBusy(false);
+    if (r && r.ok) {
+      showToast(t("omniPost.accounts.add.toast.ok"));
+      onAdded();
+      onClose();
+    } else {
+      showToast(t("omniPost.accounts.add.toast.fail", { msg: (r && r.body && r.body.detail) || ("HTTP " + (r && r.status)) }), "error");
+    }
+  }, [platform, nickname, cookies, tagsStr, daily, weekly, monthly, onAdded, onClose, t]);
+
+  return (
+    <div className="ak-modal-mask" onClick={onClose}>
+      <div className="ak-modal" onClick={function (e) { e.stopPropagation(); }} role="dialog" aria-modal="true">
+        <div className="ak-modal__head">
+          <span>{t("omniPost.accounts.add.title")}</span>
+          <button className="btn btn-sm btn-ghost" onClick={onClose}><Ico name="close" /></button>
+        </div>
+        <div className="ak-modal__body">
+          <label className="label">{t("omniPost.accounts.add.platform")}
+            <select className="input" value={platform} onChange={function (e) { setPlatform(e.target.value); }}>
+              {platforms.map(function (p) {
+                return <option key={p.id} value={p.id}>{p.display_name_zh || p.display_name_en || p.id}</option>;
+              })}
+            </select>
+          </label>
+          <label className="label">{t("omniPost.accounts.add.nickname")}
+            <input className="input" value={nickname} onChange={function (e) { setNickname(e.target.value); }}
+                   placeholder={t("omniPost.accounts.add.nicknamePlaceholder")} />
+          </label>
+          <label className="label">{t("omniPost.accounts.add.tags")}
+            <input className="input" value={tagsStr} onChange={function (e) { setTagsStr(e.target.value); }}
+                   placeholder={t("omniPost.accounts.add.tagsPlaceholder")} />
+          </label>
+          <label className="label">{t("omniPost.accounts.add.cookies")}
+            <textarea className="input" rows={6} value={cookies} onChange={function (e) { setCookies(e.target.value); }}
+                      placeholder={t("omniPost.accounts.add.cookiesPlaceholder")} style={{ fontFamily: "monospace", fontSize: 11 }} />
+          </label>
+          <label className="label">{t("omniPost.accounts.add.limits")}
+            <div className="grid-3">
+              <input className="input" type="number" min="0" value={daily}   onChange={function (e) { setDaily(e.target.value); }} />
+              <input className="input" type="number" min="0" value={weekly}  onChange={function (e) { setWeekly(e.target.value); }} />
+              <input className="input" type="number" min="0" value={monthly} onChange={function (e) { setMonthly(e.target.value); }} />
+            </div>
+          </label>
+        </div>
+        <div className="ak-modal__foot">
+          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>{t("omniPost.common.cancel")}</button>
+          <button className="btn btn-primary" onClick={submit} disabled={busy}>
+            {busy ? <span className="spinner-sm" /> : <Ico name="check" />} {t("omniPost.accounts.add.confirm")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountsTab() {
+  const t = useT();
+  const { accounts, refresh } = useAccounts();
+  const { catalog } = useCatalog();
+  const [modal, setModal] = useState(false);
+
+  const grouped = useMemo(function () {
+    const by = {};
+    accounts.forEach(function (a) {
+      if (!by[a.platform]) by[a.platform] = [];
+      by[a.platform].push(a);
+    });
+    return by;
+  }, [accounts]);
+
+  const platformMeta = useMemo(function () {
+    const m = {};
+    (catalog.platforms || []).forEach(function (p) { m[p.id] = p; });
+    return m;
+  }, [catalog]);
+
+  const empty = !accounts.length;
+  return (
+    <div>
+      <div className="acc-tab__header">
+        <div>
+          <h2>{t("omniPost.accounts.header")}</h2>
+          <p>{t("omniPost.accounts.subtitle")}</p>
+        </div>
+        <div className="flex gap-2">
+          <button className="btn btn-sm" onClick={refresh}><Ico name="refresh" /> {t("omniPost.common.refresh")}</button>
+          <button className="btn btn-sm btn-primary" onClick={function () { setModal(true); }}>
+            <Ico name="plus" /> {t("omniPost.accounts.action.add")}
+          </button>
+        </div>
+      </div>
+      {empty ? (
+        <div className="stub">
+          <Ico name="user" />
+          <h2>{t("omniPost.accounts.empty.title")}</h2>
+          <p>{t("omniPost.accounts.empty.desc")}</p>
+        </div>
+      ) : (
+        Object.keys(grouped).sort().map(function (pid) {
+          const meta = platformMeta[pid];
+          const name = meta ? (meta.display_name_zh || meta.display_name_en || pid) : pid;
+          return (
+            <div className="acc-group" key={pid}>
+              <div className="acc-group__head">
+                <span>{name}</span>
+                <span className="acc-group__count">· {grouped[pid].length}</span>
+              </div>
+              <div className="acc-grid">
+                {grouped[pid].map(function (a) {
+                  return <AccountMatrixCard key={a.id} account={a} platform={pid} onChanged={refresh} />;
+                })}
+              </div>
+            </div>
+          );
+        })
+      )}
+      {modal ? (
+        <AccountAddModal platforms={catalog.platforms || []} onClose={function () { setModal(false); }} onAdded={refresh} />
+      ) : null}
+    </div>
+  );
+}
+
 /* ─── Stubs for tabs that land in later sprints ────────────────────── */
 function StubTab({ titleKey, descKey }) {
   const t = useT();
@@ -1498,7 +1976,7 @@ function App() {
   switch (tab) {
     case "publish":  pane = <PublishTab />; break;
     case "tasks":    pane = <TasksTab />;   break;
-    case "accounts": pane = <StubTab titleKey="omniPost.accounts.coming.title" descKey="omniPost.accounts.coming.desc" />; break;
+    case "accounts": pane = <AccountsTab />; break;
     case "calendar": pane = <StubTab titleKey="omniPost.calendar.coming.title" descKey="omniPost.calendar.coming.desc" />; break;
     case "library":  pane = <StubTab titleKey="omniPost.library.coming.title" descKey="omniPost.library.coming.desc" />; break;
     case "settings": pane = <StubTab titleKey="omniPost.settings.coming.title" descKey="omniPost.settings.coming.desc" />; break;

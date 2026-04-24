@@ -442,6 +442,37 @@ class OmniPostPlugin(PluginBase):
             assert self._tm is not None
             return {"ok": await self._tm.delete_account(account_id)}
 
+        @router.get("/accounts/{account_id}/history")
+        async def account_history(account_id: str, limit: int = 50) -> dict:
+            """Return the most recent publish events for an account.
+
+            Drives the AccountMatrixCard's expand-to-see-published-assets
+            panel; bounded at 200 to keep the SQLite scan cheap.
+            """
+
+            self._require_tm()
+            assert self._tm is not None
+            if await self._tm.get_account(account_id) is None:
+                raise HTTPException(404, "account not found")
+            return {
+                "account_id": account_id,
+                "history": await self._tm.list_publish_history(
+                    account_id=account_id,
+                    limit=max(1, min(int(limit), 200)),
+                ),
+            }
+
+        @router.get("/accounts/{account_id}/quota")
+        async def account_quota(account_id: str) -> dict:
+            """Return daily / weekly / monthly used-vs-cap for the UI quota bars."""
+
+            self._require_tm()
+            assert self._tm is not None
+            if await self._tm.get_account(account_id) is None:
+                raise HTTPException(404, "account not found")
+            breakdown = await check_account_quota(self._deps(), account_id)
+            return {"account_id": account_id, **breakdown}
+
         # Asset Bus pull ────────────────────────────────────────────
 
         @router.post("/asset-bus/pull")
