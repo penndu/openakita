@@ -452,6 +452,42 @@ class ScheduleRequest(PublishRequest):
     scheduled_at: str  # type: ignore[assignment]
 
 
+class MatrixPublishRequest(BaseModel):
+    """HTTP body for POST /publish/matrix (Sprint 3).
+
+    One request ⇒ N platforms × M accounts expansion. Accounts are
+    staggered in wall-clock time to avoid triggering rate-limit alarms
+    on any single platform, and tag-routed overrides let the author
+    ship one description per account tag without duplicating the whole
+    payload.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str
+    payload: PublishPayload
+    platforms: list[str] = Field(min_length=1, max_length=16)
+    account_ids: list[str] = Field(min_length=1, max_length=64)
+    client_trace_id: str = Field(..., min_length=4, max_length=80)
+    auto_submit: bool = True
+    engine: Literal["auto", "pw", "mp"] = "auto"
+
+    # Timezone stagger parameters. If ``scheduled_at`` is None we
+    # publish immediately; if it is an ISO-8601 UTC time we still
+    # stagger accounts around it. ``timezone`` + ``local_hour`` +
+    # ``local_minute`` are mutually exclusive with ``scheduled_at``
+    # (but if all are set, ``scheduled_at`` wins).
+    scheduled_at: str | None = None
+    timezone: str | None = None
+    local_hour: int | None = Field(default=None, ge=0, le=23)
+    local_minute: int = Field(default=0, ge=0, le=59)
+    stagger_seconds: int = Field(default=600, ge=0, le=7200)
+    jitter_seconds: int = Field(default=0, ge=0, le=1800)
+
+    # Tag-routed copy overrides: {"travel": {"description": "..."}, ...}
+    per_tag_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 class AccountCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -786,6 +786,34 @@ class OmniPostTaskManager:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    async def list_due_schedules(
+        self,
+        *,
+        now_iso: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return scheduled rows whose wall-clock time has elapsed.
+
+        The scheduler uses this to pick rows on each tick. ISO-8601
+        strings compare lexicographically when padded + UTC-Z'd, so a
+        plain string comparison is safe and keeps the query index-only.
+        """
+
+        conn = self._conn()
+        async with conn.execute(
+            """
+            SELECT * FROM schedules
+            WHERE status = 'scheduled'
+              AND scheduled_at IS NOT NULL
+              AND scheduled_at <= ?
+            ORDER BY scheduled_at
+            LIMIT ?
+            """,
+            (now_iso, int(limit)),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
     # ── Selectors health ─────────────────────────────────────────────
 
     async def upsert_selector_health(

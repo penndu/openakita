@@ -63,6 +63,7 @@ from omni_post_models import (
     PLATFORMS_BY_ID,
     AccountCreateRequest,
     ErrorKind,
+    MatrixPublishRequest,
     OmniPostError,
     PublishPayload,
     PublishRequest,
@@ -75,6 +76,7 @@ from omni_post_pipeline import (
     check_account_quota,
     run_publish_task,
 )
+from omni_post_scheduler import ScheduleTicker, fanout_matrix, stagger_slots
 from omni_post_task_manager import OmniPostTaskManager
 from pydantic import BaseModel, ConfigDict
 from starlette.responses import FileResponse
@@ -106,6 +108,7 @@ class OmniPostPlugin(PluginBase):
         self._screenshot_dir: Path | None = None
         self._uploads_dir: Path | None = None
         self._active_tasks: set[asyncio.Task[Any]] = set()
+        self._scheduler: ScheduleTicker | None = None
 
     def on_load(self, api: PluginAPI) -> None:
         self._api = api
@@ -144,6 +147,13 @@ class OmniPostPlugin(PluginBase):
             settings=self._settings,
         )
 
+        self._scheduler = ScheduleTicker(
+            task_manager=self._tm,
+            runner=lambda task_id: run_publish_task(self._deps(), task_id),
+            spawn=lambda coro, name=None: self._spawn(coro, name=name),
+            poll_seconds=float(self._settings.get("scheduler_poll_seconds", 30.0)),
+        )
+
         api.spawn_task(self._async_bootstrap(), name="omni-post:bootstrap")
 
         router = self._build_router()
@@ -167,9 +177,13 @@ class OmniPostPlugin(PluginBase):
             )
         if self._upload is not None:
             self._upload.sweep_stale_uploads(older_than_seconds=3600)
+        if self._scheduler is not None:
+            self._scheduler.start()
 
     def on_unload(self) -> Any:
         async def _close() -> None:
+            if self._scheduler is not None:
+                await self._scheduler.stop()
             for t in list(self._active_tasks):
                 if not t.done():
                     t.cancel()
@@ -218,6 +232,19 @@ class OmniPostPlugin(PluginBase):
         @router.post("/publish")
         async def publish(body: PublishRequest) -> dict:
             return await self._handle_publish(body)
+
+        @router.post("/publish/matrix")
+        async def publish_matrix(body: MatrixPublishRequest) -> dict:
+            """Fan out one publish to N platforms × M accounts with stagger.
+
+            This is the S3 matrix mode: the server expands the matrix,
+            runs tag-routed copy overrides, staggers times so a single
+            platform is never hit by N simultaneous POSTs, and persists
+            one ``tasks`` row per pair. Scheduled rows are also written
+            to the ``schedules`` table so the ticker picks them up.
+            """
+
+            return await self._handle_matrix_publish(body)
 
         @router.post("/schedule")
         async def schedule(body: ScheduleRequest) -> dict:
@@ -535,6 +562,126 @@ class OmniPostPlugin(PluginBase):
                 self._spawn(run_publish_task(self._deps(), task_id))
         return {"ok": True, "task_ids": created_tasks, "count": len(created_tasks)}
 
+    async def _handle_matrix_publish(self, body: MatrixPublishRequest) -> dict:
+        """Matrix fan-out with timezone stagger + tag-routed overrides.
+
+        Control flow:
+
+        1. Validate asset + platforms + accounts exist.
+        2. Expand ``(platforms × accounts)`` via ``fanout_matrix`` and
+           apply any ``per_tag_overrides``.
+        3. If caller gave ``scheduled_at`` use it straight; else if they
+           gave ``timezone + local_hour`` we compute per-account UTC
+           times via ``stagger_slots``; else we publish immediately.
+        4. Insert tasks (and schedule rows when applicable). Broadcast
+           a single ``publish_matrix_ok`` event so the UI can collapse
+           N toasts into one.
+        """
+
+        self._require_tm()
+        assert self._tm is not None
+
+        if body.asset_id:
+            asset = await self._tm.get_asset(body.asset_id)
+            if asset is None:
+                raise HTTPException(404, f"asset {body.asset_id} not found")
+        for pid in body.platforms:
+            if pid not in PLATFORMS_BY_ID:
+                raise HTTPException(422, f"unknown platform {pid}")
+
+        accounts: list[dict[str, Any]] = []
+        for aid in body.account_ids:
+            acc = await self._tm.get_account(aid)
+            if acc is None:
+                raise HTTPException(404, f"account {aid} not found")
+            try:
+                tags = (
+                    list(acc["tags"])
+                    if isinstance(acc.get("tags"), list)
+                    else __import__("json").loads(acc.get("tags_json") or "[]")
+                )
+            except (TypeError, ValueError):
+                tags = []
+            acc_view = {
+                "id": acc["id"],
+                "platform": acc["platform"],
+                "tags": tags,
+            }
+            accounts.append(acc_view)
+
+        fanout = fanout_matrix(
+            platforms=body.platforms,
+            accounts=accounts,
+            payload=body.payload.model_dump(),
+            per_tag_overrides=body.per_tag_overrides,
+        )
+        if not fanout:
+            return {"ok": True, "task_ids": [], "count": 0, "skipped": "no matching accounts"}
+
+        # Build per-pair scheduled_at.
+        per_pair_time: dict[tuple[str, str], str | None] = {}
+        if body.scheduled_at:
+            for pair in fanout:
+                per_pair_time[(pair["platform"], pair["account_id"])] = body.scheduled_at
+        elif body.timezone and body.local_hour is not None:
+            # Stagger per platform so we don't spam a single platform.
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            for pair in fanout:
+                grouped.setdefault(pair["platform"], []).append(
+                    {"id": pair["account_id"], "platform": pair["platform"]}
+                )
+            for pid, pair_list in grouped.items():
+                slots = stagger_slots(
+                    base_local_hour=int(body.local_hour),
+                    base_minute=int(body.local_minute),
+                    timezone=body.timezone,
+                    accounts=pair_list,
+                    stagger_seconds=int(body.stagger_seconds),
+                    jitter_seconds=int(body.jitter_seconds),
+                )
+                for slot in slots:
+                    per_pair_time[(pid, slot["account_id"])] = slot["scheduled_at"]
+        else:
+            for pair in fanout:
+                per_pair_time[(pair["platform"], pair["account_id"])] = None
+
+        jitter_default = int(self._settings.get("schedule_jitter_seconds", 900))
+        created_tasks: list[dict[str, Any]] = []
+        for pair in fanout:
+            scheduled_at = per_pair_time.get((pair["platform"], pair["account_id"]))
+            task_id = await self._tm.create_task(
+                platform=pair["platform"],
+                account_id=pair["account_id"],
+                asset_id=body.asset_id,
+                payload=pair["payload"],
+                engine=body.engine,
+                client_trace_id=f"{body.client_trace_id}:{pair['platform']}:{pair['account_id']}",
+                scheduled_at=scheduled_at,
+            )
+            created_tasks.append(
+                {
+                    "task_id": task_id,
+                    "platform": pair["platform"],
+                    "account_id": pair["account_id"],
+                    "scheduled_at": scheduled_at,
+                }
+            )
+            if scheduled_at:
+                await self._tm.create_schedule(
+                    task_id=task_id,
+                    scheduled_at=scheduled_at,
+                    jitter_seconds=jitter_default,
+                )
+            else:
+                self._spawn(run_publish_task(self._deps(), task_id))
+
+        if self._api is not None:
+            self._api.broadcast_ui_event(
+                "publish_matrix_ok",
+                {"count": len(created_tasks), "tasks": created_tasks},
+            )
+        return {"ok": True, "count": len(created_tasks), "tasks": created_tasks}
+
     async def _pull_from_asset_bus(self, asset_id: str) -> dict:
         if self._api is None or self._tm is None:
             raise HTTPException(503, "not initialized")
@@ -720,10 +867,10 @@ class OmniPostPlugin(PluginBase):
             api=self._api,
         )
 
-    def _spawn(self, coro) -> None:
+    def _spawn(self, coro, name: str | None = None) -> None:
         if self._api is None:
             return
-        task = self._api.spawn_task(coro, name="omni-post:publish")
+        task = self._api.spawn_task(coro, name=name or "omni-post:publish")
         self._active_tasks.add(task)
         task.add_done_callback(self._active_tasks.discard)
 
