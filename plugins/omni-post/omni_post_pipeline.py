@@ -76,6 +76,9 @@ class PipelineDeps:
     screenshot_dir: Path
     settings: dict[str, Any]
     api: Any | None = None  # PluginAPI (optional — tests run without host)
+    # Directory for publish_receipt JSON files. Optional so tests can
+    # construct minimal deps; production always wires it in plugin.py.
+    receipts_dir: Path | None = None
 
 
 async def run_publish_task(deps: PipelineDeps, task_id: str) -> dict[str, Any]:
@@ -286,7 +289,15 @@ async def _terminal_success(
         task["account_id"],
         {"last_published_at": now, "health_status": "ok", "last_health_check": now},
     )
-    await _publish_receipt_asset(deps, task, outcome, asset_info)
+    await _publish_receipt_asset(
+        deps,
+        task,
+        outcome=outcome,
+        status="succeeded",
+        error_kind=None,
+        retries=int(task.get("retry_count") or 0),
+        screenshots=outcome.screenshots,
+    )
     await _broadcast(
         deps,
         "task_update",
@@ -346,36 +357,160 @@ async def _terminal_failure(
             "error_hint_i18n": hint,
         },
     )
+    await _publish_receipt_asset(
+        deps,
+        task,
+        outcome=None,
+        status="failed",
+        error_kind=kind.value,
+        retries=int(retries or 0),
+        screenshots=screenshots,
+    )
     await _write_publish_memory(deps, task, None, None, success=False, error=kind.value)
 
 
 # ── Asset Bus + MDRM helpers ────────────────────────────────────────
 
+# The receipt schema version is bumped whenever the metadata shape changes
+# in a way that downstream consumers (fin-pulse / idea-research / MDRM)
+# must notice. Breaking changes always require `docs/asset-kinds.md` to
+# be updated in the same commit.
+PUBLISH_RECEIPT_SCHEMA_VERSION = 1
+
+# Default TTL for publish_receipt rows. 90 days matches the typical window
+# where ROI / comment-hub reconciliation is still interesting; set to
+# None / <=0 to disable expiry.
+PUBLISH_RECEIPT_TTL_SECONDS = 90 * 24 * 3600
+
+
+def _build_receipt_payload(
+    *,
+    task: dict[str, Any],
+    account: dict[str, Any] | None,
+    outcome: Any,
+    status: str,
+    error_kind: str | None,
+    retries: int,
+    screenshots: list[str] | None,
+    metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Construct the full publish_receipt payload.
+
+    Kept as a pure function so tests can assert the shape without spinning
+    up Playwright / sqlite. Callers pass `outcome=None` on the failure
+    path — we tolerate either shape.
+    """
+
+    published_url = getattr(outcome, "published_url", None) if outcome is not None else None
+    screenshot_path = screenshots[-1] if screenshots else None
+    return {
+        "schema_version": PUBLISH_RECEIPT_SCHEMA_VERSION,
+        "task_id": task["id"],
+        "asset_id": task.get("asset_id"),
+        "platform": task["platform"],
+        "account_id": task["account_id"],
+        "account_nickname": (account or {}).get("nickname"),
+        "status": status,
+        "error_kind": error_kind,
+        "published_url": published_url,
+        "published_at": _now_iso(),
+        "engine": task.get("engine"),
+        "retry_count": int(retries or 0),
+        "screenshot_path": screenshot_path,
+        "metrics": metrics or {},
+    }
+
 
 async def _publish_receipt_asset(
-    deps: PipelineDeps, task: dict, outcome, asset_info: dict | None
+    deps: PipelineDeps,
+    task: dict[str, Any],
+    *,
+    outcome: Any = None,
+    status: str,
+    error_kind: str | None = None,
+    retries: int = 0,
+    screenshots: list[str] | None = None,
 ) -> None:
+    """Write the receipt JSON to disk and register it on the host Asset Bus.
+
+    We always attempt the disk write first: even when the plugin is running
+    on a host without Asset Bus (`api.publish_asset` missing), having the
+    JSON sitting under `data/omni-post/receipts/<task_id>.json` keeps the
+    forensic trail and lets a future sweeper backfill the bus.
+    """
+
+    payload = _build_receipt_payload(
+        task=task,
+        account=await _get_account_silent(deps, task.get("account_id") or ""),
+        outcome=outcome,
+        status=status,
+        error_kind=error_kind,
+        retries=retries,
+        screenshots=screenshots,
+        metrics=_collect_metrics(outcome),
+    )
+
+    receipt_path: Path | None = None
+    receipts_dir = getattr(deps, "receipts_dir", None)
+    if receipts_dir is not None:
+        try:
+            receipts_dir.mkdir(parents=True, exist_ok=True)
+            receipt_path = receipts_dir / f"{task['id']}.json"
+            receipt_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as e:
+            logger.warning("omni-post: receipt file write failed: %s", e)
+            receipt_path = None
+
     api = deps.api
     if api is None or not hasattr(api, "publish_asset"):
         return
     try:
-        metadata = {
-            "platform": task["platform"],
-            "account_id": task["account_id"],
-            "asset_id": task.get("asset_id"),
-            "published_url": outcome.published_url,
-            "published_at": _now_iso(),
-            "task_id": task["id"],
-            "engine": task.get("engine"),
-        }
         await api.publish_asset(
             asset_kind="publish_receipt",
-            preview_url=outcome.published_url,
-            metadata=metadata,
+            source_path=str(receipt_path) if receipt_path is not None else None,
+            preview_url=payload.get("published_url"),
+            metadata=payload,
             shared_with=["*"],
+            ttl_seconds=PUBLISH_RECEIPT_TTL_SECONDS,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("omni-post: publish_asset failed: %s", e)
+
+
+async def _get_account_silent(deps: PipelineDeps, account_id: str) -> dict[str, Any] | None:
+    if not account_id:
+        return None
+    try:
+        return await deps.task_manager.get_account(account_id)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("omni-post: account lookup for receipt failed: %s", e)
+        return None
+
+
+def _collect_metrics(outcome: Any) -> dict[str, Any]:
+    """Extract the small, structured metrics bag from the engine outcome.
+
+    We only surface counters / millisecond numbers — never free-form text
+    that could leak cookies or user content. This keeps the receipt safe
+    to share with `shared_with=["*"]` downstream plugins.
+    """
+
+    if outcome is None:
+        return {}
+    out: dict[str, Any] = {}
+    for key in ("duration_ms", "upload_ms", "submit_ms", "retry_count"):
+        value = getattr(outcome, key, None)
+        if isinstance(value, (int, float)):
+            out[key] = value
+    metrics = getattr(outcome, "metrics", None)
+    if isinstance(metrics, dict):
+        for k, v in metrics.items():
+            if isinstance(v, (int, float, str, bool)) and k not in out:
+                out[k] = v
+    return out
 
 
 async def _write_publish_memory(

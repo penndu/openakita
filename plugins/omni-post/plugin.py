@@ -107,6 +107,7 @@ class OmniPostPlugin(PluginBase):
         self._selectors_dir: Path | None = None
         self._screenshot_dir: Path | None = None
         self._uploads_dir: Path | None = None
+        self._receipts_dir: Path | None = None
         self._active_tasks: set[asyncio.Task[Any]] = set()
         self._scheduler: ScheduleTicker | None = None
 
@@ -121,10 +122,12 @@ class OmniPostPlugin(PluginBase):
         self._uploads_dir = self._data_dir / "uploads"
         thumbs_dir = self._data_dir / "thumbs"
         self._screenshot_dir = self._data_dir / "screenshots"
+        self._receipts_dir = self._data_dir / "receipts"
         for p in (
             self._uploads_dir,
             thumbs_dir,
             self._screenshot_dir,
+            self._receipts_dir,
             self._data_dir / "user_data",
         ):
             p.mkdir(parents=True, exist_ok=True)
@@ -865,6 +868,7 @@ class OmniPostPlugin(PluginBase):
             screenshot_dir=self._screenshot_dir,
             settings=self._settings,
             api=self._api,
+            receipts_dir=self._receipts_dir,
         )
 
     def _spawn(self, coro, name: str | None = None) -> None:
