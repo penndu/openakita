@@ -1,19 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Fin Pulse">
   <title>Fin Pulse</title>
   <defs>
-    <!-- Warm three-stop background: midnight navy → deep purple → burgundy -->
+    <!-- Neutral finance-desk background: deep navy → midnight slate → indigo.
+         Keeps the icon readable at 16/32px without drowning the red candles
+         in a pink wash. -->
     <linearGradient id="fp-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%"  stop-color="#1A1026"/>
-      <stop offset="55%" stop-color="#3A1020"/>
-      <stop offset="100%" stop-color="#5C0E1A"/>
+      <stop offset="0%"   stop-color="#0B1220"/>
+      <stop offset="55%"  stop-color="#121D33"/>
+      <stop offset="100%" stop-color="#1C2541"/>
     </linearGradient>
     <linearGradient id="fp-red" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%"  stop-color="#FF7080"/>
-      <stop offset="100%" stop-color="#C9152A"/>
+      <stop offset="0%"  stop-color="#FF8190"/>
+      <stop offset="100%" stop-color="#D01F33"/>
     </linearGradient>
     <linearGradient id="fp-vol" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%"  stop-color="#FF6B7C" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#8A1625" stop-opacity="0.45"/>
+      <stop offset="0%"  stop-color="#FF6B7C" stop-opacity="0.70"/>
+      <stop offset="100%" stop-color="#8A1625" stop-opacity="0.55"/>
     </linearGradient>
     <linearGradient id="fp-line" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%"  stop-color="#FFD2A8"/>
@@ -34,14 +36,14 @@
         fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
 
   <!-- Dashed chart grid -->
-  <g opacity="0.14" stroke="#FFFFFF" stroke-width="0.5" stroke-dasharray="1.6,2.2">
+  <g opacity="0.16" stroke="#9FB3D1" stroke-width="0.5" stroke-dasharray="1.6,2.2">
     <line x1="6" y1="16" x2="58" y2="16"/>
     <line x1="6" y1="30" x2="58" y2="30"/>
     <line x1="6" y1="44" x2="58" y2="44"/>
   </g>
 
   <!-- Y-axis tick dots -->
-  <g opacity="0.40" fill="#FFFFFF">
+  <g opacity="0.45" fill="#BFD0EC">
     <circle cx="5.2" cy="16" r="0.7"/>
     <circle cx="5.2" cy="30" r="0.7"/>
     <circle cx="5.2" cy="44" r="0.7"/>
