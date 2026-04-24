@@ -106,6 +106,20 @@ omni-post 是 Asset Bus 上的**双向节点**：
 - 单 host 单 Chromium；如需更大并发应考虑多实例部署，而不是在本插件里
   再起多个 playwright 进程（会抢 CPU / GPU）。
 
+## 7.5 · S4 专属能力
+
+- **双引擎选择**：`settings.engine = "auto" | "pw" | "mp"`。`auto` 探测到
+  MultiPost 就走扩展（复用日常浏览器登录态），否则回落 Playwright。
+- **MultiPostGuide**：Settings Tab 顶部，3s `postMessage` PING 检测扩展、
+  版本号、信任域；不满足时给出 Chrome Web Store / GitHub 安装链接和
+  配置指引。
+- **选择器自愈**：`SelfHealTicker` 每 24h 扫一次 `selectors_health`；
+  低于 60% 命中率且 24h 内未告警过的平台会广播 `selector_alert`
+  UI 事件，由任一 IM 桥插件订阅转发。
+- **MDRM 写入**：每次终态（成功或失败）通过 `OmniPostMdrmAdapter` 写
+  一条 `SemanticMemory(type=experience, subject="omni-post:publish:{platform}:{account}", tags=[platform:…,account:…,hour:…,weekday:…,engine:…,outcome:…])`。
+  无 `memory.write` 权限时返回 `{"status": "skipped"}`，绝不阻塞发布。
+
 ## 7 · 测试入口
 
 ```bash

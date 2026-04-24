@@ -134,21 +134,74 @@ plugins/omni-post/
     └── _assets/                      # 与 avatar-studio 1:1 的 UI Kit
 ```
 
-S2–S4 阶段会追加 `omni_post_scheduler.py` / `omni_post_engine_mp.py` /
-`omni_post_mdrm.py` / 更多选择器与 Tab。
+S2–S4 阶段追加的文件已全部就位（绿色表示已合入 main）：
+
+```
+plugins/omni-post/
+├── omni_post_scheduler.py            # ✅ S3: ScheduleTicker + stagger_slots + fanout_matrix
+├── omni_post_engine_mp.py            # ✅ S4: MultiPost compat choreographer
+├── omni_post_selfheal.py             # ✅ S4: daily selector probe + IM alerts
+├── omni_post_mdrm.py                 # ✅ S4: publish-memory adapter
+├── omni_post_selectors/              # ✅ S1→S2: 3 → 10 平台 JSON bundles
+└── ui/dist/index.html                # ✅ S1→S4: 6 个完整 Tab
+```
 
 ---
 
-## 6 · 已知限制
+## 6 · S4 关键能力
 
-- S1 仅开放 3 个平台（抖音 / 小红书 / B 站）的选择器，其余 7 个平台将于
-  S2 补齐，但 `PlatformAdapter` 抽象已就位，追加一个平台只需新增一个
-  `omni_post_selectors/*.json` 即可在 `GenericJsonAdapter` 下跑通。
-- Cookie 池在 S1 只做加密存储与手动导入；懒加载健康探针、自动 refresh
-  与失败重投在 S2 落地。
-- 定时发布、时区错峰、矩阵模式在 S3 落地；MultiPost Compat 引擎与
-  MDRM 记忆写入在 S4 落地。
-- 不处理 "跨平台帐号实名切换"，这是平台安全策略，不应由第三方工具代劳。
+### 6.1 MultiPost 信任域握手
+
+Settings Tab 顶部的 **MultiPostGuide** 做四件事：
+
+1. 通过 `window.postMessage` 广播 `MULTIPOST_EXTENSION_CHECK_SERVICE_STATUS`，
+   3 秒超时后回落到 "未检测到扩展"；
+2. 比对版本号 ≥ `mp_extension_min_version`（默认 `1.3.8`）；
+3. 检查扩展侧是否把当前 host 加入信任域；
+4. 将探测结论 `POST /mp/status` 同步回后端，`pipeline._resolve_engine`
+   就能按实际可用性在 Playwright / MultiPost 之间切换。
+
+### 6.2 选择器自愈（每日）
+
+`SelfHealTicker` 默认每 24 小时跑一次，对 10 张 `omni_post_selectors/*.json`
+里的每个选择器询问 `probe_fn` 是否仍可解析。结果写 `selectors_health`：
+
+| 字段 | 含义 |
+|---|---|
+| `hit_rate` | `(total - failed) / total` |
+| `last_error` | 第一条失败样本的简要描述 |
+| `last_alerted_at` | 最近一次 IM 告警时刻（`ALERT_COOLDOWN=24h` 内不再重发）|
+
+低于 `ALERT_THRESHOLD=0.6` 时，后端广播 `selector_alert` UI 事件
+（`{platform, hit_rate, failed, threshold}`），任一 IM 桥插件订阅转发到
+微信 / 飞书 / Slack 即可。
+
+### 6.3 MDRM 发布记忆
+
+每次任务终态通过 `OmniPostMdrmAdapter` 写入宿主 `MemoryManager`，
+记忆形状与 `idea-research` 对齐：
+
+```python
+SemanticMemory(
+    type=MemoryType.EXPERIENCE,
+    subject="omni-post:publish:{platform}:{account_id}",
+    predicate="success" | "failure:{error_kind}",
+    tags=["omni-post", "platform:…", "account:…", "hour:{0–23}",
+          "weekday:{0–6}", "engine:pw|mp", "outcome:success|failure",
+          "asset:video|image|…", "error:…"],
+    content="[ISO 时间] account acc-7 published to douyin via pw: …",
+)
+```
+
+后续 idea-research / fin-pulse 可以按标签聚合 "某账号历史上 21 点推文
+的成功率" 进而驱动推荐，不再需要 omni-post 重复持久化。
+
+### 6.4 已知限制
+
+- 不处理 "跨平台账号实名切换" — 平台安全策略，不应由第三方工具代劳。
+- 单 host 单 Chromium；需要更大并发请多实例部署。
+- MDRM 写入优先级 `LONG_TERM`，成功 0.55 / 失败 0.7 importance；
+  宿主可在 Memory 管理器里按需调整 TTL。
 
 ---
 

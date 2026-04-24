@@ -772,6 +772,24 @@ const I18N_DICT = {
     "omniPost.engine.desc.auto": "自动：探测到 MultiPost 则走扩展，否则走 Playwright。",
     "omniPost.engine.desc.pw": "Playwright：0 依赖，适合无头服务端。",
     "omniPost.engine.desc.mp": "MultiPost：需浏览器 + 扩展，复用日常登录态。",
+    "omniPost.settings.section.engine": "引擎",
+    "omniPost.settings.section.runtime": "运行时",
+    "omniPost.settings.section.scheduler": "调度与自愈",
+    "omniPost.settings.field.headless": "Playwright 无头模式",
+    "omniPost.settings.field.headless.desc": "生产服务器建议开启；本地调试时关闭可以看到真实浏览器。",
+    "omniPost.settings.field.concurrency_global": "全局并发上限",
+    "omniPost.settings.field.concurrency_per_platform": "单平台并发上限",
+    "omniPost.settings.field.retry_max": "最大重试次数",
+    "omniPost.settings.field.cooldown": "单账号冷却秒数",
+    "omniPost.settings.field.poll": "调度轮询秒数",
+    "omniPost.settings.field.selfheal": "开启选择器自愈探针",
+    "omniPost.settings.field.selfheal.desc": "每日一次扫描每个平台的选择器命中率，低于 60% 自动广播 selector_alert 事件。",
+    "omniPost.settings.field.selfheal_interval": "自愈探针间隔（小时）",
+    "omniPost.settings.field.probe": "开启 Playwright 健康探针",
+    "omniPost.settings.field.probe.desc": "会话维护时真实加载平台检测登录态；关闭时仅做 Cookie 解密 smoke 检查。",
+    "omniPost.settings.saved": "设置已保存",
+    "omniPost.settings.save.failed": "保存失败：{err}",
+    "omniPost.settings.save": "保存",
     "omniPost.engine.pw": "Playwright",
     "omniPost.engine.mp": "MultiPost",
     "omniPost.engine.auto": "自动",
@@ -956,6 +974,24 @@ const I18N_DICT = {
     "omniPost.engine.desc.auto": "Auto: use the extension when detected, otherwise fall back to Playwright.",
     "omniPost.engine.desc.pw": "Playwright: zero-dep, headless-friendly.",
     "omniPost.engine.desc.mp": "MultiPost: needs a browser + extension, reuses everyday logins.",
+    "omniPost.settings.section.engine": "Engine",
+    "omniPost.settings.section.runtime": "Runtime",
+    "omniPost.settings.section.scheduler": "Scheduler & self-heal",
+    "omniPost.settings.field.headless": "Playwright headless mode",
+    "omniPost.settings.field.headless.desc": "Recommended on prod servers; turn off locally to see the real browser.",
+    "omniPost.settings.field.concurrency_global": "Global concurrency cap",
+    "omniPost.settings.field.concurrency_per_platform": "Per-platform concurrency cap",
+    "omniPost.settings.field.retry_max": "Max retries",
+    "omniPost.settings.field.cooldown": "Per-account cooldown (s)",
+    "omniPost.settings.field.poll": "Scheduler poll seconds",
+    "omniPost.settings.field.selfheal": "Enable selector self-heal probe",
+    "omniPost.settings.field.selfheal.desc": "Scans per-platform selector hit rate once per day; broadcasts selector_alert when it drops below 60%.",
+    "omniPost.settings.field.selfheal_interval": "Self-heal interval (hours)",
+    "omniPost.settings.field.probe": "Enable Playwright health probe",
+    "omniPost.settings.field.probe.desc": "Loads the platform page to verify login state; when off we only run a cheap cookie decrypt smoke test.",
+    "omniPost.settings.saved": "Settings saved",
+    "omniPost.settings.save.failed": "Save failed: {err}",
+    "omniPost.settings.save": "Save",
     "omniPost.engine.pw": "Playwright",
     "omniPost.engine.mp": "MultiPost",
     "omniPost.engine.auto": "Auto",
@@ -2732,14 +2768,165 @@ function MultiPostGuide() {
   );
 }
 
-/* ─── Settings tab (S4 scaffold) ───────────────────────────────────── */
+/* ─── Settings tab (S4) ────────────────────────────────────────────── */
 function SettingsTab() {
   const t = useT();
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(function () {
+    pluginApi("GET", "/settings").then(function (r) { setDraft(r || {}); })
+                                 .catch(function () { setDraft({}); });
+  }, []);
+
+  useEffect(load, [load]);
+
+  function update(key, value) {
+    setDraft(function (prev) {
+      const next = Object.assign({}, prev || {});
+      next[key] = value;
+      return next;
+    });
+  }
+
+  async function save() {
+    if (!draft || saving) return;
+    setSaving(true);
+    try {
+      const patch = {};
+      [
+        "engine",
+        "concurrency_global",
+        "concurrency_per_platform",
+        "retry_max_attempts",
+        "cooldown_seconds_per_account",
+        "scheduler_poll_seconds",
+        "playwright_headless",
+        "enable_selfheal",
+        "selfheal_interval_hours",
+        "enable_playwright_probe",
+        "mp_extension_min_version",
+        "mp_trusted_domain",
+      ].forEach(function (k) {
+        if (draft[k] !== undefined && draft[k] !== null) patch[k] = draft[k];
+      });
+      const r = await pluginApi("PUT", "/settings", patch);
+      if (r && typeof r === "object") setDraft(r);
+      showToast(t("omniPost.settings.saved"), "success");
+    } catch (err) {
+      showToast(t("omniPost.settings.save.failed").replace("{err}", String(err && err.message || err)), "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!draft) {
+    return <div style={{ padding: 16 }}><p className="cal-sub">…</p></div>;
+  }
+
+  const engine = draft.engine || "auto";
+
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 16, maxWidth: 820 }}>
       <h2 style={{ marginTop: 0 }}>{t("omniPost.settings.coming.title")}</h2>
       <p className="cal-sub">{t("omniPost.settings.coming.desc")}</p>
+
       <MultiPostGuide />
+
+      {/* Engine ---------------------------------------------------- */}
+      <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+        <h3 style={{ margin: "0 0 8px 0" }}>{t("omniPost.settings.section.engine")}</h3>
+        <label style={{ display: "block", marginBottom: 6 }}>
+          <div className="cal-sub">{t("omniPost.engine.label")}</div>
+          <select className="input" value={engine} onChange={function (e) { update("engine", e.target.value); }}>
+            <option value="auto">auto</option>
+            <option value="pw">pw (Playwright)</option>
+            <option value="mp">mp (MultiPost)</option>
+          </select>
+        </label>
+        <p className="cal-sub" style={{ margin: 0 }}>
+          {engine === "mp"
+            ? t("omniPost.engine.desc.mp")
+            : engine === "pw"
+              ? t("omniPost.engine.desc.pw")
+              : t("omniPost.engine.desc.auto")}
+        </p>
+      </div>
+
+      {/* Runtime --------------------------------------------------- */}
+      <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+        <h3 style={{ margin: "0 0 8px 0" }}>{t("omniPost.settings.section.runtime")}</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <label>
+            <div className="cal-sub">{t("omniPost.settings.field.concurrency_global")}</div>
+            <input type="number" min={1} max={64} className="input"
+                   value={draft.concurrency_global ?? 6}
+                   onChange={function (e) { update("concurrency_global", parseInt(e.target.value, 10) || 1); }} />
+          </label>
+          <label>
+            <div className="cal-sub">{t("omniPost.settings.field.concurrency_per_platform")}</div>
+            <input type="number" min={1} max={16} className="input"
+                   value={draft.concurrency_per_platform ?? 2}
+                   onChange={function (e) { update("concurrency_per_platform", parseInt(e.target.value, 10) || 1); }} />
+          </label>
+          <label>
+            <div className="cal-sub">{t("omniPost.settings.field.retry_max")}</div>
+            <input type="number" min={0} max={10} className="input"
+                   value={draft.retry_max_attempts ?? 3}
+                   onChange={function (e) { update("retry_max_attempts", parseInt(e.target.value, 10) || 0); }} />
+          </label>
+          <label>
+            <div className="cal-sub">{t("omniPost.settings.field.cooldown")}</div>
+            <input type="number" min={0} max={3600} className="input"
+                   value={draft.cooldown_seconds_per_account ?? 120}
+                   onChange={function (e) { update("cooldown_seconds_per_account", parseInt(e.target.value, 10) || 0); }} />
+          </label>
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+          <input type="checkbox" checked={!!draft.playwright_headless}
+                 onChange={function (e) { update("playwright_headless", e.target.checked); }} />
+          <span>{t("omniPost.settings.field.headless")}</span>
+        </label>
+        <p className="cal-sub" style={{ margin: "4px 0 0 24px" }}>{t("omniPost.settings.field.headless.desc")}</p>
+      </div>
+
+      {/* Scheduler / self-heal ------------------------------------ */}
+      <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+        <h3 style={{ margin: "0 0 8px 0" }}>{t("omniPost.settings.section.scheduler")}</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <label>
+            <div className="cal-sub">{t("omniPost.settings.field.poll")}</div>
+            <input type="number" min={5} max={600} className="input"
+                   value={draft.scheduler_poll_seconds ?? 30}
+                   onChange={function (e) { update("scheduler_poll_seconds", parseFloat(e.target.value) || 30); }} />
+          </label>
+          <label>
+            <div className="cal-sub">{t("omniPost.settings.field.selfheal_interval")}</div>
+            <input type="number" min={1} max={168} className="input"
+                   value={draft.selfheal_interval_hours ?? 24}
+                   onChange={function (e) { update("selfheal_interval_hours", parseFloat(e.target.value) || 24); }} />
+          </label>
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+          <input type="checkbox" checked={!!draft.enable_selfheal}
+                 onChange={function (e) { update("enable_selfheal", e.target.checked); }} />
+          <span>{t("omniPost.settings.field.selfheal")}</span>
+        </label>
+        <p className="cal-sub" style={{ margin: "4px 0 0 24px" }}>{t("omniPost.settings.field.selfheal.desc")}</p>
+
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+          <input type="checkbox" checked={!!draft.enable_playwright_probe}
+                 onChange={function (e) { update("enable_playwright_probe", e.target.checked); }} />
+          <span>{t("omniPost.settings.field.probe")}</span>
+        </label>
+        <p className="cal-sub" style={{ margin: "4px 0 0 24px" }}>{t("omniPost.settings.field.probe.desc")}</p>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button className="btn btn-primary" disabled={saving} onClick={save}>
+          {t("omniPost.settings.save")}
+        </button>
+      </div>
     </div>
   );
 }

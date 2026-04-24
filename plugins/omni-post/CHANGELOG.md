@@ -1,5 +1,151 @@
 # omni-post CHANGELOG
 
+## [Unreleased] — Sprint 4 (2026-04-24)
+
+Sprint 4 closes the roadmap: a compatibility engine that lets users
+reuse their daily browser via `MultiPost-Extension`, a daily selector
+self-heal probe with throttled IM alerts, a structured MDRM publish
+memory for downstream recommendation, and a real Settings tab.
+
+### Added
+
+- `omni_post_engine_mp.MultiPostCompatEngine`:
+  - Stateless choreographer — the backend never touches the DOM.
+  - `build_mp_payload` translates our task row into the
+    `MULTIPOST_EXTENSION_REQUEST_PUBLISH` contract (with the douyin ↔
+    tiktok, rednote ↔ xiaohongshu id mapping and a deliberate no-cookie
+    audit in tests).
+  - `dispatch` broadcasts `mp_dispatch`, then awaits `ack` with a
+    configurable timeout; refuses to start when the extension is
+    missing / outdated / untrusted.
+  - `record_status` / `snapshot_status` expose the latest probe verdict
+    to the UI and to `pipeline._resolve_engine`.
+- `omni_post_selfheal`:
+  - `probe_platform` + `run_probe_cycle` run a pluggable per-selector
+    probe, aggregate hit rate, persist to `selectors_health`.
+  - Alerts are throttled by `ALERT_COOLDOWN` (24 h) to avoid pager
+    fatigue; the default notifier broadcasts a `selector_alert` UI
+    event so any IM bridge plugin can pick it up.
+  - `SelfHealTicker` runs the cycle every `selfheal_interval_hours`
+    (default 24 h) in a dedicated background task.
+- `omni_post_mdrm.OmniPostMdrmAdapter`:
+  - Thin facade over `api.get_memory_manager()` / `.get_brain()` /
+    `.get_vector_store()`, mirroring the idea-research pattern.
+  - `PublishMemoryRecord` shapes every publish outcome into
+    `SemanticMemory(subject="omni-post:publish:{platform}:{account}",
+    predicate="success|failure:{kind}", tags=[...platform, account,
+    hour, weekday, engine, asset, error])`.
+  - Tolerant by design: missing API, raising getters, and missing
+    `add_memory` signatures all downgrade to a `"skipped"` marker.
+- `pipeline._resolve_engine` chooses between Playwright and MultiPost
+  per-task based on `task.engine` / `settings.engine` and the current
+  MP availability snapshot; `_write_publish_memory` now routes through
+  the MDRM adapter first and keeps a legacy `api.write_memory` fallback.
+- Plugin lifecycle wires both tickers (`SelfHealTicker` gated by
+  `settings.enable_selfheal`) and the MDRM adapter; unload stops them
+  cleanly before closing the engine + DB.
+- FastAPI routes: `GET/POST /mp/status`, `GET /mp/pending`, `POST /mp/ack`.
+- UI Tab 6 "Settings":
+  - `MultiPostGuide` — PING probe (via `window.postMessage` with 3 s
+    timeout), installed/version/trusted-domain chip row, install
+    wizard + trust-domain copy when misconfigured.
+  - Engine card (auto / pw / mp), Runtime card (global & per-platform
+    concurrency, retries, cooldown, headless toggle), Scheduler card
+    (poll seconds, self-heal toggle + interval, Playwright probe
+    toggle). Save button PUTs the diff to `/settings`.
+- `docs/asset-kinds.md` continues to register `publish_receipt` as an
+  Asset Bus contract with a 90-day TTL and no sensitive fields.
+
+### Tests
+
+- `tests/test_engine_mp.py` (18): semver comparison, payload shaping
+  with a no-cookies audit, availability gating, dispatch ↔ ack
+  rendezvous, duplicate-ack idempotency, timeout returns
+  `ErrorKind.TIMEOUT`, pending-dispatches snapshot.
+- `tests/test_selfheal.py` (6): probe aggregation, exception-as-failure
+  accounting, empty-bundle healthy, cycle alert on hit_rate < 0.6,
+  alert cooldown respected, notifier raising doesn't break the cycle.
+- `tests/test_mdrm.py` (8): tag / predicate / content shape,
+  missing-API / raising-API skip paths, full happy-path memory write,
+  exception wrap, fallback to single-arg `add_memory` signature.
+
+### Known
+
+- Real-world MultiPost trust-domain detection depends on the extension
+  replying to `MULTIPOST_EXTENSION_CHECK_SERVICE_STATUS`; older builds
+  may answer with a different shape — `MultiPostGuide` already tolerates
+  several envelopes but may need updates when the extension ships 2.x.
+- `_default_selector_probe` is an offline sanity check that verifies
+  the bundle shape; a Playwright-backed DOM probe is wired when
+  `enable_playwright_probe` is flipped on.
+
+---
+
+## [Unreleased] — Sprint 3 (2026-04-24)
+
+Sprint 3 adds scheduling (with timezone staggering), matrix publishing
+(multi-account × multi-platform with tag-routed copy overrides), the
+`publish_receipt` Asset Bus contract, and two new UI tabs (Calendar,
+Library).
+
+### Added
+
+- `omni_post_scheduler`: `ScheduleTicker` polls due tasks every
+  `scheduler_poll_seconds`, runs them through the pipeline, and marks
+  schedules as fired. `stagger_slots` computes timezone-aware kick-off
+  times; `fanout_matrix` expands `MatrixPublishRequest` into one task
+  row per platform × account with per-tag overrides.
+- `omni_post_models.MatrixPublishRequest` + `/publish/matrix` route.
+- Task-manager additions: `templates` table, `list_due_schedules`,
+  `list_scheduled_tasks_in_range`, `reschedule_task`,
+  `create/list/update/delete_template`.
+- Pipeline: `_build_receipt_payload` + `_publish_receipt_asset` write
+  a full JSON receipt to `data/omni-post/receipts/<task_id>.json` and
+  publish a 90-day TTL asset on the host Asset Bus
+  (`asset_kind="publish_receipt"`, `shared_with=["*"]`).
+- `docs/asset-kinds.md` documents the new contract plus the existing
+  video / cover / article_draft / subtitle_pack kinds.
+- UI Tab 4 "Calendar": week view, timezone-aware rendering, same-account
+  conflict flag (< 30 min), reschedule via PUT `/calendar/{task_id}`.
+- UI Tab 5 "Library": segmented control Assets ⇄ Templates, asset
+  filters (all / video / image / audio / article), template CRUD +
+  tags + kind filters, TemplateAddModal with JSON or free-form body.
+
+### Tests
+
+- `tests/test_scheduler.py`: stagger_slots timezone handling,
+  fanout_matrix precedence, ScheduleTicker due-task triggering.
+- `tests/test_receipt.py`: receipt payload shape, disk + bus publish,
+  degradation when bus is unavailable.
+- `tests/test_calendar_templates.py`: calendar range query, reschedule
+  refuses running tasks, template CRUD with kind validation.
+
+---
+
+## [Unreleased] — Sprint 2 (2026-04-24)
+
+Sprint 2 widens the platform coverage, hardens the cookie vault, adds
+retry + half-auto fallback, and delivers the Account Matrix tab.
+
+### Added
+
+- Seven more platform bundles: `wechat_video` (with a dedicated
+  micro-frontend adapter accounting for
+  [MultiPost-Extension issue #166](
+  https://github.com/leaperone/MultiPost-Extension/issues/166)),
+  `kuaishou`, `youtube`, `tiktok`, `zhihu`, `weibo`, `wechat_mp`.
+- `CookiePool.probe_lazy` now feeds a Playwright-backed health probe
+  when `enable_playwright_probe=true`, following the spirit of
+  [issue #207](https://github.com/leaperone/MultiPost-Extension/issues/207).
+- Pipeline exponential-backoff retry + `auto_submit` half-auto fallback
+  after `auto_submit_fail_threshold` failures
+  (see [issue #198](https://github.com/leaperone/MultiPost-Extension/issues/198)).
+- Screenshot replay on every terminal failure, cookies redacted.
+- UI Tab 3 "Accounts": `AccountMatrixCard` + per-account recently-used
+  asset history and quota breakdown.
+
+---
+
 ## [Unreleased] — Sprint 1 skeleton (2026-04-24)
 
 Sprint 1 delivers the backbone: plugin scaffolding, data model, asset
