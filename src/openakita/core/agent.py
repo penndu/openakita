@@ -1646,6 +1646,11 @@ class Agent:
             logger.warning("propagate_skill_change: catalog rebuild failed: %s", e)
 
         try:
+            self._invalidate_system_prompt_cache("skill change")
+        except Exception as e:
+            logger.warning("propagate_skill_change: prompt cache invalidation failed: %s", e)
+
+        try:
             self._update_skill_tools()
         except Exception as e:
             logger.warning("propagate_skill_change: tool mapping update failed: %s", e)
