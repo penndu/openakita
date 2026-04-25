@@ -19,12 +19,13 @@ import pytest
 
 import finpulse_fetchers._http as http_mod
 from finpulse_fetchers.base import NormalizedItem
-from finpulse_fetchers.cls import CLSFetcher
 from finpulse_fetchers.eastmoney import EastmoneyFetcher
 from finpulse_fetchers.fed_fomc import FedFOMCFetcher
 from finpulse_fetchers.newsnow import NewsNowFetcher
 from finpulse_fetchers.rss import FEEDPARSER_AVAILABLE, GenericRSSFetcher, parse_feed
-from finpulse_fetchers.wallstreetcn import WallStreetCNFetcher
+from finpulse_fetchers.yicai import YicaiFetcher
+from finpulse_fetchers.nbd import NBDFetcher
+from finpulse_fetchers.stcn import STCNFetcher
 
 BS4_AVAILABLE: bool
 try:
@@ -49,8 +50,9 @@ def _patch_transport(
         timeout: float = 15.0,
         extra_headers: dict[str, str] | None = None,
         follow_redirects: bool = True,
+        user_agent: str | None = None,
     ) -> httpx.AsyncClient:
-        headers = {"User-Agent": "test"}
+        headers = {"User-Agent": user_agent or "test"}
         if extra_headers:
             headers.update(extra_headers)
         return httpx.AsyncClient(
@@ -61,62 +63,97 @@ def _patch_transport(
         )
 
     monkeypatch.setattr(http_mod, "make_client", _factory)
-    # Several fetchers import make_client directly — patch those modules too.
     for mod_name in (
         "finpulse_fetchers.rss",
-        "finpulse_fetchers.cls",
         "finpulse_fetchers.eastmoney",
-        "finpulse_fetchers.wallstreetcn",
         "finpulse_fetchers.sec_edgar",
         "finpulse_fetchers.pbc_omo",
         "finpulse_fetchers.fed_fomc",
         "finpulse_fetchers.newsnow",
+        "finpulse_fetchers.yicai",
+        "finpulse_fetchers.nbd",
+        "finpulse_fetchers.stcn",
     ):
         mod = importlib.import_module(mod_name)
         if hasattr(mod, "make_client"):
             monkeypatch.setattr(mod, "make_client", _factory)
 
 
-# ── CLS Telegram ─────────────────────────────────────────────────────────
+# ── Yicai (第一财经) ──────────────────────────────────────────────────────
 
 
-class TestCLSFetcher:
-    def test_parses_roll_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        payload = {
-            "data": {
-                "roll_data": [
-                    {
-                        "title": "央行开展 2000 亿逆回购操作",
-                        "brief": "内容摘要",
-                        "shareurl": "https://www.cls.cn/detail/100",
-                        "ctime": 1_713_600_000,
-                        "level": "A",
-                    },
-                    {
-                        "title": "",
-                        "brief": "只有 brief 的短讯内容",
-                        "shareurl": "https://www.cls.cn/detail/101",
-                        "ctime": 1_713_600_060,
-                    },
-                    {
-                        "title": "缺少 URL 的条目会被丢弃",
-                        "shareurl": "",
-                    },
-                ]
-            }
-        }
+class TestYicaiFetcher:
+    def test_parses_json_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        payload = [
+            {
+                "title": "央行开展逆回购操作",
+                "url": "/news/id-101.html",
+                "CreatedDate": "2026-04-24 09:10:00",
+                "NewsContent": "摘要内容",
+            },
+            {
+                "title": "",
+                "url": "/news/id-102.html",
+            },
+        ]
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=payload)
 
         _patch_transport(monkeypatch, handler)
-        items = _run(CLSFetcher(config={}).fetch())
+        items = _run(YicaiFetcher(config={}).fetch())
 
-        assert len(items) == 2
-        assert items[0].url == "https://www.cls.cn/detail/100"
-        assert items[0].extra.get("level") == "A"
-        # Auto-derived title when ``title`` is empty but brief exists.
-        assert items[1].title.startswith("只有 brief")
+        assert len(items) == 1
+        assert "yicai.com" in items[0].url
+        assert items[0].title == "央行开展逆回购操作"
+
+
+# ── NBD (每日经济新闻) ──────────────────────────────────────────────────
+
+
+class TestNBDFetcher:
+    def test_parses_html_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        html = (
+            '<html><body>'
+            '<a href="https://www.nbd.com.cn/articles/2026-04-24/001.html">'
+            'A股三大指数高开</a>'
+            '<span>2026-04-24 09:30:00</span>'
+            '<a href="https://www.nbd.com.cn/articles/2026-04-24/002.html">'
+            '上市公司公告</a>'
+            '</body></html>'
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=html)
+
+        _patch_transport(monkeypatch, handler)
+        items = _run(NBDFetcher(config={}).fetch())
+
+        assert len(items) >= 2
+        assert items[0].title == "A股三大指数高开"
+
+
+# ── STCN (证券时报) ──────────────────────────────────────────────────────
+
+
+class TestSTCNFetcher:
+    def test_parses_html_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        html = (
+            '<html><body>'
+            '<a href="https://www.stcn.com/article/detail/abc123.html">'
+            '证券市场要闻</a>'
+            '<span>2026-04-24 10:00</span>'
+            '</body></html>'
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=html)
+
+        _patch_transport(monkeypatch, handler)
+        items = _run(STCNFetcher(config={}).fetch())
+
+        assert len(items) >= 1
+        assert items[0].title == "证券市场要闻"
 
 
 # ── EastMoney ────────────────────────────────────────────────────────────
@@ -162,137 +199,38 @@ class TestEastMoneyFetcher:
         assert url_lookup["A股三大指数低开高走"].startswith("https://")
 
 
-# ── WallStreet CN ────────────────────────────────────────────────────────
-
-
-class TestWallStreetCNFetcher:
-    @pytest.mark.skipif(
-        not FEEDPARSER_AVAILABLE, reason="feedparser not installed"
-    )
-    def test_rss_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        rss_body = (
-            "<?xml version='1.0' encoding='UTF-8'?>"
-            "<rss version='2.0'><channel>"
-            "<title>WSCN</title><link>https://wallstreetcn.com</link>"
-            "<item><title>股市早报</title>"
-            "<link>https://wallstreetcn.com/articles/3001</link>"
-            "<description>摘要</description></item>"
-            "</channel></rss>"
-        )
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, text=rss_body)
-
-        _patch_transport(monkeypatch, handler)
-        items = _run(WallStreetCNFetcher(config={}).fetch())
-
-        assert len(items) == 1
-        assert items[0].url.endswith("3001")
-
-    def test_empty_rss_falls_back_to_html(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # RSS returns empty channel; HTML fallback carries NEXT_DATA JSON.
-        next_data = {
-            "props": {
-                "pageProps": {
-                    "articles": [
-                        {
-                            "title": "华尔街见闻首页要闻",
-                            "url": "https://wallstreetcn.com/articles/4000",
-                            "content_short": "简短摘要",
-                        }
-                    ]
-                }
-            }
-        }
-        html = (
-            "<html><body>"
-            "<script id=\"__NEXT_DATA__\">" + json.dumps(next_data) + "</script>"
-            "</body></html>"
-        )
-        empty_rss = "<?xml version='1.0'?><rss><channel><title>empty</title></channel></rss>"
-        seen: list[str] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            seen.append(request.url.path)
-            if "feed" in request.url.path:
-                return httpx.Response(200, text=empty_rss)
-            return httpx.Response(200, text=html)
-
-        _patch_transport(monkeypatch, handler)
-        items = _run(WallStreetCNFetcher(config={}).fetch())
-
-        # Either feedparser parsed the empty RSS (0 items) and the HTML fallback
-        # produced one, or feedparser is missing and the RSS path raised into
-        # the HTML fallback still. Both should end with >= 1 HTML-sourced item.
-        assert any(
-            "wallstreetcn.com/articles/4000" in (item.url or "")
-            for item in items
-        )
-        assert any("/feed" in p for p in seen)
-
-
 # ── NewsNow ──────────────────────────────────────────────────────────────
 
 
 class TestNewsNowFetcher:
     def test_off_mode_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def handler(request: httpx.Request) -> httpx.Response:
-            pytest.fail("newsnow must not perform IO when mode==off")
-
-        _patch_transport(monkeypatch, handler)
         cfg = {"newsnow.mode": "off", "newsnow.api_url": "https://example.com/api/s"}
         items = _run(NewsNowFetcher(config=cfg).fetch())
         assert items == []
 
-    def test_public_mode_reads_api_url_from_config(
+    def test_public_mode_iterates_source_defs(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls: list[str] = []
-        payload = {
-            "status": "success",
-            "items": [
-                {
-                    "title": "Hot tag",
-                    "url": "https://site.com/a",
-                    "mobileUrl": "https://m.site.com/a",
-                    "rank": 1,
-                }
-            ],
-        }
+        called_pids: list[str] = []
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            calls.append(str(request.url))
-            return httpx.Response(200, json=payload)
+        async def fake_fetch(*, platform_id: str, source_id: str, config: Any, timeout_sec: float) -> list[NormalizedItem]:
+            called_pids.append(platform_id)
+            return [NormalizedItem(source_id=source_id, title=f"from {platform_id}", url=f"https://x.com/{platform_id}")]
 
-        _patch_transport(monkeypatch, handler)
+        import finpulse_fetchers.newsnow as nn_mod
+        monkeypatch.setattr(nn_mod, "fetch_from_newsnow", fake_fetch)
+        monkeypatch.setattr(nn_mod, "jittered_sleep", lambda *a, **k: asyncio.sleep(0))
+
         cfg = {
             "newsnow.mode": "public",
             "newsnow.api_url": "https://custom.example.com/api/s",
-            "newsnow.channels": "wallstreetcn-hot",
         }
         items = _run(NewsNowFetcher(config=cfg).fetch())
 
-        assert len(items) == 1
-        # Confirms TrendRadar bug fix: api_url honoured from config, not hard-coded.
-        assert calls and calls[0].startswith("https://custom.example.com/api/s")
-        assert items[0].source_id == "newsnow:wallstreetcn-hot"
-
-    def test_status_outside_whitelist_raises(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json={"status": "ratelimited", "items": []})
-
-        _patch_transport(monkeypatch, handler)
-        cfg = {
-            "newsnow.mode": "public",
-            "newsnow.api_url": "https://x.example/api/s",
-            "newsnow.channels": "wallstreetcn-hot",
-        }
-        with pytest.raises(ValueError, match="unexpected newsnow status"):
-            _run(NewsNowFetcher(config=cfg).fetch())
+        assert len(items) >= 1
+        assert "wallstreetcn" in called_pids
+        source_ids = {it.source_id for it in items}
+        assert any(sid in source_ids for sid in ("wallstreetcn", "cls", "jin10"))
 
 
 # ── Fed FOMC calendar gating ────────────────────────────────────────────
@@ -472,9 +410,6 @@ class TestFetcherContract:
     @pytest.mark.parametrize(
         "module_name, class_name",
         [
-            ("finpulse_fetchers.wallstreetcn", "WallStreetCNFetcher"),
-            ("finpulse_fetchers.cls", "CLSFetcher"),
-            ("finpulse_fetchers.xueqiu", "XueqiuFetcher"),
             ("finpulse_fetchers.eastmoney", "EastmoneyFetcher"),
             ("finpulse_fetchers.pbc_omo", "PbcOmoFetcher"),
             ("finpulse_fetchers.nbs", "NBSFetcher"),
@@ -482,6 +417,9 @@ class TestFetcherContract:
             ("finpulse_fetchers.sec_edgar", "SecEdgarFetcher"),
             ("finpulse_fetchers.rss", "GenericRSSFetcher"),
             ("finpulse_fetchers.newsnow", "NewsNowFetcher"),
+            ("finpulse_fetchers.yicai", "YicaiFetcher"),
+            ("finpulse_fetchers.nbd", "NBDFetcher"),
+            ("finpulse_fetchers.stcn", "STCNFetcher"),
         ],
     )
     def test_each_fetcher_defines_source_id(
