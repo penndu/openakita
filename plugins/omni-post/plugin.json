@@ -56,7 +56,7 @@
   },
   "ui": {
     "entry": "ui/dist/index.html",
-    "icon": "send",
+    "icon": "icon.svg",
     "title": "\u5168\u5a92\u53d1\u5e03",
     "title_i18n": {
       "zh": "\u5168\u5a92\u53d1\u5e03",
