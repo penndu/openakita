@@ -3123,7 +3123,7 @@ class ReasoningEngine:
                                 r = f"⚠️ 策略拒绝: {_pr.reason}"
                                 _tool_is_error = True
                             elif _pr.decision == PolicyDecision.CONFIRM:
-                                _risk = _pr.metadata.get("risk_level", "HIGH")
+                                _risk = _pr.metadata.get("risk_level") or "medium"
                                 _needs_sb = _pr.metadata.get("needs_sandbox", False)
                                 _pe.store_ui_pending(
                                     t_id,
@@ -3439,7 +3439,7 @@ class ReasoningEngine:
                             continue
 
                         if _pr.decision == PolicyDecision.CONFIRM:
-                            _risk = _pr.metadata.get("risk_level", "HIGH")
+                            _risk = _pr.metadata.get("risk_level") or "medium"
                             _needs_sb = _pr.metadata.get("needs_sandbox", False)
                             _pe.store_ui_pending(
                                 tool_id,

@@ -1,7 +1,12 @@
+import pytest
+
+import openakita.api.routes.config as config_routes
 from openakita.api.routes.config import (
+    _PermissionModeBody,
     _apply_permission_mode_defaults,
     _mode_from_security,
     _normalize_permission_mode,
+    write_permission_mode,
 )
 
 
@@ -45,4 +50,24 @@ def test_cautious_mode_syncs_strict_defaults():
     assert sec["sandbox"]["enabled"] is True
     assert sec["self_protection"]["enabled"] is True
     assert sec["command_patterns"]["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_write_permission_mode_fails_when_yaml_unreadable(monkeypatch):
+    monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: None)
+
+    result = await write_permission_mode(_PermissionModeBody(mode="smart"))
+
+    assert result["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_write_permission_mode_fails_when_yaml_write_fails(monkeypatch):
+    data = {"security": {}}
+    monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: data)
+    monkeypatch.setattr(config_routes, "_write_policies_yaml", lambda _data: False)
+
+    result = await write_permission_mode(_PermissionModeBody(mode="smart"))
+
+    assert result["status"] == "error"
 

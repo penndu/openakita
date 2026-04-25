@@ -1276,11 +1276,13 @@ async def write_permission_mode(body: _PermissionModeBody):
 
         # Persist to YAML
         data = _read_policies_yaml()
-        if data is not None:
-            sec = data.setdefault("security", {})
-            _apply_permission_mode_defaults(sec, mode)
-            _write_policies_yaml(data)
-            reset_policy_engine()
+        if data is None:
+            return {"status": "error", "message": "无法读取当前配置文件，安全模式未切换"}
+        sec = data.setdefault("security", {})
+        _apply_permission_mode_defaults(sec, mode)
+        if not _write_policies_yaml(data):
+            return {"status": "error", "message": "配置写入失败，安全模式未切换"}
+        reset_policy_engine()
         pe = get_policy_engine()
         pe._frontend_mode = mode
         logger.info(f"[Config API] Permission mode set to: {mode}")

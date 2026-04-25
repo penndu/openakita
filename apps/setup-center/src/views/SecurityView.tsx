@@ -197,6 +197,7 @@ export default function SecurityView({ apiBaseUrl, serviceRunning }: SecurityVie
   };
 
   const selectPermissionMode = async (mode: PermissionMode) => {
+    const previousMode = permissionMode;
     setPermissionMode(mode);
     setSaving(true);
     try {
@@ -205,6 +206,7 @@ export default function SecurityView({ apiBaseUrl, serviceRunning }: SecurityVie
       await load();
       if (mode !== "yolo") setShowAdvanced(true);
     } catch {
+      setPermissionMode(previousMode);
       toast.error(t("security.saveFailed"));
     }
     setSaving(false);
