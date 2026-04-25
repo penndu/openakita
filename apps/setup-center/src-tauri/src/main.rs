@@ -891,7 +891,10 @@ fn ensure_venv(venv_dir: &Path, python_version: &str, log_path: &Path) -> Result
     }
     let uv = bootstrap_uv_path();
     let mut cmd = Command::new(&uv);
-    cmd.args(["venv", "--python", python_version, "--clear"]);
+    // uv does not guarantee pip is present unless the venv is seeded. The
+    // runtime manager immediately uses `uv pip install` and the health checks
+    // require `import pip`, so seed the venv at creation time.
+    cmd.args(["venv", "--python", python_version, "--seed", "--clear"]);
     cmd.arg(venv_dir);
     apply_no_window(&mut cmd);
     run_and_log(cmd, log_path)?;
@@ -926,7 +929,9 @@ fn ensure_app_venv(
     cmd.args(["pip", "install", "--python"]);
     cmd.arg(&app_py);
     cmd.arg(wheel_arg);
-    cmd.args(["--index-url", &pip_index.url, "--prefer-binary"]);
+    // `uv pip install` does not support pip's `--prefer-binary` flag.
+    // Keep binary preference on Python-side `pip install` calls only.
+    cmd.args(["--index-url", &pip_index.url]);
     if !pip_index.trusted_host.trim().is_empty() {
         cmd.args(["--trusted-host", &pip_index.trusted_host]);
     }
