@@ -103,8 +103,8 @@ py -3.11 -m ruff check .             # 0 error
 | `data.own` | 独占 `$DATA_DIR/plugins/omni-post/` 下的 SQLite / uploads / thumbs |
 | `assets.publish` / `assets.consume` | 产出 `publish_receipt`、消费上游素材 |
 | `memory.read` / `memory.write` | MDRM 记录 "平台 × 账号 × 时段 × 成功率" |
-| `channel.push` | 任务状态 SSE 推送 |
 | `brain.access` | LLM 差异化文案与定时推荐 |
+| `vector.access` | MDRM 相似素材 / 同主题发布召回（可选） |
 
 ---
 
