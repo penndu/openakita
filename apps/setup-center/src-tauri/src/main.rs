@@ -922,7 +922,11 @@ fn ensure_app_venv(
     let app_py = runtime_venv_python_path(&app_venv_dir());
     let expected_version = env!("CARGO_PKG_VERSION");
     let manifest_ok = read_runtime_manifest()
-        .map(|m| m.app_version == expected_version && !m.legacy_mode)
+        .map(|m| {
+            m.app_version == expected_version
+                && m.wheel_hash == bootstrap.wheel.sha256
+                && !m.legacy_mode
+        })
         .unwrap_or(false);
     if manifest_ok && health_check_python(&app_py, "import openakita, pip, certifi", &log_path) {
         return Ok(app_py);
@@ -938,6 +942,7 @@ fn ensure_app_venv(
     cmd.args(["pip", "install", "--python"]);
     cmd.arg(&app_py);
     cmd.arg(wheel_arg);
+    cmd.args(["--reinstall-package", "openakita"]);
     // `uv pip install` does not support pip's `--prefer-binary` flag.
     // Keep binary preference on Python-side `pip install` calls only.
     cmd.args(["--index-url", &pip_index.url]);
@@ -3010,6 +3015,45 @@ enum VersionCheckResult {
     Upgraded,
 }
 
+fn runtime_wheel_hash_matches_bootstrap() -> bool {
+    let bootstrap_hash = match read_bootstrap_manifest() {
+        Ok(b) => b.wheel.sha256,
+        Err(e) => {
+            log_to_file(&format!("[version_check] bootstrap manifest unavailable: {e}"));
+            return true;
+        }
+    };
+    if bootstrap_hash.trim().is_empty() {
+        return true;
+    }
+    read_runtime_manifest()
+        .map(|m| !m.legacy_mode && m.wheel_hash == bootstrap_hash)
+        .unwrap_or(false)
+}
+
+fn stop_backend_for_restart(pid: u32, port: u16) -> VersionCheckResult {
+    if let Err(e) = graceful_stop_pid(pid, Some(port)) {
+        eprintln!(
+            "Failed to stop old backend (pid={}): {}. Keeping current backend.",
+            pid, e
+        );
+        return VersionCheckResult::RunningOk;
+    }
+
+    // 清理被终止进程对应的 PID 文件
+    for ent in list_service_pids() {
+        if let Some(data) = read_pid_file(&ent.workspace_id) {
+            if data.pid == pid || !is_pid_running(data.pid) {
+                let _ = fs::remove_file(service_pid_file(&ent.workspace_id));
+                remove_heartbeat_file(&ent.workspace_id);
+            }
+        }
+    }
+
+    eprintln!("Old backend (pid={}) stopped. New backend will be started automatically.", pid);
+    VersionCheckResult::Upgraded
+}
+
 /// DMG 覆盖安装后版本对账：检查运行中后端的版本，必要时替换。
 ///
 /// macOS 上通过 DMG 拖拽覆盖安装后，旧的 openakita-server 进程可能仍在端口上
@@ -3057,12 +3101,27 @@ fn startup_version_check(app_version: &str, port: u16) -> VersionCheckResult {
         .trim_start_matches('v');
     let desktop_version = app_version.trim_start_matches('v');
 
-    // 版本一致、dev 版本、或无法判断 → 保持现有后端
-    if backend_version.is_empty()
-        || backend_version == "0.0.0-dev"
-        || backend_version == desktop_version
-    {
+    // 版本无法判断或 dev 后端 → 保守保持现有后端。
+    if backend_version.is_empty() || backend_version == "0.0.0-dev" {
         return VersionCheckResult::RunningOk;
+    }
+
+    if backend_version == desktop_version {
+        if runtime_wheel_hash_matches_bootstrap() {
+            return VersionCheckResult::RunningOk;
+        }
+        let pid = match json.get("pid").and_then(|v| v.as_u64()).map(|p| p as u32) {
+            Some(p) => p,
+            None => {
+                eprintln!("Runtime wheel changed but backend PID is unavailable; keeping current backend.");
+                return VersionCheckResult::RunningOk;
+            }
+        };
+        eprintln!(
+            "Runtime wheel changed for version {}. Stopping backend to refresh app-venv...",
+            desktop_version
+        );
+        return stop_backend_for_restart(pid, port);
     }
 
     // 核心防护：检查安装包内 bundled 后端版本。
@@ -3098,26 +3157,7 @@ fn startup_version_check(app_version: &str, port: u16) -> VersionCheckResult {
         }
     };
 
-    if let Err(e) = graceful_stop_pid(pid, Some(port)) {
-        eprintln!(
-            "Failed to stop old backend (pid={}): {}. Keeping current backend.",
-            pid, e
-        );
-        return VersionCheckResult::RunningOk;
-    }
-
-    // 清理被终止进程对应的 PID 文件
-    for ent in list_service_pids() {
-        if let Some(data) = read_pid_file(&ent.workspace_id) {
-            if data.pid == pid || !is_pid_running(data.pid) {
-                let _ = fs::remove_file(service_pid_file(&ent.workspace_id));
-                remove_heartbeat_file(&ent.workspace_id);
-            }
-        }
-    }
-
-    eprintln!("Old backend (pid={}) stopped. New backend will be started automatically.", pid);
-    VersionCheckResult::Upgraded
+    stop_backend_for_restart(pid, port)
 }
 
 /// 启动对账：清理残留锁文件和已死的 PID 文件
