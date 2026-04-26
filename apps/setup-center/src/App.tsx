@@ -599,6 +599,19 @@ function MainApp() {
   const wsRefreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pageVisible, setPageVisible] = useState(true);
   const visibilityGraceRef = useRef(false); // 休眠恢复宽限期
+  const lastPluginAppsReadyEventRef = useRef(0);
+  const notifyPluginAppsReady = useCallback(() => {
+    const now = Date.now();
+    if (now - lastPluginAppsReadyEventRef.current < 30_000) return;
+    lastPluginAppsReadyEventRef.current = now;
+    try {
+      window.dispatchEvent(
+        new CustomEvent("openakita:plugin-apps-changed", {
+          detail: { source: "backend-ready" },
+        }),
+      );
+    } catch { /* ignore */ }
+  }, []);
   const [detectedProcesses, setDetectedProcesses] = useState<Array<{ pid: number; cmd: string }>>([]);
   const [serviceLog, setServiceLog] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
   const [serviceLogError, setServiceLogError] = useState<string | null>(null);
@@ -755,6 +768,7 @@ function MainApp() {
               setApiBaseUrl(url);
               setServiceStatus({ running: true, pid: healthData.pid || null, pidFile: "" });
               if (svcVersion) setBackendVersion(svcVersion);
+              notifyPluginAppsReady();
               try { await refreshStatus("local", url, true); } catch { /* ignore */ }
               autoCheckEndpoints(url);
               if (svcVersion) setTimeout(() => checkVersionMismatch(svcVersion), 500);
@@ -837,7 +851,7 @@ function MainApp() {
         autoStartToastRef.current = null;
       }
     };
-  }, []);
+  }, [notifyPluginAppsReady]);
 
   // ── 页面可见性监听（休眠/睡眠恢复感知）──
   // Capacitor 环境下 visibilitychange 和 appStateChange 可能同时触发，
@@ -916,6 +930,7 @@ function MainApp() {
             const data = await res.json();
             if (data.version) setBackendVersion(data.version);
           } catch { /* ignore */ }
+          notifyPluginAppsReady();
         } else {
           throw new Error("non-ok");
         }
@@ -1959,6 +1974,7 @@ function MainApp() {
         setServiceStatus((prev) =>
           prev ? { ...prev, running: true } : { running: true, pid: null, pidFile: "" }
         );
+        notifyPluginAppsReady();
         try { await refreshStatus(undefined, undefined, true); } catch { /* ignore */ }
         autoCheckEndpoints(apiBaseUrl);
         setTimeout(() => {

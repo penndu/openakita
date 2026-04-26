@@ -132,11 +132,12 @@ export function Sidebar({
   // event dispatched by PluginManagerView after install/enable/disable/etc.
   //
   // Tauri can mark the backend process as "running" before FastAPI has mounted
-  // plugin UI routes. Use a few startup retries instead of polling forever.
+  // plugin UI routes. Use sparse startup retries as a fallback; the main
+  // trigger is the backend-ready event dispatched after /api/health succeeds.
   useEffect(() => {
     if (!httpApiBase || !serviceRunning) { setPluginApps([]); return; }
     let cancelled = false;
-    const retryDelays = [2_000, 6_000, 15_000];
+    const retryDelays = [2_000, 8_000, 20_000, 60_000, 120_000];
     const timers = new Set<ReturnType<typeof setTimeout>>();
 
     const clearTimers = () => {
