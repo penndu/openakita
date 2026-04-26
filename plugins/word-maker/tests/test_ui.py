@@ -13,6 +13,11 @@ def test_ui_contains_avatar_studio_aligned_tabs() -> None:
     assert "open-folder" in html
     assert "storage/list-dir" in html
     assert "deps/check" in html
+    assert "/upload" in html
+    assert "/render" in html
+    assert "/outline/generate" in html
+    assert "/exports/" in html
+    assert "oaConfirm" in html
     assert "localStorage" in html
     assert "模板变量检测" in html
 

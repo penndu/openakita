@@ -79,21 +79,45 @@
           requirements: state.draft.requirements || ""
         };
         api("POST", "/projects", body).then(function (r) {
-          state.selected = r.project; setTab("projects"); toast("项目已创建：" + r.project.id);
+          state.selected = r.project; state.draft.project_id = r.project.id; localStorage.setItem("word-maker-draft", JSON.stringify(state.draft)); setTab("projects"); toast("项目已创建：" + r.project.id);
         }).catch(function (e) { toast("创建失败：" + (e.message || e), true); });
       }
       function inspectTemplate() {
-        var projectId = document.getElementById("tpl-project").value.trim();
-        var path = document.getElementById("tpl-path").value.trim();
+        var projectId = document.getElementById("tpl-project").value.trim() || currentProjectId();
+        var path = document.getElementById("tpl-path").value.trim() || state.draft.template_path || "";
         if (!projectId || !path) return toast("请填写 project_id 和模板路径", true);
         api("POST", "/projects/" + encodeURIComponent(projectId) + "/template", { template_path: path, context: {} }).then(function (r) {
           document.getElementById("tpl-result").textContent = JSON.stringify(r.inspection, null, 2);
+          state.draft.template_path = path; localStorage.setItem("word-maker-draft", JSON.stringify(state.draft));
         }).catch(function (e) { toast("模板检测失败：" + (e.message || e), true); });
       }
       function checkDeps() {
         api("POST", "/deps/check", {}).then(function (r) {
           document.getElementById("deps-result").textContent = JSON.stringify(r.deps, null, 2);
         });
+      }
+      function apiUpload(inputId, targetKey) {
+        var input = document.getElementById(inputId);
+        if (!input || !input.files || !input.files[0]) return toast("请先选择文件", true);
+        var form = new FormData();
+        form.append("file", input.files[0]);
+        return fetch("/api/plugins/word-maker/upload", { method: "POST", body: form }).then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function (data) {
+          if (targetKey === "source_paths") {
+            state.draft.source_paths = state.draft.source_paths || [];
+            state.draft.source_paths.push(data.rel_path);
+          } else {
+            state.draft[targetKey] = data.rel_path;
+          }
+          localStorage.setItem("word-maker-draft", JSON.stringify(state.draft));
+          toast("已上传：" + data.filename);
+          render();
+        }).catch(function (e) { toast("上传失败：" + (e.message || e), true); });
+      }
+      function currentProjectId() {
+        return state.selected && state.selected.id || state.draft.project_id || (state.projects[0] && state.projects[0].id) || "";
       }
       function openFolderPicker() {
         document.getElementById("folder-picker").style.display = "block";
@@ -103,6 +127,58 @@
             return '<div class="pill">' + (x.is_dir ? "目录 " : "文件 ") + esc(x.name) + '</div>';
           }).join(" ");
         });
+      }
+      function generateOutline(projectId) {
+        var project = state.projects.filter(function (p) { return p.id === projectId; })[0] || {};
+        api("POST", "/projects/" + encodeURIComponent(projectId) + "/outline/generate", {
+          requirement: project.requirements || state.draft.requirements || "",
+          doc_type: project.doc_type || state.draft.doc_type || "research_report",
+          sources_text: ""
+        }).then(function (r) {
+          state.draft.outline = r.data || r;
+          localStorage.setItem("word-maker-draft", JSON.stringify(state.draft));
+          toast("大纲已生成");
+          setTab("draft");
+        }).catch(function (e) { toast("大纲生成失败：" + (e.message || e), true); });
+      }
+      function renderProject(projectId) {
+        var fields = {};
+        try { fields = JSON.parse(document.getElementById("fields-json") && document.getElementById("fields-json").value || "{}"); }
+        catch (e) { return toast("字段 JSON 格式错误", true); }
+        api("POST", "/projects/" + encodeURIComponent(projectId) + "/render", {
+          template_path: state.draft.template_path || null,
+          source_paths: state.draft.source_paths || [],
+          fields: fields,
+          outline: state.draft.outline || {}
+        }).then(function () {
+          toast("已开始渲染，正在轮询状态");
+          pollProject(projectId, 0);
+        }).catch(function (e) { toast("渲染失败：" + (e.message || e), true); });
+      }
+      function pollProject(projectId, count) {
+        api("GET", "/projects/" + encodeURIComponent(projectId)).then(function (r) {
+          var project = r.project;
+          state.projects = state.projects.map(function (item) { return item.id === project.id ? project : item; });
+          render();
+          if (project.status === "rendering" && count < 20) setTimeout(function () { pollProject(projectId, count + 1); }, 1500);
+        });
+      }
+      function downloadProject(projectId, outputPath) {
+        var filename = String(outputPath || "document.docx").split(/[\\/]/).pop();
+        window.location.href = "/api/plugins/word-maker/projects/" + encodeURIComponent(projectId) + "/exports/" + encodeURIComponent(filename);
+      }
+      function cancelProject(projectId) {
+        oaConfirm("确认取消这个项目的后台任务？").then(function (ok) {
+          if (!ok) return;
+          api("POST", "/projects/" + encodeURIComponent(projectId) + "/cancel", {}).then(function () {
+            toast("项目已取消");
+            refresh();
+          });
+        });
+      }
+      function oaConfirm(message) {
+        if (window.OpenAkita && window.OpenAkita.confirm) return window.OpenAkita.confirm(message);
+        return Promise.resolve(window.confirm(message));
       }
       function renderHeader() {
         var ok = state.health && state.health.ok;
@@ -122,20 +198,21 @@
           '<input class="input" placeholder="标题" value="' + esc(state.draft.title || "") + '" oninput="window.__wmDraft(\\'title\\',this.value)"><br><br>' +
           '<input class="input" placeholder="目标受众" value="' + esc(state.draft.audience || "") + '" oninput="window.__wmDraft(\\'audience\\',this.value)"><br><br>' +
           '<textarea class="textarea" placeholder="请描述要生成的文档、已有资料和交付要求" oninput="window.__wmDraft(\\'requirements\\',this.value)">' + esc(state.draft.requirements || "") + '</textarea>' +
-          '<br><br><button class="btn primary" onclick="window.__wmCreate()">创建项目</button></div>' +
-          '<div class="card"><h2>下一步</h2><p class="muted">创建后进入 Projects：上传资料、检测模板变量、生成大纲并渲染 DOCX。</p><pre>' + esc(JSON.stringify(state.health || {}, null, 2)) + '</pre></div></div>';
+          '<br><br><div class="row"><button class="btn primary" onclick="window.__wmCreate()">创建项目</button><label class="btn">上传资料<input id="source-upload" type="file" style="display:none" onchange="window.__wmUpload(\\'source-upload\\',\\'source_paths\\')"></label><label class="btn">上传模板<input id="template-upload" type="file" accept=".docx" style="display:none" onchange="window.__wmUpload(\\'template-upload\\',\\'template_path\\')"></label></div></div>' +
+          '<div class="card"><h2>下一步</h2><p class="muted">创建后进入 Projects：上传资料、检测模板变量、生成大纲并渲染 DOCX。</p><p class="muted">模板：' + esc(state.draft.template_path || "未上传") + '</p><p class="muted">资料数：' + esc((state.draft.source_paths || []).length) + '</p><pre>' + esc(JSON.stringify(state.health || {}, null, 2)) + '</pre></div></div>';
       }
       function renderProjects() {
         var rows = state.projects.map(function (p) {
-          return '<tr><td>' + esc(p.id) + '</td><td>' + esc(p.title) + '</td><td>' + esc(p.doc_type) + '</td><td><span class="status">' + esc(p.status) + '</span></td><td>' + esc(p.output_path || "") + '</td></tr>';
+          var download = p.output_path ? '<button class="btn" onclick="window.__wmDownload(\\'' + p.id + '\\',\\'' + esc(p.output_path) + '\\')">下载</button>' : '';
+          return '<tr><td>' + esc(p.id) + '</td><td>' + esc(p.title) + '</td><td>' + esc(p.doc_type) + '</td><td><span class="status">' + esc(p.status) + '</span></td><td>' + esc(p.error_message || p.output_path || "") + '</td><td class="row"><button class="btn" onclick="window.__wmOutline(\\'' + p.id + '\\')">生成大纲</button><button class="btn primary" onclick="window.__wmRenderProject(\\'' + p.id + '\\')">渲染</button><button class="btn" onclick="window.__wmCancel(\\'' + p.id + '\\')">取消</button>' + download + '</td></tr>';
         }).join("");
-        return '<div class="card"><h2>项目列表</h2><table style="width:100%;border-collapse:collapse"><thead><tr><th>id</th><th>标题</th><th>类型</th><th>状态</th><th>输出</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+        return '<div class="card"><h2>项目列表</h2><table style="width:100%;border-collapse:collapse"><thead><tr><th>id</th><th>标题</th><th>类型</th><th>状态</th><th>输出/错误</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
       }
       function renderTemplates() {
-        return '<div class="grid"><div class="card"><h2>模板变量检测</h2><input id="tpl-project" class="input" placeholder="project_id"><br><br><input id="tpl-path" class="input" placeholder="DOCX 模板绝对路径"><br><br><button class="btn primary" onclick="window.__wmInspectTemplate()">提取变量</button></div><div class="card"><h2>检测结果</h2><pre id="tpl-result">等待检测</pre></div></div>';
+        return '<div class="grid"><div class="card"><h2>模板变量检测</h2><input id="tpl-project" class="input" placeholder="project_id" value="' + esc(currentProjectId()) + '"><br><br><input id="tpl-path" class="input" placeholder="DOCX 模板路径或上传 rel_path" value="' + esc(state.draft.template_path || "") + '"><br><br><button class="btn primary" onclick="window.__wmInspectTemplate()">提取变量</button></div><div class="card"><h2>检测结果</h2><pre id="tpl-result">等待检测</pre></div></div>';
       }
       function renderDraft() {
-        return '<div class="card"><h2>草稿与章节</h2><p class="muted">这里用于查看大纲、字段 JSON 和章节重写结果。当前阶段后端接口已具备，UI 保留入口。</p><textarea class="textarea" placeholder="粘贴章节 Markdown，后续可调用 rewrite_section"></textarea></div>';
+        return '<div class="grid"><div class="card"><h2>大纲 JSON</h2><textarea class="textarea" oninput="try{window.__wmDraft(\\'outline\\',JSON.parse(this.value||\\'{}\\'))}catch(e){}">' + esc(JSON.stringify(state.draft.outline || {}, null, 2)) + '</textarea></div><div class="card"><h2>字段 JSON</h2><textarea id="fields-json" class="textarea" placeholder="{&quot;title&quot;:&quot;报告标题&quot;}">' + esc(JSON.stringify(state.draft.fields || {}, null, 2)) + '</textarea><br><br><button class="btn primary" onclick="window.__wmRenderProject(window.__wmProjectId())">渲染当前项目</button></div></div>';
       }
       function renderSettings() {
         var settings = state.settings || {};
@@ -150,7 +227,7 @@
       function render() {
         document.getElementById("app").innerHTML = '<div class="app">' + renderHeader() + renderTabs() + (state.notice ? '<div class="card status ' + (state.error ? "bad" : "ok") + '">' + esc(state.notice) + '</div>' : "") + '<div class="content">' + renderContent() + '</div></div>';
       }
-      window.__wmTab = setTab; window.__wmRefresh = refresh; window.__wmDraft = draft; window.__wmCreate = createProject; window.__wmInspectTemplate = inspectTemplate; window.__wmDeps = checkDeps; window.__wmFolder = openFolderPicker; window.__wmRender = render;
+      window.__wmTab = setTab; window.__wmRefresh = refresh; window.__wmDraft = draft; window.__wmCreate = createProject; window.__wmInspectTemplate = inspectTemplate; window.__wmDeps = checkDeps; window.__wmFolder = openFolderPicker; window.__wmRender = render; window.__wmUpload = apiUpload; window.__wmOutline = generateOutline; window.__wmRenderProject = renderProject; window.__wmDownload = downloadProject; window.__wmCancel = cancelProject; window.__wmProjectId = currentProjectId; window.oaConfirm = oaConfirm;
       window.addEventListener("openakita:ready", function (event) { if (event.detail && event.detail.theme) document.documentElement.setAttribute("data-theme", event.detail.theme); });
       refresh(); render();
     })();

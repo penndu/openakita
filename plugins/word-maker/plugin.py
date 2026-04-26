@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from word_brain_helper import WordBrainHelper
 from word_maker_inline.file_utils import safe_name, unique_child
@@ -23,6 +23,18 @@ from word_template_engine import extract_template_vars, render_template
 from openakita.plugins.api import PluginAPI, PluginBase
 
 PLUGIN_ID = "word-maker"
+SETTINGS_KEY = "word_maker_settings"
+
+
+def _read_settings(api: PluginAPI | None) -> dict[str, Any]:
+    config = api.get_config() if api else {}
+    settings = config.get(SETTINGS_KEY, {}) if isinstance(config, dict) else {}
+    return {
+        "custom_data_dir": str(settings.get("custom_data_dir") or "").strip(),
+        "default_language": settings.get("default_language", "zh-CN"),
+        "default_tone": settings.get("default_tone", "professional"),
+        "retention_days": int(settings.get("retention_days", 30)),
+    }
 
 
 class StrictModel(BaseModel):
@@ -77,14 +89,19 @@ class Plugin(PluginBase):
         self._workspace_dir: Path | None = None
         self._manager: WordTaskManager | None = None
         self._brain_helper: WordBrainHelper | None = None
-        self._tasks: set[asyncio.Task[Any]] = set()
+        self._tasks: dict[str, asyncio.Task[Any]] = {}
 
     def on_load(self, api: PluginAPI) -> None:
         self._api = api
+        settings = _read_settings(api)
         data_dir = api.get_data_dir() or Path.cwd() / "data" / PLUGIN_ID
         data_dir.mkdir(parents=True, exist_ok=True)
         self._data_dir = data_dir
-        self._workspace_dir = data_dir / PLUGIN_ID
+        self._workspace_dir = (
+            Path(settings["custom_data_dir"]).expanduser()
+            if settings.get("custom_data_dir")
+            else data_dir / PLUGIN_ID
+        )
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
         self._manager = WordTaskManager(
             self._workspace_dir / "word-maker.db",
@@ -106,9 +123,24 @@ class Plugin(PluginBase):
             return json.dumps({"projects": await manager.list_projects()}, ensure_ascii=False)
         if tool_name == "word_start_project":
             project = await manager.create_project(arguments or {"title": "未命名文档"})
-            return json.dumps({"project_id": project["id"], "status": project["status"]}, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "project_id": project["id"],
+                    "status": project["status"],
+                    "next_action": "ingest_sources_or_upload_template",
+                },
+                ensure_ascii=False,
+            )
+        if tool_name == "word_ingest_sources":
+            return json.dumps(await self._tool_ingest_sources(arguments), ensure_ascii=False)
+        if tool_name == "word_upload_template":
+            return json.dumps(await self._tool_upload_template(arguments), ensure_ascii=False)
         if tool_name == "word_extract_template_vars":
-            result = extract_template_vars(arguments.get("template_path", ""), context=arguments.get("context", {}))
+            result = extract_template_vars(
+                self._resolve_workspace_path(arguments.get("template_path", "")),
+                context=arguments.get("context", {}),
+            )
             return json.dumps(result.to_dict(), ensure_ascii=False)
         if tool_name == "word_generate_outline":
             helper = self._require_brain_helper()
@@ -118,11 +150,21 @@ class Plugin(PluginBase):
                 sources_text=arguments.get("sources_text", ""),
             )
             return json.dumps(result.to_dict(), ensure_ascii=False)
+        if tool_name == "word_confirm_outline":
+            project_id = arguments.get("project_id", "")
+            version = await manager.add_draft_version(project_id, outline=arguments.get("outline", {}))
+            project = await manager.update_project_safe(project_id, status="outline_ready")
+            return json.dumps(
+                {"ok": True, "project": project, "version": version, "next_action": "fill_template_or_render"},
+                ensure_ascii=False,
+            )
         if tool_name == "word_fill_template":
-            result = render_template(
-                arguments.get("template_path", ""),
-                arguments.get("output_path", ""),
-                arguments.get("fields", {}),
+            return json.dumps(await self._tool_fill_template(arguments), ensure_ascii=False)
+        if tool_name == "word_rewrite_section":
+            result = await self._require_brain_helper().rewrite_section(
+                section_markdown=arguments.get("section_markdown", ""),
+                instruction=arguments.get("instruction", ""),
+                tone=arguments.get("tone", "professional"),
             )
             return json.dumps(result.to_dict(), ensure_ascii=False)
         if tool_name == "word_audit":
@@ -131,11 +173,17 @@ class Plugin(PluginBase):
         if tool_name == "word_export":
             project = await manager.get_project(arguments.get("project_id", ""))
             asset_id = None
+            versions = await manager.list_versions(project["id"]) if project else []
+            latest = versions[0] if versions else {}
             if project and arguments.get("publish_for_ppt") and self._api and self._api.has_permission("assets.publish"):
                 asset_id = await self._api.publish_asset(
                     asset_kind="word_document_brief",
                     source_path=project.get("output_path"),
-                    metadata=build_ppt_asset_metadata(project=project),
+                    metadata=build_ppt_asset_metadata(
+                        project=project,
+                        outline=latest.get("outline"),
+                        doc_markdown=latest.get("doc_markdown", ""),
+                    ),
                     shared_with=["ppt-maker"],
                     ttl_seconds=7 * 86400,
                 )
@@ -145,16 +193,16 @@ class Plugin(PluginBase):
                     "status": project.get("status") if project else "not_found",
                     "output_path": project.get("output_path") if project else None,
                     "asset_id": asset_id,
+                    "next_action": "download_or_publish_for_ppt" if project else "check_project_id",
                 },
                 ensure_ascii=False,
             )
         if tool_name == "word_cancel":
-            project = await manager.update_project_safe(arguments.get("project_id", ""), status="cancelled")
-            return json.dumps({"project": project}, ensure_ascii=False)
+            return json.dumps(await self._cancel_project(arguments.get("project_id", "")), ensure_ascii=False)
         return json.dumps({"ok": False, "error": f"Unknown or not yet implemented tool: {tool_name}"}, ensure_ascii=False)
 
     async def on_unload(self) -> None:
-        for task in list(self._tasks):
+        for task in list(self._tasks.values()):
             task.cancel()
         self._tasks.clear()
         if self._manager:
@@ -177,9 +225,23 @@ class Plugin(PluginBase):
             raise RuntimeError("word-maker workspace is not initialized")
         return self._workspace_dir
 
+    def _resolve_workspace_path(self, value: str | Path) -> Path:
+        raw = Path(value)
+        if raw.is_absolute():
+            return raw
+        candidate = (self._require_workspace() / raw).resolve()
+        try:
+            candidate.relative_to(self._require_workspace().resolve())
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="Path escapes plugin workspace") from exc
+        return candidate
+
+    def _file_url(self, path: Path) -> str:
+        rel = path.resolve().relative_to(self._require_workspace().resolve())
+        return f"/api/plugins/{PLUGIN_ID}/files/{rel.as_posix()}"
+
     def _settings(self) -> dict[str, Any]:
-        config = self._api.get_config() if self._api else {}
-        settings = config.get("word_maker_settings", {}) if isinstance(config, dict) else {}
+        settings = _read_settings(self._api)
         return {
             "custom_data_dir": settings.get("custom_data_dir", ""),
             "default_language": settings.get("default_language", "zh-CN"),
@@ -189,6 +251,97 @@ class Plugin(PluginBase):
             "brain_available": bool(self._brain_helper and self._brain_helper.is_available()),
             "deps": check_optional_deps(),
         }
+
+    async def _tool_ingest_sources(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_manager()
+        project_id = arguments.get("project_id", "")
+        raw_paths = arguments.get("paths") or arguments.get("source_paths") or []
+        if isinstance(raw_paths, str):
+            raw_paths = [raw_paths]
+        sources = []
+        for raw_path in raw_paths:
+            path = self._resolve_workspace_path(raw_path)
+            result = load_source(path)
+            source = await manager.add_source(
+                project_id,
+                source_type=result.source_type,
+                filename=path.name,
+                path=str(path),
+                text_preview=result.text[:1200],
+                parse_status="parsed" if result.ok else "failed",
+                error_message=result.error or None,
+            )
+            sources.append({"source": source, "load": result.to_dict()})
+        return {
+            "ok": all(item["load"]["ok"] for item in sources),
+            "project_id": project_id,
+            "sources": sources,
+            "next_action": "generate_outline_or_upload_template",
+        }
+
+    async def _tool_upload_template(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_manager()
+        project_id = arguments.get("project_id", "")
+        template_path = self._resolve_workspace_path(arguments.get("template_path", ""))
+        inspection = extract_template_vars(template_path, context=arguments.get("context", {}))
+        template = await manager.add_template(
+            project_id,
+            label=template_path.name,
+            path=str(template_path),
+            variables=inspection.variables,
+            validation=inspection.to_dict(),
+        )
+        project = await manager.update_project_safe(project_id, status="template_ready")
+        return {
+            "ok": inspection.error == "",
+            "project": project,
+            "template": template,
+            "inspection": inspection.to_dict(),
+            "next_action": "fill_missing_fields" if inspection.missing else "render_docx",
+        }
+
+    async def _tool_fill_template(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_manager()
+        project_id = arguments.get("project_id", "")
+        template_path = self._resolve_workspace_path(arguments.get("template_path", ""))
+        output_arg = arguments.get("output_path")
+        output_path = (
+            self._resolve_workspace_path(output_arg)
+            if output_arg
+            else manager.project_dir(project_id) / "exports" / "document.docx"
+        )
+        fields = arguments.get("fields", {})
+        result = render_template(template_path, output_path, fields)
+        audit = audit_output(output_path if result.ok else None, missing=result.missing)
+        project = None
+        if project_id:
+            await manager.add_draft_version(
+                project_id,
+                fields=fields,
+                export_path=str(output_path) if result.ok else None,
+                audit=audit,
+            )
+            project = await manager.update_project_safe(
+                project_id,
+                status="succeeded" if result.ok and audit.get("ok") else "failed",
+                output_path=str(output_path) if result.ok else None,
+                error_kind=None if result.ok else "template_render_failed",
+                error_message="" if result.ok else result.error,
+            )
+        return {
+            **result.to_dict(),
+            "project": project,
+            "audit": audit,
+            "download_url": self._file_url(output_path) if result.ok else None,
+            "next_action": "download_or_audit" if result.ok else "fill_missing_fields",
+        }
+
+    async def _cancel_project(self, project_id: str) -> dict[str, Any]:
+        task = self._tasks.pop(project_id, None)
+        if task and not task.done():
+            task.cancel()
+        project = await self._require_manager().update_project_safe(project_id, status="cancelled")
+        return {"ok": project is not None, "project": project, "cancelled_task": bool(task)}
 
     def _register_routes(self, router: APIRouter) -> None:
         @router.get("/healthz")
@@ -212,7 +365,7 @@ class Plugin(PluginBase):
         @router.put("/settings")
         async def put_settings(body: SettingsUpdateRequest) -> dict[str, Any]:
             if self._api:
-                self._api.set_config({"word_maker_settings": body.model_dump()})
+                self._api.set_config({SETTINGS_KEY: body.model_dump()})
             return self._settings()
 
         @router.get("/storage/stats")
@@ -248,13 +401,13 @@ class Plugin(PluginBase):
             return {"ok": True, "path": str(target)}
 
         @router.post("/upload")
-        async def upload(file: UploadFile) -> dict[str, Any]:
+        async def upload(file: UploadFile = File(...)) -> dict[str, Any]:
             uploads = self._require_workspace() / "uploads"
             target = unique_child(uploads, file.filename or "upload.bin")
             content = await file.read()
             target.write_bytes(content)
             rel = target.relative_to(self._require_workspace())
-            return {"ok": True, "path": str(target), "url": f"/api/plugins/{PLUGIN_ID}/files/{rel.as_posix()}"}
+            return {"ok": True, "rel_path": rel.as_posix(), "url": self._file_url(target), "filename": target.name}
 
         @router.get("/projects")
         async def list_projects(status: str | None = None) -> dict[str, Any]:
@@ -282,7 +435,7 @@ class Plugin(PluginBase):
 
         @router.post("/projects/{project_id}/sources")
         async def add_source(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
-            result = load_source(body.get("path", ""))
+            result = load_source(self._resolve_workspace_path(body.get("path") or body.get("rel_path", "")))
             source = await self._require_manager().add_source(
                 project_id,
                 source_type=result.source_type,
@@ -296,10 +449,11 @@ class Plugin(PluginBase):
 
         @router.post("/projects/{project_id}/template")
         async def add_template(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
-            inspection = extract_template_vars(body.get("template_path", ""), context=body.get("context", {}))
+            template_path = self._resolve_workspace_path(body.get("template_path") or body.get("rel_path", ""))
+            inspection = extract_template_vars(template_path, context=body.get("context", {}))
             template = await self._require_manager().add_template(
                 project_id,
-                label=Path(inspection.template_path).name,
+                label=template_path.name,
                 path=inspection.template_path,
                 variables=inspection.variables,
                 validation=inspection.to_dict(),
@@ -332,16 +486,20 @@ class Plugin(PluginBase):
                 task_dir=self._require_manager().project_dir(project_id),
                 requirement=project.get("requirements", ""),
                 doc_type=project.get("doc_type", "research_report"),
-                template_path=Path(body.template_path) if body.template_path else None,
-                source_paths=[Path(item) for item in body.source_paths],
+                template_path=self._resolve_workspace_path(body.template_path) if body.template_path else None,
+                source_paths=[self._resolve_workspace_path(item) for item in body.source_paths],
                 fields=body.fields,
                 outline=body.outline,
             )
             coro = run_pipeline(ctx, manager=self._require_manager(), brain_helper=self._brain_helper)
             task = self._api.spawn_task(coro, name=f"word-maker:{project_id}") if self._api else asyncio.create_task(coro)
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            self._tasks[project_id] = task
+            task.add_done_callback(lambda _task: self._tasks.pop(project_id, None))
             return {"ok": True, "project_id": project_id, "status": "rendering"}
+
+        @router.post("/projects/{project_id}/cancel")
+        async def cancel(project_id: str) -> dict[str, Any]:
+            return await self._cancel_project(project_id)
 
         @router.post("/projects/{project_id}/sections/rewrite")
         async def rewrite_section(project_id: str, body: RewriteSectionRequest) -> dict[str, Any]:
