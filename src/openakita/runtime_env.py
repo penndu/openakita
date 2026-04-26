@@ -418,6 +418,8 @@ def apply_agent_python_environment(env: dict[str, str]) -> dict[str, str]:
     merged["UV_INDEX_URL"] = pip_index["url"]
     if pip_index.get("trusted_host"):
         merged["PIP_TRUSTED_HOST"] = pip_index["trusted_host"]
+    # Keep agent subprocesses isolated from any host/app PYTHONPATH.
+    merged.pop("PYTHONPATH", None)
     merged["PYTHONNOUSERSITE"] = "1"
     return merged
 

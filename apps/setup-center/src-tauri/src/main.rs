@@ -747,12 +747,59 @@ fn runtime_venv_python_path(venv_dir: &Path) -> PathBuf {
     }
 }
 
+fn runtime_venv_home_python_path(venv_dir: &Path) -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let cfg_path = venv_dir.join("pyvenv.cfg");
+    let content = fs::read_to_string(cfg_path).ok()?;
+    for line in content.lines() {
+        let Some(home) = line.strip_prefix("home = ") else {
+            continue;
+        };
+        let py = PathBuf::from(home.trim()).join("python.exe");
+        if py.exists() {
+            return Some(py);
+        }
+    }
+    None
+}
+
+fn runtime_venv_site_packages_dir(venv_dir: &Path) -> Option<PathBuf> {
+    if cfg!(windows) {
+        let sp = venv_dir.join("Lib").join("site-packages");
+        return sp.exists().then_some(sp);
+    }
+    None
+}
+
+fn python_string_literal(value: &Path) -> String {
+    format!("{:?}", value.to_string_lossy().to_string())
+}
+
+fn runtime_venv_backend_args(venv_dir: &Path) -> Vec<String> {
+    if cfg!(windows) && runtime_venv_home_python_path(venv_dir).is_some() {
+        if let Some(site_packages) = runtime_venv_site_packages_dir(venv_dir) {
+            let venv_python = runtime_venv_python_path(venv_dir);
+            let code = format!(
+                "import runpy, site, sys; sys.prefix = sys.exec_prefix = {}; sys.executable = {}; site.addsitedir({}); runpy.run_module('openakita.main', run_name='__main__')",
+                python_string_literal(venv_dir),
+                python_string_literal(&venv_python),
+                python_string_literal(&site_packages)
+            );
+            return vec!["-u".into(), "-c".into(), code, "serve".into()];
+        }
+    }
+    vec!["-u".into(), "-m".into(), "openakita.main".into(), "serve".into()]
+}
+
 fn runtime_venv_backend_python_path(venv_dir: &Path) -> PathBuf {
-    // Do not use pythonw.exe for uv-created Windows venvs. The uv launcher can
-    // delegate to the managed console python.exe as a grandchild, which escapes
-    // our CREATE_NO_WINDOW flag and leaves a visible black terminal window.
-    // Launch python.exe directly and rely on the Rust spawn flags/stdio
-    // redirection applied in openakita_service_start.
+    // Do not use the python.exe/pythonw.exe launcher files created by uv on
+    // Windows. They delegate to the managed CPython executable as a grandchild,
+    // which escapes our CREATE_NO_WINDOW flag and leaves a visible console.
+    if let Some(py) = runtime_venv_home_python_path(venv_dir) {
+        return py;
+    }
     runtime_venv_python_path(venv_dir)
 }
 
@@ -1112,7 +1159,7 @@ fn get_backend_executable(venv_dir: &str) -> (PathBuf, Vec<String>) {
             ));
             return (
                 backend_python,
-                vec!["-u".into(), "-m".into(), "openakita.main".into(), "serve".into()],
+                runtime_venv_backend_args(&runtime.app_venv),
             );
         }
         Err(e) => {
@@ -2544,7 +2591,7 @@ fn openakita_list_processes() -> Vec<OpenAkitaProcess> {
         let mut pe: win::PROCESSENTRY32W = unsafe { std::mem::zeroed() };
         pe.dw_size = std::mem::size_of::<win::PROCESSENTRY32W>() as u32;
 
-        let mut python_pids: Vec<u32> = Vec::new();
+        let mut python_pids: Vec<(u32, u32)> = Vec::new();
 
         if unsafe { win::Process32FirstW(snap, &mut pe) } != 0 {
             loop {
@@ -2557,7 +2604,7 @@ fn openakita_list_processes() -> Vec<OpenAkitaProcess> {
                 );
                 let name_lower = name.to_ascii_lowercase();
                 if name_lower.contains("python") {
-                    python_pids.push(pe.th32_process_id);
+                    python_pids.push((pe.th32_process_id, pe.th32_parent_process_id));
                 }
                 if unsafe { win::Process32NextW(snap, &mut pe) } == 0 {
                     break;
@@ -2568,8 +2615,10 @@ fn openakita_list_processes() -> Vec<OpenAkitaProcess> {
             win::CloseHandle(snap);
         }
 
+        let mut matched: Vec<(u32, u32, String)> = Vec::new();
+
         // Step 2: 对每个 python 进程查命令行
-        for ppid in python_pids {
+        for (ppid, parent_pid) in python_pids {
             let mut c = Command::new("powershell");
             c.args([
                 "-NoProfile",
@@ -2587,12 +2636,21 @@ fn openakita_list_processes() -> Vec<OpenAkitaProcess> {
                 // 精确匹配模块调用签名，避免 venv 路径中 .openakita 误报
                 if s_lower.contains("openakita.main") && (s_lower.contains(" serve") || s_lower.ends_with("serve")) {
                     if is_pid_running(ppid) {
-                        out.push(OpenAkitaProcess {
-                            pid: ppid,
-                            cmd: s.trim().to_string(),
-                        });
+                        matched.push((ppid, parent_pid, s.trim().to_string()));
                     }
                 }
+            }
+        }
+
+        // uv-created venv python.exe can be a launcher parent that delegates to
+        // the managed CPython executable. Count only the leaf backend process.
+        for (pid, _parent, cmd) in &matched {
+            let has_matched_child = matched.iter().any(|(_, parent, _)| parent == pid);
+            if !has_matched_child {
+                out.push(OpenAkitaProcess {
+                    pid: *pid,
+                    cmd: cmd.clone(),
+                });
             }
         }
     }
