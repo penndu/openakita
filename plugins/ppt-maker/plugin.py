@@ -163,7 +163,12 @@ class Plugin(PluginBase):
         async def list_projects() -> dict[str, Any]:
             async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
                 projects = await manager.list_projects()
-            return {"ok": True, "projects": [item.model_dump(mode="json") for item in projects]}
+                payload = []
+                for project in projects:
+                    item = project.model_dump(mode="json")
+                    item["exports"] = await manager.list_exports(project.id)
+                    payload.append(item)
+            return {"ok": True, "projects": payload}
 
         @router.get("/projects/{project_id}")
         async def get_project(project_id: str) -> dict[str, Any]:
@@ -594,13 +599,96 @@ class Plugin(PluginBase):
         async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
             if tool_name == "ppt_list_projects":
                 projects = await manager.list_projects()
+                payload = []
+                for project in projects:
+                    item = project.model_dump(mode="json")
+                    item["exports"] = await manager.list_exports(project.id)
+                    payload.append(item)
                 return json.dumps(
-                    {"ok": True, "projects": [item.model_dump(mode="json") for item in projects]},
+                    {"ok": True, "projects": payload},
                     ensure_ascii=False,
                 )
             if tool_name == "ppt_start_project":
                 project = await manager.create_project(ProjectCreate(**arguments))
                 return json.dumps({"ok": True, "project": project.model_dump(mode="json")}, ensure_ascii=False)
+            if tool_name == "ppt_ingest_sources":
+                created = []
+                for raw_path in arguments.get("paths", []):
+                    path = Path(str(raw_path))
+                    source = await manager.create_source(
+                        project_id=arguments.get("project_id"),
+                        kind=SourceLoader().detect_kind(path),
+                        filename=path.name,
+                        path=str(path),
+                        metadata={"tool": tool_name},
+                    )
+                    created.append(source.model_dump(mode="json"))
+                return json.dumps({"ok": True, "sources": created}, ensure_ascii=False)
+            if tool_name == "ppt_ingest_table":
+                dataset = await manager.create_dataset(
+                    project_id=arguments.get("project_id"),
+                    name=arguments.get("name") or Path(str(arguments["path"])).stem,
+                    original_path=str(arguments["path"]),
+                    metadata={"kind": SourceLoader().detect_kind(str(arguments["path"]))},
+                )
+                return json.dumps({"ok": True, "dataset": dataset.model_dump(mode="json")}, ensure_ascii=False)
+            if tool_name == "ppt_profile_table":
+                result = await _profile_dataset_for_tool(manager, data_dir, str(arguments["dataset_id"]))
+                return json.dumps({"ok": True, **result}, ensure_ascii=False)
+            if tool_name == "ppt_generate_table_insights":
+                result = await _dataset_file_payload(manager, str(arguments["dataset_id"]), "insights")
+                return json.dumps({"ok": True, **result}, ensure_ascii=False)
+            if tool_name == "ppt_upload_template":
+                template = await manager.create_template(
+                    name=arguments.get("name") or Path(str(arguments["path"])).stem,
+                    category=arguments.get("category"),
+                    original_path=str(arguments["path"]),
+                )
+                return json.dumps({"ok": True, "template": template.model_dump(mode="json")}, ensure_ascii=False)
+            if tool_name == "ppt_diagnose_template":
+                result = await _diagnose_template_for_tool(manager, data_dir, str(arguments["template_id"]))
+                return json.dumps({"ok": True, **result}, ensure_ascii=False)
+            if tool_name == "ppt_generate_outline":
+                result = await _generate_outline_for_tool(manager, data_dir, str(arguments["project_id"]))
+                return json.dumps({"ok": True, **result}, ensure_ascii=False)
+            if tool_name == "ppt_confirm_outline":
+                outline = OutlineBuilder().confirm(arguments["outline"])
+                OutlineBuilder().save(outline, project_dir(data_dir, str(arguments["project_id"])))
+                record = await manager.create_outline(
+                    project_id=str(arguments["project_id"]),
+                    outline=outline,
+                    confirmed=True,
+                )
+                await manager.update_project_safe(str(arguments["project_id"]), status=ProjectStatus.OUTLINE_CONFIRMED)
+                return json.dumps({"ok": True, "outline": outline, "record": record}, ensure_ascii=False)
+            if tool_name == "ppt_generate_design":
+                result = await _generate_design_for_tool(manager, data_dir, str(arguments["project_id"]))
+                return json.dumps({"ok": True, **result}, ensure_ascii=False)
+            if tool_name == "ppt_confirm_design":
+                design = DesignBuilder().confirm(arguments["design"])
+                paths = DesignBuilder().save(design, project_dir(data_dir, str(arguments["project_id"])))
+                record = await manager.create_design_spec(
+                    project_id=str(arguments["project_id"]),
+                    design_markdown=design["design_spec_markdown"],
+                    spec_lock=design["spec_lock"],
+                    confirmed=True,
+                )
+                await manager.update_project_safe(str(arguments["project_id"]), status=ProjectStatus.DESIGN_CONFIRMED)
+                return json.dumps({"ok": True, "design": design, "paths": paths, "record": record}, ensure_ascii=False)
+            if tool_name == "ppt_revise_slide":
+                updated = await manager.update_slide_safe(
+                    str(arguments["project_id"]),
+                    str(arguments["slide_id"]),
+                    arguments["slide"],
+                )
+                return json.dumps({"ok": updated is not None, "slide": updated}, ensure_ascii=False)
+            if tool_name == "ppt_audit":
+                slides_ir = _project_json(data_dir, str(arguments["project_id"]), "slides_ir.json")
+                if slides_ir is None:
+                    return json.dumps({"ok": False, "error": "Generate slides first"}, ensure_ascii=False)
+                report = PptAudit().run(slides_ir)
+                path = PptAudit().save(report, project_dir(data_dir, str(arguments["project_id"])))
+                return json.dumps({"ok": True, "audit": report, "path": str(path)}, ensure_ascii=False)
             if tool_name == "ppt_cancel":
                 project_id = str(arguments.get("project_id") or "")
                 count = await manager.cancel_project_tasks(project_id)
@@ -697,4 +785,122 @@ async def _template_design_inputs(
     brand_tokens = _read_json_if_exists(template.brand_tokens_path)
     layout_map = _read_json_if_exists(template.layout_map_path)
     return brand_tokens, layout_map
+
+
+async def _profile_dataset_for_tool(
+    manager: PptTaskManager,
+    data_dir: Path,
+    dataset_id: str,
+) -> dict[str, Any]:
+    dataset = await manager.get_dataset(dataset_id)
+    if dataset is None:
+        return {"dataset": None, "error": "Dataset not found"}
+    analysis = TableAnalyzer().analyze_to_files(
+        dataset.original_path,
+        dataset_dir(data_dir, dataset_id),
+    )
+    updated = await manager.update_dataset_safe(
+        dataset_id,
+        status="profiled",
+        profile_path=analysis["paths"]["profile_path"],
+        insights_path=analysis["paths"]["insights_path"],
+        chart_specs_path=analysis["paths"]["chart_specs_path"],
+    )
+    return {
+        "dataset": updated.model_dump(mode="json") if updated else None,
+        "profile": analysis["profile"],
+        "insights": analysis["insights"],
+        "chart_specs": analysis["chart_specs"],
+    }
+
+
+async def _dataset_file_payload(
+    manager: PptTaskManager,
+    dataset_id: str,
+    kind: str,
+) -> dict[str, Any]:
+    dataset = await manager.get_dataset(dataset_id)
+    if dataset is None:
+        return {"error": "Dataset not found"}
+    path = dataset.insights_path if kind == "insights" else dataset.chart_specs_path
+    return {kind: _read_json_if_exists(path)}
+
+
+async def _diagnose_template_for_tool(
+    manager: PptTaskManager,
+    data_dir: Path,
+    template_id: str,
+) -> dict[str, Any]:
+    template = await manager.get_template(template_id)
+    if template is None or not template.original_path:
+        return {"template": None, "error": "Template not found"}
+    diagnosis = TemplateManager().diagnose_to_files(
+        template.original_path,
+        template_dir(data_dir, template_id),
+    )
+    updated = await manager.update_template_safe(
+        template_id,
+        status="diagnosed",
+        profile_path=diagnosis["paths"]["profile_path"],
+        brand_tokens_path=diagnosis["paths"]["brand_tokens_path"],
+        layout_map_path=diagnosis["paths"]["layout_map_path"],
+    )
+    return {
+        "template": updated.model_dump(mode="json") if updated else None,
+        "profile": diagnosis["profile"],
+        "brand_tokens": diagnosis["brand_tokens"],
+        "layout_map": diagnosis["layout_map"],
+    }
+
+
+async def _generate_outline_for_tool(
+    manager: PptTaskManager,
+    data_dir: Path,
+    project_id: str,
+) -> dict[str, Any]:
+    project = await manager.get_project(project_id)
+    if project is None:
+        return {"error": "Project not found"}
+    dataset = await manager.get_dataset(project.dataset_id) if project.dataset_id else None
+    template = await manager.get_template(project.template_id) if project.template_id else None
+    outline = OutlineBuilder().build(
+        mode=project.mode,
+        title=project.title,
+        slide_count=project.slide_count,
+        audience=project.audience,
+        requirements={"prompt": project.prompt, "style": project.style},
+        table_insights=_read_json_if_exists(dataset.insights_path if dataset else None),
+        template_profile=_read_json_if_exists(template.profile_path if template else None),
+    )
+    path = OutlineBuilder().save(outline, project_dir(data_dir, project_id))
+    record = await manager.create_outline(project_id=project_id, outline=outline)
+    await manager.update_project_safe(project_id, status=ProjectStatus.OUTLINE_READY)
+    return {"outline": outline, "path": str(path), "record": record}
+
+
+async def _generate_design_for_tool(
+    manager: PptTaskManager,
+    data_dir: Path,
+    project_id: str,
+) -> dict[str, Any]:
+    project = await manager.get_project(project_id)
+    if project is None:
+        return {"error": "Project not found"}
+    outline = await manager.latest_outline(project_id)
+    if outline is None:
+        return {"error": "Generate outline first"}
+    brand_tokens, layout_map = await _template_design_inputs(manager, project.template_id)
+    design = DesignBuilder().build(
+        outline=outline["outline"],
+        brand_tokens=brand_tokens,
+        layout_map=layout_map,
+    )
+    paths = DesignBuilder().save(design, project_dir(data_dir, project_id))
+    record = await manager.create_design_spec(
+        project_id=project_id,
+        design_markdown=design["design_spec_markdown"],
+        spec_lock=design["spec_lock"],
+    )
+    await manager.update_project_safe(project_id, status=ProjectStatus.DESIGN_READY)
+    return {"design": design, "paths": paths, "record": record}
 
