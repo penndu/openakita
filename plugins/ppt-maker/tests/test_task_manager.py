@@ -199,3 +199,22 @@ async def test_replace_list_and_update_slides(tmp_path) -> None:
     assert updated is not None
     assert updated["slide_type"] == "summary"
 
+
+@pytest.mark.asyncio
+async def test_create_and_get_export(tmp_path) -> None:
+    async with PptTaskManager(tmp_path / "ppt_maker.db") as manager:
+        project = await manager.create_project(
+            ProjectCreate(mode=DeckMode.TOPIC_TO_DECK, title="Roadmap")
+        )
+        export = await manager.create_export(
+            project_id=project.id,
+            path="exports/roadmap.pptx",
+            metadata={"audit_ok": True},
+        )
+        fetched = await manager.get_export(export["id"])
+        exports = await manager.list_exports(project.id)
+
+    assert fetched is not None
+    assert fetched["metadata"] == {"audit_ok": True}
+    assert [item["id"] for item in exports] == [export["id"]]
+

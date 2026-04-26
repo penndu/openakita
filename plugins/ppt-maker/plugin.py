@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from openakita.plugins.api import PluginAPI, PluginBase
@@ -29,6 +30,8 @@ from ppt_source_loader import MissingDependencyError, SourceLoader, SourceParseE
 from ppt_table_analyzer import TableAnalyzer
 from ppt_template_manager import TemplateDiagnosticError, TemplateManager
 from ppt_design import DesignBuilder
+from ppt_audit import PptAudit
+from ppt_exporter import PptxExportError, PptxExporter
 from ppt_ir import SlideIrBuilder
 from ppt_outline import OutlineBuilder
 from ppt_task_manager import PptTaskManager
@@ -449,6 +452,52 @@ class Plugin(PluginBase):
                 raise HTTPException(status_code=404, detail="Slide not found")
             return {"ok": True, "slide": updated}
 
+        @router.post("/projects/{project_id}/audit")
+        async def audit_project(project_id: str) -> dict[str, Any]:
+            slides_ir = _project_json(data_dir, project_id, "slides_ir.json")
+            if slides_ir is None:
+                raise HTTPException(status_code=409, detail="Generate slides first")
+            report = PptAudit().run(slides_ir)
+            path = PptAudit().save(report, project_dir(data_dir, project_id))
+            return {"ok": True, "audit": report, "path": str(path)}
+
+        @router.get("/projects/{project_id}/audit")
+        async def get_audit(project_id: str) -> dict[str, Any]:
+            report = _project_json(data_dir, project_id, "audit_report.json")
+            if report is None:
+                raise HTTPException(status_code=404, detail="Audit report not found")
+            return {"ok": True, "audit": report}
+
+        @router.post("/projects/{project_id}/export")
+        async def export_project(project_id: str) -> dict[str, Any]:
+            slides_ir = _project_json(data_dir, project_id, "slides_ir.json")
+            if slides_ir is None:
+                raise HTTPException(status_code=409, detail="Generate slides first")
+            out_dir = project_dir(data_dir, project_id) / "exports"
+            output_path = out_dir / f"{project_id}.pptx"
+            try:
+                export_path = PptxExporter().export(slides_ir, output_path)
+            except PptxExportError as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+            audit = PptAudit().run(slides_ir, export_path)
+            PptAudit().save(audit, project_dir(data_dir, project_id))
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                export = await manager.create_export(
+                    project_id=project_id,
+                    path=str(export_path),
+                    metadata={"audit_ok": audit["ok"], "slide_count": len(slides_ir.get("slides", []))},
+                )
+                await manager.update_project_safe(project_id, status="ready")
+            return {"ok": True, "export": export, "audit": audit}
+
+        @router.get("/exports/{export_id}/download")
+        async def download_export(export_id: str) -> FileResponse:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                export = await manager.get_export(export_id)
+            if export is None or not Path(export["path"]).exists():
+                raise HTTPException(status_code=404, detail="Export not found")
+            return FileResponse(export["path"], filename=Path(export["path"]).name)
+
         api.register_api_routes(router)
         api.register_tools(_tool_definitions(), self._handle_tool)
         api.log(f"{PLUGIN_ID}: loaded")
@@ -504,6 +553,10 @@ def _read_json_if_exists(path: str | None) -> Any:
     if not file_path.exists():
         return None
     return json.loads(file_path.read_text(encoding="utf-8"))
+
+
+def _project_json(data_dir: Path, project_id: str, filename: str) -> Any:
+    return _read_json_if_exists(str(project_dir(data_dir, project_id) / filename))
 
 
 def _normalize_design(value: dict[str, Any] | None) -> dict[str, Any] | None:

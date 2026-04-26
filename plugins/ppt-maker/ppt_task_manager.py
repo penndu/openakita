@@ -715,6 +715,66 @@ class PptTaskManager:
         rows = await self.list_slides(project_id)
         return next((row for row in rows if row["id"] == slide_id), None)
 
+    async def create_export(
+        self,
+        *,
+        project_id: str,
+        path: str,
+        kind: str = "pptx",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = _now()
+        export_id = _new_id("export")
+        await self._conn.execute(
+            """
+            INSERT INTO exports (id, project_id, kind, path, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (export_id, project_id, kind, path, _json(metadata), now),
+        )
+        await self._conn.commit()
+        return {
+            "id": export_id,
+            "project_id": project_id,
+            "kind": kind,
+            "path": path,
+            "metadata": metadata or {},
+            "created_at": now,
+        }
+
+    async def get_export(self, export_id: str) -> dict[str, Any] | None:
+        async with self._conn.execute("SELECT * FROM exports WHERE id = ?", (export_id,)) as cur:
+            row = _row_dict(await cur.fetchone())
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "kind": row["kind"],
+            "path": row["path"],
+            "metadata": _loads(row.get("metadata_json"), {}),
+            "created_at": row["created_at"],
+        }
+
+    async def list_exports(self, project_id: str) -> list[dict[str, Any]]:
+        async with self._conn.execute(
+            "SELECT * FROM exports WHERE project_id = ? ORDER BY created_at DESC",
+            (project_id,),
+        ) as cur:
+            rows = [_row_dict(row) for row in await cur.fetchall()]
+        return [
+            {
+                "id": row["id"],
+                "project_id": row["project_id"],
+                "kind": row["kind"],
+                "path": row["path"],
+                "metadata": _loads(row.get("metadata_json"), {}),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+            if row is not None
+        ]
+
     async def _next_version(self, table: str, project_id: str) -> int:
         if table not in {"outlines", "design_specs"}:
             raise ValueError(f"Unsupported versioned table: {table}")
