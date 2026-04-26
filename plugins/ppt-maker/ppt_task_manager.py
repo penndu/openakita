@@ -181,6 +181,15 @@ _DATASET_WRITABLE = frozenset(
         "metadata_json",
     }
 )
+_TEMPLATE_WRITABLE = frozenset(
+    {
+        "profile_path",
+        "brand_tokens_path",
+        "layout_map_path",
+        "status",
+        "metadata_json",
+    }
+)
 
 
 def _now() -> float:
@@ -507,6 +516,42 @@ class PptTaskManager:
         if row is None:
             raise RuntimeError("Template insert failed")
         return self._template_record(row)
+
+    async def get_template(self, template_id: str) -> TemplateRecord | None:
+        async with self._conn.execute("SELECT * FROM templates WHERE id = ?", (template_id,)) as cur:
+            row = _row_dict(await cur.fetchone())
+        return self._template_record(row) if row is not None else None
+
+    async def list_templates(self, *, limit: int = 50) -> list[TemplateRecord]:
+        async with self._conn.execute(
+            "SELECT * FROM templates ORDER BY created_at DESC LIMIT ?", (limit,)
+        ) as cur:
+            rows = [_row_dict(row) for row in await cur.fetchall()]
+        return [self._template_record(row) for row in rows if row is not None]
+
+    async def update_template_safe(self, template_id: str, **updates: Any) -> TemplateRecord | None:
+        if not updates:
+            return await self.get_template(template_id)
+        if "metadata" in updates:
+            updates["metadata_json"] = _json(updates.pop("metadata"))
+        bad = set(updates) - _TEMPLATE_WRITABLE
+        if bad:
+            raise ValueError(f"Unsupported template update columns: {sorted(bad)}")
+        if "metadata_json" in updates and not isinstance(updates["metadata_json"], str):
+            updates["metadata_json"] = _json(updates["metadata_json"])
+        updates["updated_at"] = _now()
+        sets = ", ".join(f"{key} = ?" for key in updates)
+        await self._conn.execute(
+            f"UPDATE templates SET {sets} WHERE id = ?",
+            [*updates.values(), template_id],
+        )
+        await self._conn.commit()
+        return await self.get_template(template_id)
+
+    async def delete_template(self, template_id: str) -> bool:
+        cur = await self._conn.execute("DELETE FROM templates WHERE id = ?", (template_id,))
+        await self._conn.commit()
+        return cur.rowcount > 0
 
     def _project_record(self, row: dict[str, Any]) -> ProjectRecord:
         return ProjectRecord(

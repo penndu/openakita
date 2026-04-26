@@ -119,3 +119,27 @@ async def test_dataset_update_safe_records_analysis_paths(tmp_path) -> None:
     assert updated.profile_path == "profile.json"
     assert updated.metadata == {"rows": 10}
 
+
+@pytest.mark.asyncio
+async def test_template_update_and_delete(tmp_path) -> None:
+    async with PptTaskManager(tmp_path / "ppt_maker.db") as manager:
+        template = await manager.create_template(name="Brand", original_path="brand.pptx")
+        updated = await manager.update_template_safe(
+            template.id,
+            status="diagnosed",
+            profile_path="template_profile.json",
+            brand_tokens_path="brand_tokens.json",
+            layout_map_path="layout_map.json",
+            metadata={"layouts": 2},
+        )
+        templates = await manager.list_templates()
+        with pytest.raises(ValueError):
+            await manager.update_template_safe(template.id, id="bad")
+        deleted = await manager.delete_template(template.id)
+
+    assert updated is not None
+    assert updated.status == "diagnosed"
+    assert updated.metadata == {"layouts": 2}
+    assert [item.id for item in templates] == [template.id]
+    assert deleted is True
+

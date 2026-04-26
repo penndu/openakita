@@ -16,10 +16,17 @@ from pydantic import BaseModel, ConfigDict
 
 from openakita.plugins.api import PluginAPI, PluginBase
 
-from ppt_maker_inline.file_utils import dataset_dir, resolve_plugin_data_root, safe_name, unique_child
+from ppt_maker_inline.file_utils import (
+    dataset_dir,
+    resolve_plugin_data_root,
+    safe_name,
+    template_dir,
+    unique_child,
+)
 from ppt_maker_inline.upload_preview import register_upload_preview_routes
 from ppt_source_loader import MissingDependencyError, SourceLoader, SourceParseError
 from ppt_table_analyzer import TableAnalyzer
+from ppt_template_manager import TemplateDiagnosticError, TemplateManager
 from ppt_task_manager import PptTaskManager
 
 
@@ -39,6 +46,20 @@ class DatasetCreateRequest(BaseModel):
     path: str
     name: str | None = None
     project_id: str | None = None
+
+
+class TemplateUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    name: str | None = None
+    category: str | None = None
+
+
+class TemplateBrandUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brand_tokens: dict[str, Any]
 
 
 class Plugin(PluginBase):
@@ -193,6 +214,93 @@ class Plugin(PluginBase):
                 raise HTTPException(status_code=404, detail="Dataset chart specs not found")
             chart_specs = json.loads(Path(dataset.chart_specs_path).read_text(encoding="utf-8"))
             return {"ok": True, "chart_specs": chart_specs}
+
+        @router.post("/templates/upload")
+        async def upload_template(payload: TemplateUploadRequest) -> dict[str, Any]:
+            source_path = Path(payload.path)
+            if not source_path.exists() or not source_path.is_file():
+                raise HTTPException(status_code=404, detail="Template file not found")
+            if source_path.suffix.lower() != ".pptx":
+                raise HTTPException(status_code=400, detail="Template must be a .pptx file")
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                template = await manager.create_template(
+                    name=payload.name or source_path.stem,
+                    category=payload.category,
+                    original_path=str(source_path),
+                )
+            return {"ok": True, "template": template.model_dump(mode="json")}
+
+        @router.get("/templates")
+        async def list_templates() -> dict[str, Any]:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                templates = await manager.list_templates()
+            return {
+                "ok": True,
+                "builtin": TemplateManager().builtin_templates(),
+                "templates": [item.model_dump(mode="json") for item in templates],
+            }
+
+        @router.get("/templates/{template_id}")
+        async def get_template(template_id: str) -> dict[str, Any]:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                template = await manager.get_template(template_id)
+            if template is None:
+                raise HTTPException(status_code=404, detail="Template not found")
+            return {"ok": True, "template": template.model_dump(mode="json")}
+
+        @router.post("/templates/{template_id}/diagnose")
+        async def diagnose_template(template_id: str) -> dict[str, Any]:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                template = await manager.get_template(template_id)
+                if template is None or not template.original_path:
+                    raise HTTPException(status_code=404, detail="Template not found")
+                try:
+                    diagnosis = TemplateManager().diagnose_to_files(
+                        template.original_path,
+                        template_dir(data_dir, template_id),
+                    )
+                except TemplateDiagnosticError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                template = await manager.update_template_safe(
+                    template_id,
+                    status="diagnosed",
+                    profile_path=diagnosis["paths"]["profile_path"],
+                    brand_tokens_path=diagnosis["paths"]["brand_tokens_path"],
+                    layout_map_path=diagnosis["paths"]["layout_map_path"],
+                )
+            return {
+                "ok": True,
+                "template": template.model_dump(mode="json") if template else None,
+                "template_profile": diagnosis["template_profile"],
+                "brand_tokens": diagnosis["brand_tokens"],
+                "layout_map": diagnosis["layout_map"],
+            }
+
+        @router.put("/templates/{template_id}/brand")
+        async def update_template_brand(
+            template_id: str,
+            payload: TemplateBrandUpdateRequest,
+        ) -> dict[str, Any]:
+            template_path = template_dir(data_dir, template_id)
+            brand_path = template_path / "brand_tokens.json"
+            brand_path.write_text(
+                json.dumps(payload.brand_tokens, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                template = await manager.update_template_safe(
+                    template_id,
+                    brand_tokens_path=str(brand_path),
+                )
+            if template is None:
+                raise HTTPException(status_code=404, detail="Template not found")
+            return {"ok": True, "template": template.model_dump(mode="json")}
+
+        @router.delete("/templates/{template_id}")
+        async def delete_template(template_id: str) -> dict[str, Any]:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                deleted = await manager.delete_template(template_id)
+            return {"ok": True, "deleted": deleted}
 
         api.register_api_routes(router)
         api.register_tools(_tool_definitions(), self._handle_tool)
