@@ -32,6 +32,7 @@ from pathlib import Path
 
 from .consolidator import MemoryConsolidator
 from .extractor import MemoryExtractor
+from .retention import apply_retention
 from .retrieval import RetrievalEngine
 from .types import (
     Attachment,
@@ -48,30 +49,7 @@ from .vector_store import VectorStore
 logger = logging.getLogger(__name__)
 
 
-def _apply_retention(memory: SemanticMemory, duration: str | None = None) -> None:
-    """Set expires_at based on duration hint or memory priority."""
-    if memory.expires_at is not None:
-        return
-    if duration and duration in _DURATION_MAP:
-        delta = _DURATION_MAP[duration]
-        memory.expires_at = (datetime.now() + delta) if delta else None
-        return
-    _PRIORITY_TTL = {
-        MemoryPriority.TRANSIENT: timedelta(days=1),
-        MemoryPriority.SHORT_TERM: timedelta(days=3),
-        MemoryPriority.LONG_TERM: timedelta(days=30),
-        MemoryPriority.PERMANENT: None,
-    }
-    delta = _PRIORITY_TTL.get(memory.priority)
-    memory.expires_at = (datetime.now() + delta) if delta else None
-
-
-_DURATION_MAP = {
-    "permanent": None,
-    "7d": timedelta(days=7),
-    "24h": timedelta(hours=24),
-    "session": timedelta(hours=2),
-}
+_apply_retention = apply_retention
 
 
 class MemoryManager:
@@ -476,7 +454,7 @@ class MemoryManager:
             # Reset turn buffer — new topic starts fresh
             self._session_turns.clear()
             return saved
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             logger.warning("[Memory] Topic-change extraction timed out (30s), skipping")
             self._session_turns.clear()
             return 0
@@ -817,7 +795,7 @@ class MemoryManager:
             self._enqueue_session_turns_for_extraction(session_id, turns)
 
         try:
-            self.store.db.cleanup_expired()
+            self.store.cleanup_expired()
         except Exception:
             pass
 
@@ -1110,6 +1088,9 @@ class MemoryManager:
         with self._memories_lock:
             memory = self._memories.get(memory_id)
             if memory:
+                now = datetime.now()
+                if memory.superseded_by or (memory.expires_at and memory.expires_at < now):
+                    return None
                 memory.access_count += 1
                 memory.updated_at = datetime.now()
             return memory
@@ -1124,8 +1105,13 @@ class MemoryManager:
         scope_owner: str = "",
     ) -> list[Memory]:
         results = []
+        now = datetime.now()
         with self._memories_lock:
             for memory in self._memories.values():
+                if memory.superseded_by:
+                    continue
+                if memory.expires_at and memory.expires_at < now:
+                    continue
                 if scope != "global" or scope_owner:
                     mem_scope = getattr(memory, "scope", "global") or "global"
                     mem_owner = getattr(memory, "scope_owner", "") or ""
@@ -1248,6 +1234,13 @@ class MemoryManager:
                 identity_dir=settings.identity_path,
             )
             result = await lifecycle.consolidate_daily()
+            if self._get_memory_mode() in ("mode2", "auto") and self._ensure_relational():
+                try:
+                    relational_report = await self.relational_consolidator.consolidate()
+                    result["relational_consolidation"] = relational_report
+                except Exception as e:
+                    logger.warning(f"[Manager] Relational consolidation failed: {e}")
+                    result["relational_consolidation_error"] = str(e)
         except Exception as e:
             from ..llm.types import LLMError
 
