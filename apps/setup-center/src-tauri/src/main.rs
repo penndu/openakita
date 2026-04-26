@@ -748,12 +748,11 @@ fn runtime_venv_python_path(venv_dir: &Path) -> PathBuf {
 }
 
 fn runtime_venv_backend_python_path(venv_dir: &Path) -> PathBuf {
-    if cfg!(windows) {
-        let pythonw = venv_dir.join("Scripts").join("pythonw.exe");
-        if pythonw.exists() {
-            return pythonw;
-        }
-    }
+    // Do not use pythonw.exe for uv-created Windows venvs. The uv launcher can
+    // delegate to the managed console python.exe as a grandchild, which escapes
+    // our CREATE_NO_WINDOW flag and leaves a visible black terminal window.
+    // Launch python.exe directly and rely on the Rust spawn flags/stdio
+    // redirection applied in openakita_service_start.
     runtime_venv_python_path(venv_dir)
 }
 
