@@ -553,6 +553,107 @@ class PptTaskManager:
         await self._conn.commit()
         return cur.rowcount > 0
 
+    async def create_outline(
+        self,
+        *,
+        project_id: str,
+        outline: dict[str, Any],
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        now = _now()
+        version = await self._next_version("outlines", project_id)
+        outline_id = _new_id("outline")
+        await self._conn.execute(
+            """
+            INSERT INTO outlines (id, project_id, version, outline_json, confirmed, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (outline_id, project_id, version, _json(outline), int(confirmed), now),
+        )
+        await self._conn.commit()
+        return {
+            "id": outline_id,
+            "project_id": project_id,
+            "version": version,
+            "outline": outline,
+            "confirmed": confirmed,
+            "created_at": now,
+        }
+
+    async def latest_outline(self, project_id: str) -> dict[str, Any] | None:
+        async with self._conn.execute(
+            "SELECT * FROM outlines WHERE project_id = ? ORDER BY version DESC LIMIT 1",
+            (project_id,),
+        ) as cur:
+            row = _row_dict(await cur.fetchone())
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "version": row["version"],
+            "outline": _loads(row.get("outline_json"), {}),
+            "confirmed": bool(row["confirmed"]),
+            "created_at": row["created_at"],
+        }
+
+    async def create_design_spec(
+        self,
+        *,
+        project_id: str,
+        design_markdown: str,
+        spec_lock: dict[str, Any],
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        now = _now()
+        version = await self._next_version("design_specs", project_id)
+        design_id = _new_id("design")
+        await self._conn.execute(
+            """
+            INSERT INTO design_specs (
+                id, project_id, version, design_markdown, spec_lock_json, confirmed, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (design_id, project_id, version, design_markdown, _json(spec_lock), int(confirmed), now),
+        )
+        await self._conn.commit()
+        return {
+            "id": design_id,
+            "project_id": project_id,
+            "version": version,
+            "design_markdown": design_markdown,
+            "spec_lock": spec_lock,
+            "confirmed": confirmed,
+            "created_at": now,
+        }
+
+    async def latest_design_spec(self, project_id: str) -> dict[str, Any] | None:
+        async with self._conn.execute(
+            "SELECT * FROM design_specs WHERE project_id = ? ORDER BY version DESC LIMIT 1",
+            (project_id,),
+        ) as cur:
+            row = _row_dict(await cur.fetchone())
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "version": row["version"],
+            "design_markdown": row["design_markdown"],
+            "spec_lock": _loads(row.get("spec_lock_json"), {}),
+            "confirmed": bool(row["confirmed"]),
+            "created_at": row["created_at"],
+        }
+
+    async def _next_version(self, table: str, project_id: str) -> int:
+        if table not in {"outlines", "design_specs"}:
+            raise ValueError(f"Unsupported versioned table: {table}")
+        async with self._conn.execute(
+            f"SELECT COALESCE(MAX(version), 0) + 1 FROM {table} WHERE project_id = ?",
+            (project_id,),
+        ) as cur:
+            return int((await cur.fetchone())[0])
+
     def _project_record(self, row: dict[str, Any]) -> ProjectRecord:
         return ProjectRecord(
             id=row["id"],

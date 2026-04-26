@@ -18,6 +18,7 @@ from openakita.plugins.api import PluginAPI, PluginBase
 
 from ppt_maker_inline.file_utils import (
     dataset_dir,
+    project_dir,
     resolve_plugin_data_root,
     safe_name,
     template_dir,
@@ -27,6 +28,8 @@ from ppt_maker_inline.upload_preview import register_upload_preview_routes
 from ppt_source_loader import MissingDependencyError, SourceLoader, SourceParseError
 from ppt_table_analyzer import TableAnalyzer
 from ppt_template_manager import TemplateDiagnosticError, TemplateManager
+from ppt_design import DesignBuilder
+from ppt_outline import OutlineBuilder
 from ppt_task_manager import PptTaskManager
 
 
@@ -60,6 +63,20 @@ class TemplateBrandUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     brand_tokens: dict[str, Any]
+
+
+class OutlineUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outline: dict[str, Any]
+    confirmed: bool = True
+
+
+class DesignConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    design: dict[str, Any] | None = None
+    confirmed: bool = True
 
 
 class Plugin(PluginBase):
@@ -302,6 +319,90 @@ class Plugin(PluginBase):
                 deleted = await manager.delete_template(template_id)
             return {"ok": True, "deleted": deleted}
 
+        @router.post("/projects/{project_id}/outline")
+        async def generate_outline(project_id: str) -> dict[str, Any]:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                project = await manager.get_project(project_id)
+                if project is None:
+                    raise HTTPException(status_code=404, detail="Project not found")
+                dataset = await manager.get_dataset(project.dataset_id) if project.dataset_id else None
+                template = await manager.get_template(project.template_id) if project.template_id else None
+                table_insights = _read_json_if_exists(dataset.insights_path if dataset else None)
+                template_profile = _read_json_if_exists(template.profile_path if template else None)
+                outline = OutlineBuilder().build(
+                    mode=project.mode,
+                    title=project.title,
+                    slide_count=project.slide_count,
+                    audience=project.audience,
+                    requirements={"prompt": project.prompt, "style": project.style},
+                    table_insights=table_insights,
+                    template_profile=template_profile,
+                )
+                OutlineBuilder().save(outline, project_dir(data_dir, project_id))
+                stored = await manager.create_outline(project_id=project_id, outline=outline)
+                await manager.update_project_safe(project_id, status="outline_ready")
+            return {"ok": True, "outline": outline, "record": stored}
+
+        @router.put("/projects/{project_id}/outline")
+        async def confirm_outline(project_id: str, payload: OutlineUpdateRequest) -> dict[str, Any]:
+            outline = OutlineBuilder().confirm(payload.outline) if payload.confirmed else payload.outline
+            OutlineBuilder().save(outline, project_dir(data_dir, project_id))
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                stored = await manager.create_outline(
+                    project_id=project_id,
+                    outline=outline,
+                    confirmed=payload.confirmed,
+                )
+                await manager.update_project_safe(
+                    project_id,
+                    status="outline_confirmed" if payload.confirmed else "outline_ready",
+                )
+            return {"ok": True, "outline": outline, "record": stored}
+
+        @router.post("/projects/{project_id}/design")
+        async def generate_design(project_id: str) -> dict[str, Any]:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                project = await manager.get_project(project_id)
+                if project is None:
+                    raise HTTPException(status_code=404, detail="Project not found")
+                latest_outline = await manager.latest_outline(project_id)
+                if latest_outline is None:
+                    raise HTTPException(status_code=409, detail="Generate outline first")
+                brand_tokens, layout_map = await _template_design_inputs(manager, project.template_id)
+                design = DesignBuilder().build(
+                    outline=latest_outline["outline"],
+                    brand_tokens=brand_tokens,
+                    layout_map=layout_map,
+                )
+                paths = DesignBuilder().save(design, project_dir(data_dir, project_id))
+                stored = await manager.create_design_spec(
+                    project_id=project_id,
+                    design_markdown=design["design_spec_markdown"],
+                    spec_lock=design["spec_lock"],
+                )
+                await manager.update_project_safe(project_id, status="design_ready")
+            return {"ok": True, "design": design, "paths": paths, "record": stored}
+
+        @router.put("/projects/{project_id}/design/confirm")
+        async def confirm_design(project_id: str, payload: DesignConfirmRequest) -> dict[str, Any]:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                current = _normalize_design(payload.design or await manager.latest_design_spec(project_id))
+                if current is None:
+                    raise HTTPException(status_code=409, detail="Generate design first")
+                design = DesignBuilder().confirm(current) if payload.confirmed else current
+                paths = DesignBuilder().save(design, project_dir(data_dir, project_id))
+                stored = await manager.create_design_spec(
+                    project_id=project_id,
+                    design_markdown=design["design_spec_markdown"],
+                    spec_lock=design["spec_lock"],
+                    confirmed=payload.confirmed,
+                )
+                await manager.update_project_safe(
+                    project_id,
+                    status="design_confirmed" if payload.confirmed else "design_ready",
+                )
+            return {"ok": True, "design": design, "paths": paths, "record": stored}
+
         api.register_api_routes(router)
         api.register_tools(_tool_definitions(), self._handle_tool)
         api.log(f"{PLUGIN_ID}: loaded")
@@ -348,4 +449,36 @@ def _tool_definitions() -> list[dict[str, Any]]:
         }
         for name, desc in names
     ]
+
+
+def _read_json_if_exists(path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    file_path = Path(path)
+    if not file_path.exists():
+        return None
+    return json.loads(file_path.read_text(encoding="utf-8"))
+
+
+def _normalize_design(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if "design_markdown" in value and "design_spec_markdown" not in value:
+        value = dict(value)
+        value["design_spec_markdown"] = value.pop("design_markdown")
+    return value
+
+
+async def _template_design_inputs(
+    manager: PptTaskManager,
+    template_id: str | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not template_id:
+        return None, None
+    template = await manager.get_template(template_id)
+    if template is None:
+        return None, None
+    brand_tokens = _read_json_if_exists(template.brand_tokens_path)
+    layout_map = _read_json_if_exists(template.layout_map_path)
+    return brand_tokens, layout_map
 

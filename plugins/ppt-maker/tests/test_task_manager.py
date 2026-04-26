@@ -143,3 +143,33 @@ async def test_template_update_and_delete(tmp_path) -> None:
     assert [item.id for item in templates] == [template.id]
     assert deleted is True
 
+
+@pytest.mark.asyncio
+async def test_outline_and_design_versions(tmp_path) -> None:
+    async with PptTaskManager(tmp_path / "ppt_maker.db") as manager:
+        project = await manager.create_project(
+            ProjectCreate(mode=DeckMode.TOPIC_TO_DECK, title="Roadmap")
+        )
+        first = await manager.create_outline(project_id=project.id, outline={"slides": []})
+        second = await manager.create_outline(
+            project_id=project.id,
+            outline={"slides": [{"title": "Intro"}]},
+            confirmed=True,
+        )
+        latest_outline = await manager.latest_outline(project.id)
+        design = await manager.create_design_spec(
+            project_id=project.id,
+            design_markdown="# Spec",
+            spec_lock={"theme": "default"},
+            confirmed=True,
+        )
+        latest_design = await manager.latest_design_spec(project.id)
+
+    assert first["version"] == 1
+    assert second["version"] == 2
+    assert latest_outline is not None
+    assert latest_outline["confirmed"] is True
+    assert design["version"] == 1
+    assert latest_design is not None
+    assert latest_design["spec_lock"] == {"theme": "default"}
+
