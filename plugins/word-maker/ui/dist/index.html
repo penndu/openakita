@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Word Maker · Word 文档助手</title>
+  <script src="_assets/bootstrap.js"></script>
+  <link rel="stylesheet" href="_assets/styles.css">
+  <script src="_assets/icons.js"></script>
+  <script src="_assets/i18n.js"></script>
+  <script src="_assets/markdown-mini.js"></script>
+  <style>
+    :root { --bg:#f8fafc; --card:#fff; --text:#1e293b; --muted:#64748b; --primary:#2563eb; --border:#e2e8f0; --ok:#16a34a; --warn:#d97706; --bad:#dc2626; }
+    [data-theme="dark"] { --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8; --border:#334155; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg); color:var(--text); }
+    .app { height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+    .header { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid var(--border); background:var(--card); }
+    .header h1 { font-size:16px; margin:0; }
+    .tabs { display:flex; gap:0; padding:0 14px; border-bottom:1px solid var(--border); background:var(--card); }
+    .tab { padding:10px 16px; font-size:13px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; }
+    .tab.active { color:var(--primary); border-bottom-color:var(--primary); font-weight:600; }
+    .content { flex:1; overflow:auto; padding:16px; }
+    .grid { display:grid; grid-template-columns:1.1fr .9fr; gap:14px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:14px; }
+    .card h2 { font-size:14px; margin:0 0 10px; }
+    .input, .select, .textarea { width:100%; border:1px solid var(--border); background:var(--bg); color:var(--text); border-radius:8px; padding:9px 10px; font-size:13px; }
+    .textarea { min-height:110px; resize:vertical; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .btn { border:1px solid var(--border); background:var(--card); color:var(--text); border-radius:8px; padding:8px 12px; cursor:pointer; }
+    .btn.primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+    .pill { border:1px solid var(--border); border-radius:999px; padding:5px 10px; font-size:12px; color:var(--muted); }
+    .muted { color:var(--muted); font-size:13px; }
+    .status { font-size:12px; font-weight:600; }
+    .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+    pre { white-space:pre-wrap; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:12px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    (function () {
+      var theme = (window.OpenAkita && window.OpenAkita.meta && window.OpenAkita.meta.theme) || "light";
+      document.documentElement.setAttribute("data-theme", theme);
+      var tabs = ["create", "projects", "templates", "draft", "settings", "guide"];
+      var state = { tab: "create", health: null, error: "", draft: JSON.parse(localStorage.getItem("word-maker-draft") || "{}") };
+      function api(method, path, body) {
+        if (window.OpenAkita && window.OpenAkita.request) {
+          return window.OpenAkita.request(path, { method: method, body: body });
+        }
+        return fetch("/api/plugins/word-maker" + path, {
+          method: method,
+          headers: { "Content-Type": "application/json" },
+          body: body ? JSON.stringify(body) : undefined
+        }).then(function (r) { return r.json(); });
+      }
+      function tr(key) {
+        var zh = {
+          create: "创建", projects: "项目", templates: "模板", draft: "草稿", settings: "设置", guide: "指南",
+          title: "Word 文档助手", subtitle: "需求澄清、模板变量校验、DOCX 生成"
+        };
+        return zh[key] || key;
+      }
+      function setTab(tab) { state.tab = tab; render(); }
+      function updateDraft(key, value) {
+        state.draft[key] = value;
+        localStorage.setItem("word-maker-draft", JSON.stringify(state.draft));
+      }
+      function loadHealth() {
+        api("GET", "/healthz").then(function (data) {
+          state.health = data; state.error = ""; render();
+        }).catch(function (err) {
+          state.error = String(err && err.message || err); render();
+        });
+      }
+      function renderCreate() {
+        return '<div class="grid"><div class="card"><h2>新建文档项目</h2>' +
+          '<p class="muted">先描述目标、受众和已有资料；后续阶段会接入 Brain 进行需求澄清和大纲生成。</p>' +
+          '<div class="row" style="margin:10px 0">' +
+          '<span class="pill">周报</span><span class="pill">会议纪要</span><span class="pill">项目建议书</span><span class="pill">SOP</span></div>' +
+          '<textarea class="textarea" placeholder="例如：基于这些材料生成一份项目验收报告..." oninput="window.__wmDraft(\\'requirement\\', this.value)">' + (state.draft.requirement || "") + '</textarea>' +
+          '<div class="row" style="margin-top:10px"><button class="btn primary" disabled>Phase 4 启用创建</button><button class="btn" onclick="window.__wmHealth()">检查插件</button></div>' +
+          '</div><div class="card"><h2>健康状态</h2>' + renderHealth() + '</div></div>';
+      }
+      function renderHealth() {
+        if (state.error) return '<p class="status bad">连接失败：' + state.error + '</p>';
+        if (!state.health) return '<p class="status warn">尚未检查</p>';
+        return '<pre>' + JSON.stringify(state.health, null, 2) + '</pre>';
+      }
+      function renderSimple(title, body) {
+        return '<div class="card"><h2>' + title + '</h2><p class="muted">' + body + '</p></div>';
+      }
+      function renderContent() {
+        if (state.tab === "create") return renderCreate();
+        if (state.tab === "projects") return renderSimple("项目", "Phase 1 后显示项目列表、状态筛选和详情抽屉。");
+        if (state.tab === "templates") return renderSimple("模板", "Phase 2 后支持上传 DOCX 模板、提取变量和校验缺失字段。");
+        if (state.tab === "draft") return renderSimple("草稿", "Phase 3 后支持大纲确认、字段 JSON 检查和章节重写。");
+        if (state.tab === "settings") return renderSimple("设置", "后续提供数据目录、依赖检测、Brain 权限状态和存储清理。");
+        return renderSimple("指南", "5 分钟烟测：加载插件，检查 healthz，调用 word_list_projects。");
+      }
+      function render() {
+        document.getElementById("app").innerHTML =
+          '<div class="app"><div class="header"><div><h1>' + tr("title") + '</h1><div class="muted">' + tr("subtitle") + '</div></div>' +
+          '<div class="status ' + (state.health ? "ok" : "warn") + '">' + (state.health ? "Loaded" : "Phase 0") + '</div></div>' +
+          '<div class="tabs">' + tabs.map(function (tab) {
+            return '<div class="tab ' + (state.tab === tab ? "active" : "") + '" onclick="window.__wmTab(\\'' + tab + '\\')">' + tr(tab) + '</div>';
+          }).join("") + '</div><div class="content">' + renderContent() + '</div></div>';
+      }
+      window.__wmTab = setTab;
+      window.__wmHealth = loadHealth;
+      window.__wmDraft = updateDraft;
+      window.addEventListener("openakita:ready", function (event) {
+        if (event.detail && event.detail.theme) document.documentElement.setAttribute("data-theme", event.detail.theme);
+      });
+      loadHealth();
+      render();
+    })();
+  </script>
+</body>
+</html>
