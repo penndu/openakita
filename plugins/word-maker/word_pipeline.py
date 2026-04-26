@@ -77,6 +77,27 @@ def audit_output(path: Path | None, *, markdown: str = "", missing: list[str] | 
     return {"ok": not errors, "warnings": warnings, "errors": errors}
 
 
+def build_ppt_asset_metadata(
+    *,
+    project: dict[str, Any],
+    outline: dict[str, Any] | None = None,
+    doc_markdown: str = "",
+    export_docx_path: str | None = None,
+) -> dict[str, Any]:
+    """Build the stable payload consumed by future ppt-maker handoff code."""
+
+    return {
+        "project_id": project.get("id"),
+        "doc_type": project.get("doc_type"),
+        "title": project.get("title"),
+        "outline_json": outline or {},
+        "summary_md": doc_markdown[:12000],
+        "export_docx_path": export_docx_path or project.get("output_path"),
+        "source": "word-maker",
+        "handoff_version": 1,
+    }
+
+
 async def run_pipeline(
     ctx: WordPipelineContext,
     *,

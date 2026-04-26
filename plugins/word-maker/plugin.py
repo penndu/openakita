@@ -15,7 +15,7 @@ from word_maker_inline.python_deps import check_optional_deps
 from word_maker_inline.storage_stats import collect_storage_stats
 from word_maker_inline.upload_preview import add_upload_preview_route
 from word_models import build_catalog
-from word_pipeline import WordPipelineContext, audit_output, run_pipeline
+from word_pipeline import WordPipelineContext, audit_output, build_ppt_asset_metadata, run_pipeline
 from word_source_loader import load_source
 from word_task_manager import WordTaskManager
 from word_template_engine import extract_template_vars, render_template
@@ -130,11 +130,21 @@ class Plugin(PluginBase):
             return json.dumps(audit_output(output_path), ensure_ascii=False)
         if tool_name == "word_export":
             project = await manager.get_project(arguments.get("project_id", ""))
+            asset_id = None
+            if project and arguments.get("publish_for_ppt") and self._api and self._api.has_permission("assets.publish"):
+                asset_id = await self._api.publish_asset(
+                    asset_kind="word_document_brief",
+                    source_path=project.get("output_path"),
+                    metadata=build_ppt_asset_metadata(project=project),
+                    shared_with=["ppt-maker"],
+                    ttl_seconds=7 * 86400,
+                )
             return json.dumps(
                 {
                     "project_id": arguments.get("project_id"),
                     "status": project.get("status") if project else "not_found",
                     "output_path": project.get("output_path") if project else None,
+                    "asset_id": asset_id,
                 },
                 ensure_ascii=False,
             )

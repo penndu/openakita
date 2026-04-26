@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from docx import Document
-from word_pipeline import WordPipelineContext, audit_output, run_pipeline
+from word_pipeline import WordPipelineContext, audit_output, build_ppt_asset_metadata, run_pipeline
 from word_task_manager import WordTaskManager
 
 
@@ -63,4 +63,17 @@ def test_audit_output_reports_missing_file() -> None:
 
     assert audit["ok"] is False
     assert audit["errors"]
+
+
+def test_build_ppt_asset_metadata() -> None:
+    metadata = build_ppt_asset_metadata(
+        project={"id": "doc_1", "doc_type": "research_report", "title": "调研报告"},
+        outline={"title": "调研报告"},
+        doc_markdown="# 调研报告",
+        export_docx_path="out.docx",
+    )
+
+    assert metadata["project_id"] == "doc_1"
+    assert metadata["handoff_version"] == 1
+    assert metadata["export_docx_path"] == "out.docx"
 

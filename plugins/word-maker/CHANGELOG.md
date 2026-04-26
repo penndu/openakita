@@ -2,6 +2,7 @@
 
 ## 0.1.0
 
-- Scaffold the word-maker plugin shell with self-contained UI assets, tools,
-  and a health route.
+- Add the self-contained Word Maker plugin shell, guided UI, project store,
+  source extraction, DOCX template inspection/rendering, Brain-assisted planning,
+  deterministic pipeline, audit checks, and optional PPT handoff metadata.
 
