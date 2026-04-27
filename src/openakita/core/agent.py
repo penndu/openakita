@@ -1017,7 +1017,7 @@ class Agent:
 
         async def _run_one(tc: dict, idx: int) -> tuple[int, dict, str | None, list | None]:
             tool_name = tc.get("name", "")
-            tool_input = tc.get("input") or {}
+            tool_input = tc.get("input", tc.get("arguments", {})) or {}
             tool_use_id = tc.get("id", "")
 
             if self._task_cancelled:
@@ -3847,6 +3847,7 @@ class Agent:
                 # 从 metadata 还原 tool_summary（跨轮工具上下文恢复）
                 _tool_summary = msg.get("tool_summary")
                 if _tool_summary and isinstance(_tool_summary, str) and content:
+                    _tool_summary = self._sanitize_replayed_tool_summary(_tool_summary)
                     content = content.rstrip() + "\n\n" + _tool_summary
             if role in ("user", "assistant") and content:
                 if isinstance(content, str) and not _RE_TIME_PREFIX.match(content):
@@ -5327,7 +5328,7 @@ class Agent:
                     continue
                 if name in self._DELEGATION_TOOLS:
                     has_delegation = True
-                tc_input = tc.get("input", {})
+                tc_input = tc.get("input", tc.get("arguments", {}))
                 param_hint = ""
                 if isinstance(tc_input, dict):
                     items = list(tc_input.items())[:6]
@@ -5392,6 +5393,8 @@ class Agent:
         stripped = text.strip()
         if stripped.startswith("[系统提示]") or stripped.startswith("[context_note:"):
             return True
+        if stripped.startswith("[系统缓存:") or stripped.startswith("[系统缓存]"):
+            return True
         if stripped.startswith("[系统] 工具 ") and (
             "已达上限" in stripped
             or "已从本轮可用工具中临时移除" in stripped
@@ -5399,6 +5402,23 @@ class Agent:
         ):
             return True
         return False
+
+    @classmethod
+    def _sanitize_replayed_tool_summary(cls, summary: str) -> str:
+        """Remove internal runtime controls from stored summaries before LLM replay."""
+        kept: list[str] = []
+        for line in str(summary or "").splitlines():
+            stripped = line.strip()
+            if not stripped:
+                kept.append(line)
+                continue
+            result_part = stripped.split(" → ", 1)[1] if " → " in stripped else stripped
+            if cls._is_internal_tool_control_message(result_part):
+                if " → " in line:
+                    kept.append(line.split(" → ", 1)[0])
+                continue
+            kept.append(line)
+        return "\n".join(kept).strip()
 
     def _build_work_summary_section(self) -> str:
         """Build [子Agent工作总结] section from sub_agent_records.

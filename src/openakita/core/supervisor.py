@@ -437,7 +437,7 @@ class RuntimeSupervisor:
         * ``tail_same_count >= TERMINATE``：同一精确签名连续 N 次 → TERMINATE
         * ``tail_same_count >= STRATEGY_SWITCH``：同一精确签名连续 N 次 → 回滚并注入提示
         * 1-2 种签名 ping-pong 高频交替 → 仅 NUDGE 软事件，不回滚、不注入
-        * ``top_count >= WARN`` 或 ``tail_same_count >= WARN``：仅 NUDGE 软事件
+        * ``tail_same_count >= WARN``：仅 NUDGE 软事件
           （记录到日志/trace，不写入 LLM 上下文，避免干扰模型正常推进）
 
         组织协调者轮询白名单（``POLL_FRIENDLY_TOOLS``）：对

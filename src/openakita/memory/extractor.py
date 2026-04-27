@@ -575,7 +575,7 @@ duration 参考:
 
         for tc in (tool_calls or [])[:5]:
             name = tc.get("name", "unknown")
-            inp = tc.get("input", {})
+            inp = tc.get("input", tc.get("arguments", {}))
             key_params = (
                 {
                     k: v
@@ -665,7 +665,7 @@ duration 参考:
                 continue
             for tc in turn.tool_calls:
                 name = tc.get("name", "")
-                inp = tc.get("input", {})
+                inp = tc.get("input", tc.get("arguments", {}))
                 key_params = {}
                 if isinstance(inp, dict):
                     for k in ("command", "path", "query", "url", "filename"):

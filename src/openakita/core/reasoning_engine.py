@@ -464,7 +464,7 @@ class ReasoningEngine:
 
         # Checkpoint 管理
         self._checkpoints: list[Checkpoint] = []
-        self._tool_failure_counter: dict[str, int] = {}  # tool_name -> consecutive_failures
+        self._tool_failure_counter: dict[str, int] = {}  # tool_name(args_hash) -> consecutive_failures
         self._consecutive_truncation_count: int = 0  # 连续截断计数（防止截断→回滚死循环）
 
         # 跨 rollback 的持久性失败计数器（rollback 不会清除）
@@ -754,7 +754,12 @@ class ReasoningEngine:
 
         logger.debug(f"[Checkpoint] Saved: {cp.id} at iteration {iteration}")
 
-    def _record_tool_result(self, tool_name: str, success: bool) -> None:
+    def _record_tool_result(
+        self,
+        tool_name: str,
+        success: bool,
+        tool_args: Any | None = None,
+    ) -> None:
         """记录工具执行结果，用于连续失败检测。
 
         Plan/todo 家族工具的 ❌ 输出多为入参校验反馈而非真正的执行失败，
@@ -764,14 +769,15 @@ class ReasoningEngine:
         """
         if tool_name in self._PLAN_TOOL_NAMES:
             return
+        key = _tool_rate_limit_key(tool_name, tool_args or {})
         if success:
-            self._tool_failure_counter[tool_name] = 0
+            self._tool_failure_counter[key] = 0
             # 成功时也重置持久计数器
-            self._persistent_tool_failures.pop(tool_name, None)
+            self._persistent_tool_failures.pop(key, None)
         else:
-            self._tool_failure_counter[tool_name] = self._tool_failure_counter.get(tool_name, 0) + 1
-            self._persistent_tool_failures[tool_name] = (
-                self._persistent_tool_failures.get(tool_name, 0) + 1
+            self._tool_failure_counter[key] = self._tool_failure_counter.get(key, 0) + 1
+            self._persistent_tool_failures[key] = (
+                self._persistent_tool_failures.get(key, 0) + 1
             )
 
     def _compact_after_token_anomaly(
@@ -781,7 +787,11 @@ class ReasoningEngine:
         tokens: int,
     ) -> None:
         """Shrink large tool payloads after a token spike to avoid replay storms."""
-        if tokens <= TOKEN_ANOMALY_THRESHOLD:
+        anomaly_threshold = int(
+            getattr(settings, "context_token_anomaly_threshold", TOKEN_ANOMALY_THRESHOLD)
+            or TOKEN_ANOMALY_THRESHOLD
+        )
+        if tokens <= anomaly_threshold:
             return
 
         summary_chars = int(getattr(settings, "context_cached_summary_chars", 2400) or 2400)
@@ -1157,7 +1167,7 @@ class ReasoningEngine:
             """生成工具签名"""
             nonlocal _last_browser_url
             name = tc.get("name", "")
-            inp = tc.get("input", {})
+            inp = tc.get("input", tc.get("arguments", {}))
 
             if name == "browser_navigate":
                 _last_browser_url = inp.get("url", "")
@@ -1496,7 +1506,7 @@ class ReasoningEngine:
                     {
                         "name": tc.get("name"),
                         "id": tc.get("id"),
-                        "input": tc.get("input", {}),
+                        "input": tc.get("input", tc.get("arguments", {})),
                     }
                     for tc in (decision.tool_calls or [])
                 ],
@@ -2057,7 +2067,11 @@ class ReasoningEngine:
                             m in result_content
                             for m in ["❌", "⚠️ 工具执行错误", "错误类型:", "⚠️ 策略拒绝:"]
                         )
-                    self._record_tool_result(_tc_name, success=not is_error)
+                    self._record_tool_result(
+                        _tc_name,
+                        success=not is_error,
+                        tool_args=tc.get("input", tc.get("arguments", {})),
+                    )
                     _r_summary = self._summarize_tool_result(_tc_name, result_content)
                     if _r_summary:
                         _icon = "❌" if is_error else "✅"
@@ -2188,8 +2202,12 @@ class ReasoningEngine:
                 if _has_truncation:
                     self._consecutive_truncation_count += 1
                     for tc in decision.tool_calls:
-                        if isinstance(tc.get("input"), dict) and PARSE_ERROR_KEY in tc["input"]:
-                            self._tool_failure_counter.pop(tc.get("name", ""), None)
+                        _tc_input = tc.get("input", tc.get("arguments", {}))
+                        if isinstance(_tc_input, dict) and PARSE_ERROR_KEY in _tc_input:
+                            self._tool_failure_counter.pop(
+                                _tool_rate_limit_key(tc.get("name", ""), _tc_input),
+                                None,
+                            )
                     logger.info(
                         f"[ReAct] Iter {iteration + 1} — Tool args truncated "
                         f"(count: {self._consecutive_truncation_count}), "
@@ -2261,7 +2279,7 @@ class ReasoningEngine:
                         )
                     self._supervisor.record_tool_call(
                         tool_name=_tc_name,
-                        params=tc.get("input", {}),
+                        params=tc.get("input", tc.get("arguments", {})),
                         success=not is_error,
                         iteration=iteration,
                         result_text=result_content if is_error else None,
@@ -2761,7 +2779,7 @@ class ReasoningEngine:
             def _make_tool_sig(tc: dict) -> str:
                 nonlocal _last_browser_url
                 name = tc.get("name", "")
-                inp = tc.get("input", {})
+                inp = tc.get("input", tc.get("arguments", {}))
                 if name == "browser_navigate":
                     _last_browser_url = inp.get("url", "")
                 try:
@@ -3292,7 +3310,7 @@ class ReasoningEngine:
                         {
                             "name": tc.get("name"),
                             "id": tc.get("id"),
-                            "input": tc.get("input", {}),
+                            "input": tc.get("input", tc.get("arguments", {})),
                         }
                         for tc in (decision.tool_calls or [])
                     ],
@@ -4277,7 +4295,11 @@ class ReasoningEngine:
                                 m in r_content
                                 for m in ["❌", "⚠️ 工具执行错误", "错误类型:", "⚠️ 策略拒绝:"]
                             )
-                            self._record_tool_result(_tc_name, success=not is_error)
+                            self._record_tool_result(
+                                _tc_name,
+                                success=not is_error,
+                                tool_args=_stc.get("input", _stc.get("arguments", {})),
+                            )
 
                     # 收集工具结果到 trace（保存完整内容，不截断）
                     _s_error_markers = ("❌", "⚠️ 工具执行错误", "错误类型:", "⚠️ 策略拒绝:")
@@ -4330,8 +4352,12 @@ class ReasoningEngine:
                     if _has_truncation:
                         self._consecutive_truncation_count += 1
                         for tc in decision.tool_calls:
-                            if isinstance(tc.get("input"), dict) and PARSE_ERROR_KEY in tc["input"]:
-                                self._tool_failure_counter.pop(tc.get("name", ""), None)
+                            _tc_input = tc.get("input", tc.get("arguments", {}))
+                            if isinstance(_tc_input, dict) and PARSE_ERROR_KEY in _tc_input:
+                                self._tool_failure_counter.pop(
+                                    _tool_rate_limit_key(tc.get("name", ""), _tc_input),
+                                    None,
+                                )
                         logger.info(
                             f"[ReAct-Stream] Iter {_iteration + 1} — Tool args truncated "
                             f"(count: {self._consecutive_truncation_count}), "
@@ -4433,7 +4459,7 @@ class ReasoningEngine:
                             )
                         self._supervisor.record_tool_call(
                             tool_name=_stn,
-                            params=_stc.get("input", {}),
+                            params=_stc.get("input", _stc.get("arguments", {})),
                             success=not _sr_err,
                             iteration=_iteration,
                             result_text=_sr_content if _sr_err else None,

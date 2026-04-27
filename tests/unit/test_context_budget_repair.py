@@ -1,7 +1,7 @@
 import pytest
 
 from openakita.core.context_manager import ContextManager
-from openakita.core.reasoning_engine import ReasoningEngine, TOKEN_ANOMALY_THRESHOLD
+from openakita.core.reasoning_engine import ReasoningEngine
 from openakita.core.loop_budget_guard import LoopBudgetGuard
 from openakita.core.microcompact import microcompact
 from openakita.prompt.budget import BudgetConfig
@@ -147,6 +147,7 @@ def test_microcompact_dedupes_cached_and_repeated_tool_results():
 
 
 def test_token_anomaly_compaction_uses_configured_summary_chars(monkeypatch):
+    monkeypatch.setattr("openakita.core.reasoning_engine.settings.context_token_anomaly_threshold", 100)
     monkeypatch.setattr("openakita.core.reasoning_engine.settings.context_cached_summary_chars", 100)
     engine = object.__new__(ReasoningEngine)
     working_messages = [
@@ -175,13 +176,29 @@ def test_token_anomaly_compaction_uses_configured_summary_chars(monkeypatch):
     engine._compact_after_token_anomaly(
         working_messages,
         react_trace,
-        TOKEN_ANOMALY_THRESHOLD + 1,
+        101,
     )
 
     assert working_messages[0]["content"][0]["compacted_after_token_anomaly"]
     assert react_trace[0]["tool_results"][0]["compacted_after_token_anomaly"]
     assert len(working_messages[0]["content"][0]["content"]) < 500
     assert len(react_trace[0]["tool_results"][0]["result_content"]) < 500
+
+
+def test_tool_failures_are_tracked_by_exact_invocation():
+    engine = object.__new__(ReasoningEngine)
+    engine._tool_failure_counter = {}
+    engine._persistent_tool_failures = {}
+
+    for i in range(ReasoningEngine.CONSECUTIVE_FAIL_THRESHOLD):
+        engine._record_tool_result(
+            "web_search",
+            success=False,
+            tool_args={"query": f"query-{i}"},
+        )
+
+    assert max(engine._tool_failure_counter.values()) == 1
+    assert len(engine._persistent_tool_failures) == ReasoningEngine.CONSECUTIVE_FAIL_THRESHOLD
 
 
 def test_plugin_catalog_is_budgeted():
