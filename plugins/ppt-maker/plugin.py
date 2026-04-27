@@ -8,6 +8,9 @@ routes while preserving this self-contained plugin shape.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,14 +21,13 @@ from ppt_design import DesignBuilder
 from ppt_exporter import PptxExporter, PptxExportError
 from ppt_ir import SlideIrBuilder
 from ppt_maker_inline.file_utils import (
-    dataset_dir,
     project_dir,
     resolve_plugin_data_root,
     safe_name,
-    template_dir,
     unique_child,
 )
 from ppt_maker_inline.python_deps import PythonDepsManager
+from ppt_maker_inline.storage_stats import collect_storage_stats
 from ppt_maker_inline.upload_preview import register_upload_preview_routes
 from ppt_models import DeckMode, ProjectCreate, ProjectStatus
 from ppt_outline import OutlineBuilder
@@ -104,6 +106,19 @@ class SlideUpdateRequest(BaseModel):
     slide: dict[str, Any]
 
 
+class StorageOpenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = "root"
+    path: str = ""
+
+
+class SettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    updates: dict[str, str] = {}
+
+
 class Plugin(PluginBase):
     """OpenAkita plugin entry for guided PPT generation."""
 
@@ -132,6 +147,22 @@ class Plugin(PluginBase):
                 "pipeline_steps": 10,
             }
 
+        @router.get("/settings")
+        async def get_settings() -> dict[str, Any]:
+            settings = _load_settings(data_dir)
+            return {"ok": True, "settings": settings, "resolved": _resolved_storage_paths(data_dir, settings)}
+
+        @router.put("/settings")
+        async def update_settings(payload: SettingsUpdateRequest) -> dict[str, Any]:
+            settings = _load_settings(data_dir)
+            allowed = set(_default_settings())
+            for key, value in payload.updates.items():
+                if key not in allowed:
+                    raise HTTPException(status_code=400, detail=f"Unknown setting: {key}")
+                settings[key] = str(value)
+            _save_settings(data_dir, settings)
+            return {"ok": True, "settings": settings, "resolved": _resolved_storage_paths(data_dir, settings)}
+
         @router.get("/system/python-deps")
         async def list_python_deps() -> dict[str, Any]:
             assert self._deps is not None
@@ -152,6 +183,66 @@ class Plugin(PluginBase):
                 return {"ok": True, "dependency": await self._deps.start_install(dep_id)}
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        @router.post("/system/python-deps/{dep_id}/uninstall")
+        async def uninstall_python_dep(dep_id: str) -> dict[str, Any]:
+            assert self._deps is not None
+            try:
+                return {"ok": True, "dependency": await self._deps.start_uninstall(dep_id)}
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        @router.get("/storage/stats")
+        async def storage_stats() -> dict[str, Any]:
+            folders = _storage_folders(data_dir, _load_settings(data_dir))
+            stats = {}
+            for key, path in folders.items():
+                raw = collect_storage_stats(path)
+                stats[key] = {
+                    "path": str(path),
+                    "bytes": raw["bytes"],
+                    "size_mb": round(raw["bytes"] / 1024 / 1024, 2),
+                    "file_count": raw["files"],
+                    "dir_count": raw["dirs"],
+                }
+            return {"ok": True, "data_dir": str(data_dir), "stats": stats}
+
+        @router.post("/storage/open-folder")
+        async def open_storage_folder(payload: StorageOpenRequest) -> dict[str, Any]:
+            folders = _storage_folders(data_dir, _load_settings(data_dir))
+            path = Path(payload.path).expanduser() if payload.path else folders.get(payload.key)
+            if path is None:
+                raise HTTPException(status_code=400, detail=f"Unknown storage key: {payload.key}")
+            path.mkdir(parents=True, exist_ok=True)
+            try:
+                _open_folder(path)
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Cannot open folder: {exc}") from exc
+            return {"ok": True, "path": str(path)}
+
+        @router.get("/storage/list-dir")
+        async def list_storage_dir(path: str = "") -> dict[str, Any]:
+            return _list_dir_payload(path)
+
+        @router.post("/storage/mkdir")
+        async def make_storage_dir(body: dict[str, Any]) -> dict[str, Any]:
+            parent = str(body.get("parent") or "").strip()
+            name = str(body.get("name") or "").strip()
+            if not parent or not name:
+                raise HTTPException(status_code=400, detail="Missing parent or name")
+            if "/" in name or "\\" in name or name in {".", ".."}:
+                raise HTTPException(status_code=400, detail="Invalid folder name")
+            parent_path = Path(parent).expanduser().resolve(strict=False)
+            if not parent_path.is_dir():
+                raise HTTPException(status_code=400, detail="Parent is not a directory")
+            target = parent_path / safe_name(name, fallback="folder")
+            try:
+                target.mkdir(parents=False, exist_ok=False)
+            except FileExistsError as exc:
+                raise HTTPException(status_code=409, detail="Folder already exists") from exc
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+            return {"ok": True, "path": str(target)}
 
         @router.post("/projects")
         async def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
@@ -212,8 +303,10 @@ class Plugin(PluginBase):
             if upload is None or not hasattr(upload, "filename") or not hasattr(upload, "read"):
                 raise HTTPException(status_code=400, detail="Missing upload field: file")
 
-            filename = safe_name(str(upload.filename or "upload.bin"))
-            target = unique_child(data_dir / "uploads", filename)
+            settings = _load_settings(data_dir)
+            filename = _format_upload_filename(str(upload.filename or "upload.bin"), settings)
+            target_dir = _upload_target_dir(data_dir, settings, filename)
+            target = unique_child(target_dir, filename)
             content = await upload.read()
             target.write_bytes(content)
 
@@ -223,15 +316,27 @@ class Plugin(PluginBase):
                 source = await manager.create_source(
                     project_id=project_id,
                     kind=kind,
-                    filename=filename,
+                    filename=target.name,
                     path=str(target),
-                    metadata={"size": len(content), "preview_url": f"/uploads/{target.name}"},
+                    metadata={
+                        "size": len(content),
+                        "original_filename": str(upload.filename or ""),
+                        "collection": target.parent.name,
+                        "storage_dir": str(target.parent),
+                        "preview_url": f"/uploads/{target.name}",
+                    },
                 )
             return {
                 "ok": True,
                 "source": source.model_dump(mode="json"),
                 "preview_url": f"/uploads/{target.name}",
             }
+
+        @router.get("/sources")
+        async def list_sources() -> dict[str, Any]:
+            async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
+                sources = await manager.list_sources()
+            return {"ok": True, "sources": [item.model_dump(mode="json") for item in sources]}
 
         @router.post("/sources/parse")
         async def parse_source(payload: ParseSourceRequest) -> dict[str, Any]:
@@ -290,9 +395,10 @@ class Plugin(PluginBase):
                 if dataset is None:
                     raise HTTPException(status_code=404, detail="Dataset not found")
                 try:
+                    settings = _load_settings(data_dir)
                     analysis = TableAnalyzer().analyze_to_files(
                         dataset.original_path,
-                        dataset_dir(data_dir, dataset_id),
+                        _analysis_dir(data_dir, settings, "datasets", dataset_id),
                     )
                 except MissingDependencyError as exc:
                     raise HTTPException(
@@ -372,9 +478,10 @@ class Plugin(PluginBase):
                 if template is None or not template.original_path:
                     raise HTTPException(status_code=404, detail="Template not found")
                 try:
+                    settings = _load_settings(data_dir)
                     diagnosis = TemplateManager().diagnose_to_files(
                         template.original_path,
-                        template_dir(data_dir, template_id),
+                        _analysis_dir(data_dir, settings, "templates", template_id),
                     )
                 except TemplateDiagnosticError as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -398,7 +505,7 @@ class Plugin(PluginBase):
             template_id: str,
             payload: TemplateBrandUpdateRequest,
         ) -> dict[str, Any]:
-            template_path = template_dir(data_dir, template_id)
+            template_path = _analysis_dir(data_dir, _load_settings(data_dir), "templates", template_id)
             brand_path = template_path / "brand_tokens.json"
             brand_path.write_text(
                 json.dumps(payload.brand_tokens, ensure_ascii=False, indent=2),
@@ -563,8 +670,10 @@ class Plugin(PluginBase):
             slides_ir = _project_json(data_dir, project_id, "slides_ir.json")
             if slides_ir is None:
                 raise HTTPException(status_code=409, detail="Generate slides first")
-            out_dir = project_dir(data_dir, project_id) / "exports"
-            output_path = out_dir / f"{project_id}.pptx"
+            settings = _load_settings(data_dir)
+            out_dir = _analysis_dir(data_dir, settings, "exports", project_id)
+            output_name = _format_output_filename(project_id, "pptx", settings)
+            output_path = out_dir / output_name
             try:
                 export_path = PptxExporter().export(slides_ir, output_path)
             except PptxExportError as exc:
@@ -580,8 +689,8 @@ class Plugin(PluginBase):
                 await manager.update_project_safe(project_id, status="ready")
             return {"ok": True, "export": export, "audit": audit}
 
-        @router.get("/exports/{export_id}/download")
-        async def download_export(export_id: str) -> FileResponse:
+        @router.get("/exports/{export_id}/download", response_class=FileResponse)
+        async def download_export(export_id: str):
             async with PptTaskManager(data_dir / "ppt_maker.db") as manager:
                 export = await manager.get_export(export_id)
             if export is None or not Path(export["path"]).exists():
@@ -797,7 +906,7 @@ async def _profile_dataset_for_tool(
         return {"dataset": None, "error": "Dataset not found"}
     analysis = TableAnalyzer().analyze_to_files(
         dataset.original_path,
-        dataset_dir(data_dir, dataset_id),
+        _analysis_dir(data_dir, _load_settings(data_dir), "datasets", dataset_id),
     )
     updated = await manager.update_dataset_safe(
         dataset_id,
@@ -836,7 +945,7 @@ async def _diagnose_template_for_tool(
         return {"template": None, "error": "Template not found"}
     diagnosis = TemplateManager().diagnose_to_files(
         template.original_path,
-        template_dir(data_dir, template_id),
+        _analysis_dir(data_dir, _load_settings(data_dir), "templates", template_id),
     )
     updated = await manager.update_template_safe(
         template_id,
@@ -847,7 +956,7 @@ async def _diagnose_template_for_tool(
     )
     return {
         "template": updated.model_dump(mode="json") if updated else None,
-        "profile": diagnosis["profile"],
+        "profile": diagnosis["template_profile"],
         "brand_tokens": diagnosis["brand_tokens"],
         "layout_map": diagnosis["layout_map"],
     }
@@ -903,4 +1012,194 @@ async def _generate_design_for_tool(
     )
     await manager.update_project_safe(project_id, status=ProjectStatus.DESIGN_READY)
     return {"design": design, "paths": paths, "record": record}
+
+
+def _default_settings() -> dict[str, str]:
+    return {
+        "uploads_dir": "",
+        "datasets_dir": "",
+        "templates_dir": "",
+        "projects_dir": "",
+        "exports_dir": "",
+        "upload_subdir_mode": "type",
+        "analysis_subdir_mode": "date",
+        "upload_naming_rule": "{date}_{original}",
+        "export_naming_rule": "{date}_{project_id}",
+    }
+
+
+def _settings_path(data_dir: Path) -> Path:
+    return data_dir / "settings.json"
+
+
+def _load_settings(data_dir: Path) -> dict[str, str]:
+    settings = _default_settings()
+    path = _settings_path(data_dir)
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                settings.update({key: str(value) for key, value in raw.items() if key in settings})
+        except (OSError, ValueError, TypeError):
+            pass
+    return settings
+
+
+def _save_settings(data_dir: Path, settings: dict[str, str]) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    _settings_path(data_dir).write_text(
+        json.dumps(settings, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _resolved_storage_paths(data_dir: Path, settings: dict[str, str]) -> dict[str, str]:
+    return {key: str(path) for key, path in _storage_folders(data_dir, settings).items()}
+
+
+def _setting_path(settings: dict[str, str], key: str, fallback: Path) -> Path:
+    raw = (settings.get(key) or "").strip()
+    return Path(raw).expanduser() if raw else fallback
+
+
+def _storage_folders(data_dir: Path, settings: dict[str, str] | None = None) -> dict[str, Path]:
+    settings = settings or _load_settings(data_dir)
+    return {
+        "root": data_dir,
+        "uploads": _setting_path(settings, "uploads_dir", data_dir / "uploads"),
+        "projects": _setting_path(settings, "projects_dir", data_dir / "projects"),
+        "datasets": _setting_path(settings, "datasets_dir", data_dir / "datasets"),
+        "templates": _setting_path(settings, "templates_dir", data_dir / "templates"),
+        "exports": _setting_path(settings, "exports_dir", data_dir / "exports"),
+    }
+
+
+def _today() -> str:
+    import time
+
+    return time.strftime("%Y%m%d")
+
+
+def _format_upload_filename(original_name: str, settings: dict[str, str]) -> str:
+    safe_original = safe_name(original_name)
+    stem = Path(safe_original).stem
+    suffix = Path(safe_original).suffix
+    token_values = {
+        "date": _today(),
+        "original": stem,
+        "kind": suffix.lstrip(".") or "file",
+    }
+    pattern = settings.get("upload_naming_rule") or "{date}_{original}"
+    base = _apply_name_pattern(pattern, token_values)
+    if base.endswith(suffix):
+        return safe_name(base)
+    return safe_name(base + suffix)
+
+
+def _format_output_filename(project_id: str, suffix: str, settings: dict[str, str]) -> str:
+    token_values = {"date": _today(), "project_id": project_id}
+    pattern = settings.get("export_naming_rule") or "{date}_{project_id}"
+    extension = "." + suffix.lstrip(".")
+    base = _apply_name_pattern(pattern, token_values)
+    if base.endswith(extension):
+        return safe_name(base)
+    return safe_name(base + extension)
+
+
+def _apply_name_pattern(pattern: str, values: dict[str, str]) -> str:
+    result = pattern
+    for key, value in values.items():
+        result = result.replace("{" + key + "}", value)
+    return result
+
+
+def _upload_target_dir(data_dir: Path, settings: dict[str, str], filename: str) -> Path:
+    base = _storage_folders(data_dir, settings)["uploads"]
+    mode = settings.get("upload_subdir_mode") or "type"
+    if mode == "date":
+        return base / _today()
+    if mode == "type":
+        suffix = Path(filename).suffix.lower()
+        if suffix in {".csv", ".tsv", ".xlsx"}:
+            return base / "tables"
+        if suffix in {".pptx", ".potx"}:
+            return base / "templates"
+        return base / "sources"
+    return base
+
+
+def _analysis_dir(data_dir: Path, settings: dict[str, str], key: str, item_id: str) -> Path:
+    base = _storage_folders(data_dir, settings)[key]
+    mode = settings.get("analysis_subdir_mode") or "date"
+    if mode == "date":
+        return base / _today() / safe_name(item_id)
+    if mode == "flat":
+        return base / safe_name(item_id)
+    return base / safe_name(item_id)
+
+
+def _list_dir_payload(path: str = "") -> dict[str, Any]:
+    raw = (path or "").strip()
+    if not raw:
+        anchors: list[dict[str, Any]] = []
+        home = Path.home()
+        anchors.append({"name": "Home", "path": str(home), "is_dir": True, "kind": "home"})
+        for sub in ("Desktop", "Documents", "Downloads", "Pictures", "Videos"):
+            candidate = home / sub
+            if candidate.is_dir():
+                anchors.append({
+                    "name": sub,
+                    "path": str(candidate),
+                    "is_dir": True,
+                    "kind": "shortcut",
+                })
+        if sys.platform.startswith("win"):
+            import string
+
+            for letter in string.ascii_uppercase:
+                drive = Path(f"{letter}:/")
+                try:
+                    if drive.exists():
+                        anchors.append({
+                            "name": f"{letter}:",
+                            "path": str(drive),
+                            "is_dir": True,
+                            "kind": "drive",
+                        })
+                except OSError:
+                    continue
+        else:
+            anchors.append({"name": "/", "path": "/", "is_dir": True, "kind": "drive"})
+        return {"ok": True, "path": "", "parent": None, "items": anchors, "is_anchor": True}
+
+    target = Path(raw).expanduser().resolve(strict=False)
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="Not a directory")
+    items: list[dict[str, Any]] = []
+    try:
+        for entry in target.iterdir():
+            if entry.name.startswith("."):
+                continue
+            try:
+                if entry.is_dir():
+                    items.append({"name": entry.name, "path": str(entry), "is_dir": True})
+            except (OSError, PermissionError):
+                continue
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    items.sort(key=lambda item: item["name"].lower())
+    parent = str(target.parent) if target.parent != target else None
+    return {"ok": True, "path": str(target), "parent": parent, "items": items, "is_anchor": False}
+
+
+def _open_folder(path: Path) -> None:
+    if sys.platform.startswith("win"):
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+        return
+    subprocess.Popen(["xdg-open", str(path)])
 

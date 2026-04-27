@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ from ppt_audit import PptAudit
 from ppt_design import DesignBuilder
 from ppt_exporter import PptxExporter
 from ppt_ir import SlideIrBuilder
-from ppt_maker_inline.file_utils import dataset_dir, project_dir, template_dir
+from ppt_maker_inline.file_utils import ensure_dir, safe_name
 from ppt_models import ErrorKind, ProjectStatus, TaskCreate, TaskStatus
 from ppt_outline import OutlineBuilder
 from ppt_table_analyzer import TableAnalyzer
@@ -79,7 +80,8 @@ class PptPipeline:
         project = await manager.get_project(project_id)
         if project is None:
             raise ValueError("Project not found")
-        root = project_dir(self._data_root, project_id)
+        settings = _load_settings(self._data_root)
+        root = _project_work_dir(self._data_root, settings, project_id)
         await self._step(manager, task_id, "setup", 0.1)
         await self._step(manager, task_id, "ingest", 0.2)
         table_insights, chart_specs = await self._table_inputs(manager, project)
@@ -145,7 +147,11 @@ class PptPipeline:
         await manager.replace_slides(project_id, slides_ir["slides"])
         await self._step(manager, task_id, "ir", 0.8)
 
-        export_path = PptxExporter().export(slides_ir, root / "exports" / f"{project_id}.pptx")
+        export_dir = _analysis_dir(self._data_root, settings, "exports", project_id)
+        export_path = PptxExporter().export(
+            slides_ir,
+            export_dir / _format_output_filename(project_id, "pptx", settings),
+        )
         export = await manager.create_export(
             project_id=project_id,
             path=str(export_path),
@@ -174,7 +180,7 @@ class PptPipeline:
         if not dataset.profile_path or not dataset.insights_path or not dataset.chart_specs_path:
             analysis = TableAnalyzer().analyze_to_files(
                 dataset.original_path,
-                dataset_dir(self._data_root, dataset.id),
+                _analysis_dir(self._data_root, _load_settings(self._data_root), "datasets", dataset.id),
             )
             dataset = await manager.update_dataset_safe(
                 dataset.id,
@@ -196,7 +202,7 @@ class PptPipeline:
         if template.original_path and (not template.brand_tokens_path or not template.layout_map_path):
             diagnosis = TemplateManager().diagnose_to_files(
                 template.original_path,
-                template_dir(self._data_root, template.id),
+                _analysis_dir(self._data_root, _load_settings(self._data_root), "templates", template.id),
             )
             template = await manager.update_template_safe(
                 template.id,
@@ -261,6 +267,70 @@ def pipeline_summary(path: str | Path) -> dict[str, Any]:
     if not file_path.exists():
         return {}
     return json.loads(file_path.read_text(encoding="utf-8"))
+
+
+def _default_settings() -> dict[str, str]:
+    return {
+        "datasets_dir": "",
+        "templates_dir": "",
+        "projects_dir": "",
+        "exports_dir": "",
+        "analysis_subdir_mode": "date",
+        "export_naming_rule": "{date}_{project_id}",
+    }
+
+
+def _load_settings(data_root: Path) -> dict[str, str]:
+    settings = _default_settings()
+    path = data_root / "settings.json"
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                settings.update({key: str(value) for key, value in raw.items() if key in settings})
+        except (OSError, ValueError, TypeError):
+            pass
+    return settings
+
+
+def _setting_path(settings: dict[str, str], key: str, fallback: Path) -> Path:
+    raw = (settings.get(key) or "").strip()
+    return Path(raw).expanduser() if raw else fallback
+
+
+def _storage_folders(data_root: Path, settings: dict[str, str]) -> dict[str, Path]:
+    return {
+        "projects": _setting_path(settings, "projects_dir", data_root / "projects"),
+        "datasets": _setting_path(settings, "datasets_dir", data_root / "datasets"),
+        "templates": _setting_path(settings, "templates_dir", data_root / "templates"),
+        "exports": _setting_path(settings, "exports_dir", data_root / "exports"),
+    }
+
+
+def _today() -> str:
+    return time.strftime("%Y%m%d")
+
+
+def _analysis_dir(data_root: Path, settings: dict[str, str], key: str, item_id: str) -> Path:
+    base = _storage_folders(data_root, settings)[key]
+    mode = settings.get("analysis_subdir_mode") or "date"
+    if mode == "date":
+        return ensure_dir(base / _today() / safe_name(item_id))
+    return ensure_dir(base / safe_name(item_id))
+
+
+def _project_work_dir(data_root: Path, settings: dict[str, str], project_id: str) -> Path:
+    base = _storage_folders(data_root, settings)["projects"]
+    return ensure_dir(base / safe_name(project_id))
+
+
+def _format_output_filename(project_id: str, suffix: str, settings: dict[str, str]) -> str:
+    extension = "." + suffix.lstrip(".")
+    pattern = settings.get("export_naming_rule") or "{date}_{project_id}"
+    base = pattern.replace("{date}", _today()).replace("{project_id}", project_id)
+    if base.endswith(extension):
+        return safe_name(base)
+    return safe_name(base + extension)
 
 
 def _read_json(path: str | None) -> Any:

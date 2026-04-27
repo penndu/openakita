@@ -461,6 +461,26 @@ class PptTaskManager:
             raise RuntimeError("Source insert failed")
         return self._source_record(row)
 
+    async def list_sources(
+        self,
+        *,
+        project_id: str | None = None,
+        limit: int = 50,
+    ) -> list[SourceRecord]:
+        if project_id:
+            async with self._conn.execute(
+                "SELECT * FROM sources WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+                (project_id, limit),
+            ) as cur:
+                rows = [_row_dict(row) for row in await cur.fetchall()]
+        else:
+            async with self._conn.execute(
+                "SELECT * FROM sources ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ) as cur:
+                rows = [_row_dict(row) for row in await cur.fetchall()]
+        return [self._source_record(row) for row in rows if row is not None]
+
     async def create_dataset(
         self,
         *,

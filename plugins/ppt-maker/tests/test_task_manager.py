@@ -88,11 +88,15 @@ async def test_sources_datasets_templates_and_wal(tmp_path) -> None:
             category="business",
             original_path="templates/original.pptx",
         )
+        sources = await manager.list_sources()
+        project_sources = await manager.list_sources(project_id=project.id)
 
     with sqlite3.connect(db_path) as conn:
         journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
 
     assert source.metadata == {"chars": 120}
+    assert [item.id for item in sources] == [source.id]
+    assert [item.id for item in project_sources] == [source.id]
     assert dataset.status == "created"
     assert template.category is not None
     assert journal_mode.lower() == "wal"
