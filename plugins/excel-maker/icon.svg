@@ -21,7 +21,7 @@
   <circle cx="12" cy="53" r="18" fill="#BBF7D0" opacity="0.22"/>
   <rect x="6" y="6" width="52" height="52" rx="15" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.24)" stroke-width="1.5"/>
   <!-- Iconify streamline-ultimate:microsoft-excel-logo, exact package paths scaled to the app icon canvas. -->
-  <g transform="translate(4 4) scale(2.3333)" fill="none" stroke="url(#excel-mark)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" filter="url(#excel-shadow)">
+  <g transform="translate(8 8) scale(2)" fill="none" stroke="url(#excel-mark)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" filter="url(#excel-shadow)">
     <path d="M15.12 12h8.13m-8.13-5h8.13M4 9l5 6m0-6l-5 6M15.13 2.25V17h8.12"/>
     <path d="M7 18v3a1 1 0 0 0 1 1h14.25a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v3"/>
     <path d="M1.75 6h10s1 0 1 1v10s0 1-1 1h-10s-1 0-1-1V7s0-1 1-1"/>
