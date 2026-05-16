@@ -295,6 +295,10 @@ def _is_reviewed_legacy(mem: Any) -> bool:
     return "legacy_pending_review" in tags or any(t.startswith("legacy_reason:") for t in tags)
 
 
+_LEGACY_BANNER_DISMISSED_KEY = "legacy_banner_dismissed"
+"""_schema_meta 里的 sentinel 键：用户点过"不再提醒"。"""
+
+
 def _legacy_review_counts(store: Any) -> dict[str, int]:
     """统计真实的 legacy_quarantine（v1/v2 历史旧数据），用于决定 UI 是否再次提示用户。
 
@@ -649,20 +653,52 @@ async def memory_migration_status(request: Request):
     legacy_counts = _legacy_review_counts(store)
     all_counts = _owner_counts(store)
     graph_counts = _graph_owner_counts(_get_manager(request))
+
+    # Phase 4：show_banner 是前端**唯一**应该信的字段，把 banner 决策完整收敛到后端。
+    # - 只有真历史 legacy_quarantine 还有待 review 条目 (`pending > 0`)；
+    # - 且用户没显式按过"不再提醒"（_schema_meta 里 legacy_banner_dismissed != '1'）。
+    # pending_consolidation 是 v4 新桶（lifecycle 后台合成产物），用户不可见，
+    # **不**触发 banner。这就是为什么修了 Phase 0 之后 banner 不会再反复弹。
+    has_pending_legacy = legacy_counts["pending"] > 0
+    try:
+        dismissed = store.get_meta(_LEGACY_BANNER_DISMISSED_KEY) == "1"
+    except Exception:
+        dismissed = False
+    show_banner = has_pending_legacy and not dismissed
+
     return {
+        "api_version": "v4",
         "current_owner": {"user_id": user_id, "workspace_id": workspace_id},
         "current_visible": current_visible,
         "legacy_quarantine": legacy_counts["total"],
         "legacy_pending": legacy_counts["pending"],
         "legacy_reviewed": legacy_counts["reviewed"],
-        # v4：lifecycle 后台合成产物现在落到独立的 pending_consolidation 桶，
-        # 不再混入 legacy_quarantine 反复触发 UI banner。前端只看
-        # has_recoverable_legacy 决定是否提示。
+        # v4 字段：lifecycle 后台合成产物的独立桶计数，仅供 DevOps 排查用。
         "pending_consolidation": legacy_counts.get("pending_consolidation", 0),
         "semantic": all_counts,
         "graph": graph_counts,
-        "has_recoverable_legacy": legacy_counts["pending"] > 0,
+        # 旧字段保留，老前端继续可读。
+        "has_recoverable_legacy": has_pending_legacy,
+        # Phase 4：banner 显示与否的唯一权威字段。
+        "show_banner": show_banner,
+        "banner_dismissed": dismissed,
     }
+
+
+@router.post("/legacy/dismiss")
+async def dismiss_legacy_banner(request: Request):
+    """Phase 4：用户点"不再提醒 legacy 记忆"按钮的端点。
+
+    幂等：重复调用只会重设 timestamp，不会产生副作用。
+    通过 _schema_meta 持久化，跨进程 / 跨重启都生效。
+    取消"不再提醒"目前没有专用按钮 —— 用户重新触发"导入旧记忆"成功后，
+    后端会顺手清除该 sentinel。
+    """
+    store = _get_store(request)
+    if not store:
+        raise HTTPException(503, "Memory store not available")
+    store.set_meta(_LEGACY_BANNER_DISMISSED_KEY, "1")
+    return {"ok": True, "dismissed": True}
 
 
 @router.post("/claim-legacy")
@@ -695,6 +731,12 @@ async def claim_legacy_memories(request: Request, body: ClaimLegacyRequest | Non
         include_default_graph_nodes=body.include_default_graph_nodes,
     )
     _sync_json(request)
+    # Phase 4：用户主动整理过 legacy 后，重置 dismissed sentinel。
+    # 这样如果未来又出现新的 legacy_quarantine（比如导入了别人的旧 db），banner 还会再提醒一次。
+    try:
+        store.set_meta(_LEGACY_BANNER_DISMISSED_KEY, "0")
+    except Exception:
+        pass
     return {
         "ok": True,
         "claimed": report["promoted"],

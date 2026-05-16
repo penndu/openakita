@@ -267,6 +267,113 @@ def test_memory_migration_status_and_claim_legacy(tmp_path):
     assert status_after["has_recoverable_legacy"] is False
 
 
+def test_migration_status_show_banner_field_phase4(tmp_path):
+    """Phase 4：migration-status 应该返回 show_banner（前端唯一信源）+ api_version。
+
+    1. 有真历史 legacy 待 review → show_banner=True
+    2. dismiss API 调用后 → show_banner=False（哪怕 legacy 还在）
+    3. claim-legacy 成功后 → dismissed sentinel 被清除（show_banner 重新跟随 legacy 数量）
+    """
+    manager = _manager(tmp_path)
+    manager.start_session("session-a", user_id="desktop_user")
+    manager.store.save_semantic(
+        _memory("v1 时期老记忆，需要复核"),
+        scope="legacy_quarantine",
+        user_id="legacy",
+        workspace_id="default",
+        skip_dedup=True,
+    )
+
+    client = _memory_client(manager)
+
+    # 1) 默认状态：有 legacy，banner 应该亮。
+    status = client.get("/api/memories/migration-status").json()
+    assert status["api_version"] == "v4"
+    assert status["show_banner"] is True
+    assert status["banner_dismissed"] is False
+    assert status["legacy_pending"] == 1
+
+    # 2) 用户点"不再提醒"，sentinel 被写到 _schema_meta。
+    dismiss_res = client.post("/api/memories/legacy/dismiss")
+    assert dismiss_res.status_code == 200
+    assert dismiss_res.json()["dismissed"] is True
+
+    # 幂等：再调一次不报错，行为相同。
+    again = client.post("/api/memories/legacy/dismiss")
+    assert again.status_code == 200
+
+    status2 = client.get("/api/memories/migration-status").json()
+    assert status2["show_banner"] is False
+    assert status2["banner_dismissed"] is True
+    # 注意：has_recoverable_legacy 是旧字段，反映 "底层还有没有 legacy"，
+    # 不受 dismissed 影响 —— 这是有意的，给老前端保留行为。
+    assert status2["has_recoverable_legacy"] is True
+    assert status2["legacy_pending"] == 1
+
+
+def test_claim_legacy_clears_banner_dismiss_sentinel(tmp_path):
+    """Phase 4：用户主动 claim-legacy 完成后，"不再提醒" sentinel 应被重置。
+
+    场景：如果之后通过任何途径又出现新的 legacy_quarantine（比如导入旧 db 备份），
+    banner 应该再次提醒，而不是被旧的 dismiss 永久淹没。
+    """
+    manager = _manager(tmp_path)
+    manager.start_session("session-a", user_id="desktop_user")
+    manager.store.save_semantic(
+        _memory("用户喜欢中文解释"),
+        scope="legacy_quarantine",
+        user_id="legacy",
+        workspace_id="default",
+        skip_dedup=True,
+    )
+
+    client = _memory_client(manager)
+
+    # 先 dismiss
+    assert client.post("/api/memories/legacy/dismiss").status_code == 200
+    assert client.get("/api/memories/migration-status").json()["show_banner"] is False
+
+    # 然后 claim-legacy
+    res = client.post("/api/memories/claim-legacy", json={})
+    assert res.status_code == 200
+
+    # 现在没有 pending legacy，show_banner 自然 False；但更关键的是：
+    # 模拟未来又出现新 legacy，看 banner 是否会再亮。
+    manager.store.save_semantic(
+        _memory("以后又导入的旧记忆"),
+        scope="legacy_quarantine",
+        user_id="legacy",
+        workspace_id="default",
+        skip_dedup=True,
+    )
+    status_final = client.get("/api/memories/migration-status").json()
+    assert status_final["legacy_pending"] == 1
+    assert status_final["banner_dismissed"] is False
+    assert status_final["show_banner"] is True
+
+
+def test_migration_status_no_banner_when_no_legacy(tmp_path):
+    """没有任何 legacy 时，show_banner 必须是 False，
+    哪怕 pending_consolidation 桶有东西也不能误亮（那是 DevOps 字段）。"""
+    manager = _manager(tmp_path)
+    manager.start_session("session-a", user_id="desktop_user")
+    # 模拟 lifecycle 后台合成的产物落到 pending_consolidation
+    manager.store.save_semantic(
+        _memory("后台合成的偏好总结"),
+        scope="pending_consolidation",
+        user_id="pending",
+        workspace_id="default",
+        skip_dedup=True,
+    )
+
+    client = _memory_client(manager)
+    status = client.get("/api/memories/migration-status").json()
+    assert status["legacy_pending"] == 0
+    assert status["pending_consolidation"] == 1
+    assert status["show_banner"] is False
+    assert status["has_recoverable_legacy"] is False
+
+
 def test_claim_legacy_keeps_unstructured_task_logs_quarantined(tmp_path):
     manager = _manager(tmp_path)
     manager.start_session("session-a", user_id="desktop_user")

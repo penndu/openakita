@@ -52,11 +52,15 @@ type Stats = {
 };
 
 type MigrationStatus = {
+  // v4 起后端返回该字段；旧版本后端不会有，前端做兼容。
+  api_version?: string;
   current_owner: { user_id: string; workspace_id: string };
   current_visible: number;
   legacy_quarantine: number;
   legacy_pending?: number;
   legacy_reviewed?: number;
+  /** v4：lifecycle 后台合成产物的独立桶计数（DevOps 用，不触发 banner） */
+  pending_consolidation?: number;
   semantic: {
     total: number;
     by_scope: Record<string, number>;
@@ -73,6 +77,9 @@ type MigrationStatus = {
     by_owner: Array<{ user_id: string; workspace_id: string; count: number }>;
   };
   has_recoverable_legacy: boolean;
+  /** v4：banner 显示与否的唯一权威字段。v3 之前的后端没有这个字段，前端会回退到旧逻辑。 */
+  show_banner?: boolean;
+  banner_dismissed?: boolean;
 };
 
 type ReviewResult = {
@@ -187,6 +194,25 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
   const { t } = useTranslation();
   const API_BASE = apiBaseUrl;
   const typeLabel = (type: string) => TYPE_LABEL_KEYS[type] ? t(TYPE_LABEL_KEYS[type]) : type;
+
+  // Phase 4：把后端打的 legacy_* 系列 tag 本地化展示。
+  // 后端不变（tag 是稳定 ID），只在 UI 层翻译显示。
+  const formatTag = (tag: string): string => {
+    if (tag === "legacy_imported") return t("memory.tagLegacyImported");
+    if (tag === "legacy_pending_review") return t("memory.tagLegacyPendingReview");
+    if (tag.startsWith("legacy_reason:")) {
+      const reason = tag.slice("legacy_reason:".length);
+      const reasonKeyMap: Record<string, string> = {
+        legacy_identity_conflict: "memory.tagLegacyReasonIdentityConflict",
+        conflicts_with_current_user: "memory.tagLegacyReasonConflictsCurrentUser",
+        invalid_enum_value: "memory.tagLegacyReasonInvalidEnumValue",
+        task_log: "memory.tagLegacyReasonTaskLog",
+      };
+      const reasonLabel = reasonKeyMap[reason] ? t(reasonKeyMap[reason]) : reason;
+      return t("memory.tagLegacyReason", { reason: reasonLabel });
+    }
+    return tag;
+  };
   const mdMods = useMdModules();
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -210,6 +236,16 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
   const [totalCount, setTotalCount] = useState(0);
   const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
   const [claimingLegacy, setClaimingLegacy] = useState(false);
+  const [dismissingLegacy, setDismissingLegacy] = useState(false);
+  // 本会话内点了"稍后提醒"，刷新页面后会重新出现。
+  // 用 sessionStorage 而不是 React state，是为了切到别的 Tab 再回来 banner 不会回来。
+  const [sessionLegacyDismissed, setSessionLegacyDismissed] = useState<boolean>(() => {
+    try {
+      return window.sessionStorage.getItem("openakita.legacy_banner_snoozed") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -327,6 +363,40 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       toast.error(e.message || t("memory.legacyClaimFailed"));
     } finally {
       setClaimingLegacy(false);
+    }
+  };
+
+  const handleSnoozeLegacy = () => {
+    // 本会话临时关闭：只写 sessionStorage，刷新或下次启动还会再问。
+    try {
+      window.sessionStorage.setItem("openakita.legacy_banner_snoozed", "1");
+    } catch {
+      /* ignore */
+    }
+    setSessionLegacyDismissed(true);
+  };
+
+  const handleDismissLegacyForever = async () => {
+    setDismissingLegacy(true);
+    try {
+      await safeFetch(`${API_BASE}/api/memories/legacy/dismiss`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      // 同时关掉本会话的 snooze，避免下次后端重置后又被本地 snooze 拦住。
+      try {
+        window.sessionStorage.removeItem("openakita.legacy_banner_snoozed");
+      } catch {
+        /* ignore */
+      }
+      setSessionLegacyDismissed(false);
+      await loadMigrationStatus();
+      toast.success(t("memory.legacyDismissForeverSuccess"));
+    } catch (e: any) {
+      toast.error(e.message || t("memory.legacyDismissForeverFailed"));
+    } finally {
+      setDismissingLegacy(false);
     }
   };
 
@@ -489,7 +559,14 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
     (o) => o.user_id === "default" && o.workspace_id === "default"
   )?.count ?? 0;
   const pendingLegacy = migrationStatus?.legacy_pending ?? migrationStatus?.legacy_quarantine ?? 0;
-  const showLegacyRecovery = !!migrationStatus && migrationStatus.has_recoverable_legacy && pendingLegacy > 0;
+  // Phase 4：banner 显示规则收敛到后端，前端只信 show_banner。
+  // 兼容：旧后端没有 show_banner，则继续看 has_recoverable_legacy + pendingLegacy（v3 行为）。
+  const sessionDismissed = sessionLegacyDismissed; // 本会话临时关闭（"稍后提醒"）
+  const backendSaysShow =
+    migrationStatus?.show_banner !== undefined
+      ? migrationStatus.show_banner
+      : !!migrationStatus && migrationStatus.has_recoverable_legacy && pendingLegacy > 0;
+  const showLegacyRecovery = backendSaysShow && !sessionDismissed && pendingLegacy > 0;
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -539,14 +616,35 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
                 })}
               </div>
             </div>
-            <Button
-              onClick={handleClaimLegacy}
-              disabled={claimingLegacy}
-              className="h-9 shrink-0 bg-amber-500 text-white hover:bg-amber-600"
-            >
-              {claimingLegacy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
-              {t("memory.legacyClaimAction")}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <Button
+                onClick={handleClaimLegacy}
+                disabled={claimingLegacy || dismissingLegacy}
+                className="h-9 bg-amber-500 text-white hover:bg-amber-600"
+              >
+                {claimingLegacy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
+                {t("memory.legacyClaimAction")}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleSnoozeLegacy}
+                disabled={claimingLegacy || dismissingLegacy}
+                className="h-9"
+                title={t("memory.legacySnoozeHint")}
+              >
+                {t("memory.legacySnoozeAction")}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={handleDismissLegacyForever}
+                disabled={claimingLegacy || dismissingLegacy}
+                className="h-9 text-muted-foreground"
+                title={t("memory.legacyDismissForeverHint")}
+              >
+                {dismissingLegacy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
+                {t("memory.legacyDismissForeverAction")}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -852,8 +950,8 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
                         {m.tags && m.tags.length > 0 && (
                           <div className="flex gap-1.5 flex-wrap">
                             {m.tags.map(tag => (
-                              <Badge key={tag} variant="outline" className="bg-indigo-500/10 text-indigo-500 border-indigo-500/20 text-[10px] px-1.5 py-0">
-                                {tag}
+                              <Badge key={tag} variant="outline" className="bg-indigo-500/10 text-indigo-500 border-indigo-500/20 text-[10px] px-1.5 py-0" title={tag}>
+                                {formatTag(tag)}
                               </Badge>
                             ))}
                           </div>
@@ -975,8 +1073,8 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
                         {m.tags && m.tags.length > 0 && (
                           <div className="mt-1 flex gap-1 flex-wrap">
                             {m.tags.map(tag => (
-                              <span key={tag} className="px-1.5 py-px rounded-lg text-[10px] bg-indigo-500/10 text-indigo-500 whitespace-nowrap">
-                                {tag}
+                              <span key={tag} className="px-1.5 py-px rounded-lg text-[10px] bg-indigo-500/10 text-indigo-500 whitespace-nowrap" title={tag}>
+                                {formatTag(tag)}
                               </span>
                             ))}
                           </div>
