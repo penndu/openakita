@@ -17,6 +17,25 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _iter_accessible_paths(root: Path):
+    """Yield descendants while skipping directories Windows refuses to open."""
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            children = list(current.iterdir())
+        except (OSError, PermissionError):
+            logger.debug("Skipping inaccessible storage path: %s", current)
+            continue
+        for child in children:
+            yield child
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    stack.append(child)
+            except (OSError, PermissionError):
+                logger.debug("Skipping inaccessible storage child: %s", child)
+
+
 @dataclass
 class StorageStats:
     """Aggregate storage usage for one or more directories."""
@@ -48,11 +67,7 @@ def _walk_sync(
     for root in roots:
         if not root.exists():
             continue
-        try:
-            iterator = root.rglob("*")
-        except (OSError, PermissionError):
-            continue
-        for p in iterator:
+        for p in _iter_accessible_paths(root):
             try:
                 if skip_hidden and any(part.startswith(".") for part in p.parts):
                     continue
