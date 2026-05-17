@@ -343,44 +343,59 @@ def _pip_install(specs: list[str], target: Path) -> tuple[bool, str]:
         return False, f"python runtime probe failed: {probe_err[-400:]}"
 
     last_err = ""
-    for url, trusted in _PIP_MIRRORS:
-        cmd = [
-            py, "-m", "pip", "install",
-            "--upgrade",
-            "--prefer-binary",
-            "--target", str(target),
-            "-i", url,
-        ]
-        if trusted:
-            cmd.extend(["--trusted-host", trusted])
-        cmd.extend(specs)
-        logger.info("happyhorse-video dep install via %s: %s", url, specs)
-        try:
-            proc = subprocess.run(
-                cmd,
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=240,
-                **extra_kwargs,
+    # First try a non-destructive install. ``pip install --upgrade --target``
+    # deletes existing target directories before replacing them; on Windows
+    # those dirs are often locked by the running backend or antivirus, causing
+    # WinError 5 even when the requested package (for example edge-tts) is only
+    # missing and could be added safely.
+    install_modes = [
+        ("install", []),
+        ("upgrade", ["--upgrade"]),
+    ]
+    for mode, mode_flags in install_modes:
+        for url, trusted in _PIP_MIRRORS:
+            cmd = [
+                py, "-m", "pip", "install",
+                *mode_flags,
+                "--prefer-binary",
+                "--target", str(target),
+                "-i", url,
+            ]
+            if trusted:
+                cmd.extend(["--trusted-host", trusted])
+            cmd.extend(specs)
+            logger.info(
+                "happyhorse-video dep %s via %s: %s",
+                mode,
+                url,
+                specs,
             )
-        except subprocess.TimeoutExpired as e:
-            last_err = f"timeout via {url}: {e}"
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=240,
+                    **extra_kwargs,
+                )
+            except subprocess.TimeoutExpired as e:
+                last_err = f"{mode} timeout via {url}: {e}"
+                logger.warning(last_err)
+                continue
+            except Exception as e:  # noqa: BLE001 - any spawn error worth retry
+                last_err = f"{mode} spawn error via {url}: {e}"
+                logger.warning(last_err)
+                continue
+            if proc.returncode == 0:
+                logger.info("happyhorse-video dep %s ok via %s", mode, url)
+                return True, ""
+            # Keep only the tail of stderr so the UI message stays readable.
+            tail = (proc.stderr or proc.stdout or "").strip()[-400:]
+            last_err = f"pip {mode} exit {proc.returncode} via {url}: {tail}"
             logger.warning(last_err)
-            continue
-        except Exception as e:  # noqa: BLE001 - any spawn error worth retry
-            last_err = f"spawn error via {url}: {e}"
-            logger.warning(last_err)
-            continue
-        if proc.returncode == 0:
-            logger.info("happyhorse-video dep install ok via %s", url)
-            return True, ""
-        # Keep only the tail of stderr so the UI message stays readable.
-        tail = (proc.stderr or proc.stdout or "").strip()[-400:]
-        last_err = f"pip exit {proc.returncode} via {url}: {tail}"
-        logger.warning(last_err)
     return False, last_err
 
 
