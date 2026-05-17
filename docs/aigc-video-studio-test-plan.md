@@ -1,5 +1,34 @@
 # AIGC 视频创作工作室测试计划
 
+> ⚠️ **本文档对应历史模板（happyhorse-video 插件 v1.0.0 / 主仓 1.27.x 前）**：
+> 旧模板 `aigc-video-studio` 由 `tongyi-image` + `seedance-video` 双插件拼装而成，
+> 共 4 节点（制片人 / 编剧 / 通义生图工作台 / 即梦视频工作台），同时还存在并列模板
+> `happyhorse-video-studio`（百炼 AIGC 视频创作工作室）。
+>
+> **happyhorse-video v1.1.0 起的最新默认模板**已重做为基于 `happyhorse-video` 单
+> 插件的 **7 节点工作室**：
+>
+> - 协作角色：`producer`（制片人）/ `screenwriter`（编剧，带 `hh_storyboard_decompose`）
+>   / `art-director`（美术指导）
+> - 工作台 leaf：`wb-hh-image`（7 个 `hh_image_*`）/ `wb-hh-video`（短视频
+>   `hh_t2v` / `hh_i2v` / `hh_r2v` / `hh_video_edit`）/ `wb-hh-human`（5 个数字人
+>   模式）/ `wb-hh-long`（`hh_long_video_create` + `hh_video_concat`）
+>
+> 并列存在的 `happyhorse-video-studio` 模板已并入新的默认 `aigc-video-studio` 删除。
+> 本文档中的「通义生图工作台」「即梦视频工作台」节点名、`tongyi_image_*` /
+> `seedance_*` 工具名、`from_asset_ids` 流转细节等仅适用于历史版本，**不能用于
+> 验收新模板**。
+>
+> 新模板的端到端验收暂以以下两份资料为准：
+>
+> - [`plugins/happyhorse-video/USER_TEST_CASES.md`](../plugins/happyhorse-video/USER_TEST_CASES.md)
+>   —— 单插件 8 Tab 的 5 分钟烟测
+> - [`plugins/happyhorse-video/README.md`](../plugins/happyhorse-video/README.md)
+>   第 7 节「与组织模板联动」—— 节点拓扑与工作流说明
+>
+> 本文档保留以便回看历史结构 / 老组织（仍引用 `tongyi-image` + `seedance-video`
+> 的 `data/org_templates/*.json` 副本）的验收说明，不再随主仓代码更新。
+
 本文用于手工验收「AIGC 视频创作工作室」组织模板，以及通义生图、即梦视频两个工作台节点在组织编排中的任务传递、附件登记和最终交付链路。
 
 ## 1. 测试目标
