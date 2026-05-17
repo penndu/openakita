@@ -186,10 +186,46 @@ sqlite3 ~/.openakita/openakita.db \
 
 ---
 
-## 7. 已知边界 / 后续计划
+## 7. Phase 2b / 3 收尾（v1.28 范围内已完成）
+
+下面这些项原本规划在"下一个 minor 推进"，最终在 v4 升级一并落地，因为它们触及的是多用户 IM 部署的真实数据隔离漏洞，没必要拖到下个版本。
+
+### 7.1 episode / turn 工具搜索按 (user_id, workspace_id) 过滤（Phase 2b.5）
+
+- `storage.search_episodes` 增加 `user_id` / `workspace_id` 参数，通过 INNER JOIN `session_tenants` 限定结果；
+- `storage.search_turns` 同上；
+- `tools/handlers/memory.py`：`list_recent_tasks` / `search_conversation_traces` 自动带上 `mm._current_owner()` 的 (user, workspace)；
+- 修复点：多用户 IM 部署下，alice 的 `list_recent_tasks` 之前会看到 bob 的任务列表 —— 是真泄漏，已堵。
+
+### 7.2 daily_consolidator dedup 按 tenant 分组（Phase 3）
+
+- 同 query content 但属于不同 (user_id, workspace_id) 的记忆**不会**再被跨用户合并；
+- 向量库回包后增加两道兜底：1) 隔离桶（`legacy_quarantine` / `pending_consolidation`）不参与；2) 跨 tenant 命中即便相似度高也跳过。
+
+### 7.3 persona_trait 加载排除隔离桶（Phase 3）
+
+- `agent._initialize_async` 加载 `persona_trait` 时换用 `iter_cached()`，自动排除隔离桶；
+- 解决"用户没碰过的旧 persona trait 突然变成新 Agent 的人格特征"问题。
+
+### 7.4 `memory_mode → memory_isolation` 后向兼容重命名（Phase 2b.2）
+
+- `AgentProfile` 新增 `memory_isolation` 属性别名（推荐新代码使用），底层字段仍为 `memory_mode`，JSON 持久化格式不变；
+- `to_dict` 双 key 输出，`from_dict` 双向接收（新名优先）；
+- API `ProfileCreateRequest` / `ProfileUpdateRequest` 接受新名，`create` 路径优先用新名；
+- `create_agent` 工具 schema 新增 `memory_isolation` 入参，旧 `memory_mode` 仍兼容（schema 中标注 deprecated）；
+- v1.30 计划把 `memory_mode` 打 `@deprecated`，更晚版本下线。
+
+### 7.5 isolated agent 首次启动 seed MEMORY.md（Phase 2b.3）
+
+- 旧实现：找不到 profile 自己的 `MEMORY.md` 时回退到全局 `settings.memory_path`，会把 isolated agent 的数据**覆写**到全局，破坏隔离语义；
+- 新实现：永远使用 `{profile_dir}/identity/MEMORY.md`，不存在时自动写入带注释头的空模板，保护用户数据（已有内容不会被 seed 覆盖）。
+
+---
+
+## 8. 已知边界 / 后续计划
 
 - `multi_agent_enabled` 已经默认为 `True`，**没有**开关可以关掉（参考 `AGENTS.md`）；
-- Phase 2b 的剩余项（`episode` / `scratchpad` / `conversation_turns` 按 user/workspace 过滤、`memory_mode → memory_isolation` 字段重命名）会在下一个 minor 版本继续推进；
-- Phase 3（`process_unextracted_turns` / `synthesize_experiences` 完全按 tenant 分组、彻底废弃 `_memories` 原始读取）也在路上。
+- `memory_mode` 字段名会在 v1.30 标 deprecated，建议前端 / 第三方集成早点切到 `memory_isolation`；
+- `daily_consolidator.refresh_memory_md` / `_promote_persona_memories` 仍然假设进程内只有"当前活跃 tenant"在写 MEMORY.md / persona —— 多用户 IM 部署如果需要每个 tenant 独立 MEMORY.md，要等 Agent Profile-per-IM-user 的更深层改造（不在 v4 范围内）。
 
 如果你在升级过程中遇到异常，请走 `openakita bugreport` 收集崩溃信息后提交 issue。
