@@ -30,6 +30,7 @@ const HOST_CAPABILITIES = [
   "theme",
   "locale",
   "notification",
+  "open-external",
   "upload",
   "download",
   "file-download",
@@ -158,6 +159,10 @@ export class PluginBridgeHost {
         this.handleDownload(data);
         break;
 
+      case "bridge:open-external":
+        this.handleOpenExternal(data);
+        break;
+
       case "bridge:show-in-folder":
         this.handleShowInFolder(data);
         break;
@@ -177,6 +182,33 @@ export class PluginBridgeHost {
           payload: { originalType: data.type },
         });
         break;
+    }
+  }
+
+  private async handleOpenExternal(msg: BridgeMessage) {
+    const url = (msg.payload?.url as string) || "";
+    if (!url) {
+      this.post({
+        type: "bridge:open-external-ack",
+        requestId: msg.requestId,
+        payload: { ok: false, error: "Missing url" },
+      });
+      return;
+    }
+    try {
+      const { openExternalUrl } = await import("../platform");
+      await openExternalUrl(url);
+      this.post({
+        type: "bridge:open-external-ack",
+        requestId: msg.requestId,
+        payload: { ok: true },
+      });
+    } catch (e) {
+      this.post({
+        type: "bridge:open-external-ack",
+        requestId: msg.requestId,
+        payload: { ok: false, error: String(e) },
+      });
     }
   }
 
