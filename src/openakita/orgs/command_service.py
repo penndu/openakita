@@ -96,6 +96,17 @@ def get_command_service() -> OrgCommandService | None:
     return _service_instance
 
 
+def _origin_surface_label_cn(surface: OrgCommandSurface) -> str:
+    """Short label for blackboard / operator visibility (Chinese UI)."""
+    if surface == OrgCommandSurface.IM:
+        return "即时通讯"
+    if surface == OrgCommandSurface.DESKTOP_CHAT:
+        return "桌面聊天"
+    if surface == OrgCommandSurface.ORG_CONSOLE:
+        return "组织指挥台"
+    return str(surface.value)
+
+
 def default_scope_for_surface(
     surface: OrgCommandSurface,
     *,
@@ -188,6 +199,12 @@ class OrgCommandService:
             self._running_by_root[root_key] = command_id
 
         self._bridge_persist_user_message(request.org_id, request.target_node_id, content)
+        self._mirror_command_to_distributed_surfaces(
+            request,
+            command_id=command_id,
+            root_node_id=root_node_id,
+            user_facing_content=content,
+        )
         run_request = OrgCommandRequest(
             org_id=request.org_id,
             content=run_content,
@@ -608,6 +625,122 @@ class OrgCommandService:
             return None
         candidates.sort(key=lambda c: float(c.get("finished_at") or c.get("updated_at") or 0), reverse=True)
         return candidates[0]
+
+    def _mirror_command_to_distributed_surfaces(
+        self,
+        request: OrgCommandRequest,
+        *,
+        command_id: str,
+        root_node_id: str,
+        user_facing_content: str,
+    ) -> None:
+        """Make IM / desktop chat commands visible on the org blackboard and editor UIs.
+
+        Historically only ``_bridge_persist_user_message`` mirrored text into the
+        synthetic desktop session — enough for history APIs, but the blackboard
+        panel and an already-open command console did not refresh until unrelated
+        events (e.g. ``org:command_done``) fired.
+
+        This writes a concise PROGRESS entry and broadcasts:
+        - ``org:blackboard_update`` so OrgEditorView refreshes the blackboard panel;
+        - ``org:command_started`` so OrgChatPanel can pull fresh session history.
+        """
+        text = (user_facing_content or "").strip()
+        if not text:
+            return
+
+        org_id = request.org_id
+        bb = None
+        skip_blackboard = request.origin_surface == OrgCommandSurface.ORG_CONSOLE
+        if not skip_blackboard:
+            try:
+                bb = self._runtime.get_blackboard(org_id)
+            except Exception:
+                bb = None
+
+        entry_id = ""
+        if bb is not None:
+            from openakita.orgs.models import MemoryType
+
+            src = request.source
+            who = (
+                (src.display_name or "").strip()
+                or (src.user_id or "").strip()
+                or (src.channel or "").strip()
+                or "user"
+            )
+            surface_cn = _origin_surface_label_cn(request.origin_surface)
+            meta_lines = [
+                f"指令 ID：`{command_id}`",
+                f"入口：{surface_cn}",
+            ]
+            if request.target_node_id:
+                meta_lines.append(f"目标节点：`{request.target_node_id}`")
+            if src.channel:
+                meta_lines.append(f"通道：`{src.channel}`")
+
+            preview = text if len(text) <= 6000 else text[:6000] + "…"
+            # Unique tail avoids blackboard duplicate suppression when the user
+            # pastes the same instruction twice in a row.
+            body = (
+                "**用户指令**\n\n"
+                + "\n".join(f"• {line}" for line in meta_lines)
+                + "\n\n---\n\n"
+                + preview
+                + f"\n\n— *{who}*"
+                + f"\n\n(ref: `{command_id}`)"
+            )
+            tags = [
+                "user_command",
+                request.origin_surface.value,
+                str(src.channel or "unknown"),
+            ]
+            try:
+                entry = bb.write_org(
+                    body,
+                    source_node="user",
+                    memory_type=MemoryType.PROGRESS,
+                    tags=tags,
+                    importance=0.55,
+                )
+                if entry is not None:
+                    entry_id = str(entry.id)
+            except Exception as exc:
+                logger.warning("[OrgCmd] blackboard mirror failed: %s", exc)
+
+        try:
+            from openakita.api.routes.websocket import fire_event
+
+            if entry_id:
+                fire_event(
+                    "org:blackboard_update",
+                    {
+                        "org_id": org_id,
+                        "scope": "org",
+                        "node_id": "user",
+                        "memory_type": "progress",
+                        "entry_id": entry_id,
+                    },
+                )
+            fire_event(
+                "org:command_started",
+                {
+                    "org_id": org_id,
+                    "command_id": command_id,
+                    "root_node_id": root_node_id,
+                    "target_node_id": request.target_node_id,
+                    "origin_surface": request.origin_surface.value,
+                    "content_preview": text[:500],
+                    "source": request.source.to_dict(),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "[OrgCmd] mirror broadcast failed org=%s cmd=%s",
+                org_id,
+                command_id,
+                exc_info=True,
+            )
 
     def _bridge_persist_user_message(
         self,

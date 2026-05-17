@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -10,6 +10,7 @@ from openakita.orgs.command_service import (
     OrgCommandConflict,
     OrgCommandRequest,
     OrgCommandService,
+    OrgCommandSource,
     OrgCommandSurface,
     OrgOutputScope,
     default_scope_for_surface,
@@ -86,6 +87,74 @@ async def test_replace_existing_cancels_previous_command_before_running_new(pers
     )
     assert service._running_by_root[(persisted_org.id, "node_ceo")] == second["command_id"]
     new_can_finish.set()
+
+
+def test_submit_mirrors_external_command_to_blackboard_and_broadcasts(persisted_org):
+    """IM / desktop chat commands should appear on the org blackboard and notify UIs."""
+    persisted_org.status = OrgStatus.ACTIVE
+    rt = MagicMock()
+    rt.get_org.return_value = persisted_org
+    bb = MagicMock()
+    mem = MagicMock()
+    mem.id = "mem_ext_1"
+    bb.write_org.return_value = mem
+    rt.get_blackboard.return_value = bb
+    service = OrgCommandService(rt, None)
+    service._schedule_run = MagicMock()
+
+    with patch("openakita.api.routes.websocket.fire_event") as fire:
+        service.submit(
+            OrgCommandRequest(
+                org_id=persisted_org.id,
+                content="从飞书下发的任务",
+                origin_surface=OrgCommandSurface.IM,
+                source=OrgCommandSource(
+                    channel="feishu",
+                    user_id="u1",
+                    display_name="张三",
+                ),
+            ),
+        )
+
+    bb.write_org.assert_called_once()
+    args, kwargs = bb.write_org.call_args
+    body = args[0] if args else ""
+    assert "用户指令" in body
+    assert "张三" in body
+    assert "feishu" in body
+    assert kwargs.get("source_node") == "user"
+
+    fired_events = [c.args[0] for c in fire.call_args_list]
+    assert "org:blackboard_update" in fired_events
+    assert "org:command_started" in fired_events
+    started_payload = fire.call_args_list[fired_events.index("org:command_started")].args[1]
+    assert started_payload.get("origin_surface") == "im"
+    assert started_payload.get("command_id")
+
+
+def test_submit_org_console_skips_blackboard_mirror_but_broadcasts_started(persisted_org):
+    persisted_org.status = OrgStatus.ACTIVE
+    rt = MagicMock()
+    rt.get_org.return_value = persisted_org
+    bb = MagicMock()
+    rt.get_blackboard.return_value = bb
+    service = OrgCommandService(rt, None)
+    service._schedule_run = MagicMock()
+
+    with patch("openakita.api.routes.websocket.fire_event") as fire:
+        service.submit(
+            OrgCommandRequest(
+                org_id=persisted_org.id,
+                content="指挥台直连",
+                origin_surface=OrgCommandSurface.ORG_CONSOLE,
+            ),
+        )
+
+    bb.write_org.assert_not_called()
+    rt.get_blackboard.assert_not_called()
+    fired = [c.args[0] for c in fire.call_args_list]
+    assert "org:command_started" in fired
+    assert "org:blackboard_update" not in fired
 
 
 def test_get_status_includes_scope_and_surface(persisted_org):
