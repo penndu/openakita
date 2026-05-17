@@ -748,14 +748,16 @@ jobs:
               CREATE_DMG_PID=$!
               ( sleep 300 && kill "$CREATE_DMG_PID" 2>/dev/null && echo "create-dmg timed out after 300s" ) &
               TIMER_PID=$!
-              wait "$CREATE_DMG_PID" 2>/dev/null || true
+              create_dmg_status=0
+              wait "$CREATE_DMG_PID" 2>/dev/null || create_dmg_status=$?
               kill "$TIMER_PID" 2>/dev/null || true
               wait "$TIMER_PID" 2>/dev/null || true
-              if [ -f "${dmg_file}" ]; then
+              if [ "${create_dmg_status}" -eq 0 ] && [ -s "${dmg_file}" ]; then
                 echo "DMG created with custom layout: ${dmg_file}"
                 dmg_created=true
                 break
               fi
+              rm -f "${dmg_file}"
               echo "create-dmg attempt ${attempt} failed or timed out, retrying in 3s..."
               sleep 3
             done
