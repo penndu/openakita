@@ -182,6 +182,10 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
 
   useEffect(() => {
     setRenderAllMessages(false);
+    // Drop any pending scroll target from the previous conversation so a later
+    // re-visit doesn't trigger an unrequested scroll if the same msg id is
+    // still reachable. itemRefs are torn down by the unmount cycle anyway.
+    pendingScrollRef.current = null;
   }, [conversationId]);
 
   // Consume any pending scroll target queued by scrollToIndex while the
