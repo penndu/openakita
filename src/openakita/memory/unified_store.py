@@ -481,6 +481,14 @@ class UnifiedStore:
     def list_known_tenants(self) -> list[tuple[str, str]]:
         return self.db.list_known_tenants()
 
+    def iter_owned_session_ids(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str | None = None,
+    ) -> list[str]:
+        return self.db.iter_owned_session_ids(user_id=user_id, workspace_id=workspace_id)
+
     def migrate_workspace_id(
         self,
         *,

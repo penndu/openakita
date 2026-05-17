@@ -1716,6 +1716,36 @@ class MemoryStorage:
             logger.debug(f"[MemoryStorage] get_session_tenant failed: {e}")
             return None
 
+    def iter_owned_session_ids(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str | None = None,
+    ) -> list[str]:
+        """返回 session_tenants 里所有属于 (user_id[, workspace_id]) 的 session_id。
+
+        用于多用户 IM 部署下 JSONL / react_traces 文件级回退路径的 owner
+        过滤 —— 没登记过的 session 自然被排除，即便文件还在磁盘上。
+        """
+        if not self._conn:
+            return []
+        try:
+            if workspace_id is None:
+                cur = self._conn.execute(
+                    "SELECT session_id FROM session_tenants WHERE user_id = ?",
+                    (user_id,),
+                )
+            else:
+                cur = self._conn.execute(
+                    "SELECT session_id FROM session_tenants "
+                    "WHERE user_id = ? AND workspace_id = ?",
+                    (user_id, workspace_id),
+                )
+            return [row[0] for row in cur.fetchall() if row[0]]
+        except Exception as e:
+            logger.debug(f"[MemoryStorage] iter_owned_session_ids failed: {e}")
+            return []
+
     def list_known_tenants(self) -> list[tuple[str, str]]:
         """返回所有已知 (user_id, workspace_id) 组合，供 synthesize 等批处理分组。
 

@@ -916,6 +916,78 @@ def test_agent_profile_memory_isolation_alias_phase_2b2():
     assert p4.memory_isolation == "isolated"
 
 
+def test_iter_owned_session_ids_phase_2b5_audit(tmp_path: Path):
+    """二次审计：iter_owned_session_ids 是 JSONL/react_traces 文件级过滤的核心
+    依赖；只能返回该 user_id（可选 workspace）的 session_id 集合。"""
+    storage = MemoryStorage(tmp_path / "openakita.db")
+    storage.upsert_session_tenant("sess-alice-1", "alice", "proj-a")
+    storage.upsert_session_tenant("sess-alice-2", "alice", "proj-b")
+    storage.upsert_session_tenant("sess-bob-1", "bob", "proj-a")
+
+    alice_all = set(storage.iter_owned_session_ids(user_id="alice"))
+    assert alice_all == {"sess-alice-1", "sess-alice-2"}
+
+    alice_proj_a = set(storage.iter_owned_session_ids(user_id="alice", workspace_id="proj-a"))
+    assert alice_proj_a == {"sess-alice-1"}
+
+    # 不存在的 user → 空集
+    assert storage.iter_owned_session_ids(user_id="ghost") == []
+
+
+def test_trace_memory_blocks_cross_owner_access(tmp_path: Path):
+    """二次审计：trace_memory 是按显式 ID 直读的接口。必须做 owner 校验，否则
+    LLM 拿到别人的 memory_id 直接就能读完整内容。"""
+    from unittest.mock import MagicMock
+
+    from openakita.memory.manager import MemoryManager
+    from openakita.tools.handlers.memory import MemoryHandler
+
+    mm = MemoryManager(
+        data_dir=tmp_path / "memory",
+        memory_md_path=tmp_path / "MEMORY.md",
+        search_backend="fts5",
+    )
+    mm.store.upsert_session_tenant("sess-alice", "alice", "proj-a")
+    mm.store.upsert_session_tenant("sess-bob", "bob", "proj-a")
+
+    bob_mem = SemanticMemory(
+        type=MemoryType.FACT,
+        priority=MemoryPriority.LONG_TERM,
+        content="bob 的内部秘密",
+    )
+    mm.store.save_semantic(
+        bob_mem, scope="user", scope_owner="", user_id="bob", workspace_id="proj-a"
+    )
+    if hasattr(mm, "_reload_from_sqlite"):
+        mm._reload_from_sqlite()
+
+    mm._current_user_id = "alice"
+    mm._current_workspace_id = "proj-a"
+
+    fake_agent = MagicMock()
+    fake_agent.memory_manager = mm
+    handler = MemoryHandler(fake_agent)
+
+    out = handler._trace_from_memory(mm.store, bob_mem.id)
+    assert "未找到记忆" in out, f"alice 不应该能读到 bob 的 memory，但 trace 返回: {out!r}"
+
+
+def test_stem_matches_session_allow_set():
+    """二次审计：allow-set 子串包含匹配的行为契约。"""
+    from openakita.tools.handlers.memory import MemoryHandler
+
+    fn = MemoryHandler._stem_matches_session_allow_set
+
+    # 空 allow-set → 默认拒绝（防止 owner 没 session 时仍读到文件）
+    assert fn("trace_anything_123.json", set()) is False
+    assert fn("trace_anything_123.json", None) is False
+
+    # session_id 作为子串命中
+    allowed = {"im_telegram__chat__user_alice"}
+    assert fn("trace_im_telegram__chat__user_alice_1716000000.json", allowed) is True
+    assert fn("trace_im_telegram__chat__user_bob_1716000000.json", allowed) is False
+
+
 def test_search_episodes_tenant_filter_phase_2b5(tmp_path: Path):
     """Phase 2b.5：search_episodes 带 user_id/workspace_id 时通过 JOIN session_tenants
     只返回该租户的 episode；不传则保持旧的全库扫描行为，向后兼容。"""

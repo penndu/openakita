@@ -228,4 +228,13 @@ sqlite3 ~/.openakita/openakita.db \
 - `memory_mode` 字段名会在 v1.30 标 deprecated，建议前端 / 第三方集成早点切到 `memory_isolation`；
 - `daily_consolidator.refresh_memory_md` / `_promote_persona_memories` 仍然假设进程内只有"当前活跃 tenant"在写 MEMORY.md / persona —— 多用户 IM 部署如果需要每个 tenant 独立 MEMORY.md，要等 Agent Profile-per-IM-user 的更深层改造（不在 v4 范围内）。
 
+### 8.1 仍未完全收敛的边界（已知 + 监控中）
+
+| 项 | 影响面 | 当前缓解 | 下一步 |
+|---|---|---|---|
+| HTTP `GET /api/memories/{id}` / `PUT /api/memories/{id}` 不做 owner 校验 | 桌面 admin UI / 本地管理面板 | API 默认只 bind localhost，desktop 单用户场景无泄漏面；多用户后台部署应放在内网 + 反代鉴权后 | v1.29 在 HTTP 路由层加 owner check |
+| 升级前已有的 episode 但其 `session_id` 在 `conversation_turns` 里没记录 | v3 → v4 升级且有过 turn 清理脚本的部署 | `session_tenants` 反推不到这些孤儿 episode，被 `search_episodes` JOIN 自然过滤；数据本身不丢，只是工具看不到 | 后续做 `claim-orphan-episodes` 工具补登记 |
+| `AgentProfile(memory_isolation="isolated")` 直接 kwarg 构造抛 `TypeError` | 直接构造 dataclass 的第三方扩展代码 | `from_dict` / API / 工具入参均接受新名，**生产代码应该走这三条之一** | v1.30 把字段重命名 + 删 alias |
+| 多用户 IM 共享 `data/react_traces/` 和 `data/memory/conversation_history/` 时，文件按 session_id 命名 | 多用户 IM 共享同一 OPENAKITA_DATA_DIR 部署 | Phase 2b.5 二次审计已加 `iter_owned_session_ids` allow-set 过滤，stem 不在 owner 已登记 session 列表内的文件直接跳过 | 已堵；后续做按 user_id 分目录归档作为深度防御 |
+
 如果你在升级过程中遇到异常，请走 `openakita bugreport` 收集崩溃信息后提交 issue。
