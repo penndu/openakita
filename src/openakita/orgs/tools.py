@@ -414,15 +414,21 @@ ORG_NODE_TOOLS: list[dict] = [
                 "file_attachments": {
                     "type": "array",
                     "description": (
-                        "如果本次交付涉及文件（无论通过 write_file 还是 run_shell 产出），"
-                        "必须在此字段声明，否则用户看不到附件。file_path 可以是相对于"
-                        "组织工作区的路径或绝对路径。"
+                        "如果本次交付涉及文件（无论通过 write_file / run_shell 产出，"
+                        "或来自插件返回的 local_paths / output_path / video_path 等），"
+                        "必须在此字段声明，否则用户看不到附件。\n"
+                        "- 字段名必须是 file_attachments（不是 attachments）\n"
+                        "- 每项必须含 filename + file_path（必填）\n"
+                        "- file_path 必须是真实存在的本地文件路径，可以相对于"
+                        "组织工作区也可以是绝对路径\n"
+                        "示例：file_attachments=[{\"filename\": \"scene_01.png\","
+                        " \"file_path\": \"data/plugin_assets/hh/.../scene_01.png\"}]"
                     ),
                     "items": {
                         "type": "object",
                         "properties": {
-                            "filename": {"type": "string", "description": "文件显示名"},
-                            "file_path": {"type": "string", "description": "文件路径（相对于组织工作区或绝对路径）"},
+                            "filename": {"type": "string", "description": "文件显示名（含扩展名，如 scene_01.png）"},
+                            "file_path": {"type": "string", "description": "文件路径（相对于组织工作区或绝对路径，必须真实存在）"},
                             "description": {"type": "string", "description": "文件说明（可选）"},
                         },
                         "required": ["filename", "file_path"],

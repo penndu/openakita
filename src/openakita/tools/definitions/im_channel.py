@@ -51,15 +51,24 @@ IM_CHANNEL_TOOLS = [
             "properties": {
                 "artifacts": {
                     "type": "array",
-                    "description": "要交付的附件清单（manifest）",
+                    "description": (
+                        "要交付的附件清单（manifest）。字段名是 artifacts（不是 attachments）；"
+                        "每项必填 type + path，name/caption 强烈建议提供。"
+                    ),
                     "items": {
                         "type": "object",
                         "properties": {
-                            "type": {"type": "string", "description": "file|image|voice"},
-                            "path": {"type": "string", "description": "本地文件路径"},
+                            "type": {"type": "string", "description": "file|image|voice（必填）"},
+                            "path": {
+                                "type": "string",
+                                "description": (
+                                    "本地文件路径，必须是宿主可读的绝对路径或工作区相对路径，"
+                                    "且文件真实存在；远端 URL 请先下载到本地再传"
+                                ),
+                            },
                             "caption": {"type": "string", "description": "说明文字（可选）"},
                             "mime": {"type": "string", "description": "MIME 类型（可选）"},
-                            "name": {"type": "string", "description": "展示文件名（可选）"},
+                            "name": {"type": "string", "description": "展示文件名（含扩展名，建议提供）"},
                             "dedupe_key": {"type": "string", "description": "去重键（可选）"},
                         },
                         "required": ["type", "path"],

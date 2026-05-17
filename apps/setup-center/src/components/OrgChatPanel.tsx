@@ -817,9 +817,9 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         updatePreview();
       } else if (event === "org:blackboard_update") {
         const mt = d.memory_type as string;
-        const fname = d.filename as string | undefined;
-        const fpath = d.file_path as string | undefined;
-        const fsize = d.file_size as number | undefined;
+        const fname = (d.filename || d.name) as string | undefined;
+        const fpath = (d.file_path || d.path) as string | undefined;
+        const fsize = (d.file_size ?? d.size) as number | undefined;
         if (mt === "resource" && fname && fpath) {
           const seg = findOrCreateSeg(nid);
           const added = pushSegFile(seg, { filename: fname, file_path: fpath, file_size: fsize });

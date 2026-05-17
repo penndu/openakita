@@ -79,12 +79,14 @@ _COORDINATOR_MODE_RULES = """\
 🚨 **下级用 org_submit_deliverable 提交了 file_attachments / output_files**（典型场景：策划方案、报告、PPT、文档、图片），那么你给用户的最终回复**必须**满足以下条件之一，否则系统会判任务未完成、强制让你重做：
 
 ✅ **优先方案：直接 deliver_artifacts**
-- 收到下级附件后，把附件的 `file_path` 整理成 `attachments=[{"file_path": "...", "filename": "..."}]`
-- 调用 `deliver_artifacts({"attachments": [...], "message": "<面向用户的简短说明>"})`
+- 收到下级附件后，把附件整理成 `artifacts=[{"type": "file"|"image"|"voice", "path": "<宿主可读的绝对/工作区相对路径>", "name": "<显示文件名>", "caption": "<可选说明>"}]`
+- 调用 `deliver_artifacts({"artifacts": [...]})`
+- 字段名是 `artifacts`（不是 `attachments`），且每项必须有 `type` 和 `path`
 - 这是唯一让用户在终端/IM 真正看到/下载文件的方式
 
 ✅ **退化方案：org_submit_deliverable(file_attachments=...)**
-- 如果你向你的上级（不是终端用户）汇报，使用 `org_submit_deliverable` 并把附件挂在 `file_attachments` 上
+- 如果你向你的上级（不是终端用户）汇报，使用 `org_submit_deliverable` 并把附件挂在 `file_attachments=[{"filename": "...", "file_path": "..."}]` 上
+- 注意字段名是 `file_attachments`（不是 `attachments`），item 字段是 `filename` + `file_path`
 
 ❌ **禁止的"空口交付"**
 - ❌ 只在文字里写"已为您整理 / 详见附件 / 文件已生成"——文字不算交付，必须有 deliver_artifacts 的成功回执

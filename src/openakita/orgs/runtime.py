@@ -5912,28 +5912,115 @@ class OrgRuntime:
         #   3. image_urls / video_url：远端 URL，httpx 流式下载
         candidates: list[dict] = []
 
-        for raw in payload.get("local_paths") or []:
-            if isinstance(raw, str) and raw:
-                candidates.append({"kind": "local", "src": raw})
-        # video_path / image_path 也按本地路径处理（plugin 可能用单数字段）
-        for key in ("video_path", "image_path"):
-            v = payload.get(key)
-            if isinstance(v, str) and v:
-                candidates.append({"kind": "local", "src": v})
+        seen_local: set[str] = set()
+        seen_asset: set[str] = set()
+        seen_url: set[str] = set()
 
-        for raw in payload.get("asset_ids") or []:
-            if isinstance(raw, str) and raw:
+        def _add_local(raw: object) -> None:
+            if isinstance(raw, str) and raw and raw not in seen_local:
+                seen_local.add(raw)
+                candidates.append({"kind": "local", "src": raw})
+
+        def _add_asset(raw: object) -> None:
+            if isinstance(raw, str) and raw and raw not in seen_asset:
+                seen_asset.add(raw)
                 candidates.append({"kind": "asset", "asset_id": raw})
 
+        def _add_url(raw: object, ext_hint: str = ".bin") -> None:
+            if (
+                isinstance(raw, str)
+                and raw
+                and not raw.startswith("data:")
+                and raw not in seen_url
+            ):
+                seen_url.add(raw)
+                candidates.append({"kind": "url", "url": raw, "ext_hint": ext_hint})
+
+        def _guess_ext_hint(key: str) -> str:
+            kl = key.lower()
+            if "video" in kl:
+                return ".mp4"
+            if "audio" in kl:
+                return ".mp3"
+            if "image" in kl or "frame" in kl or "thumb" in kl or "preview" in kl:
+                return ".png"
+            return ".bin"
+
+        # ── 顶层扫描白名单 ────────────────────────────────────────────────
+        # local files
+        for raw in payload.get("local_paths") or []:
+            _add_local(raw)
+        for key in (
+            "video_path",
+            "image_path",
+            "output_path",
+            "audio_path",
+            "last_frame_path",
+            "first_frame_path",
+            "cover_path",
+            "thumbnail_path",
+        ):
+            _add_local(payload.get(key))
+
+        # asset bus refs
+        for raw in payload.get("asset_ids") or []:
+            _add_asset(raw)
+
+        # remote URLs (plural / singular)
         for raw in payload.get("image_urls") or []:
-            if isinstance(raw, str) and raw and not raw.startswith("data:"):
-                candidates.append({"kind": "url", "url": raw, "ext_hint": ".png"})
-        v = payload.get("video_url")
-        if isinstance(v, str) and v and not v.startswith("data:"):
-            candidates.append({"kind": "url", "url": v, "ext_hint": ".mp4"})
-        v = payload.get("audio_url")
-        if isinstance(v, str) and v and not v.startswith("data:"):
-            candidates.append({"kind": "url", "url": v, "ext_hint": ".mp3"})
+            _add_url(raw, ".png")
+        for raw in payload.get("video_urls") or []:
+            _add_url(raw, ".mp4")
+        for raw in payload.get("audio_urls") or []:
+            _add_url(raw, ".mp3")
+        for key in (
+            "video_url",
+            "audio_url",
+            "image_url",
+            "preview_url",
+            "last_frame_url",
+            "first_frame_url",
+            "cover_url",
+            "thumbnail_url",
+        ):
+            _add_url(payload.get(key), _guess_ext_hint(key))
+
+        # ── 递归扫描 segments[*] / shots[*] / outputs[*] ─────────────────
+        for container_key in ("segments", "shots", "outputs", "items", "clips"):
+            container = payload.get(container_key)
+            if not isinstance(container, list):
+                continue
+            for seg in container:
+                if not isinstance(seg, dict):
+                    continue
+                for raw in seg.get("local_paths") or []:
+                    _add_local(raw)
+                for sk in (
+                    "path",
+                    "video_path",
+                    "image_path",
+                    "output_path",
+                    "audio_path",
+                    "last_frame_path",
+                    "first_frame_path",
+                    "cover_path",
+                    "thumbnail_path",
+                ):
+                    _add_local(seg.get(sk))
+                for raw in seg.get("asset_ids") or []:
+                    _add_asset(raw)
+                for sk in (
+                    "url",
+                    "video_url",
+                    "audio_url",
+                    "image_url",
+                    "preview_url",
+                    "last_frame_url",
+                    "first_frame_url",
+                    "cover_url",
+                    "thumbnail_url",
+                ):
+                    _add_url(seg.get(sk), _guess_ext_hint(sk))
 
         if not candidates:
             return None
