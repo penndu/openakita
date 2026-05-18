@@ -20,6 +20,14 @@ from .base import (
     NodeProtocol,
     NodeRegistration,
 )
+from .condition_node import BranchInputs, ConditionNode, ConditionPredicate
+from .human_review_node import (
+    HumanReviewNode,
+    InMemoryReviewQueue,
+    ReviewDecision,
+    ReviewQueue,
+    ReviewVerdict,
+)
 from .llm_node import (
     BrainPrompt,
     BrainResponse,
@@ -32,14 +40,22 @@ from .tool_node import ToolInvocation, ToolNode, ToolResult, ToolRunner
 
 __all__ = [
     "BaseNode",
+    "BranchInputs",
     "BrainPrompt",
     "BrainResponse",
+    "ConditionNode",
+    "ConditionPredicate",
+    "HumanReviewNode",
+    "InMemoryReviewQueue",
     "LLMNode",
     "NodeBrain",
     "NodeContext",
     "NodeLifecycleEvent",
     "NodeProtocol",
     "NodeRegistration",
+    "ReviewDecision",
+    "ReviewQueue",
+    "ReviewVerdict",
     "ToolCallRequest",
     "ToolInvocation",
     "ToolNode",
