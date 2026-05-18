@@ -37,9 +37,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
-from openakita.core.brain import Brain as _LegacyBrainImpl
-from openakita.core.brain import Context as _LegacyContext
-from openakita.core.brain import Response as _LegacyResponse
+from openakita.core._brain_legacy import Brain as _LegacyBrainImpl
+from openakita.core._brain_legacy import Context as _LegacyContext
+from openakita.core._brain_legacy import Response as _LegacyResponse
 from openakita.runtime.llm import (
     CompilerCircuitBreaker,
     EndpointFailoverView,
