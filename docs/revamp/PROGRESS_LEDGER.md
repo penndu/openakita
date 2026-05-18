@@ -2,7 +2,7 @@
 
 <!-- machine-readable phase marker; do NOT remove.
      Parsed by tests/revamp/_ledger.py + tests/parity/test_no_facade.py. -->
-current_phase: P-RC-2
+current_phase: P-RC-3
 
 > Source of truth for every commit landed on `revamp/v2` during
 > the post-RC continuation phases (P-RC-0 → P-RC-8). One row per
@@ -77,9 +77,19 @@ cold-session `org_id` rehydration in `MessageGateway` (#3).
 | `0bfad7de` | P-RC-2 P2.8 | feat(setup-center): bump asset version + stale bundle banner | +339 / -1 | +2 (vitest) +3 (pytest) | ADR-0007 |
 | _this commit_ | P-RC-2 P2.9 | docs(revamp): G-RC-2 gate review + STATUS scoreboard update | +220 / 0 | 0 | — |
 
-## P-RC-3 — Multi-process-safe v2 persistence
+## P-RC-3 — Multi-process-safe v2 persistence + nit cleanup
 
-_Not started._
+G-RC-2 was signed; this phase folds in five small tail items the
+P-RC-2 audit identified (T1–T5), then adds a SQLite-backed
+`SqliteOrgStore` so multi-process v2 deployments can share a
+single org catalogue without JSON-write contention. The phase also
+ships a JSON->SQLite migration helper, a pluggable backend factory
+gated by `settings.orgs_v2_backend`, and a contract suite that
+runs identical cases against both backends.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-3 P3.0 | chore(revamp): bump ledger to P-RC-3 + add commit_guard script (T1) | +220 (script+tests+ledger) | +11 (commit_guard) | — |
 
 ## P-RC-4 — Phase 2 real slim-down: brain / tools / context
 
@@ -122,3 +132,11 @@ may be retired from this list.
   via PowerShell ``Out-File -Encoding utf8`` -- the latter prepends a
   UTF-8 BOM and the resulting commit subject reads as
   ``\ufefffeat(...): ...``.
+
+* **T1** (G-RC-2 P-RC-2 audit, tightened): before every `git commit` on `revamp/v2`, run `python scripts/revamp_commit_guard.py --staged`. The script
+  reads `git diff --cached --numstat`, skips auto-generated
+  files (`package-lock.json`, `*.lock`, `*.svg`,
+  `docs/revamp/*.json` baselines), warns at >= 380 hand-written
+  LOC, and exits 1 at >= 400. No git hook is installed; this is
+  a manual operator discipline so a legitimate one-off giant
+  commit can still be force-recorded with eyes open.
