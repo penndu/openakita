@@ -31,6 +31,11 @@ from .hooks import (
     set_hook_executor,
 )
 from .identity import Identity
+from .loop_budget import (
+    READONLY_EXPLORATION_TOOLS,
+    LoopBudgetDecision,
+    LoopBudgetGuard,
+)
 from .output_formatter import (
     JSONFormatter,
     OutputFormatter,
@@ -71,6 +76,20 @@ from .persona import (
     PersonaTrait,
     persist_trait_to_memory,
 )
+from .resource_budget import (
+    BudgetAction,
+    BudgetConfig,
+    BudgetExceeded,
+    BudgetStatus,
+    ResourceBudget,
+    create_budget_from_settings,
+)
+from .token_budget import TokenBudget, parse_token_budget
+from .tool_result_budget import (
+    DEFAULT_MAX_RESULT_CHARS,
+    OVERFLOW_DIR,
+    truncate_tool_result,
+)
 from .ui_confirm_bus import UIConfirmBus, get_ui_confirm_bus, reset_ui_confirm_bus
 from .validators import (
     BaseValidator,
@@ -91,10 +110,15 @@ __all__ = [
     "ASK_MODE_RULESET",
     "AuditLogger",
     "BaseValidator",
+    "BudgetAction",
+    "BudgetConfig",
+    "BudgetExceeded",
+    "BudgetStatus",
     "CODE_EXEC_TOOLS",
     "COORDINATOR_MODE_RULESET",
     "CallbackHook",
     "ConfirmationDecision",
+    "DEFAULT_MAX_RESULT_CHARS",
     "DEFAULT_RULESET",
     "DISCLAIMER_TEXT",
     "DeniedError",
@@ -104,7 +128,10 @@ __all__ = [
     "HookResult",
     "Identity",
     "JSONFormatter",
+    "LoopBudgetDecision",
+    "LoopBudgetGuard",
     "MergedPersona",
+    "OVERFLOW_DIR",
     "OutputFormatter",
     "PERSONA_DIMENSIONS",
     "PLAN_MODE_RULESET",
@@ -116,10 +143,13 @@ __all__ = [
     "PermissionRule",
     "PersonaManager",
     "PersonaTrait",
+    "READONLY_EXPLORATION_TOOLS",
+    "ResourceBudget",
     "Ruleset",
     "ShellHook",
     "StreamJSONFormatter",
     "TextFormatter",
+    "TokenBudget",
     "UIConfirmBus",
     "UserCancelledError",
     "ValidationContext",
@@ -130,6 +160,7 @@ __all__ = [
     "check_mode_permission",
     "check_path",
     "check_permission",
+    "create_budget_from_settings",
     "create_default_registry",
     "create_formatter",
     "detect_numeric_output",
@@ -143,10 +174,12 @@ __all__ = [
     "get_ui_confirm_bus",
     "merge_working_facts",
     "normalize_confirmation_answer",
+    "parse_token_budget",
     "persist_trait_to_memory",
     "reset_audit_logger",
     "reset_pending_approvals_store",
     "reset_ui_confirm_bus",
     "set_hook_executor",
+    "truncate_tool_result",
     "validate_no_fabricated_numbers",
 ]
