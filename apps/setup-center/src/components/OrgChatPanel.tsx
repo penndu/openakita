@@ -72,6 +72,12 @@ interface TimelineSegment {
   failed?: boolean;
   /** 后端 failure_diagnoser 生成的结构化诊断 */
   diagnosis?: FailureDiagnosis;
+  /**
+   * P10: 节点退出后处于"需要用户/上级补充输入"的挂起态。
+   * - "waiting_user": 节点 escalate 给用户、等待回复。UI 必须显眼提示用户回复，
+   *   否则用户会误以为系统卡死、自己点取消导致 producer 链路被 soft_stop。
+   */
+  paused?: "waiting_user";
 }
 
 export interface OrgChatPanelProps {
@@ -661,6 +667,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           cur.exitReason = undefined;
           cur.diagnosis = undefined;
           cur.resultPreview = undefined;
+          cur.paused = undefined;
           return cur;
         }
       }
@@ -713,6 +720,20 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       return segments.map(seg => {
         const body = seg.lines.join("\n\n");
         if (seg.done) {
+          // P10: waiting_user 节点单独走"挂起需回复"模板。默认展开 + 标题用
+          // ⏸ 取代 ✓，body 顶部加 blockquote 引导用户在下方输入框回应，
+          // 避免被当成普通"完成"折叠而忽略。
+          if (seg.paused === "waiting_user") {
+            const hint = t("org.chat.waitingUserNotice", {
+              name: seg.nodeName,
+              defaultValue: `📣 **${seg.nodeName}** 已把决策权交回给你。请在下方输入框直接回应（例如：「同意继续」「换 t2v 降级」「放弃此镜头」），或在指挥台点击「继续」继续推进。`,
+            });
+            const summaryLabel = t("org.chat.waitingUserSummary", {
+              name: seg.nodeName,
+              defaultValue: `⏸ ${seg.nodeName} · 正在等待你的回复`,
+            });
+            return `<details open>\n<summary>${summaryLabel}</summary>\n\n> ${hint}\n\n${body}\n\n</details>`;
+          }
           const icon = segSummaryIcon(seg);
           // 非正常结束时默认展开，让用户立刻看到诊断；正常完成保持折叠
           const detailsTag = seg.failed ? "<details open>" : "<details>";
@@ -743,7 +764,16 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         pending.allFiles = flat;
       }
       if (!mountedRef.current) return;
-      setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, content: rendered || t("org.chat.thinking") } : m));
+      // P10: 进度流式更新时也把 attachments 推上去，让用户在过程阶段就能
+      // 看到图片/视频预览（FileAttachmentCard 已支持 img/video 内嵌）。
+      // 之前只在 finalize 时才注入 attachments，进度期间黑板登记的媒体
+      // 一直被隐藏直到任务完成。
+      const streamingAtts = pending?.allFiles && pending.allFiles.length > 0
+        ? pending.allFiles
+        : undefined;
+      setMessages(prev => prev.map(m => m.id === placeholderId
+        ? { ...m, content: rendered || t("org.chat.thinking"), attachments: streamingAtts ?? m.attachments }
+        : m));
     }
 
     const unsubProgress = onWsEvent((event, raw) => {
@@ -809,6 +839,15 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           if (isSoftOrgExitReason(reason)) {
             segments[idx].failed = false;
             segments[idx].diagnosis = undefined;
+          }
+          // P10: waiting_user 单独标记 paused 状态，让 renderTimeline 显眼
+          // 提示用户"需要你回复"。如果不标，用户会以为节点正常完成、
+          // 没有任何挂起，于是看到 producer/art-director 静默几分钟后自己
+          // 点取消（产生"任务莫名其妙被取消"的错觉）。
+          if (reason === "waiting_user") {
+            segments[idx].paused = "waiting_user";
+          } else {
+            segments[idx].paused = undefined;
           }
         }
       } else if (event === "org:task_terminated") {
@@ -1181,10 +1220,14 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
                 m.content
               )}
               {m.streaming && <span className="ocp-typing">●</span>}
-              {!m.streaming && m.attachments && m.attachments.length > 0 && (
-                <div style={{ borderTop: "1px solid rgba(100,116,139,0.2)", marginTop: 10, paddingTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+              {m.attachments && m.attachments.length > 0 && (
+                /* P10: 不再用 !m.streaming 阻塞 attachments 渲染——进度阶段
+                   收到的图片/视频可以即时显示给用户，避免任务完成前用户
+                   一直看不到媒体。FileAttachmentCard 已根据扩展名渲染
+                   img / video 内嵌预览。 */
+                <div style={{ borderTop: "1px solid rgba(100,116,139,0.2)", marginTop: 10, paddingTop: 8, display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                   {m.attachments.map((f, i) => (
-                    <FileAttachmentCard key={f.file_path || i} file={f} apiBaseUrl={apiBaseUrl} />
+                    <FileAttachmentCard key={f.file_path || i} file={f} apiBaseUrl={apiBaseUrl} inline />
                   ))}
                 </div>
               )}
