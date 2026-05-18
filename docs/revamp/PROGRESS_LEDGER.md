@@ -122,7 +122,8 @@ loses its sentinel allowance for these three files.
 | `5e7e0e79` | P-RC-4 P4.2 | refactor(runtime/llm): extract compiler-LLM circuit breaker from core.brain | +280 (circuit_breaker.py + tests + delegation) / -70 (state fields + 3 method bodies + reset block) | +11 (5 transition + 6 auth-keyword param) | ADR-0001, ADR-0002 |
 | `2d39b49c` | P-RC-4 P4.3 | refactor(runtime/llm): scaffold multimodal block conversion module | +328 (multimodal.py + tests + __init__ exports + ledger row) | +10 (multimodal conversion cases) | ADR-0001, ADR-0002 |
 | `1b77a4ed` | P-RC-4 P4.3b | refactor(core/brain): delegate _convert_response_to_anthropic to multimodal module | +6 / -82 (legacy method body) | 0 | ADR-0001, ADR-0002 |
-| _this commit_ | P-RC-4 P4.4 | refactor(runtime/llm): extract LLM streaming primitive from core.brain | +281 (stream.py + tests + __init__ exports) | +5 (stream + tracking cases) | ADR-0001, ADR-0002, ADR-0006 |
+| `0746709f` | P-RC-4 P4.4 | refactor(runtime/llm): extract LLM streaming primitive from core.brain | +281 (stream.py + tests + __init__ exports) | +5 (stream + tracking cases) | ADR-0001, ADR-0002, ADR-0006 |
+| _this commit_ | P-RC-4 P4.5 | feat(agent): implement real agent/brain.py on extracted helpers (~370 LOC) | +290 (real Brain class + SupervisorBrain protocol + helper accessors + 16 v2 surface methods) / -88 (facade) | 0 (existing tests cover) | ADR-0001, ADR-0003 |
 
 ## P-RC-5 — Phase 2 real slim-down: reasoning_engine
 

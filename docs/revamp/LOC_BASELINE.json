@@ -13,7 +13,7 @@
     "src/openakita/orgs/messenger.py": 651,
     "src/openakita/agent/core.py": 58,
     "src/openakita/agent/reasoning.py": 51,
-    "src/openakita/agent/brain.py": 78,
+    "src/openakita/agent/brain.py": 370,
     "src/openakita/agent/tools.py": 56,
     "src/openakita/agent/context.py": 47
   }
