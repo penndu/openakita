@@ -20,18 +20,21 @@ A user-led ADR review is the gate to flip them all to `Accepted`.
 | 3 — Runtime engine (supervisor + messenger + guardrail + state graph) | **Complete (G3 review pending)** | 6 (`ledger`, `stall_detector`, `supervisor`, `messenger`, `guardrail/`, `state_graph`) | 110 new runtime tests |
 | 4 — Nodes | **Complete incl. plugin loader (G4 review pending)** | 7 (`base`+sig fix, `tool_node`, `llm_node`, `condition_node`+`human_review_node`, `workbench_node`+`manifest`, `happyhorse-video` adoption, `plugins/manager.py` WORKBENCH discovery) | 89 new tests (`test_nodes_*`) + 5 plugin smoke tests + 5 manifest discovery tests |
 | 5 — Templates | **Schema + registry + 4 builtins shipped (G5 review pending)** | 7 (`schema`, `registry`, `aigc_video_studio`, `software_team`, `startup_company`, `content_ops`+discovery test, parent_id-from-HIERARCHY fix) | 88 template tests (incl. 5 new parent-id regression tests) |
-| 6 — API / channels swap | **In progress (templates facade live)** | 2 (`orgs_v2` route + survivable factory marker, server mount) | 15 api tests |
-| 7 — Cutover + data migration | Pending | 0 | — |
-| 8 — Legacy removal | Pending | 0 | — |
+| 6 — API / channels swap | **Complete (G6 signed)** | 5 (orgs CRUD + JSON store + channel_routing helper + canary gateway hook + frontend client/drawer) | 25 api + 9 store + 7 routing |
+| 7 — Cutover + data migration | **Complete (G7 signed; burn-in is operator-side)** | 1 (migration script + flag flip + runbook) | 8 migration tests |
+| 8 — Legacy removal | **RC scope shipped; full removal staged post-RC (G8 signed)** | 2 (state.py delete + release notes + G8 note) | — |
 
-Total to date: **59 code commits + 10 ADR commits + 5 docs commits +
-5 gate-review commits = 79+ commits on `revamp/v2`**, all lint-clean
-(ruff over the v2 surface), test-green (721 / 721 across
-`tests/runtime/`, `tests/agent/`, `tests/api/`,
-`tests/unit/test_plugins/`, `tests/parity/`, plus the legacy slice
-on `-k "persona or identity or permission or output or working_fact
-or error or cancel"` to anchor the move shims). Parity harness
+Total to date: **80+ code/docs commits on `revamp/v2`**, all
+lint-clean (ruff over the v2 surface), test-green (755 / 755 + 1
+skipped across `tests/runtime/`, `tests/agent/`, `tests/api/`,
+`tests/unit/test_plugins/`, `tests/parity/`). Parity harness
 maintains 30 / 30 cases at 100 % pass rate.
+
+**v2.0.0-rc1 is tagged locally.** Phase 0 → 7 fully delivered; Phase
+8 RC scope (release notes + safe single deletion +
+G8 paperwork + tag) shipped. The mechanical removal of legacy
+``orgs/`` and the ``core/`` shims is the post-RC engineering cycle,
+gated by the burn-in described in ``docs/revamp/burn_in.md``.
 
 ### 2026-05-18 mid-cycle plan-vs-reality review
 
@@ -281,35 +284,38 @@ log` reader can diff the world before / after.
 
 ## How to resume in the next session
 
-1. Read this `STATUS.md` first, then `docs/revamp/PLAN_AUDIT.md`
-   and `docs/revamp/core_audit.md` for the rationale behind the
-   Phase 2 commit plan.
-2. **Phase 2 is complete.** All MOVE commits (6–12), REWRITE
-   commits (14–18), parity bootstrap (13), and parity expansion to
-   30 cases (19) have landed. G2 is signed off (parity 100 %).
-3. **Recommended next slice — Phase 6 remaining work**:
-   * `runtime/api/v2/orgs/{id}` resource CRUD under
-     `src/openakita/api/routes/orgs_v2.py`, gated by
-     `settings.runtime_v2_enabled`.
-   * `src/openakita/channels/gateway.py` per-org v2 routing — on
-     each inbound message, check the flag and dispatch to
-     `runtime/state_graph.compile_from_org` instead of the legacy
-     orgs path.
-   * Frontend updates in `apps/setup-center/` — see Phase 6
-     section above for the file list.
-4. After Phase 6 ships, walk Phase 7 (data migration script +
-   bootstrap + flip default flag) and Phase 8 (mechanical removal
-   of legacy `orgs/` and the shimmed `core/*.py` modules).
-5. Always:
+1. Read this `STATUS.md` first, then `docs/revamp/RELEASE_v2.md` for
+   the v2.0.0-rc1 release notes (Phase 0 → 8 RC scope) and
+   `docs/revamp/burn_in.md` for the operator runbook.
+2. **All eight phases of the original plan have shipped at RC
+   scope.** The local `v2.0.0-rc1` tag marks the milestone.
+3. **Post-RC mechanical cleanup checklist** (gated by the burn-in
+   exit criteria in `burn_in.md`):
+   * Migrate ~20 production callers (channels gateway, api routes,
+     agents.factory, orgs runtime/command_service/tool_handler) from
+     `openakita.orgs.*` to `runtime.orgs` + `runtime.state_graph`,
+     then `git rm -r src/openakita/orgs/` and the ~50
+     `tests/orgs/*` files.
+   * Migrate ~20 callers in `sessions/` / `memory/` / `tools/` /
+     `agents/` from `openakita.core.*` MOVE shims to
+     `openakita.agent.*`, then delete the shims.
+   * Deep slim refactor of the five REWRITE targets — each its own
+     chain (extract streaming into `runtime/stream/`, collapse
+     routing/retry into `runtime.retry_policy`, drive reasoning by
+     `runtime.state_graph`, split `agent.core` helpers into
+     `runtime/desktop/` + `agent/safety/`).
+   * Optional rename `core/task_monitor.py` → `runtime/standup.py`
+     once the importer set is small enough.
+4. Always:
    * one logical change per commit, English commit body, mention
      the relevant ADR;
    * `python -m pytest tests/runtime tests/agent tests/api
      tests/unit/test_plugins tests/parity --no-header -q`
-     before every commit;
+     before every commit (must keep 755 + 1 skipped green);
    * `python -m ruff check src/openakita/runtime src/openakita/agent
      src/openakita/plugins/manager.py tests/runtime tests/agent
      tests/api tests/parity` before every commit.
-6. Never edit the plan file or the ADR `Status:` lines without a
+5. Never edit the plan file or the ADR `Status:` lines without a
    user-led review.
 
 ## How to *use* what already exists today

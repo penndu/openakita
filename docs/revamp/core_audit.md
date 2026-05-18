@@ -62,7 +62,7 @@ default unless a parity test surfaces a better placement.
 | `prompt_assembler.py` | 157 | **MOVE** | `agent/prompt.py` | The legacy single-pass assembler; the new `prompt/builder.py` (already in repo) is the multi-layer builder. We keep the assembler as the agent's view-into-builder until the parity harness is happy. |
 | `output_formatter.py` | 101 | **MOVE — done** | `agent/output_formatter.py` | Shipped 2026-05-18 in commit `feat(agent): port output_guard and output_formatter (MOVE)`. Legacy path is now a re-export shim. |
 | `errors.py` | 15 | **MOVE — done** | `agent/errors.py` | Shipped 2026-05-18 in commit `feat(agent): port errors and working_facts (MOVE)`. Legacy path is now a re-export shim until Phase 8. |
-| `state.py` | 75 | **DELETE — Phase 8** (re-classified) | n/a | Re-classified during the actual port: a workspace-wide search for `core.state` returns zero importers in production code, so the audit's original "MOVE → merge into agent/state.py" is wrong on two counts. (1) The merge target (`agent/state.py`) is the port of the unrelated 431-line `core/agent_state.py` and shares no symbols with this 75-line `StateStore` / `AppState` module. (2) Nothing imports it, so the cleanest action is mechanical removal at Phase 8. We leave the file untouched so a stray future caller would still find it during the burn-in window. |
+| `state.py` | 75 | **DELETED — 2026-05-18 (Phase 8 RC)** | n/a | Removed in the Phase 8 RC commit; the audit confirmed zero importers in production code (a workspace-wide search for `core.state` / `from openakita.core.state` / `from .core.state` was empty) and the full suite stayed at 755 / 755 + 1 skipped after deletion. |
 | `working_facts.py` | 53 | **MOVE — done** | `agent/working_facts.py` | Shipped 2026-05-18 in commit `feat(agent): port errors and working_facts (MOVE)`. Legacy path is now a re-export shim until Phase 8. |
 | `token_budget.py` | 78 | **MOVE** | `agent/token_budget.py` | Numeric helpers. |
 | `confirmation_state.py` | 113 | **MOVE** | `agent/confirmation.py` | Tight. |
@@ -115,7 +115,7 @@ them out of scope. Touching them risks needless churn.
 
 | File | LOC | Verdict | Notes |
 |---|---:|---|---|
-| `state.py` | 75 | **DELETE** | Re-classified from MOVE during the actual port (see the MOVE table). Zero importers in production code (workspace-wide search for `core.state` / `from openakita.core.state` / `from .core.state` is empty). The Tauri Rust file mentioning `AppState` is unrelated. Removed mechanically at Phase 8. |
+| `state.py` | 75 | **DELETED — 2026-05-18 (Phase 8 RC)** | Removed in the Phase 8 RC commit. Audit confirmed zero importers in production code; full v2 + parity suite stayed at 755 / 755 + 1 skipped after removal. |
 
 ## Aggregate sizing
 
