@@ -18,15 +18,15 @@ A user-led ADR review is the gate to flip them all to `Accepted`.
 | 1 — Foundation (runtime/ leaf modules) | **Complete** | 8 | 99 runtime tests |
 | 2 — Agent rewrite | **In progress (foundation slice)** | 1 (`agent/state.py`) | 17 agent tests |
 | 3 — Runtime engine (supervisor + messenger + guardrail) | **In progress (critical path complete)** | 5 (`ledger`, `stall_detector`, `supervisor`, `messenger`, `guardrail/`) | 82 new runtime tests |
-| 4 — Nodes | Pending | 0 | — |
+| 4 — Nodes | **Implementation complete (G4 review pending)** | 6 (`base`+sig fix, `tool_node`, `llm_node`, `condition_node`+`human_review_node`, `workbench_node`+`manifest`, `happyhorse-video` adoption) | 89 new tests (`test_nodes_*`) + 5 plugin smoke tests |
 | 5 — Templates | Pending | 0 | — |
 | 6 — API / channels swap | Pending | 0 | — |
 | 7 — Cutover + data migration | Pending | 0 | — |
 | 8 — Legacy removal | Pending | 0 | — |
 
-Total to date: **24 code commits + 10 ADR commits = 34 commits on
-`revamp/v2`**, all lint-clean (ruff), test-green (198 / 198 in
-`tests/runtime/` + `tests/agent/`).
+Total to date: **30 code commits + 10 ADR commits = 40 commits on
+`revamp/v2`**, all lint-clean (ruff), test-green (272 / 272 across
+`tests/runtime/`, `tests/agent/`, and `plugins/happyhorse-video/tests/test_workbench_manifest.py`).
 
 ## What v2 already delivers
 
@@ -105,12 +105,28 @@ src/openakita/runtime/
     runner.py                          GuardrailRunner + verdict aggregation
     builtin.py                         min/max length, required fields, regex
 
+src/openakita/runtime/nodes/         Phase 4 — first-class node types
+  __init__.py                          public exports
+  base.py                              NodeProtocol + NodeContext + BaseNode
+  tool_node.py                         deterministic single-tool node
+  llm_node.py                          brain-driven reasoning node
+  condition_node.py                    deterministic branch / routing node
+  human_review_node.py                 pause-on-human checkpoint node
+  workbench_node.py                    plugin-as-node, manifest-driven
+  manifest.py                          WORKBENCH manifest parser/validator
+
 src/openakita/agent/
   __init__.py                          empty shell (Phase 2 fills it)
   state.py                             v2 minimal TaskState + AgentState
 
-tests/runtime/                         99 tests (Phase 1) + 82 tests (Phase 3) = 181
+plugins/happyhorse-video/
+  plugin.py                            now declares a top-level WORKBENCH
+                                       constant (4 roles, mode-scoped tools)
+  tests/test_workbench_manifest.py     load-time validation guard
+
+tests/runtime/                         99 (Phase 1) + 82 (Phase 3) + 89 (Phase 4) = 270
 tests/agent/                           17 tests
+plugins/happyhorse-video/tests/        + 5 manifest smoke tests
 ```
 
 ## What is *not* shipped yet (continuation map)
@@ -150,20 +166,32 @@ full loop body fits in `reasoning.py`.
 |---|---|---|
 | `runtime/state_graph.py` | ADR-0007 | LangGraph-style BSP engine. Required for ConditionNode + multi-node fan-out. The supervisor + messenger work end-to-end without it for single-flight, hierarchical orgs (the AIGC studio shape today). |
 
-### Phase 4 — Nodes
+### Phase 4 — Nodes (delivered)
 
-| Module | ADR | Notes |
+| Module | ADR | Status |
 |---|---|---|
-| `runtime/nodes/base.py` | ADR-0007 | NodeProtocol + NodeContext |
-| `runtime/nodes/llm_node.py` | ADR-0007 | Default node hosting `agent.Agent`. Depends on Phase 2's `agent.facade.Agent`. |
-| `runtime/nodes/workbench_node.py` | ADR-0007, ADR-0009 | First-class plugin host. Reads WORKBENCH manifest. |
-| `runtime/nodes/tool_node.py` | ADR-0007 | Deterministic single-tool step. |
-| `runtime/nodes/condition_node.py` | ADR-0007 | LLM/rule branch. Needs `state_graph`. |
-| `runtime/nodes/human_review_node.py` | ADR-0007 | `interrupt_before` semantics. |
+| `runtime/nodes/base.py` | ADR-0007 | **Done.** NodeProtocol + NodeContext + BaseNode (lifecycle state machine, defensive exception promotion, cooperative cancel routing). 13 tests. |
+| `runtime/nodes/tool_node.py` | ADR-0007 | **Done.** Single-tool step with documented JSON / metadata argument parsing. 8 tests. |
+| `runtime/nodes/llm_node.py` | ADR-0007 | **Done.** Brain-driven node with bounded ReAct tool loop, allow-list rejection, budget guard, runner-absent recovery. 8 tests. |
+| `runtime/nodes/condition_node.py` | ADR-0007 | **Done.** Deterministic sync/async predicate routing with construction-time validation; deterministic failure on unknown / non-string labels. 8 tests. |
+| `runtime/nodes/human_review_node.py` | ADR-0007 | **Done.** Three-verdict (APPROVE/REJECT/EDIT) review pause with cooperative cancel cleanup and InMemoryReviewQueue reference. 9 tests. |
+| `runtime/nodes/manifest.py` | ADR-0009 | **Done.** WorkbenchManifest / WorkbenchMode / WorkbenchUI dataclasses + `parse(raw_dict)` validator. 14 tests. |
+| `runtime/nodes/workbench_node.py` | ADR-0007 + ADR-0009 | **Done.** Plugin-as-node with mode-scoped tool allow-list, explicit mode switching, workbench_ready / workbench_mode_switched / workbench_cancelled lifecycle envelope. 9 tests. |
+| `plugins/happyhorse-video/plugin.py` (`WORKBENCH` constant) | ADR-0009 | **Done.** Four-role manifest (art_director / image_artist / video_animator / portrait_actor) + load-time validation in `tests/test_workbench_manifest.py`. |
 
-The first plugin to adopt `WORKBENCH` is `happyhorse-video`, because
-its capability surface (`t2i`, `i2v`, `s2v`, `photo_speak`,
-`storyboard`) matches every WorkbenchNode test scenario.
+Outstanding before we can declare gate G4 closed:
+
+* `runtime/state_graph.py` (Phase 3 leftover; ADR-0002). The
+  ConditionNode contract is layered on top of a missing
+  StateGraph: today the supervisor delegates linearly via the
+  messenger, so a ConditionNode result with `next_address` is set
+  but no engine yet picks the next speaker from it. State graph
+  is a separate small commit (next session); ConditionNode itself
+  is fully tested in isolation.
+* End-to-end smoke test wiring `Supervisor → Messenger → ToolNode
+  + LLMNode + WorkbenchNode + ConditionNode` for one synthetic
+  org. The plumbing is all there; this is one new
+  `tests/runtime/test_node_integration.py`.
 
 ### Phase 5 — Templates
 
@@ -199,21 +227,28 @@ log` reader can diff the world before / after.
 ## How to resume in the next session
 
 1. Read this `STATUS.md` first.
-2. If continuing Phase 2: pick the smallest unfinished module from
+2. Recommended next slice: **Phase 3 `runtime/state_graph.py`** —
+   the BSP engine ConditionNode is already plumbed for. It also
+   unblocks the end-to-end smoke test that closes gate G4. Estimate:
+   one focused commit (~300 lines + tests), no external deps.
+3. After state_graph: **Phase 5 `runtime/templates/registry.py` +
+   `templates/builtin/aigc_video_studio.py`**. The user's explicit
+   constraint: organisation templates must be preserved and
+   instantiable from the UI. The legacy
+   `orgs/templates.py` (1234 lines) and
+   `orgs/plugin_workbench_templates.py` (225 lines) are the source
+   material to port.
+4. If continuing Phase 2: pick the smallest unfinished module from
    the list above and stand it up under `src/openakita/agent/` with
    a test file under `tests/agent/`.
-3. If continuing Phase 4 (nodes): start with `nodes/base.py` because
-   every other node imports from it. Then implement `LLMNode`
-   thinly using whatever Phase 2 surface exists at that point —
-   even a stub `Agent` is enough to integrate.
-4. Always:
+5. Always:
    * one logical change per commit, English commit body, mention
      the relevant ADR;
    * `python -m pytest tests/runtime tests/agent --no-header -q`
      before every commit;
    * `python -m ruff check src/openakita/runtime src/openakita/agent
      tests/runtime tests/agent` before every commit.
-5. Never edit the plan file or the ADR `Status:` lines without a
+6. Never edit the plan file or the ADR `Status:` lines without a
    user-led review.
 
 ## How to *use* what already exists today
