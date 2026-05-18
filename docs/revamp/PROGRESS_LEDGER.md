@@ -161,7 +161,8 @@ long-tail Decision cascade; ``core/reasoning_engine.py`` collapses to a thin laz
 | `b0160926` | P-RC-5 P5.3b | test(runtime/state_graph/guards): 20 cases for tool-failure ack + successful-tool aggregator | +133 (test_tool_failure_ack.py) | +20 (8 ack parity + 5 ack negative + 1 banner shape + 1 word-list anchors + 5 successful-tool + 1 successful-tool parity) | ADR-0001 |
 | `718be8b5` | P-RC-5 P5.4 | refactor(runtime/state_graph/guards): extract recap-context detector | +47 (recap_context.py) / -29 (legacy regex + fn replaced); core/reasoning_engine 8565 -> 8536; baseline rebased | +11 (recap_re anchors + 6 cases incl. 5 legacy-parity) | ADR-0001, ADR-0002 |
 | `108f4843` | P-RC-5 P5.5 | refactor(runtime/state_graph/guards): extract verb-to-tool fragment maps | +85 (_verb_tool_map.py + 5 tests) / -52 (2 legacy dicts replaced by re-imports); core/reasoning_engine 8536 -> 8484 | +5 (anchor entries + shape + parity-via-identity) | ADR-0001, ADR-0002 |
-| _this commit_ | P-RC-5 P5.6a | refactor(runtime/state_graph/guards): extract unbacked-action-claim guard | +146 (unbacked_action.py) / -133 (3 legacy bodies replaced by 1 re-import); core/reasoning_engine 8484 -> 8360; baseline rebased | 0 (tests follow in P5.6b) | ADR-0001, ADR-0002 |
+| `5cc10705` | P-RC-5 P5.6a | refactor(runtime/state_graph/guards): extract unbacked-action-claim guard | +146 (unbacked_action.py) / -133 (3 legacy bodies replaced by 1 re-import); core/reasoning_engine 8484 -> 8360; baseline rebased | 0 (tests follow in P5.6b) | ADR-0001, ADR-0002 |
+| _this commit_ | P-RC-5 P5.6b | test(runtime/state_graph/guards): 17 cases for unbacked-action-claim guard | +144 (test_unbacked_action.py) | +17 (2 action_claim_re + 4 extract behaviour + 5 guard behaviour + 5 guard parity + 1 extract parity) | ADR-0001 |
 
 ## P-RC-6 — Phase 2 real slim-down: agent.py
 
