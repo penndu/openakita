@@ -25,14 +25,13 @@ from openakita.runtime.stream import (
     StreamEvent,
 )
 
-
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
 
 
 def test_standard_channel_set_matches_adr_0006() -> None:
-    assert STANDARD_CHANNELS == {
+    assert {
         "values",
         "updates",
         "tasks",
@@ -41,7 +40,7 @@ def test_standard_channel_set_matches_adr_0006() -> None:
         "debug",
         "progress_ledger",
         "lifecycle",
-    }
+    } == STANDARD_CHANNELS
 
 
 def test_event_to_jsonable_round_trip() -> None:

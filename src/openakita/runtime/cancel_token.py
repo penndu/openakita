@@ -148,7 +148,7 @@ class CancellationToken:
         self.add_callback(_cancel_future)
         return fut
 
-    def link_task(self, task: "asyncio.Task[Any]") -> "asyncio.Task[Any]":
+    def link_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
         """Cancel the given asyncio task when this token cancels."""
 
         def _cancel_task() -> None:

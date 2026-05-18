@@ -20,7 +20,6 @@ import pytest
 
 from openakita.runtime.cancel_token import CancellationToken, CancelledByToken
 
-
 # ---------------------------------------------------------------------------
 # Basic state machine
 # ---------------------------------------------------------------------------

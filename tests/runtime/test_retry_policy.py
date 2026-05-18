@@ -27,7 +27,6 @@ from openakita.runtime.retry_policy import (
     is_retriable_exception,
 )
 
-
 # ---------------------------------------------------------------------------
 # Predicate
 # ---------------------------------------------------------------------------
@@ -67,13 +66,13 @@ def test_predicate_rejects_cooperative_cancel() -> None:
 def test_predicate_matches_qualified_name() -> None:
     """Synthetic exception with a fake qualified name from a provider."""
 
-    class FakeAnthropic_RateLimitError(Exception):
+    class FakeAnthropicRateLimitError(Exception):  # noqa: N801 — synthetic
         pass
 
     # Force the qualified name to look like the real anthropic one.
-    FakeAnthropic_RateLimitError.__qualname__ = "RateLimitError"
-    FakeAnthropic_RateLimitError.__module__ = "anthropic"
-    assert is_retriable_exception(FakeAnthropic_RateLimitError("429")) is True
+    FakeAnthropicRateLimitError.__qualname__ = "RateLimitError"
+    FakeAnthropicRateLimitError.__module__ = "anthropic"
+    assert is_retriable_exception(FakeAnthropicRateLimitError("429")) is True
 
 
 # ---------------------------------------------------------------------------

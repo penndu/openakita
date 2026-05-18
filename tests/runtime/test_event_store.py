@@ -28,14 +28,13 @@ from openakita.runtime.event_store import (
 )
 from openakita.runtime.stream import StreamBus
 
-
 # ---------------------------------------------------------------------------
 # Canonicalisation
 # ---------------------------------------------------------------------------
 
 
 def test_genesis_hash_matches_sha256_of_empty() -> None:
-    assert GENESIS_HASH == hashlib.sha256(b"").hexdigest()
+    assert hashlib.sha256(b"").hexdigest() == GENESIS_HASH
 
 
 def test_canonical_bytes_are_key_order_independent() -> None:
@@ -50,7 +49,7 @@ def test_canonical_bytes_preserve_non_ascii() -> None:
     stability across locales."""
     payload = {"task": "10秒竖屏短视频"}
     out = canonical_event_bytes(payload)
-    assert "10秒竖屏短视频".encode("utf-8") in out
+    assert "10秒竖屏短视频".encode() in out
 
 
 # ---------------------------------------------------------------------------
