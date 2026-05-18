@@ -3110,6 +3110,10 @@ class MessageGateway:
             relay_task = asyncio.create_task(
                 bridge.relay_to(_bridge_send, session_key=session_key),
             )
+            # Let the relay task reach ``bus.subscribe`` before the
+            # supervisor starts emitting; otherwise the first
+            # lifecycle.started event fans out to zero subscribers.
+            await asyncio.sleep(0)
             text = (message.plain_text or "").strip()
             try:
                 plan = await dispatch_inbound_message_to_v2(
@@ -3122,10 +3126,16 @@ class MessageGateway:
                 )
             finally:
                 self._v2_cancel_tokens.pop(session_key, None)
+                # Drain: give the relay a few ticks to consume queued events
+                # before we close the bus. ``StreamBus.close()`` races with
+                # queued events; without this, emits made right at the end
+                # of ``supervisor.run()`` are dropped.
+                for _ in range(10):
+                    await asyncio.sleep(0)
                 with contextlib.suppress(Exception):
                     await stream_bus.close()
                 relay_task.cancel()
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await relay_task
 
             logger.info(
