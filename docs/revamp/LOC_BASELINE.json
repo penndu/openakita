@@ -15,6 +15,6 @@
     "src/openakita/agent/reasoning.py": 51,
     "src/openakita/agent/brain.py": 370,
     "src/openakita/agent/tools.py": 347,
-    "src/openakita/agent/context.py": 47
+    "src/openakita/agent/context.py": 336
   }
 }
