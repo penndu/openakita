@@ -148,6 +148,12 @@ BASELINE_CASES: list[ParityCase] = [
             "stop_reason": "tool_use",
         },
     ),
+    ParityCase(
+        id="primary-agent-set-get-roundtrip",
+        kind="primary_agent",
+        label="primary agent registry set/get round-trips",
+        inputs={},
+    ),
 ]
 
 

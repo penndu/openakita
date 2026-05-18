@@ -216,6 +216,40 @@ RunnerFn = Callable[[ParityCase], ParityResult]
 
 
 # ---------------------------------------------------------------------------
+# Kind 10 — primary-agent registry parity (set/get round-trip)
+# ---------------------------------------------------------------------------
+
+
+def _primary_agent_v1(case: ParityCase) -> ParityResult:
+    from openakita.core.agent import get_primary_agent, set_primary_agent
+
+    return _primary_agent_eval(get_primary_agent, set_primary_agent, case)
+
+
+def _primary_agent_v2(case: ParityCase) -> ParityResult:
+    from openakita.agent.core import get_primary_agent, set_primary_agent
+
+    return _primary_agent_eval(get_primary_agent, set_primary_agent, case)
+
+
+def _primary_agent_eval(get_fn, set_fn, case: ParityCase) -> ParityResult:
+    before = get_fn()
+    sentinel = object()
+    try:
+        set_fn(sentinel)  # type: ignore[arg-type]
+        mid = get_fn()
+        ok = mid is sentinel
+    finally:
+        set_fn(before)
+    after = get_fn()
+    return ParityResult(
+        final_message="ok" if ok and after is before else "leak",
+        success=ok and after is before,
+        extras={"restored": after is before},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Kind 9 — reasoning engine DecisionType enum parity
 # ---------------------------------------------------------------------------
 
@@ -364,6 +398,7 @@ V1_RUNNERS: dict[str, RunnerFn] = {
     "context_estimate_tokens": _context_estimate_v1,
     "brain_response": _brain_response_v1,
     "reasoning_decision": _reasoning_decision_v1,
+    "primary_agent": _primary_agent_v1,
 }
 
 V2_RUNNERS: dict[str, RunnerFn] = {
@@ -376,6 +411,7 @@ V2_RUNNERS: dict[str, RunnerFn] = {
     "context_estimate_tokens": _context_estimate_v2,
     "brain_response": _brain_response_v2,
     "reasoning_decision": _reasoning_decision_v2,
+    "primary_agent": _primary_agent_v2,
 }
 
 

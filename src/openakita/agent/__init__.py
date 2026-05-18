@@ -41,6 +41,7 @@ from .context import (
     estimate_tokens,
     get_max_context_tokens,
 )
+from .core import Agent, PromptStrategy, get_primary_agent, set_primary_agent
 from .desktop_notify import (
     notify_task_completed,
     notify_task_completed_async,
@@ -235,6 +236,7 @@ __all__ = [
     "ANSWER_ANALYSIS_PROMPT",
     "ANSWER_ANALYSIS_SYSTEM",
     "ASK_MODE_RULESET",
+    "Agent",
     "AuditLogger",
     "BackupInfo",
     "BaseValidator",
@@ -306,6 +308,7 @@ __all__ = [
     "PermissionRule",
     "PersonaManager",
     "PersonaTrait",
+    "PromptStrategy",
     "READONLY_EXPLORATION_TOOLS",
     "RalphLoop",
     "ReasoningDecision",
@@ -379,6 +382,7 @@ __all__ = [
     "get_hook_executor",
     "get_max_context_tokens",
     "get_pending_approvals_store",
+    "get_primary_agent",
     "get_profile_manager",
     "get_registry",
     "get_sandbox_executor",
@@ -409,6 +413,7 @@ __all__ = [
     "send_desktop_notification",
     "send_desktop_notification_async",
     "set_hook_executor",
+    "set_primary_agent",
     "set_skill_external_allowlist",
     "smart_truncate",
     "truncate_tool_result",
