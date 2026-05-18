@@ -170,7 +170,8 @@ long-tail Decision cascade; ``core/reasoning_engine.py`` collapses to a thin laz
 | `8e187b8d` | P-RC-5 P5.9a | refactor(core): rename reasoning_engine.py to _reasoning_engine_legacy.py (pre-shim move) | 0 net (pure git mv, --diff-filter=R100) | 0 (tests transiently fail until P5.9b shim) | ADR-0001 |
 | `a8c8509d` | P-RC-5 P5.9b | refactor(core): replace core/reasoning_engine.py body with thin shim | +25 (new shim) / 0 deletions; baseline core/reasoning_engine 8057 -> 25, adds _reasoning_engine_legacy 8057 | 0 (legacy tests resume passing) | ADR-0001, ADR-0002 |
 | `d8bb22d8` | P-RC-5 P5.10 | feat(agent): implement real agent/reasoning.py on StateGraph + guard composition | +315 / -55 (real ReasoningEngine subclassing _LegacyReasoningEngine; sentinel removed; core/reasoning_engine shim repointed); agent/reasoning 51 -> 333 baseline rebased | 0 net new tests (parity lands in P5.11); existing 1078 still pass; sentinel SLOC 222 (>200 floor) | ADR-0001, ADR-0002, ADR-0003 |
-| _this commit_ | P-RC-5 P5.11 | test(parity): 23 cases for ReasoningEngine v1/v2 parity + 10 fixtures | +180 (test_reasoning_parity.py) / 10 new JSON fixtures (auto-gen, skipped by guard) / agent/reasoning fine-tunes for guard signature mismatch | +23 (3 structural parity + 10 routing parity + 10 guard parity); pytest 1078 -> 1101 | ADR-0001, ADR-0002, ADR-0003 |
+| `a37a71f7` | P-RC-5 P5.11 | test(parity): 23 cases for ReasoningEngine v1/v2 parity + 10 fixtures | +180 (test_reasoning_parity.py) / 10 new JSON fixtures (auto-gen, skipped by guard) / agent/reasoning fine-tunes for guard signature mismatch | +23 (3 structural parity + 10 routing parity + 10 guard parity); pytest 1078 -> 1101 | ADR-0001, ADR-0002, ADR-0003 |
+| _this commit_ | P-RC-5 P5.12 | docs(revamp): G-RC-5 gate review + STATUS scoreboard | +250 (G-RC-5.md) / +1 (STATUS scoreboard row) | 0 (docs only) | ADR-0001 |
 
 ## P-RC-6 — Phase 2 real slim-down: agent.py
 
