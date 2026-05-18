@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from openakita.runtime.io import (
     DEFAULT_TOOL_RESULT_MAX_CHARS,
     cleanup_overflow_files,

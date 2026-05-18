@@ -127,7 +127,8 @@ loses its sentinel allowance for these three files.
 | `7264dcc8` | P-RC-4 P4.6a | refactor(core): rename core/brain.py to core/_brain_legacy.py (pre-shim move) | 0 (pure rename) | 0 | ADR-0001 |
 | `dfa462df` | P-RC-4 P4.6b | refactor(core): replace core/brain.py body with 26-LOC lazy-import shim | core/brain 2015 -> 26 (shim, lazy __getattr__) | 0 | ADR-0001, ADR-0003 |
 | `4b5d385c` | P-RC-4 P4.7 | test(parity): real parity for Brain (5 fixtures + __file__ divergence) | +176 (test_brain_parity.py) + 5 JSON fixtures | +7 (5 fixtures + __file__ + class-identity) | ADR-0001, ADR-0003 |
-| _this commit_ | P-RC-4 P4.8 | refactor(runtime/io): extract truncate + overflow from core.tool_executor | +307 (truncate.py + overflow.py + __init__ + tests) | +8 (truncate / overflow / cleanup / constant) | ADR-0001 |
+| `bf5559e2` | P-RC-4 P4.8 | refactor(runtime/io): extract truncate + overflow from core.tool_executor | +307 (truncate.py + overflow.py + __init__ + tests) | +8 (truncate / overflow / cleanup / constant) | ADR-0001 |
+| _this commit_ | P-RC-4 P4.9 | refactor(runtime/llm): collapse tool_executor routing/retry into RetryPolicy | +108 (retry_policy.py +50 / test_retry_policy_tool.py +85) | +10 (tool retry predicate + default policy) | ADR-0001, ADR-0004 |
  refactor(core): replace core/brain.py body with thin import shim | core/brain 2015 -> 19 (shim), _brain_legacy preserves legacy body | 0 | ADR-0001, ADR-0003 |
 
 ## P-RC-5 — Phase 2 real slim-down: reasoning_engine

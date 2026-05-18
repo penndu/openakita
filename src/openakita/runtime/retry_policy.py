@@ -43,6 +43,9 @@ __all__ = [
     "RetryGaveUp",
     "RetryAttempt",
     "is_retriable_exception",
+    "is_retriable_tool_error",
+    "default_tool_retry_policy",
+    "TOOL_NON_RETRIABLE_NAMES",
 ]
 
 logger = logging.getLogger(__name__)
@@ -105,6 +108,72 @@ def is_retriable_exception(exc: BaseException) -> bool:
     if cls.__name__ in RETRIABLE_EXCEPTION_NAMES:
         return True
     return _qualname(exc) in RETRIABLE_EXCEPTION_NAMES
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Tool-call retry predicate (P-RC-4 P4.9)
+# ---------------------------------------------------------------------------
+
+#: Tool handlers raise their own taxonomy. These names are NEVER
+#: retriable because they signal a contract violation, not a transient
+#: failure. Matching is by class name (with optional fully-qualified
+#: name) to avoid pulling tool packages into this leaf module.
+TOOL_NON_RETRIABLE_NAMES: frozenset[str] = frozenset(
+    {
+        "ToolSkipped",
+        "ToolConfigError",
+        "ToolPermissionDenied",
+        "ToolArgumentError",
+        "ToolNotFoundError",
+        # PermissionError from filesystem tools is always semantic.
+        "PermissionError",
+        "FileNotFoundError",
+        "NotADirectoryError",
+        "IsADirectoryError",
+    }
+)
+
+
+def is_retriable_tool_error(exc: BaseException) -> bool:
+    """Tool-call variant of :func:`is_retriable_exception`.
+
+    Differs from the LLM-side predicate in one direction: tool-domain
+    exceptions (``ToolSkipped``, ``ToolConfigError``, permission /
+    not-found errors from filesystem tools) are NEVER retriable
+    because they signal contract violations, not transient faults.
+    Everything else delegates to the general predicate.
+
+    Refs: continuation plan section 5 (P-RC-4, P4.9). The legacy
+    ``core.tool_executor`` decided "retry vs. fail" ad-hoc inside
+    ``execute_tool_with_policy``; lifting the decision here means
+    the v2 ``agent.tools`` rewrite (P4.10) can compose
+    ``RetryPolicy(retry_predicate=is_retriable_tool_error)`` instead
+    of carrying its own ladder.
+    """
+    if isinstance(exc, (asyncio.CancelledError, CancelledByToken)):
+        return False
+    cls = exc.__class__
+    if cls.__name__ in TOOL_NON_RETRIABLE_NAMES:
+        return False
+    if _qualname(exc) in TOOL_NON_RETRIABLE_NAMES:
+        return False
+    return is_retriable_exception(exc)
+
+
+def default_tool_retry_policy() -> "RetryPolicy":
+    """Return the v2 default ``RetryPolicy`` for tool calls.
+
+    Conservative defaults: 3 attempts, 100ms initial interval, 5s
+    ceiling, full jitter. Callers wanting a different shape should
+    construct their own ``RetryPolicy`` directly.
+    """
+    return RetryPolicy(
+        max_attempts=3,
+        initial_interval=0.1,
+        max_interval=5.0,
+        jitter=True,
+    )
 
 
 # ---------------------------------------------------------------------------
