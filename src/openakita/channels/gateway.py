@@ -2968,6 +2968,40 @@ class MessageGateway:
                     return str(org_id), task
         return None
 
+    def _maybe_log_v2_routing_plan(self, session_key: str) -> None:
+        """Phase-6 canary observability hook.
+
+        On every inbound message, ask :mod:`runtime.channel_routing`
+        whether v2 would have routed it and emit a one-line structured
+        log. This is **observation only** — the legacy path always
+        continues to run during the canary window. The routing helper
+        itself is production-shaped (returns a :class:`RoutingPlan`
+        dataclass, never raises). Phase 7 flips
+        ``settings.runtime_v2_enabled`` to True by default; Phase 8
+        replaces the legacy delegate call below with a real
+        ``runtime.supervisor`` run.
+
+        We deliberately do NOT try to resolve the bound org from
+        ``session_key`` here. Today the IM gateway does not carry an
+        org-aware session reverse lookup, and adding one in this
+        commit would couple the canary hook to that future API. The
+        routing helper handles ``org_id=None`` cleanly by returning a
+        ``skipped: not bound`` plan, which is the right answer for
+        every non-org IM session anyway.
+        """
+        try:
+            from openakita.runtime.channel_routing import route_inbound_message_to_v2
+
+            plan = route_inbound_message_to_v2(org_id=None)
+            logger.debug(
+                "[IM v2-canary] session=%s status=%s reason=%s",
+                session_key,
+                plan.status,
+                plan.reason,
+            )
+        except Exception as exc:  # noqa: BLE001 — must never break the legacy path
+            logger.debug("[IM v2-canary] hook failed (non-fatal): %s", exc)
+
     def _get_org_manager(self):
         """从 OrgCommandService 链路上取出 OrgManager 单例。
 
@@ -3676,6 +3710,8 @@ class MessageGateway:
             f"user={message.user_id}, "
             f'text="{user_text[:100]}"'
         )
+
+        self._maybe_log_v2_routing_plan(session_key)
 
         typing_task: asyncio.Task | None = None
         session = None
