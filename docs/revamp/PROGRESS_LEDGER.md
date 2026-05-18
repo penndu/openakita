@@ -136,7 +136,8 @@ loses its sentinel allowance for these three files.
 | `41ca7a94` | P-RC-4 P4.12 | test(parity): real parity for ToolExecutor (5 fixtures + __file__ divergence) | +124 (test_tools_parity.py) + 5 JSON fixtures | +7 (5 fixtures + __file__ + class-identity) | ADR-0001 |
 | `9d31e975` | P-RC-4 P4.13a | refactor(runtime/context): extract group_messages + budget_trace from core.context_manager | +279 (grouping.py + budget_trace.py + __init__ + tests) | +11 (group_messages / calc_context_budget / estimate_tokens / payload_size_bytes) | ADR-0001 |
 | `3779575b` | P-RC-4 P4.13b | refactor(runtime/context): extract compress (pre_request_cleanup + sanitize_tool_pairs) from core.context_manager | +180 (compress.py + 5 new tests + __init__ extension) | +5 (sanitize / cleanup) | ADR-0001 |
-| _this commit_ | P-RC-4 P4.14 | feat(agent): implement real agent/context.py on extracted helpers (~340 LOC) | +279 (agent/context.py 57->336; +208 real SLOC) | 0 (parity tests cover behaviour) | ADR-0001 |
+| `5ba4711b` | P-RC-4 P4.14 | feat(agent): implement real agent/context.py on extracted helpers (~340 LOC) | +279 (agent/context.py 57->336; +208 real SLOC) | 0 (parity tests cover behaviour) | ADR-0001 |
+| _this commit_ | P-RC-4 P4.15a | refactor(core): rename core/context_manager.py to _context_manager_legacy.py (pure git mv) | rename only | 0 | ADR-0001 |
 | _this commit_ | P-RC-4 P4.10 | feat(agent): implement real agent/tools.py on extracted helpers (~280 LOC) | +330 (agent/tools.py 56->401) | -0 (no new tests; parity tests cover behaviour) | ADR-0001 |
  refactor(core): replace core/brain.py body with thin import shim | core/brain 2015 -> 19 (shim), _brain_legacy preserves legacy body | 0 | ADR-0001, ADR-0003 |
 
