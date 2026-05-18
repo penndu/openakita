@@ -130,3 +130,38 @@ def test_known_facade_sentinel_phases_are_in_plan_range() -> None:
     # failure mode explicit if someone widens the regex later.
     invalid = {k: v for k, v in seen.items() if v not in {'P-RC-4', 'P-RC-5', 'P-RC-6'}}
     assert not invalid, f'sentinel phases out of range: {invalid}'
+
+
+@pytest.mark.parametrize('rel', FACADE_FILES, ids=lambda p: p.split('/')[-1])
+def test_facade_sentinel_has_not_expired(rel: str) -> None:
+    """Forbid a sentinel from outliving its declared phase.
+
+    The continuation plan section 0.2 calls this the "P-RC-X facade
+    allowance" -- ``# REVAMP-FACADE-ALLOWED-UNTIL: P-RC-N`` permits a
+    thin facade body, but only until the phase counter advances past
+    ``N``. The P-RC-0 auditor (N1) flagged that the sentinel had no
+    real expiry: a commit could keep the facade alive past P-RC-N
+    without the test catching it.
+
+    Enforcement: the ledger header ``current_phase: P-RC-M`` is parsed
+    via :mod:`tests.revamp._ledger`; if ``M > N`` for a file that
+    still carries the sentinel, the test fails loudly.
+    """
+    from tests.revamp._ledger import current_phase, phase_as_int
+
+    text = (REPO_ROOT / rel).read_text(encoding='utf-8')
+    match = SENTINEL_RE.search(text)
+    if not match:
+        # No sentinel -> the SLOC-floor test
+        # (test_facade_files_either_declare_sentinel_or_have_real_body)
+        # already enforces a real body. Nothing to do here.
+        return
+    allowed_until_int = int(match.group('phase'))
+    current_int = phase_as_int(current_phase())
+    assert current_int <= allowed_until_int, (
+        f'{rel}: facade allowance expired -- sentinel says '
+        f'P-RC-{allowed_until_int} but ledger current_phase is '
+        f'P-RC-{current_int}. Drop the sentinel and ship a real '
+        f'implementation, or postpone the phase bump in '
+        f'docs/revamp/PROGRESS_LEDGER.md.'
+    )
