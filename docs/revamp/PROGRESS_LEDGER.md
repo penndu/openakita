@@ -1,5 +1,9 @@
 # Revamp Progress Ledger
 
+<!-- machine-readable phase marker; do NOT remove.
+     Parsed by tests/revamp/_ledger.py + tests/parity/test_no_facade.py. -->
+current_phase: P-RC-1
+
 > Source of truth for every commit landed on `revamp/v2` during
 > the post-RC continuation phases (P-RC-0 → P-RC-8). One row per
 > commit, in commit order. Each row is appended *in the same
@@ -34,7 +38,13 @@
 
 ## P-RC-1 — IM truly lands on the v2 Supervisor
 
-_Not started._ Awaiting user signoff on G-RC-0.
+G-RC-0 was signed; this phase wires canary IM traffic to the v2
+supervisor stack. The first two rows (`P1.0a`/`P1.0b`) close the
+two nits the P-RC-0 audit raised before the main work begins.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-1 P1.0a | chore(revamp): standardise progress ledger to advertise current_phase | +60 | 0 | — |
 
 ## P-RC-2 — Frontend v2 wiring
 
