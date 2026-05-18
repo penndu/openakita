@@ -152,7 +152,8 @@ long-tail Decision cascade; ``core/reasoning_engine.py`` collapses to a thin laz
 
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
-| _this commit_ | P-RC-5 P5.0a | chore(revamp): bump ledger to P-RC-5 + clean P-RC-4 ledger residue (N8) | +12 / -3 (ledger header + dup row + orphan fragment + section preface) | 0 | — |
+| `7f094936` | P-RC-5 P5.0a | chore(revamp): bump ledger to P-RC-5 + clean P-RC-4 ledger residue (N8) | +12 / -3 (ledger header + dup row + orphan fragment + section preface) | 0 | — |
+| _this commit_ | P-RC-5 P5.0b | chore(core/brain): add legacy-private fallback to shim (N7) | +5 / -1 (shim docstring + 4-line fallback block; net stays 25 LOC <= baseline 26) | 0 | ADR-0001, ADR-0003 |
 
 ## P-RC-6 — Phase 2 real slim-down: agent.py
 
