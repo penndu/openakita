@@ -146,11 +146,29 @@ def call_tool_text_helper():
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _disable_desktop_notifications(monkeypatch):
-    """禁止测试过程中弹出真实的桌面通知。"""
+    """禁止测试过程中弹出真实的桌面通知。
+
+    Phase 2 commit 11 把 ``desktop_notify`` 模块从 ``openakita.core``
+    搬到了 ``openakita.agent``，旧路径仅保留 re-export shim。要让
+    no-op 保护无论调用方走哪条 import 路径都生效，需要同时
+    monkeypatch 两个模块的 send/notify 函数名字。
+    """
     # fail-soft：模块未导入时静默跳过（pytest collection 阶段可能还没 import）
+    modules: list = []
     try:
-        from openakita.core import desktop_notify as _dn
+        from openakita.core import desktop_notify as _dn_core
+
+        modules.append(_dn_core)
     except Exception:
+        pass
+    try:
+        from openakita.agent import desktop_notify as _dn_agent
+
+        modules.append(_dn_agent)
+    except Exception:
+        pass
+
+    if not modules:
         return
 
     async def _noop_async(*_args, **_kwargs):
@@ -159,14 +177,15 @@ def _disable_desktop_notifications(monkeypatch):
     def _noop_sync(*_args, **_kwargs):
         return False
 
-    monkeypatch.setattr(_dn, "send_desktop_notification", _noop_sync, raising=False)
-    monkeypatch.setattr(
-        _dn, "send_desktop_notification_async", _noop_async, raising=False
-    )
-    monkeypatch.setattr(_dn, "notify_task_completed", _noop_sync, raising=False)
-    monkeypatch.setattr(
-        _dn, "notify_task_completed_async", _noop_async, raising=False
-    )
+    for _dn in modules:
+        monkeypatch.setattr(_dn, "send_desktop_notification", _noop_sync, raising=False)
+        monkeypatch.setattr(
+            _dn, "send_desktop_notification_async", _noop_async, raising=False
+        )
+        monkeypatch.setattr(_dn, "notify_task_completed", _noop_sync, raising=False)
+        monkeypatch.setattr(
+            _dn, "notify_task_completed_async", _noop_async, raising=False
+        )
 
     # 双保险：把 settings.desktop_notify_enabled 也置为 False，覆盖任何动态导入
     try:
