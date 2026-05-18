@@ -215,12 +215,51 @@ def _trusted_paths_eval(is_trusted, case: ParityCase) -> ParityResult:
 RunnerFn = Callable[[ParityCase], ParityResult]
 
 
+# ---------------------------------------------------------------------------
+# Kind 6 — tool executor smart_truncate parity
+# ---------------------------------------------------------------------------
+
+
+def _smart_truncate_v1(case: ParityCase) -> ParityResult:
+    from openakita.core.tool_executor import smart_truncate
+
+    return _smart_truncate_eval(smart_truncate, case)
+
+
+def _smart_truncate_v2(case: ParityCase) -> ParityResult:
+    from openakita.agent.tools import smart_truncate
+
+    return _smart_truncate_eval(smart_truncate, case)
+
+
+def _smart_truncate_eval(smart_truncate_fn, case: ParityCase) -> ParityResult:
+    text = case.inputs["text"]
+    limit = case.inputs["limit"]
+    head_ratio = case.inputs.get("head_ratio", 0.65)
+    truncated, was_truncated = smart_truncate_fn(
+        text,
+        limit,
+        label=case.inputs.get("label", "content"),
+        save_full=False,
+        head_ratio=head_ratio,
+    )
+    return ParityResult(
+        final_message="truncated" if was_truncated else "kept",
+        success=True,
+        extras={
+            "length": len(truncated),
+            "was_truncated": was_truncated,
+        },
+    )
+
+
 V1_RUNNERS: dict[str, RunnerFn] = {
     "permission_mode": _permission_v1,
     "token_budget": _token_budget_v1,
     "working_facts": _working_facts_v1,
     "loop_budget": _loop_budget_v1,
     "trusted_paths": _trusted_paths_v1,
+    "smart_truncate": _smart_truncate_v1,
 }
 
 V2_RUNNERS: dict[str, RunnerFn] = {
@@ -229,6 +268,7 @@ V2_RUNNERS: dict[str, RunnerFn] = {
     "working_facts": _working_facts_v2,
     "loop_budget": _loop_budget_v2,
     "trusted_paths": _trusted_paths_v2,
+    "smart_truncate": _smart_truncate_v2,
 }
 
 

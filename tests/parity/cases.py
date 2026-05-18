@@ -72,6 +72,27 @@ BASELINE_CASES: list[ParityCase] = [
             "message": "请清理 workspace/playground/legacy 里的临时文件",
         },
     ),
+    ParityCase(
+        id="smart-truncate-large-content",
+        kind="smart_truncate",
+        label="smart_truncate compresses oversized text",
+        inputs={
+            "text": "abcd" * 5000,
+            "limit": 1000,
+            "label": "tool_output",
+            "head_ratio": 0.6,
+        },
+    ),
+    ParityCase(
+        id="smart-truncate-under-limit",
+        kind="smart_truncate",
+        label="smart_truncate keeps short text intact",
+        inputs={
+            "text": "short result",
+            "limit": 1000,
+            "label": "tool_output",
+        },
+    ),
 ]
 
 
