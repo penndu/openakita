@@ -28,7 +28,15 @@ from .confirmation import (
     get_confirmation_store,
     normalize_confirmation_answer,
 )
+from .domain_allowlist import Decision, DomainAllowlist, get_domain_allowlist
 from .errors import UserCancelledError
+from .file_history import (
+    HISTORY_BASE_DIR,
+    MAX_SNAPSHOTS,
+    BackupInfo,
+    FileHistoryManager,
+    FileSnapshot,
+)
 from .hooks import (
     CallbackHook,
     HookEvent,
@@ -44,6 +52,14 @@ from .loop_budget import (
     READONLY_EXPLORATION_TOOLS,
     LoopBudgetDecision,
     LoopBudgetGuard,
+)
+from .lsp_feedback import (
+    Diagnostic,
+    DiagnosticBackend,
+    DiagnosticReport,
+    LSPFeedbackCollector,
+    RuffBackend,
+    TypeScriptBackend,
 )
 from .output_formatter import (
     JSONFormatter,
@@ -116,6 +132,14 @@ from .tool_result_budget import (
     OVERFLOW_DIR,
     truncate_tool_result,
 )
+from .trusted_paths import (
+    SESSION_KEY,
+    clear_session_trust,
+    consume_session_trust,
+    get_session_overrides,
+    grant_session_trust,
+    is_trusted_workspace_path,
+)
 from .ui_confirm_bus import UIConfirmBus, get_ui_confirm_bus, reset_ui_confirm_bus
 from .validators import (
     BaseValidator,
@@ -135,6 +159,7 @@ from .working_facts import (
 __all__ = [
     "ASK_MODE_RULESET",
     "AuditLogger",
+    "BackupInfo",
     "BaseValidator",
     "BudgetAction",
     "BudgetConfig",
@@ -151,15 +176,25 @@ __all__ = [
     "DEFAULT_MAX_RESULT_CHARS",
     "DEFAULT_RULESET",
     "DISCLAIMER_TEXT",
+    "Decision",
     "DeniedError",
+    "Diagnostic",
+    "DiagnosticBackend",
+    "DiagnosticReport",
+    "DomainAllowlist",
+    "FileHistoryManager",
+    "FileSnapshot",
+    "HISTORY_BASE_DIR",
     "HookEvent",
     "HookExecutor",
     "HookHandler",
     "HookResult",
     "Identity",
     "JSONFormatter",
+    "LSPFeedbackCollector",
     "LoopBudgetDecision",
     "LoopBudgetGuard",
+    "MAX_SNAPSHOTS",
     "MergedPersona",
     "OVERFLOW_DIR",
     "OutputFormatter",
@@ -175,7 +210,9 @@ __all__ = [
     "PersonaTrait",
     "READONLY_EXPLORATION_TOOLS",
     "ResourceBudget",
+    "RuffBackend",
     "Ruleset",
+    "SESSION_KEY",
     "SKILL_GIT_CLONE_TIMEOUT_SECONDS",
     "SKILL_INSTALL_CIRCUIT_COOLDOWN_SECONDS",
     "SKILL_INSTALL_CIRCUIT_THRESHOLD",
@@ -184,6 +221,7 @@ __all__ = [
     "StreamJSONFormatter",
     "TextFormatter",
     "TokenBudget",
+    "TypeScriptBackend",
     "UIConfirmBus",
     "UserCancelledError",
     "ValidationContext",
@@ -197,6 +235,8 @@ __all__ = [
     "check_mode_permission",
     "check_path",
     "check_permission",
+    "clear_session_trust",
+    "consume_session_trust",
     "create_budget_from_settings",
     "create_default_registry",
     "create_formatter",
@@ -207,9 +247,13 @@ __all__ = [
     "format_working_facts",
     "get_audit_logger",
     "get_confirmation_store",
+    "get_domain_allowlist",
     "get_hook_executor",
     "get_pending_approvals_store",
+    "get_session_overrides",
     "get_ui_confirm_bus",
+    "grant_session_trust",
+    "is_trusted_workspace_path",
     "list_security_allowlist",
     "list_skill_external_allowlist",
     "maybe_broadcast_death_switch_reset",
