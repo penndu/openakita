@@ -189,7 +189,8 @@ commit_guard WARN/REJECT documentation).
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | `be9c1b13` | P-RC-6 P6.0a | chore(revamp): bump ledger to P-RC-6 + close N11 (legacy LOC visibility) and N12 (commit_guard docs) | +60 / -7 (TRACKED_FILES + INFO_ONLY_FILES + commit_guard docstring + baseline cleanup + ledger header + section + Discipline N12) | 0 | --- |
-| _this commit_ | P-RC-6 P6.0b | test(parity): 5 non-trivial reasoning fixtures + non-triviality structural assertion (N9) | +136 (5 JSON fixtures + test_fixtures_include_non_trivial_divergence) | +11 (10 parity + 1 structural) | --- |
+| `89038ecc` | P-RC-6 P6.0b | test(parity): 5 non-trivial reasoning fixtures + non-triviality structural assertion (N9) | +136 (5 JSON fixtures + structural test) | +11 (10 parity + 1 structural) | --- |
+| _this commit_ | P-RC-6 P6.0c | test(parity): diff-test sanity wrapper proving parity infrastructure catches divergence (N10) | +128 (new test_parity_diffability.py with 3 xfail-strict cases) | +3 (xfailed) | --- |
 
 ## P-RC-7 — Caller migration + legacy bulk delete
 
