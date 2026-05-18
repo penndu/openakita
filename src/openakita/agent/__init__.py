@@ -12,7 +12,24 @@ from :mod:`openakita.agent.facade` once the rewrite slices land.
 from __future__ import annotations
 
 from .audit import AuditLogger, get_audit_logger, reset_audit_logger
+from .confirmation import (
+    ConfirmationDecision,
+    PendingRiskConfirmation,
+    PendingRiskConfirmationStore,
+    get_confirmation_store,
+    normalize_confirmation_answer,
+)
 from .errors import UserCancelledError
+from .hooks import (
+    CallbackHook,
+    HookEvent,
+    HookExecutor,
+    HookHandler,
+    HookResult,
+    ShellHook,
+    get_hook_executor,
+    set_hook_executor,
+)
 from .identity import Identity
 from .output_formatter import (
     JSONFormatter,
@@ -27,6 +44,12 @@ from .output_guard import (
     detect_numeric_output,
     detect_numeric_task,
     validate_no_fabricated_numbers,
+)
+from .pending_approvals import (
+    PendingApproval,
+    PendingApprovalsStore,
+    get_pending_approvals_store,
+    reset_pending_approvals_store,
 )
 from .permission import (
     ASK_MODE_RULESET,
@@ -48,6 +71,7 @@ from .persona import (
     PersonaTrait,
     persist_trait_to_memory,
 )
+from .ui_confirm_bus import UIConfirmBus, get_ui_confirm_bus, reset_ui_confirm_bus
 from .validators import (
     BaseValidator,
     ValidationContext,
@@ -69,22 +93,34 @@ __all__ = [
     "BaseValidator",
     "CODE_EXEC_TOOLS",
     "COORDINATOR_MODE_RULESET",
+    "CallbackHook",
+    "ConfirmationDecision",
     "DEFAULT_RULESET",
     "DISCLAIMER_TEXT",
     "DeniedError",
+    "HookEvent",
+    "HookExecutor",
+    "HookHandler",
+    "HookResult",
     "Identity",
     "JSONFormatter",
     "MergedPersona",
     "OutputFormatter",
     "PERSONA_DIMENSIONS",
     "PLAN_MODE_RULESET",
+    "PendingApproval",
+    "PendingApprovalsStore",
+    "PendingRiskConfirmation",
+    "PendingRiskConfirmationStore",
     "PermissionDecision",
     "PermissionRule",
     "PersonaManager",
     "PersonaTrait",
     "Ruleset",
+    "ShellHook",
     "StreamJSONFormatter",
     "TextFormatter",
+    "UIConfirmBus",
     "UserCancelledError",
     "ValidationContext",
     "ValidationReport",
@@ -101,8 +137,16 @@ __all__ = [
     "extract_working_facts",
     "format_working_facts",
     "get_audit_logger",
+    "get_confirmation_store",
+    "get_hook_executor",
+    "get_pending_approvals_store",
+    "get_ui_confirm_bus",
     "merge_working_facts",
+    "normalize_confirmation_answer",
     "persist_trait_to_memory",
     "reset_audit_logger",
+    "reset_pending_approvals_store",
+    "reset_ui_confirm_bus",
+    "set_hook_executor",
     "validate_no_fabricated_numbers",
 ]
