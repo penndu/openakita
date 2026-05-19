@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -65,7 +66,20 @@ class BlackboardBackendProtocol(Protocol):
         *,
         max_entries: int,
     ) -> None:
-        """Persist *entry*; backends MAY evict to honour ``max_entries``."""
+        """Persist *entry*; backends MUST evict to honour ``max_entries``."""
+
+    def all_for_scope(
+        self, scope: MemoryScope, *, owner: str | None = None
+    ) -> list[OrgMemoryEntry]:
+        """Every entry for ``scope`` (optionally narrowed to ``owner``)."""
+
+    def is_duplicate(
+        self, scope: MemoryScope, owner: str, content: str, *, prefix_len: int = 100
+    ) -> bool:
+        """True iff an entry whose content shares the first ``prefix_len`` chars exists."""
+
+    def delete_by_id(self, memory_id: str) -> bool:
+        """Remove entry with id ``memory_id``; True iff found."""
 
     def read(
         self,
@@ -124,8 +138,118 @@ class JsonFileBlackboardBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
-        # Eviction is the P9.1b deliverable; the scaffold caps
-        # only via read-side truncation.
+        self._evict_if_needed(path, max_entries)
+
+    def is_duplicate(
+        self,
+        scope: MemoryScope,
+        owner: str,
+        content: str,
+        *,
+        prefix_len: int = 100,
+    ) -> bool:
+        path = self._path_for(scope, owner)
+        prefix = content[:prefix_len].strip()
+        if not prefix or not path.is_file():
+            return False
+        with self._lock:
+            raw = path.read_text(encoding="utf-8")
+        for line in raw.strip().splitlines():
+            if not line.strip():
+                continue
+            try:
+                existing = json.loads(line).get("content", "")
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if isinstance(existing, str) and existing[:prefix_len].strip() == prefix:
+                return True
+        return False
+
+    def all_for_scope(
+        self, scope: MemoryScope, *, owner: str | None = None
+    ) -> list[OrgMemoryEntry]:
+        out: list[OrgMemoryEntry] = []
+        if scope == MemoryScope.ORG:
+            out.extend(self.read(MemoryScope.ORG, self._org_id, limit=10_000))
+            return out
+        sub = "departments" if scope == MemoryScope.DEPARTMENT else "nodes"
+        d = self._memory_dir / sub
+        if not d.exists():
+            return out
+        for f in sorted(d.glob("*.jsonl")):
+            if owner and f.stem != owner:
+                continue
+            out.extend(self.read(scope, f.stem, limit=10_000))
+        return out
+
+    def delete_by_id(self, memory_id: str) -> bool:
+        with self._lock:
+            for path in self._all_memory_files():
+                if not path.is_file():
+                    continue
+                lines = path.read_text(encoding="utf-8").splitlines()
+                kept: list[str] = []
+                found = False
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    try:
+                        if json.loads(line).get("id") == memory_id:
+                            found = True
+                            continue
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                    kept.append(line)
+                if found:
+                    path.write_text(
+                        ("\n".join(kept) + "\n") if kept else "", encoding="utf-8"
+                    )
+                    return True
+        return False
+
+    def _all_memory_files(self) -> list[Path]:
+        files: list[Path] = []
+        org_path = self._memory_dir / "blackboard.jsonl"
+        if org_path.exists():
+            files.append(org_path)
+        for sub in ("departments", "nodes"):
+            d = self._memory_dir / sub
+            if d.exists():
+                files.extend(sorted(d.glob("*.jsonl")))
+        return files
+
+    @staticmethod
+    def _is_expired(entry: OrgMemoryEntry) -> bool:
+        if not entry.ttl_hours:
+            return False
+        try:
+            created = datetime.fromisoformat(entry.created_at.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return False
+        expiry = created + timedelta(hours=entry.ttl_hours)
+        return datetime.now(created.tzinfo) > expiry
+
+    def _evict_if_needed(self, path: Path, max_entries: int) -> None:
+        if not path.is_file():
+            return
+        with self._lock:
+            lines = [
+                ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()
+            ]
+            live: list[tuple[float, str]] = []
+            for line in lines:
+                try:
+                    entry = OrgMemoryEntry.from_dict(json.loads(line))
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    continue
+                if self._is_expired(entry):
+                    continue
+                live.append((entry.importance, line))
+            if len(live) <= max_entries and len(live) == len(lines):
+                return
+            live.sort(key=lambda x: x[0], reverse=True)
+            kept = live[:max_entries]
+            path.write_text("\n".join(ln for _, ln in kept) + "\n", encoding="utf-8")
 
     def read(
         self,
@@ -153,6 +277,8 @@ class JsonFileBlackboardBackend:
                 entry = OrgMemoryEntry.from_dict(json.loads(line))
             except (json.JSONDecodeError, ValueError, TypeError) as exc:
                 logger.debug("[Blackboard] dropping malformed row: %s", exc)
+                continue
+            if self._is_expired(entry):
                 continue
             if tag and tag not in entry.tags:
                 continue
@@ -234,6 +360,9 @@ class OrgBlackboard:
             importance=importance,
             attachments=attachments or [],
         )
+        if self._backend.is_duplicate(MemoryScope.ORG, self._org_id, content):
+            logger.debug("[Blackboard] skip duplicate org entry: %r", content[:50])
+            return None
         self._backend.append(
             MemoryScope.ORG, self._org_id, entry, max_entries=MAX_ORG_MEMORIES
         )
@@ -258,6 +387,9 @@ class OrgBlackboard:
             tags=tags or [],
             importance=importance,
         )
+        if self._backend.is_duplicate(MemoryScope.DEPARTMENT, dept_name, content):
+            logger.debug("[Blackboard] skip duplicate dept entry: %r", content[:50])
+            return None
         self._backend.append(
             MemoryScope.DEPARTMENT, dept_name, entry, max_entries=MAX_DEPT_MEMORIES
         )
@@ -285,3 +417,64 @@ class OrgBlackboard:
             MemoryScope.NODE, node_id, entry, max_entries=MAX_NODE_MEMORIES
         )
         return entry
+
+
+    # ---- query / delete / summaries -----------------------------------
+
+    def query(
+        self,
+        scope: MemoryScope | None = None,
+        scope_owner: str | None = None,
+        memory_type: MemoryType | None = None,
+        tag: str | None = None,
+        limit: int = 50,
+    ) -> list[OrgMemoryEntry]:
+        """Cross-scope query with optional filters; most-recent first."""
+        limit = _safe_int(limit, 50)
+        all_entries: list[OrgMemoryEntry] = []
+        if scope is None or scope == MemoryScope.ORG:
+            all_entries.extend(self._backend.all_for_scope(MemoryScope.ORG))
+        if scope is None or scope == MemoryScope.DEPARTMENT:
+            all_entries.extend(
+                self._backend.all_for_scope(
+                    MemoryScope.DEPARTMENT, owner=scope_owner
+                )
+            )
+        if scope is None or scope == MemoryScope.NODE:
+            all_entries.extend(
+                self._backend.all_for_scope(MemoryScope.NODE, owner=scope_owner)
+            )
+        if memory_type:
+            all_entries = [e for e in all_entries if e.memory_type == memory_type]
+        if tag:
+            all_entries = [e for e in all_entries if tag in e.tags]
+        all_entries.sort(key=lambda e: e.created_at, reverse=True)
+        return all_entries[:limit]
+
+    def delete_entry(self, memory_id: str) -> bool:
+        """Delete a memory entry by id; True iff found in any scope."""
+        return self._backend.delete_by_id(memory_id)
+
+    def get_org_summary(self, max_entries: int = 10) -> str:
+        entries = self.read_org(limit=max_entries)
+        if not entries:
+            return "(???????)"
+        return "\n".join(
+            f"- [{e.memory_type.value}] {e.content}"
+            + (f" [{', '.join(e.tags)}]" if e.tags else "")
+            for e in entries
+        )
+
+    def get_dept_summary(self, dept_name: str, max_entries: int = 5) -> str:
+        entries = self.read_department(dept_name, limit=max_entries)
+        if not entries:
+            return f"({dept_name} ???????)"
+        return "\n".join(
+            f"- [{e.memory_type.value}] {e.content}" for e in entries
+        )
+
+    def get_node_summary(self, node_id: str, max_entries: int = 5) -> str:
+        entries = self.read_node(node_id, limit=max_entries)
+        if not entries:
+            return "(??????)"
+        return "\n".join(f"- {e.content}" for e in entries)

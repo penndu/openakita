@@ -66,4 +66,5 @@ current_phase: P-RC-9
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | ``040256b2`` | P-RC-9 P9.1a0 | feat(runtime/orgs): add v2 memory models (MemoryScope/Type/OrgMemoryEntry) | +162 (memory_models.py NEW 127 + __init__.py +17/-10 + ledger) | 0 | ADR-0011 (subsystem decomposition; this is the shared model layer) |
-| _this commit_ | P-RC-9 P9.1a | feat(runtime/orgs): scaffold BlackboardProtocol + minimal v2 implementation | +312 (blackboard.py NEW 288 + __init__.py +20/-5) | 0 (smoke import only, no test additions) | ADR-0011 (Protocol-typed subsystem); ADR-0012 (no shim under v1) |
+| ``bcf43580`` | P-RC-9 P9.1a | feat(runtime/orgs): scaffold BlackboardProtocol + minimal v2 implementation | +315 (blackboard.py NEW 288 + __init__.py +20/-5 + ledger +3) | 0 (smoke import only) | ADR-0011 (Protocol-typed subsystem); ADR-0012 (no shim under v1) |
+| _this commit_ | P-RC-9 P9.1b | feat(runtime/orgs): complete v2 OrgBlackboard with concurrency + schema validation (JsonFile half) | +199 (blackboard.py JsonFile feature additions: eviction, ttl, dup-detect, query, summaries) | 0 (no test additions yet; P9.1c parity activates next) | ADR-0011; ADR-0013 (concurrency requirements feeding wall-clock SLAs) |
