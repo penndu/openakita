@@ -265,7 +265,8 @@ that requires writing 6 new v2 subsystems (~4-6 weeks).
 | `b1fb4cd7` | P-RC-8 P8.2 | docs(adr): flip ADR-0001..0010 Status from Proposed to Accepted | +24 / -13 (10 ADRs Status+Accepted line + STATUS.md G0 line + ledger row) | 0 | ADR-0001..0010 |
 | `709767b3` | P-RC-8 P8.3 | docs(revamp): write ACCEPTANCE.md per original plan section 9 (5 criteria) | +274 / -1 (new ACCEPTANCE.md + ledger row) | 0 | ADR-0004 (criterion 1), ADR-0005 (criteria 2/3), ADR-0009 (criterion 4), ADR-0008 (criterion 5) |
 | `483b8b13` | P-RC-8 P8.4 | docs(revamp): write P-RC-9 charter for deferred orgs/ integral migration | +169 / -1 (new P-RC-9-CHARTER.md + STATUS.md scoreboard pointer + ledger row) | 0 | --- (charter, not implementing) |
-| _this commit_ | P-RC-8 P8.5 | docs(revamp): update RELEASE_v2.md to v2.0.0-rc2 + acceptance summary | +110 (new rc2 section prepended) +1 (rc1 H1 demoted) +1 (STATUS.md P-RC-8 row bump) +ledger | 0 | ADR-0001 (overall) |
+| `df4e1bf1` | P-RC-8 P8.5 | docs(revamp): update RELEASE_v2.md to v2.0.0-rc2 + acceptance summary | +113 / -3 (new rc2 section prepended + rc1 H1 demoted + STATUS.md P-RC-8 row bump + ledger row) | 0 | ADR-0001 (overall) |
+| _this commit_ | P-RC-8 P8.6 | docs(revamp): G-RC-8 final gate review (continuation plan endgame) | +281 (new gates/G-RC-8.md) +1 (STATUS.md P-RC-8 row -> Complete) +ledger | 0 | ADR-0001 (overall close-out) |
 
 ## Discipline reminders (auto-collected by audits)
 
