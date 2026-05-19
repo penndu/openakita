@@ -113,7 +113,7 @@ async def maybe_refresh_skills(
     if get_agent is None:
         return
     try:
-        from openakita.core.agent import Agent
+        from openakita.agent.core import Agent
         from openakita.skills.events import SkillEvent
 
         agent = get_agent()

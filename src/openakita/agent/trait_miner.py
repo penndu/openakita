@@ -166,7 +166,7 @@ class TraitMiner:
                 return []
 
         try:
-            from openakita.core.tool_executor import smart_truncate as _st
+            from openakita.agent.tools import smart_truncate as _st
 
             msg_trunc, _ = _st(message, 800, save_full=False, label="trait_msg")
             prompt = TRAIT_MINING_PROMPT.format(message=msg_trunc)

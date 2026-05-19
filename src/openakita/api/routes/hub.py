@@ -71,7 +71,7 @@ def _reload_skills(request) -> None:
     Best-effort: failures are logged but never break the install flow.
     """
     try:
-        from openakita.core.agent import Agent
+        from openakita.agent.core import Agent
 
         agent = getattr(request.app.state, "agent", None)
         actual_agent = agent

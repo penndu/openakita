@@ -55,7 +55,7 @@ def _invalidate_skills_cache() -> None:
 
 def _resolve_agent(request: Request):
     """返回真实 Agent 实例（解包可能的 thin wrapper / _local_agent）。"""
-    from openakita.core.agent import Agent
+    from openakita.agent.core import Agent
 
     agent = getattr(request.app.state, "agent", None)
     if isinstance(agent, Agent):

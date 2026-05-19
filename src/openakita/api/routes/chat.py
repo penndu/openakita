@@ -531,7 +531,7 @@ def _extract_mcp_call(event: dict) -> dict | None:
 
 def _resolve_agent(agent: object):
     """Resolve the actual Agent instance."""
-    from openakita.core.agent import Agent
+    from openakita.agent.core import Agent
 
     if isinstance(agent, Agent):
         return agent

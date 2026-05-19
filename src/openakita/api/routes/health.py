@@ -562,7 +562,7 @@ async def domain_unblock(conversation_id: str, host: str):
 
 def _get_llm_client(agent: object):
     """Resolve LLMClient from Agent."""
-    from openakita.core.agent import Agent
+    from openakita.agent.core import Agent
 
     actual = agent if isinstance(agent, Agent) else None
     if actual is None:
