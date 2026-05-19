@@ -262,7 +262,8 @@ that requires writing 6 new v2 subsystems (~4-6 weeks).
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | `caf5d7f3` | P-RC-8 P8.0 | chore(revamp): bump ledger to P-RC-8 + close P-RC-7 audit nits (N-G7-1/2/3) | +99 / -22 (rename core/supervisor.py -> core/_supervisor_legacy.py R100; +57 tests/agent/test_brain.py; +9 LOC audit + ledger; -3 production import retargets) | +1 (smoke test_brain_get_current_endpoint_info_smoke) | --- |
-| _this commit_ | P-RC-8 P8.2 | docs(adr): flip ADR-0001..0010 Status from Proposed to Accepted | +30 (10 ADRs x Status+Accepted) +2 (STATUS.md G0 line) +ledger | 0 | ADR-0001..0010 |
+| `b1fb4cd7` | P-RC-8 P8.2 | docs(adr): flip ADR-0001..0010 Status from Proposed to Accepted | +24 / -13 (10 ADRs Status+Accepted line + STATUS.md G0 line + ledger row) | 0 | ADR-0001..0010 |
+| _this commit_ | P-RC-8 P8.3 | docs(revamp): write ACCEPTANCE.md per original plan section 9 (5 criteria) | +220 (new ACCEPTANCE.md) +ledger | 0 | ADR-0004 (criterion 1), ADR-0005 (criteria 2/3), ADR-0009 (criterion 4), ADR-0008 (criterion 5) |
 
 ## Discipline reminders (auto-collected by audits)
 
