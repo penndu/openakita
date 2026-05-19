@@ -767,6 +767,12 @@ override any of them at G-RC-9.0 review.
     v2 surface has a clean top-level package.
   * (c) Rename to ``src/openakita/orgs/`` after P9.9 (reclaim
     the v1 path now that v1 is gone).
+* **ACCEPTED: (a)** -- operator confirmed in conversation on
+  2026-05-19 (G-RC-9.0 review). ``runtime/orgs/`` stays under
+  ``runtime/``; the wholesale ``runtime/`` flattening that path
+  rename (b) or (c) would imply is deferred to P-RC-10 (see
+  ``docs/revamp/P-RC-10-CHARTER.md`` -- v2.1.0 hygiene phase).
+  Recorded in ``docs/revamp/Q_DECISIONS.md``.
 * **Default:** (a). Justification: every other v2 surface
   (``runtime/supervisor``, ``runtime/templates``,
   ``runtime/state_graph``, ``runtime/nodes``) lives under
@@ -788,6 +794,12 @@ override any of them at G-RC-9.0 review.
   * (c) **Full passthrough:** v1 endpoints proxy to v2
     handlers (1:1 mapping inside the same FastAPI process).
     Slowest to remove but most caller-friendly.
+* **ACCEPTED: (b)** -- operator confirmed in conversation on
+  2026-05-19 (G-RC-9.0 review). v1 REST endpoints respond with
+  HTTP 410 Gone + a body pointing at the v2 equivalent for one
+  release (v2.0.x); hard-deleted in v2.1.0. Matches the P-RC-7
+  shim cadence (``core/agent.py`` shim removed at v2.0.0-rc2).
+  Recorded in ``docs/revamp/Q_DECISIONS.md``.
 * **Default:** (b). Justification: matches the P-RC-7 shim
   pattern for core/agent.py (gone in v2.0.0-rc1, fully
   deleted in v2.0.0-rc2 endgame). One release of 410-Gone
@@ -805,6 +817,12 @@ override any of them at G-RC-9.0 review.
   * (c) **6 weeks conservative:** allows time for unanticipated
     REST contract edge cases and the OrgRuntime fold complexity
     to slip 1-2 weeks.
+* **ACCEPTED: (b) 4 weeks normal** -- operator confirmed in
+  conversation on 2026-05-19 (G-RC-9.0 review). One engineer
+  full-time, 5-10 commits/day, mini-gates per phase as
+  designed. Matches P-RC-4..P-RC-7 cadence; P9.6 (OrgRuntime)
+  and P9.7 (80-endpoint REST mint) carry the natural slack.
+  Recorded in ``docs/revamp/Q_DECISIONS.md``.
 * **Default:** (b) 4 weeks normal. Justification: matches the
   charter's projection and the P-RC-4..P-RC-7 cadence (those
   four phases shipped in roughly 4 weeks of effort). The 4-week
