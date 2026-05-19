@@ -18,8 +18,15 @@
     ``get_default_project_store`` /
     ``reset_default_project_stores`` factory.
   - P9.3 ships v2 :class:`NodeSchedule` / :class:`ScheduleType`
-    schedule models (this commit, P9.3a0); the Protocols + the
-    :class:`OrgNodeScheduler` itself land in P9.3a/b.
+    schedule models (P9.3a0), four Protocols
+    (:class:`NodeSchedulerProtocol`,
+    :class:`CommandDispatcher` -- the ADR-0011 cross-subsystem
+    boundary; :class:`ScheduleStore`;
+    :class:`SchedulerRuntimeProbe`), the
+    :func:`compute_next_fire_time` pure helper (P-RC-9-PLAN
+    section 5.2 1-ms parity gate), and the
+    :class:`OrgNodeScheduler` skeleton (this commit, P9.3a;
+    P9.3b lands the method bodies).
 """
 
 from __future__ import annotations
@@ -35,6 +42,18 @@ from .blackboard import (
     get_default_blackboard_backend,
 )
 from .memory_models import MemoryScope, MemoryType, OrgMemoryEntry
+from .node_scheduler import (
+    CLEAN_THRESHOLD,
+    FREQUENCY_MULTIPLIER,
+    MAX_FREQUENCY_FACTOR,
+    RECHECK_DELAY,
+    CommandDispatcher,
+    NodeSchedulerProtocol,
+    OrgNodeScheduler,
+    SchedulerRuntimeProbe,
+    ScheduleStore,
+    compute_next_fire_time,
+)
 from .project_models import (
     OrgProject,
     ProjectStatus,
@@ -57,28 +76,38 @@ from .store import JsonOrgStore, OrgNotFound, get_default_store, reset_default_s
 
 __all__ = [
     "BlackboardBackendProtocol",
+    "CLEAN_THRESHOLD",
+    "CommandDispatcher",
+    "FREQUENCY_MULTIPLIER",
     "JsonFileBlackboardBackend",
     "JsonOrgStore",
     "JsonProjectStore",
     "MAX_DEPT_MEMORIES",
+    "MAX_FREQUENCY_FACTOR",
     "MAX_NODE_MEMORIES",
     "MAX_ORG_MEMORIES",
     "MemoryScope",
     "MemoryType",
     "NodeSchedule",
+    "NodeSchedulerProtocol",
     "OrgBlackboard",
     "OrgMemoryEntry",
+    "OrgNodeScheduler",
     "OrgNotFound",
     "OrgProject",
     "ProjectStatus",
     "ProjectStoreProtocol",
     "ProjectTask",
     "ProjectType",
+    "RECHECK_DELAY",
+    "ScheduleStore",
     "ScheduleType",
+    "SchedulerRuntimeProbe",
     "SqliteBlackboardBackend",
     "SqliteOrgStore",
     "SqliteProjectStore",
     "TaskStatus",
+    "compute_next_fire_time",
     "get_default_blackboard_backend",
     "get_default_project_store",
     "get_default_store",
