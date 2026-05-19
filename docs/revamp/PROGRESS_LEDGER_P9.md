@@ -196,4 +196,20 @@ current_phase: P-RC-9
 
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
-| _this commit_ | P-RC-9 P9.6.nit | docs(revamp): clean up G-RC-9.5 NIT-D-1 + 4 G-RC-9.4 doc-only NITs (K-1 fixture-id drift / K-2 v2_im_cancel 4/4 / L-1 SLA file LOC 300 / G-2 lock-claim wording) | +PLACEHOLDER (command_service.py 9 lines + __init__.py 7 lines + G-RC-9.4.md 26 lines + ACCEPTANCE.md 4 lines + ledger ~22 lines) | 0 (smoke: pytest tests/runtime/orgs/test_command_service_contract.py + tests/parity/orgs/test_command_service_parity.py = 26 passed; ruff clean on touched files) | G-RC-9.5 NIT-D-1 (P9.5 docstring count corrected); G-RC-9.4 NIT-K-1 (fixture ids re-fetched and pinned); NIT-K-2 (test_v2_im_cancel 4 cases not 5; verified via --collect-only); NIT-L-1 (SLA file LOC actual 300 per ``wc -l``; previous 234 was commit-point net add); NIT-G-2 (cancel does not acquire self._lock; docstring corrected) |
+| ``e4b59137`` | P-RC-9 P9.6.nit | docs(revamp): clean up G-RC-9.5 NIT-D-1 + 4 G-RC-9.4 doc-only NITs (K-1 fixture-id drift / K-2 v2_im_cancel 4/4 / L-1 SLA file LOC 300 / G-2 lock-claim wording) | +PLACEHOLDER (command_service.py 9 lines + __init__.py 7 lines + G-RC-9.4.md 26 lines + ACCEPTANCE.md 4 lines + ledger ~22 lines) | 0 (smoke: pytest tests/runtime/orgs/test_command_service_contract.py + tests/parity/orgs/test_command_service_parity.py = 26 passed; ruff clean on touched files) | G-RC-9.5 NIT-D-1 (P9.5 docstring count corrected); G-RC-9.4 NIT-K-1 (fixture ids re-fetched and pinned); NIT-K-2 (test_v2_im_cancel 4 cases not 5; verified via --collect-only); NIT-L-1 (SLA file LOC actual 300 per ``wc -l``; previous 234 was commit-point net add); NIT-G-2 (cancel does not acquire self._lock; docstring corrected) |
+
+## P9.6 plan -- budget revision (ADR-0014)
+
+> Empirical recon (P9.6 turn-1 escape-hatch report) revealed
+> the original 1 200 src LOC budget was incompatible with
+> ADR-0012 + P-RC-9-PLAN section 5.2 parity. Per the project
+> owner's option-C ruling, the P9.6 src budget is revised to
+> ~3 000 LOC across 7-8 sibling modules (each <= 500 LOC),
+> tests budget to ~900 LOC (20 parity + ~25 contract), and
+> commits to 12-15 across 2-3 turns (alpha / beta / gamma).
+> ADR-0014 records the decision drivers + alternatives
+> rejected. Pure docs commit; no production code touched.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-9 P9.6.plan | docs(revamp): revise P9.6 budget 1200 -> 3000 LOC + add ADR-0014 (empirical recon outcome) | +PLACEHOLDER (P-RC-9-PLAN.md ~55 net + ADR-0014 NEW ~160 + ledger ~25 = ~240) | 0 (paperwork) | ADR-0014 (NEW; records option-C decision); ADR-0011 (subsystem decomposition; OrgRuntime sibling list anchored here); ADR-0012 (no-shim invariant cited in alternatives-rejected); cites P-RC-9-PLAN section 4 P9.6 revision + section 5.2 parity gate |

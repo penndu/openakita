@@ -477,31 +477,63 @@ that must be written before the next phase opens.
   v2 will surface as test failures; the migration script must
   be dry-run-default + idempotent (R4 mitigation).
 
-### P9.6 -- OrgRuntime (the big one)
+### P9.6 -- OrgRuntime (the big one; budget revised per ADR-0014)
 
-* Commits: 10-15.
-* LOC budget: 1 200 + 600 tests + the folded subsystems
-  (``tool_handler.py`` 3 183, ``messenger.py`` 552,
+**Empirical recon (P9.6 turn-1 escape-hatch report, 2026-05-19)
+revealed v1 ``orgs/runtime.py`` has 132 methods, 6 355 LOC,
+254 ``tracker`` x 221 ``chain_id`` cross-cutting references,
+and Top-10 methods alone account for ~2 400 LOC
+(``_activate_and_run_inner`` is 556 LOC). The original
+1 200 LOC src budget was naive (sized before deep recon) and
+incompatible with ADR-0012 (no-shim under v1; v2 must
+independently support P9.8 deletion).** ADR-0014 records the
+revised budget. Per-commit gate discipline unchanged
+(<= 380 WARN, target <= 350, REJECT at 400).
+
+* **Commits**: 12-15 across **2-3 turns** (P9.6alpha turn 1:
+  skeleton + 3 Protocols + event_bus + watchdog + lifecycle;
+  P9.6beta turn 2: dispatch + agent_pipeline +
+  node_lifecycle + plugin_assets; P9.6gamma turn 3: parity
+  + contract + mini-gate).
+* **LOC budget**: **~3 000 src + ~900 tests** (20 parity +
+  ~25 contract).
+* **Sibling-module decomposition** (each <= 500 LOC ceiling per
+  ADR-0014):
+
+| Module | LOC | Responsibility |
+|---|---|---|
+| ``runtime.py`` | ~400 | OrgRuntime skeleton + public API + 3 Protocol impls (RuntimeState / NodeLifecycle / EventBus) + ``CommandRuntimeProtocol`` surface |
+| ``_runtime_agent_pipeline.py`` | ~500 | v1 ``_activate_and_run_inner`` (556) + agent build / cache helpers |
+| ``_runtime_dispatch.py`` | ~500 | ``send_command`` / ``cancel_user_command`` / tracker + chain helpers (~22 v1 methods absorbed) |
+| ``_runtime_node_lifecycle.py`` | ~400 | node state machine + ``_on_node_message`` routing |
+| ``_runtime_lifecycle.py`` | ~300 | start_org / stop_org / restart / health / activate / deactivate |
+| ``_runtime_plugin_assets.py`` | ~400 | ``_record_plugin_asset_output`` + file output registration |
+| ``_runtime_watchdog.py`` | ~250 | ``_command_watchdog`` + ``_idle_probe_loop`` |
+| ``_runtime_event_bus.py`` | ~150 | emit / on / ``_broadcast_ws`` |
+| **Total src** | **~2 900** | |
+| ``tests/parity/orgs/test_runtime_parity.py`` | ~500 | 20 fixtures per section 5.2 (state graph + checkpoint sequence equality) |
+| ``tests/runtime/orgs/test_runtime_contract.py`` | ~400 | ~25 cases (lifecycle / dispatch / event_bus / node_lifecycle / watchdog / 2 ``CommandRuntimeProtocol`` impl / integration) |
+
+* **Deliverables**: ``runtime.py`` + 7 sibling modules +
+  parity 20 fixtures + contract ~25 cases.
+* **Gate criteria**: tests/runtime +25; tests/parity +20
+  (-20 xfail = LAST sentinel activation); cancel wall-clock
+  from P9.4 still under 2 s; LOC audit baselines for the
+  absorbed legacy files drop in P9.8 deletion (NOT in P9.6
+  itself; v2 imports / delegates to v1 for non-runtime
+  subsystems until P9.8).
+* **Rework risk**: HIGH (unchanged). Mitigation: every
+  sub-commit lands one sibling module at a time + runs
+  targeted pytest. P9.6alpha / beta / gamma turn boundaries
+  enforced.
+* **Folded subsystems (deferred from P9.6 to P9.8 deletion)**:
+  ``tool_handler.py`` 3 183, ``messenger.py`` 552,
   ``event_store.py`` 361, ``heartbeat.py`` 394, ``inbox.py``
   265, ``notifier.py`` 164, ``scaler.py`` 351, ``reporter.py``
-  189, ``failure_diagnoser.py`` 462, ``plugin_assets.py`` 137 =
-  6 058 LOC moved + slimmed).
-* Deliverables: ``runtime/orgs/runtime.py`` (30 public methods +
-  thin delegate to handler/messenger/scheduler).
-  ``runtime/orgs/tool_handler.py`` (66 methods preserved).
-  9 other folded modules under ``runtime/orgs/``.
-  ``tests/runtime/orgs/test_runtime.py`` (40 cases).
-  ``tests/runtime/orgs/test_tool_handler.py`` (preserved from
-  legacy ``tests/orgs/test_tool_handler.py``, re-pointed).
-* Gate criteria: tests/runtime +40 minimum; tests/parity +20
-  (-20 xfail); the ~30 v1 REST runtime endpoints still green
-  through legacy path (P9.7 flips them to v2); the cancel
-  wall-clock test from P9.4 still under 2 s; LOC audit
-  baselines for the 10 absorbed legacy files drop to 0 (since
-  the rewritten v2 paths get fresh budgets).
-* Rework risk: HIGH. This is the phase most likely to slip
-  calendar. Mitigation: every sub-commit lands one absorbed
-  legacy module at a time and runs the full pytest suite.
+  189, ``failure_diagnoser.py`` 462, ``plugin_assets.py``
+  137 = 6 058 LOC. P9.6 v2 OrgRuntime does NOT absorb these
+  inline; it accesses them via Protocol-typed seams that v1
+  still satisfies (P9.8 cuts the legacy modules).
 
 ### P9.7 -- REST v2 full (the 80 missing endpoints) + UI port flip
 
