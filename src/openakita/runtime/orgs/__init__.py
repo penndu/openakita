@@ -47,6 +47,11 @@
     ``get_default_event_bus`` factory in
     ``_runtime_event_bus.py`` (the Protocol contract is in
     ``runtime.py`` P9.6a0).
+  - P9.6c ships :class:`CommandWatchdog` (v1
+    ``_command_watchdog`` parity) + :class:`IdleProbeLoop`
+    (v1 ``_idle_probe_loop`` parity) in
+    ``_runtime_watchdog.py``; both are DI-driven async
+    loops with start / stop / graceful-shutdown semantics.
 """
 
 from __future__ import annotations
@@ -56,6 +61,7 @@ from ._runtime_event_bus import (
     WebSocketEventBus,
     get_default_event_bus,
 )
+from ._runtime_watchdog import CommandWatchdog, IdleProbeLoop
 from .blackboard import (
     MAX_DEPT_MEMORIES,
     MAX_NODE_MEMORIES,
@@ -145,11 +151,13 @@ __all__ = [
     "BrainProtocol",
     "CLEAN_THRESHOLD",
     "ChannelGatewayProtocol",
+    "CommandWatchdog",
     "CommandDispatcher",
     "CommandRuntimeProtocol",
     "EventEmitterProtocol",
     "FREQUENCY_MULTIPLIER",
     "ForwardTarget",
+    "IdleProbeLoop",
     "JsonFileBlackboardBackend",
     "JsonOrgStore",
     "JsonProjectStore",
