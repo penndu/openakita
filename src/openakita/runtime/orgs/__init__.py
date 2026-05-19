@@ -66,6 +66,14 @@ from .command_service import (
     get_command_service,
     set_command_service,
 )
+from .manager import (
+    OrgFactoryProtocol,
+    OrgLifecycleEmitterProtocol,
+    OrgManager,
+    OrgNameConflictError,
+    OrgPersistenceProtocol,
+    get_org_manager,
+)
 from .memory_models import MemoryScope, MemoryType, OrgMemoryEntry
 from .node_scheduler import (
     CLEAN_THRESHOLD,
@@ -130,11 +138,16 @@ __all__ = [
     "OrgCommandServiceProtocol",
     "OrgCommandSource",
     "OrgCommandSurface",
+    "OrgFactoryProtocol",
+    "OrgLifecycleEmitterProtocol",
     "OrgLookupProtocol",
+    "OrgManager",
     "OrgMemoryEntry",
+    "OrgNameConflictError",
     "OrgNodeScheduler",
     "OrgNotFound",
     "OrgOutputScope",
+    "OrgPersistenceProtocol",
     "OrgProject",
     "ProjectStatus",
     "ProjectStoreProtocol",
@@ -156,6 +169,7 @@ __all__ = [
     "get_default_blackboard_backend",
     "get_default_project_store",
     "get_default_store",
+    "get_org_manager",
     "new_command_id",
     "new_project_id",
     "new_schedule_id",
