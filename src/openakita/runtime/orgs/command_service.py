@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextlib import suppress
 from typing import Any, Protocol, runtime_checkable
 
 from .command_models import (
@@ -415,12 +416,109 @@ class OrgCommandService:
         }
 
     def get_status(self, org_id: str, command_id: str) -> dict[str, Any] | None:
-        """Status snapshot. P9.4b2 lands the body."""
-        raise NotImplementedError("P9.4b2: get_status body")
+        """Live status snapshot for ``command_id``.
+
+        Byte-for-byte parity with v1: ``cmd[*]`` direct fields
+        + tracker-snapshot overlay via
+        :class:`CommandRuntimeProtocol`. Read-only, no lock --
+        v1 contract: the caller may see a snapshot one event
+        older than live state.
+        """
+        cmd = self._commands.get(command_id)
+        if not cmd or cmd.get("org_id") != org_id:
+            return None
+        try:
+            live = self._runtime.get_command_tracker_snapshot(org_id, command_id)
+        except Exception:
+            live = None
+        phase = cmd.get("phase") or cmd["status"]
+        if cmd["status"] == "running":
+            if live:
+                phase = live.get("phase") or phase
+            try:
+                es = self._runtime.get_event_store(org_id)
+                for ev in es.query(event_type="command_phase", limit=20) or []:
+                    data = ev.get("data") or {}
+                    if data.get("command_id") == command_id:
+                        phase = data.get("phase") or phase
+                        break
+            except Exception:
+                pass
+        result: dict[str, Any] = {
+            "command_id": cmd["command_id"],
+            "status": cmd["status"],
+            "phase": phase,
+            "root_node_id": cmd.get("root_node_id", ""),
+            "result": cmd["result"],
+            "error": cmd["error"],
+            "elapsed_s": round(time.time() - cmd["created_at"], 1),
+            "cancel_requested_by_user": bool(cmd.get("cancel_requested_by_user")),
+            "origin_surface": cmd.get("origin_surface"),
+            "output_scope": cmd.get("output_scope"),
+        }
+        if live:
+            result.update(_live_snapshot_view(live))
+        elif isinstance(cmd.get("result"), dict):
+            cr = cmd["result"]
+            result.update(
+                {
+                    "warning": cr.get("warning"),
+                    "stopped_by_watchdog": bool(cr.get("stopped_by_watchdog")),
+                    "cancelled_by_user": bool(cr.get("cancelled_by_user")),
+                }
+            )
+        return result
 
     async def cancel(self, org_id: str, command_id: str) -> dict[str, Any] | None:
-        """Cancel an in-flight command. P9.4b2 lands the body."""
-        raise NotImplementedError("P9.4b2: cancel body")
+        """Cancel an in-flight command.
+
+        Byte-for-byte parity with v1: ``None`` on missing /
+        wrong-org; ``{"ok": True, "already_done": True}`` on
+        terminal; otherwise the runtime cancel
+        + ``cancel_requested_by_user`` flag + the cancelled
+        IM forward via :class:`ChannelGatewayProtocol`. The
+        broadcast goes through :class:`EventEmitterProtocol`
+        (no-op when emitter is None -- v1 degraded-mode
+        equivalence).
+        """
+        cmd = self._commands.get(command_id)
+        if not cmd or cmd.get("org_id") != org_id:
+            return None
+        if cmd.get("status") != "running":
+            return {"ok": True, "command_id": command_id, "already_done": True}
+        result = await self._runtime.cancel_user_command(org_id, command_id)
+        self._update_command_state(
+            command_id,
+            cancel_requested_by_user=True,
+            cancel_requested_at=time.time(),
+        )
+        if self._emitter is not None:
+            try:
+                await self._emitter.broadcast(
+                    "org:command_cancelled",
+                    {
+                        "org_id": org_id,
+                        "command_id": command_id,
+                        "by": "user",
+                        "cancelled_roots": result.get("cancelled_roots", []),
+                    },
+                )
+            except Exception:
+                logger.debug(
+                    "[OrgCmd] broadcast org:command_cancelled failed",
+                    exc_info=True,
+                )
+        await self._dispatch_forwards(
+            org_id,
+            command_id,
+            "cancelled",
+            "用户在指挥台对该任务强制取消，正在执行的子节点应该停止。",
+        )
+        return {
+            "ok": True,
+            "command_id": command_id,
+            "cancelled_roots": result.get("cancelled_roots", []),
+        }
 
     # ------------------------------------------------------------------
     # Private helpers (parity with v1; lifted as-is unless ADR-0011 forces
@@ -660,9 +758,239 @@ class OrgCommandService:
         if self._gateway is None:
             return
 
-    # Fan-out methods (subscribe_summary / unsubscribe_summary /
-    # publish_summary / find_command_for_event / mark_delivered)
-    # land in P9.4b2.
+    # ------------------------------------------------------------------
+    # Fan-out / observability
+    # ------------------------------------------------------------------
+
+    def subscribe_summary(
+        self,
+        command_id: str,
+        *,
+        surface: str = "unknown",
+        target: str = "",
+    ) -> asyncio.Queue[dict[str, Any]]:
+        """Subscribe to summary events for ``command_id``.
+
+        Captures the *current* event loop at subscribe time so
+        :meth:`publish_summary` can hop threads if the event
+        fires from a worker (v1 contract).
+        """
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._summary_subscribers.setdefault(command_id, []).append(
+            (queue, asyncio.get_running_loop(), surface, target)
+        )
+        cmd = self._commands.get(command_id)
+        if cmd and cmd.get("status") in {"done", "error"}:
+            event: dict[str, Any] = {
+                "type": "org_command_done",
+                "org_id": cmd.get("org_id", ""),
+                "command_id": command_id,
+            }
+            if cmd.get("status") == "done":
+                event["result"] = cmd.get("result")
+            else:
+                event["error"] = cmd.get("error") or "Command failed"
+            queue.put_nowait(event)
+        return queue
+
+    async def publish_summary(self, command_id: str, event: dict[str, Any]) -> None:
+        """Fan out a summary event to every subscriber.
+
+        Records each delivery on the command's ``delivered_to``
+        list (parity with v1 mark_delivered + publish_summary
+        ordering). ``asyncio.QueueFull`` is swallowed -- a slow
+        subscriber must not block siblings (v1 contract).
+        """
+        for queue, loop, surface, target in list(self._summary_subscribers.get(command_id, [])):
+            try:
+                self.mark_delivered(
+                    command_id,
+                    surface=surface,
+                    target=target,
+                    event=str(event.get("type") or event.get("event") or ""),
+                )
+                if loop is asyncio.get_running_loop():
+                    queue.put_nowait(event)
+                else:
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+            except asyncio.QueueFull:
+                pass
+
+    def find_command_for_event(self, org_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Look up the command record matching an event payload.
+
+        Direct command_id match wins; otherwise (legacy events
+        without an explicit id) returns the lone running
+        command if exactly one exists. Mirrors v1.
+        """
+        command_id = str(data.get("command_id") or "")
+        if command_id:
+            cmd = self._commands.get(command_id)
+            if cmd and cmd.get("org_id") == org_id:
+                return cmd
+        running = [
+            cmd
+            for cmd in self._commands.values()
+            if cmd.get("org_id") == org_id and cmd.get("status") == "running"
+        ]
+        if len(running) == 1:
+            return running[0]
+        return None
+
+    def mark_delivered(
+        self,
+        command_id: str,
+        *,
+        surface: str,
+        target: str,
+        event: str,
+    ) -> None:
+        """Mark a summary event as delivered to a surface. v1 parity."""
+        cmd = self._commands.get(command_id)
+        if not cmd:
+            return
+        delivered = cmd.setdefault("delivered_to", [])
+        delivered.append(
+            {
+                "surface": surface,
+                "target": target,
+                "event": event,
+                "ts": time.time(),
+            }
+        )
+
+    def unsubscribe_summary(
+        self,
+        command_id: str,
+        queue: asyncio.Queue[dict[str, Any]],
+    ) -> None:
+        """Unsubscribe a previously-subscribed queue. v1 parity."""
+        subscribers = self._summary_subscribers.get(command_id)
+        if not subscribers:
+            return
+        for item in list(subscribers):
+            if item[0] is queue:
+                with suppress(ValueError):
+                    subscribers.remove(item)
+                break
+        if not subscribers:
+            self._summary_subscribers.pop(command_id, None)
+
+    # ------------------------------------------------------------------
+    # Forward dispatch (mirror final outcome to IM gateways)
+    # ------------------------------------------------------------------
+
+    async def _dispatch_forwards(
+        self,
+        org_id: str,
+        command_id: str,
+        kind: str,
+        text: str,
+    ) -> None:
+        """Mirror a final outcome to extra IM destinations.
+
+        ``kind`` is one of ``done`` / ``error`` / ``cancelled``;
+        ``text`` is the human-readable body already trimmed by
+        the caller. When ``self._gateway`` is None the method
+        is a fast no-op (v1's degraded-mode equivalence). Each
+        per-target send is best-effort: one channel failure
+        must not affect siblings or the desktop flow.
+        """
+        if self._gateway is None:
+            return
+        cmd = self._commands.get(command_id)
+        if not cmd:
+            return
+        targets_raw = cmd.get("forward_to") or []
+        if not targets_raw:
+            return
+        prefix = {
+            "done": "✅ 组织任务已完成",
+            "error": "❌ 组织任务失败",
+            "cancelled": "🛑 组织任务已被取消",
+        }.get(kind, "📣 组织任务更新")
+        body = (text or "").strip()
+        if len(body) > 1500:
+            body = body[:1500].rstrip() + "…"
+        msg = f"{prefix}\n(command_id: {command_id}, org: {org_id})\n\n{body}"
+        delivered: list[dict[str, Any]] = []
+        for raw in targets_raw:
+            if not isinstance(raw, dict):
+                continue
+            channel = str(raw.get("channel") or "")
+            chat_id = str(raw.get("chat_id") or "")
+            if not channel or not chat_id:
+                continue
+            thread_id = raw.get("thread_id") or None
+            try:
+                ok = await self._gateway.send_text_reliably(
+                    channel=channel,
+                    chat_id=chat_id,
+                    text=msg,
+                    record_to_session=False,
+                    user_id="system",
+                    thread_id=thread_id,
+                    metadata={
+                        "org_id": org_id,
+                        "command_id": command_id,
+                        "forward_kind": kind,
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[OrgCmd] forward to %s/%s failed for command %s: %s",
+                    channel,
+                    chat_id,
+                    command_id,
+                    exc,
+                )
+                ok = False
+            delivered.append(
+                {
+                    "channel": channel,
+                    "chat_id": chat_id,
+                    "kind": kind,
+                    "ok": bool(ok),
+                    "ts": time.time(),
+                }
+            )
+        if delivered:
+            cmd_now = self._commands.get(command_id)
+            if cmd_now is not None:
+                existing = list(cmd_now.get("forward_log") or [])
+                existing.extend(delivered)
+                cmd_now["forward_log"] = existing[-50:]
+
+
+# ---------------------------------------------------------------------------
+# Local helpers (kept at module scope so the service body stays compact)
+# ---------------------------------------------------------------------------
+
+
+def _live_snapshot_view(live: dict[str, Any]) -> dict[str, Any]:
+    """Project a runtime tracker snapshot into ``get_status``.
+
+    14 keys, byte-for-byte parity with v1 ``get_status``
+    fallback values. Lifted as a helper so the v2 method body
+    stays single-pass.
+    """
+    return {
+        "root_node_id": live.get("root_node_id") or "",
+        "tracker_state": live.get("tracker_state"),
+        "root_chain_id": live.get("root_chain_id", ""),
+        "open_chains": live.get("open_chains", []),
+        "open_chain_count": live.get("open_chain_count", 0),
+        "open_subtree_chains": live.get("open_subtree_chains", []),
+        "blockers": live.get("blockers", []),
+        "blocker_summary": live.get("blocker_summary", ""),
+        "busy_nodes": live.get("busy_nodes", []),
+        "pending_mailbox": live.get("pending_mailbox", []),
+        "root_status": live.get("root_status", ""),
+        "last_progress_elapsed_s": live.get("last_progress_elapsed_s"),
+        "warned_stuck": live.get("warned_stuck", False),
+        "stopped_by_watchdog": live.get("auto_stopped", False),
+        "cancelled_by_user": live.get("user_cancelled", False),
+    }
 
 
 # ---------------------------------------------------------------------------
