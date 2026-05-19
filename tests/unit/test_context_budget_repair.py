@@ -2,10 +2,10 @@ import inspect
 
 import pytest
 
-from openakita.core.context_manager import ContextManager
+from openakita.agent.context import ContextManager
 from openakita.core.loop_budget_guard import LoopBudgetGuard
 from openakita.core.microcompact import microcompact
-from openakita.core.reasoning_engine import ReasoningEngine
+from openakita.agent.reasoning import ReasoningEngine
 from openakita.prompt.builder import _build_catalogs_section
 
 

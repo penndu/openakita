@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from openakita.core.agent import _build_destructive_intent_question, _classify_risk_intent
+from openakita.core._agent_legacy import _build_destructive_intent_question, _classify_risk_intent
 from openakita.core.confirmation_state import ConfirmationDecision, get_confirmation_store
 from openakita.core.loop_budget_guard import LoopBudgetGuard
 from openakita.core.risk_intent import (

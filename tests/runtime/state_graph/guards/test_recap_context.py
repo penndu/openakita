@@ -12,7 +12,7 @@ from openakita.runtime.state_graph.guards.recap_context import (
 
 def _legacy():
     import openakita.agent.brain  # noqa: F401
-    from openakita.core.reasoning_engine import _is_recap_context as legacy
+    from openakita.core._reasoning_engine_legacy import _is_recap_context as legacy
     return legacy
 
 

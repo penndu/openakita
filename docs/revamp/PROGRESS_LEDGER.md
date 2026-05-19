@@ -236,7 +236,8 @@ the residual-risk note.
 | `95b01f25` | P-RC-7 P7.4 | refactor(agents/factory): retarget Agent + get_primary_agent imports to openakita.agent.core | +2 / -2 (1 file, 2 imports) | 0 | ADR-0001, ADR-0003 |
 | `f542e612` | P-RC-7 P7.5 | refactor(agents/orchestrator): retarget smart_truncate imports to openakita.agent.tools | +2 / -2 (1 file, 2 imports) | 0 | ADR-0001, ADR-0003 |
 | `23f8e05b` | P-RC-7 P7.6 | refactor(api+agent): retarget Agent + smart_truncate imports to openakita.agent.* | +8 / -8 (8 files, 8 imports rewritten) | 0 | ADR-0001, ADR-0003 |
-| _this commit_ | P-RC-7 P7.7 | fix(core/_agent_legacy): break circular import (confirmation_state <-> agent.confirmation <-> agent.core) | +4 / -1 (1 import retargeted to canonical home) | +26 collectable (test_api_chat.py no longer ImportErrors) | ADR-0003 |
+| `e8638ea1` | P-RC-7 P7.7 | fix(core/_agent_legacy): break circular import (confirmation_state <-> agent.confirmation <-> agent.core) | +4 / -1 (1 import retargeted to canonical home) | +26 collectable (test_api_chat.py no longer ImportErrors) | ADR-0003 |
+| _this commit_ | P-RC-7 P7.8 | refactor(tests): mechanical mass-migrate 119 shim imports across 59 test files (prep for shim deletion) | +122 / -150 (59 files; public->agent.*, private->core._<x>_legacy) | 0 | ADR-0001, ADR-0003 |
 
 ## P-RC-8 — Endgame (renames, docs, acceptance, release)
 

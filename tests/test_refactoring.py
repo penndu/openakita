@@ -179,13 +179,13 @@ print("\n🔧 Phase 2: Agent 子模块拆分")
 
 @check("ToolExecutor 导入")
 def _():
-    from openakita.core.tool_executor import ToolExecutor
+    from openakita.agent.tools import ToolExecutor
     assert ToolExecutor is not None
 
 
 @check("ContextManager 基本功能")
 def _():
-    from openakita.core.context_manager import ContextManager
+    from openakita.agent.context import ContextManager
 
     cm = ContextManager(brain=None)
     # 测试 token 估算
@@ -232,9 +232,7 @@ def _():
 
 @check("ReasoningEngine 和 Checkpoint")
 def _():
-    from openakita.core.reasoning_engine import (
-        ReasoningEngine, Decision, DecisionType, Checkpoint,
-    )
+    from openakita.agent.reasoning import ReasoningEngine, Decision, DecisionType, Checkpoint
     assert ReasoningEngine is not None
     assert Checkpoint is not None
 
@@ -468,7 +466,7 @@ def _():
 @check("Agent 子模块初始化检查")
 def _():
     """验证 Agent 类有初始化所有子模块的代码"""
-    from openakita.core.agent import Agent
+    from openakita.agent.core import Agent
 
     # 通过检查 __init__ 源码来验证
     import inspect
@@ -485,7 +483,7 @@ def _():
 @check("Agent._chat_with_tools_and_context 委托给 ReasoningEngine")
 def _():
     """验证核心方法已委托"""
-    from openakita.core.agent import Agent
+    from openakita.agent.core import Agent
     import inspect
     source = inspect.getsource(Agent._chat_with_tools_and_context)
     assert "self.reasoning_engine.run" in source, \
@@ -502,12 +500,12 @@ def _():
     from openakita.tools.errors import ToolError, ErrorType, classify_error
 
     # Phase 2
-    from openakita.core.tool_executor import ToolExecutor
-    from openakita.core.context_manager import ContextManager
+    from openakita.agent.tools import ToolExecutor
+    from openakita.agent.context import ContextManager
     from openakita.core.response_handler import ResponseHandler
     from openakita.core.skill_manager import SkillManager
     from openakita.core.prompt_assembler import PromptAssembler
-    from openakita.core.reasoning_engine import ReasoningEngine, Checkpoint, Decision
+    from openakita.agent.reasoning import ReasoningEngine, Checkpoint, Decision
 
     # Phase 3
     from openakita.memory.storage import MemoryStorage

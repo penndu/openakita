@@ -25,7 +25,7 @@ from openakita.runtime.state_graph.guards.tool_failure_ack import (
 
 def _legacy():
     import openakita.agent.brain  # noqa: F401  (warm up)
-    from openakita.core.reasoning_engine import (
+    from openakita.core._reasoning_engine_legacy import (
         _check_tool_failure_acknowledgement,
         _successful_tool_names,
     )

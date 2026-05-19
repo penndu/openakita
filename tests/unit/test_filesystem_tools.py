@@ -528,12 +528,12 @@ class TestToolDefinitions:
         assert "grep" not in HIGH_FREQ_TOOLS
 
     def test_small_ctx_core_tools(self):
-        from openakita.core.agent import SMALL_CTX_CORE_TOOLS
+        from openakita.core._agent_legacy import SMALL_CTX_CORE_TOOLS
         assert "edit_file" in SMALL_CTX_CORE_TOOLS
         assert "grep" in SMALL_CTX_CORE_TOOLS
 
     def test_medium_ctx_extra_tools(self):
-        from openakita.core.agent import MEDIUM_CTX_EXTRA_TOOLS
+        from openakita.core._agent_legacy import MEDIUM_CTX_EXTRA_TOOLS
         assert "glob" in MEDIUM_CTX_EXTRA_TOOLS
         assert "delete_file" in MEDIUM_CTX_EXTRA_TOOLS
 

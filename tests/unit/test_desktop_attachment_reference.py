@@ -1,7 +1,7 @@
 import base64
 
 from openakita.api.routes import upload
-from openakita.core.agent import _format_desktop_attachment_reference
+from openakita.core._agent_legacy import _format_desktop_attachment_reference
 
 
 def test_non_media_data_uri_attachment_is_saved_not_inlined(monkeypatch, tmp_path):

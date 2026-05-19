@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from openakita.core.brain import Brain
+from openakita.agent.brain import Brain
 from openakita.llm.client import _friendly_error_hint
 from openakita.llm.error_types import FailoverReason
 from openakita.llm.types import LOCAL_ENDPOINT_DEFAULT_CONTEXT_WINDOW, EndpointConfig

@@ -262,7 +262,7 @@ class TestRuntimeAutoDetect:
 class TestToolExecutorPropagation:
     async def test_execute_tool_returns_tuple(self) -> None:
         from openakita.core.permission import PermissionDecision
-        from openakita.core.tool_executor import ToolExecutor
+        from openakita.agent.tools import ToolExecutor
 
         registry = MagicMock()
         registry.has_tool.return_value = True
@@ -279,7 +279,7 @@ class TestToolExecutorPropagation:
 
     async def test_executor_catches_tool_config_error(self) -> None:
         from openakita.core.permission import PermissionDecision
-        from openakita.core.tool_executor import ToolExecutor
+        from openakita.agent.tools import ToolExecutor
 
         async def _raise(_name, _input):
             raise ToolConfigError(
@@ -307,7 +307,7 @@ class TestToolExecutorPropagation:
         assert "<" not in text and "{" not in text
 
     async def test_execute_batch_attaches_hint_field(self) -> None:
-        from openakita.core.tool_executor import ToolExecutor
+        from openakita.agent.tools import ToolExecutor
 
         async def _raise(_name, _input):
             raise ToolConfigError(
@@ -346,7 +346,7 @@ class TestToolExecutorPropagation:
 
 class TestReasoningEngineHelper:
     def test_builds_two_events_when_hint_present(self) -> None:
-        from openakita.core.reasoning_engine import _build_tool_end_events
+        from openakita.core._reasoning_engine_legacy import _build_tool_end_events
 
         h = ConfigHint(
             scope="web_search",
@@ -372,7 +372,7 @@ class TestReasoningEngineHelper:
         assert evts[1]["actions"] == [{"id": "a", "label": "L"}]
 
     def test_builds_one_event_when_hint_none(self) -> None:
-        from openakita.core.reasoning_engine import _build_tool_end_events
+        from openakita.core._reasoning_engine_legacy import _build_tool_end_events
 
         evts = _build_tool_end_events(
             tool_name="read_file",
@@ -385,7 +385,7 @@ class TestReasoningEngineHelper:
         assert evts[0]["type"] == "tool_call_end"
 
     def test_extra_kwarg_merges_into_tool_call_end(self) -> None:
-        from openakita.core.reasoning_engine import _build_tool_end_events
+        from openakita.core._reasoning_engine_legacy import _build_tool_end_events
 
         evts = _build_tool_end_events(
             tool_name="x",

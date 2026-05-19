@@ -37,7 +37,7 @@ def test_verb_tool_map_values_are_tool_fragment_tuples() -> None:
 def test_legacy_aliases_resolve_to_same_objects() -> None:
     """The re-import in core/reasoning_engine must point at our dicts."""
     import openakita.agent.brain  # noqa: F401
-    from openakita.core.reasoning_engine import (
+    from openakita.core._reasoning_engine_legacy import (
         _CLAIMED_TOOL_TO_FRAGMENTS,
         _VERB_TO_TOOL_FRAGMENTS,
     )

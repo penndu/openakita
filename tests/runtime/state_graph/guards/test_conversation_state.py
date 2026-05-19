@@ -16,7 +16,7 @@ from openakita.runtime.state_graph.guards.conversation_state import (
 
 def _legacy():
     import openakita.agent.brain  # noqa: F401
-    from openakita.core.reasoning_engine import (
+    from openakita.core._reasoning_engine_legacy import (
         _has_recoverable_tool_issue,
         _looks_like_waiting_for_user_response,
     )

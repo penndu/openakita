@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openakita.core.agent import _consume_risk_authorization
+from openakita.core._agent_legacy import _consume_risk_authorization
 
 
 # ---------------------------------------------------------------------------

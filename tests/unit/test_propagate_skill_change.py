@@ -26,7 +26,7 @@ def _build_fake_agent(*, initialized: bool = True, ctx_system: str | None = "old
 
     绑定真实的 ``Agent.propagate_skill_change`` 方法（unbound 版本）以便验证真实逻辑。
     """
-    from openakita.core.agent import Agent
+    from openakita.agent.core import Agent
 
     fake = SimpleNamespace()
     fake.skill_loader = MagicMock()

@@ -1,11 +1,5 @@
-from openakita.core.agent import (
-    MINIMAL_PROMPT_TOOLS,
-    Agent,
-    _apply_previous_answer_replay_hint,
-    _looks_like_external_tool_request,
-    _looks_like_previous_answer_replay_request,
-    _resolve_force_tool_policy,
-)
+from openakita.agent.core import MINIMAL_PROMPT_TOOLS, Agent
+from openakita.core._agent_legacy import _apply_previous_answer_replay_hint, _looks_like_external_tool_request, _looks_like_previous_answer_replay_request, _resolve_force_tool_policy
 from openakita.core.intent_analyzer import (
     IntentAnalyzer,
     IntentResult,

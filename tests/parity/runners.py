@@ -222,7 +222,7 @@ RunnerFn = Callable[[ParityCase], ParityResult]
 
 
 def _primary_agent_v1(case: ParityCase) -> ParityResult:
-    from openakita.core.agent import get_primary_agent, set_primary_agent
+    from openakita.agent.core import get_primary_agent, set_primary_agent
 
     return _primary_agent_eval(get_primary_agent, set_primary_agent, case)
 
@@ -256,7 +256,7 @@ def _primary_agent_eval(get_fn, set_fn, case: ParityCase) -> ParityResult:
 
 
 def _reasoning_decision_v1(case: ParityCase) -> ParityResult:
-    from openakita.core.reasoning_engine import Decision, DecisionType
+    from openakita.agent.reasoning import Decision, DecisionType
 
     return _reasoning_decision_eval(Decision, DecisionType, case)
 
@@ -295,7 +295,7 @@ def _reasoning_decision_eval(decision_cls, decision_type_cls, case: ParityCase) 
 
 
 def _brain_response_v1(case: ParityCase) -> ParityResult:
-    from openakita.core.brain import Response
+    from openakita.agent.brain import Response
 
     return _brain_response_eval(Response, case)
 
@@ -357,7 +357,7 @@ def _context_estimate_eval(estimate_fn, case: ParityCase) -> ParityResult:
 
 
 def _smart_truncate_v1(case: ParityCase) -> ParityResult:
-    from openakita.core.tool_executor import smart_truncate
+    from openakita.agent.tools import smart_truncate
 
     return _smart_truncate_eval(smart_truncate, case)
 

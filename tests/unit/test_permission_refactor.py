@@ -29,7 +29,7 @@ from openakita.core.policy_v2 import (
     reset_engine_v2,
     set_engine_v2,
 )
-from openakita.core.tool_executor import ToolExecutor
+from openakita.agent.tools import ToolExecutor
 
 
 @pytest.fixture(autouse=True)

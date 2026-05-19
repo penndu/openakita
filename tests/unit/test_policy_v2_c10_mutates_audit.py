@@ -206,7 +206,7 @@ class _StubPluginManager:
 
 class TestToolExecutorBeforeHookAudit:
     def _make_executor(self, hooks, plugin_manager=None):
-        from openakita.core.tool_executor import ToolExecutor
+        from openakita.agent.tools import ToolExecutor
         from openakita.tools.handlers import SystemHandlerRegistry
 
         registry = SystemHandlerRegistry()
@@ -431,7 +431,7 @@ class TestSnapshotFailedSentinel:
             SNAPSHOT_FAILED,
             ParamMutationAuditor,
         )
-        from openakita.core.tool_executor import ToolExecutor
+        from openakita.agent.tools import ToolExecutor
         from openakita.tools.handlers import SystemHandlerRegistry
 
         original_snapshot = ParamMutationAuditor.snapshot

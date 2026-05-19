@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from openakita.core.agent import _check_trust_mode_skip, _check_trusted_path_skip
+from openakita.core._agent_legacy import _check_trust_mode_skip, _check_trusted_path_skip
 from openakita.core.risk_intent import (
     AccessMode,
     OperationKind,

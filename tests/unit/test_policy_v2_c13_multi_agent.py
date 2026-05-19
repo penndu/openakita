@@ -33,7 +33,7 @@ import pytest
 
 from openakita.core.policy_v2 import PolicyContext
 from openakita.core.policy_v2.adapter import build_policy_context
-from openakita.core.reasoning_engine import _compute_confirm_dedup_key
+from openakita.core._reasoning_engine_legacy import _compute_confirm_dedup_key
 from openakita.core.ui_confirm_bus import UIConfirmBus
 
 

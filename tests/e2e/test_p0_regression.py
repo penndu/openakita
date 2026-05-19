@@ -112,7 +112,7 @@ def test_p0_2_phase0_no_hard_exit_reason():
 
 def test_p0_2_phase0_action_done_regex_matches_chinese():
     """阶段 0：兜底正则必须能识别"已查到/已读到/我刚才执行"这类典型动作完成短语。"""
-    from openakita.core.reasoning_engine import _get_action_done_re
+    from openakita.core._reasoning_engine_legacy import _get_action_done_re
 
     rx = _get_action_done_re()
     for sample in [
@@ -152,7 +152,7 @@ def test_p0_2_phase2_intent_result_has_evidence_recommended_field():
 
 def test_p0_2_phase3_source_tag_inconsistency_warns():
     """阶段 3：声称 [来源:工具] 但 tools_executed=0 时必须返回告警字符串。"""
-    from openakita.core.reasoning_engine import _check_source_tag_consistency
+    from openakita.core._reasoning_engine_legacy import _check_source_tag_consistency
 
     text_claims_tool = "好的，我已经检查了文件 [来源:工具]，里面有 3 行代码。"
     warn = _check_source_tag_consistency(text_claims_tool, tools_executed_count=0)
@@ -164,7 +164,7 @@ def test_p0_2_phase3_source_tag_inconsistency_warns():
 
 def test_p0_2_phase3_source_tag_consistent_passes():
     """阶段 3：标签为 [来源:常识] 时，tools_executed=0 不应当告警。"""
-    from openakita.core.reasoning_engine import _check_source_tag_consistency
+    from openakita.core._reasoning_engine_legacy import _check_source_tag_consistency
 
     text = "太阳系第三颗行星是地球。[来源:常识]"
     assert _check_source_tag_consistency(text, tools_executed_count=0) is None

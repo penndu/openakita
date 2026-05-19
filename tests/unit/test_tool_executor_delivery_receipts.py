@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from openakita.core.tool_executor import ToolExecutor
+from openakita.agent.tools import ToolExecutor
 from openakita.tools.handlers import SystemHandlerRegistry
 
 

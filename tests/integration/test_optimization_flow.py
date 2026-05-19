@@ -320,7 +320,7 @@ class TestToolCatalogGroups:
 
     def test_tool_filtering_by_hints(self):
         """Simulate the _effective_tools intent-driven filtering logic with always-keep categories."""
-        from openakita.core.agent import Agent
+        from openakita.agent.core import Agent
 
         catalog = ToolCatalog(_sample_tools())
         all_tools = _sample_tools()
@@ -475,7 +475,7 @@ class TestSystemPromptBuild:
 
 class TestContextManagerOptimizations:
     def test_token_cache_consistency(self):
-        from openakita.core.context_manager import ContextManager
+        from openakita.agent.context import ContextManager
 
         mock_brain = MagicMock()
         cm = ContextManager(mock_brain)
@@ -491,7 +491,7 @@ class TestContextManagerOptimizations:
         assert tokens_1 > 0
 
     def test_token_cache_invalidation_on_content_change(self):
-        from openakita.core.context_manager import ContextManager
+        from openakita.agent.context import ContextManager
 
         mock_brain = MagicMock()
         cm = ContextManager(mock_brain)
@@ -504,7 +504,7 @@ class TestContextManagerOptimizations:
         assert t2 > t1
 
     def test_hard_truncate_preserves_minimum_messages(self):
-        from openakita.core.context_manager import ContextManager
+        from openakita.agent.context import ContextManager
 
         mock_brain = MagicMock()
         cm = ContextManager(mock_brain)
@@ -518,7 +518,7 @@ class TestContextManagerOptimizations:
         assert len(result) >= 2
 
     def test_hard_truncate_no_op_when_under_budget(self):
-        from openakita.core.context_manager import ContextManager
+        from openakita.agent.context import ContextManager
 
         mock_brain = MagicMock()
         cm = ContextManager(mock_brain)
@@ -586,7 +586,7 @@ class TestEndToEndIntentToPompt:
 
     async def test_task_intent_with_tool_filtering(self, tmp_path):
         """TASK intent should filter tools based on tool_hints + always-keep categories."""
-        from openakita.core.agent import Agent
+        from openakita.agent.core import Agent
         from openakita.prompt.builder import build_system_prompt
 
         identity_dir = tmp_path / "identity"
