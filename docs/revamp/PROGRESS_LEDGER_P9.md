@@ -4,7 +4,7 @@
      Parsed by tests/revamp/_ledger.py + tests/parity/test_no_facade.py. -->
 current_phase: P-RC-9
 
-> **Sub-phase status (2026-05-19, G-RC-9.1 sign-off)**: P9.0 closed, P9.1 closed, P-RC-10 charter recorded, Q-A/Q-B/Q-C locked in. **HARD STOP** -- P9.2 ProjectStore NOT started; awaiting operator review of `docs/revamp/gates/G-RC-9.1.md` before resuming.
+> **Sub-phase status (2026-05-19, G-RC-9.1 Nit-3 closed)**: P9.0 closed, P9.1 closed (Nit-3 of 5 cleared; 4 nits ride to G-RC-9), P-RC-10 charter recorded, Q-A/Q-B/Q-C locked in. **HARD STOP** -- P9.2 ProjectStore NOT started; awaiting operator review of `docs/revamp/gates/G-RC-9.1.md` before resuming.
 
 > Source of truth for every commit landed on ``revamp/v3-orgs``
 > during the P-RC-9 ``src/openakita/orgs/`` integral migration.
@@ -76,3 +76,13 @@ current_phase: P-RC-9
 | ``9b8d83a5`` | P-RC-9 G-RC-9.1 | docs(revamp): write G-RC-9.1 mini-gate (P9.1 OrgBlackboard sign-off) | +189 (G-RC-9.1.md NEW 186 + ledger +3) | 0 | ADR-0011; ADR-0012; ADR-0013 |
 | ``fea1a5d5`` | P-RC-9 P9.1e | test(parity/orgs): relax bb_concurrent_writes to corruption-parity (v1 has no lock) | +17 (test_blackboard_parity.py rewrite + ledger) | 0 (8 parity still pass; flake eliminated; 3 stress runs 8/8/8) | ADR-0011; ADR-0013 |
 | _this commit_ | P-RC-9 P9.1f | docs(revamp): append G-RC-9.1 section 11 addendum (P9.1e flake fix audit trail) | +42 (G-RC-9.1.md +41 + ledger +3) | 0 | ADR-0011; ADR-0013 |
+
+## P9.2 prep -- G-RC-9.1 Nit-3 (date placeholder fix)
+
+> One paperwork commit closing G-RC-9.1 auditor Nit-3 BEFORE
+> P9.2 ProjectStore work opens. The other 4 nits ride along to
+> the full G-RC-9 gate at P9.10. Pure docs; no source touched.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-9 P9.2.nit3 | docs(revamp): fix Q_DECISIONS.md date placeholders (G-RC-9.1 Nit-3) | +6 (Q_DECISIONS.md 3-line edit + ledger 3) | 0 | --- (process; G-RC-9.1 audit follow-up) |

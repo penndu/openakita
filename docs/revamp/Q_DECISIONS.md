@@ -35,9 +35,9 @@ The defaults are recorded in the G-RC-8 review notes.
 
 | Q-ref | question | accepted answer | answered on | recorded at |
 |---|---|---|---|---|
-| Q-A (cont) | timeline aggressive (2w) vs normal (4w) vs conservative (6w) | (b) normal 4w (defaulted) | 2026-05-XX (no operator answer) | ``docs/revamp/gates/G-RC-8.md`` |
-| Q-B (cont) | Phase-5 templates land before or after Phase-4 nodes | (a) after nodes (defaulted) | 2026-05-XX (no operator answer) | ``docs/revamp/gates/G-RC-8.md`` |
-| Q-C (cont) | parity-suite scope (every subsystem vs reasoning/agent only) | (b) reasoning/agent only (defaulted) | 2026-05-XX (no operator answer) | ``docs/revamp/gates/G-RC-8.md`` |
+| Q-A (cont) | timeline aggressive (2w) vs normal (4w) vs conservative (6w) | (b) normal 4w (defaulted) | 2026-05-19 (no operator answer; defaulted) | ``docs/revamp/gates/G-RC-8.md`` |
+| Q-B (cont) | Phase-5 templates land before or after Phase-4 nodes | (a) after nodes (defaulted) | 2026-05-19 (no operator answer; defaulted) | ``docs/revamp/gates/G-RC-8.md`` |
+| Q-C (cont) | parity-suite scope (every subsystem vs reasoning/agent only) | (b) reasoning/agent only (defaulted) | 2026-05-19 (no operator answer; defaulted) | ``docs/revamp/gates/G-RC-8.md`` |
 
 ## P-RC-9 plan (``docs/revamp/P-RC-9-PLAN.md``) section 7
 
