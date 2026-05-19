@@ -537,7 +537,7 @@ class TestAgentFactory:
         from openakita.agents.factory import AgentFactory
         factory = AgentFactory()
         profile = _make_profile("ep-agent", "EP Agent", preferred_endpoint="my-endpoint")
-        with patch("openakita.core.agent.Agent") as MockAgent:
+        with patch("openakita.core._agent_legacy.Agent") as MockAgent:
             mock_instance = MagicMock()
             mock_instance.initialize = AsyncMock()
             mock_instance._agent_profile = None
@@ -554,7 +554,7 @@ class TestAgentFactory:
         from openakita.agents.factory import AgentFactory
         factory = AgentFactory()
         profile = _make_profile("plain-agent", "Plain Agent")
-        with patch("openakita.core.agent.Agent") as MockAgent:
+        with patch("openakita.core._agent_legacy.Agent") as MockAgent:
             mock_instance = MagicMock()
             mock_instance.initialize = AsyncMock()
             mock_instance._agent_profile = None

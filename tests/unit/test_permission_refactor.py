@@ -19,7 +19,8 @@ from typing import Any
 
 import pytest
 
-from openakita.core import reasoning_engine as reasoning_engine_module
+from openakita.agent.tools import ToolExecutor
+from openakita.core import _reasoning_engine_legacy as reasoning_engine_module
 from openakita.core.permission import check_permission
 from openakita.core.policy_v2 import (
     ApprovalClass,
@@ -29,7 +30,6 @@ from openakita.core.policy_v2 import (
     reset_engine_v2,
     set_engine_v2,
 )
-from openakita.agent.tools import ToolExecutor
 
 
 @pytest.fixture(autouse=True)

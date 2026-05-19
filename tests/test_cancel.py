@@ -434,7 +434,7 @@ class TestStreamCancelFarewell:
         state.cancel("停止")
 
         with patch(
-            "openakita.core.reasoning_engine.asyncio.wait_for",
+            "openakita.core._reasoning_engine_legacy.asyncio.wait_for",
             side_effect=asyncio.TimeoutError(),
         ):
             events = []
