@@ -199,7 +199,8 @@ commit_guard WARN/REJECT documentation).
 | `11350920` | P-RC-6 P6.2c | test(agent/safety): 14 cases for destructive-intent helpers | +149 (new tests/agent/test_safety_destructive_intent.py) | +14 | ADR-0002, ADR-0003 |
 | `32c29c54` | P-RC-6 P6.3 | refactor(core): rename agent.py to _agent_legacy.py (pre-shim move) | 0 net (pure git mv, R100) | 0 (transient red, restored by P6.4) | ADR-0001 |
 | `3d43af41` | P-RC-6 P6.4 | refactor(core): replace core/agent.py body with thin import shim | +33 (new shim + TRACKED_FILES update) / -2 (LOC_BASELINE rebase notes); baseline core/agent.py 9208 -> 27, _agent_legacy.py added to INFO_ONLY_FILES | 0 (gate restored) | ADR-0001 |
-| _this commit_ | P-RC-6 P6.5 | feat(agent): implement real agent/core.py on lifecycle StateGraph + extracted helpers | +290 / -55 (real Agent subclassing _LegacyAgent; sentinel removed; build_agent_lifecycle_graph + RiskGateDecision + 9 v2-native methods); agent/core 68 -> 336 baseline rebased | 0 net new tests (parity lands in P6.6) | ADR-0001, ADR-0002, ADR-0003 |
+| `04b802af` | P-RC-6 P6.5 | feat(agent): implement real agent/core.py on lifecycle StateGraph + extracted helpers | +339 / -70 (real Agent subclassing _LegacyAgent; sentinel removed; build_agent_lifecycle_graph + RiskGateDecision + 9 v2-native methods); agent/core 68 -> 336 baseline rebased | 0 net new tests (parity lands in P6.6) | ADR-0001, ADR-0002, ADR-0003 |
+| _this commit_ | P-RC-6 P6.6 | test(parity): 19 cases for Agent v1/v2 parity + 12 fixtures | +197 (new test_agent_parity.py) + 12 JSON fixtures | +19 (3 structural + 12 fixture probes + 4 helper invariants) | ADR-0001, ADR-0002, ADR-0003 |
 
 ## P-RC-7 — Caller migration + legacy bulk delete
 
