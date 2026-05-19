@@ -52,6 +52,15 @@
     (v1 ``_idle_probe_loop`` parity) in
     ``_runtime_watchdog.py``; both are DI-driven async
     loops with start / stop / graceful-shutdown semantics.
+  - P9.6d ships :class:`OrgLifecycleManager` -- org
+    state-machine + DI-callback orchestrator for
+    start / stop / pause / resume / restart / delete /
+    health-check verbs (v1 ~18 lifecycle methods absorbed)
+    + five org-state constants
+    (``STATE_CREATED`` / ``ACTIVE`` / ``PAUSED`` /
+    ``STOPPED`` / ``DELETED``) +
+    :class:`IllegalOrgTransition` guard exception in
+    ``_runtime_lifecycle.py``.
 """
 
 from __future__ import annotations
@@ -60,6 +69,15 @@ from ._runtime_event_bus import (
     InMemoryEventBus,
     WebSocketEventBus,
     get_default_event_bus,
+)
+from ._runtime_lifecycle import (
+    STATE_ACTIVE,
+    STATE_CREATED,
+    STATE_DELETED,
+    STATE_PAUSED,
+    STATE_STOPPED,
+    IllegalOrgTransition,
+    OrgLifecycleManager,
 )
 from ._runtime_watchdog import CommandWatchdog, IdleProbeLoop
 from .blackboard import (
@@ -158,6 +176,7 @@ __all__ = [
     "FREQUENCY_MULTIPLIER",
     "ForwardTarget",
     "IdleProbeLoop",
+    "IllegalOrgTransition",
     "JsonFileBlackboardBackend",
     "JsonOrgStore",
     "JsonProjectStore",
@@ -179,6 +198,7 @@ __all__ = [
     "OrgCommandSource",
     "OrgCommandSurface",
     "OrgFactoryProtocol",
+    "OrgLifecycleManager",
     "OrgLifecycleEmitterProtocol",
     "OrgLookupProtocol",
     "OrgManager",
@@ -194,6 +214,11 @@ __all__ = [
     "ProjectTask",
     "ProjectType",
     "RECHECK_DELAY",
+    "STATE_ACTIVE",
+    "STATE_CREATED",
+    "STATE_DELETED",
+    "STATE_PAUSED",
+    "STATE_STOPPED",
     "ScheduleStore",
     "ScheduleType",
     "SchedulerRuntimeProbe",
