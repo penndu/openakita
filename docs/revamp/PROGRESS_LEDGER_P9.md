@@ -4,7 +4,7 @@
      Parsed by tests/revamp/_ledger.py + tests/parity/test_no_facade.py. -->
 current_phase: P-RC-9
 
-> **Sub-phase status (2026-05-19, P9.4a0 land)**: P9.0 closed, P9.1 closed (Nit-3 of 5 cleared; 4 ride to G-RC-9), P9.2 closed (parity 6/6, contract 36/36), P9.3 NodeScheduler closed (parity 4/4, contract 12/12, all 4 G-RC-9.2 nits folded in, no v1 touch). P9.4 OrgCommandService IN FLIGHT -- P9.4a0 ships ``command_models.py`` (data classes + ``new_command_id`` monotonic-counter mint, Nit-1 fold-in). Charter: 700 src + 500 tests + ADR-0013 wall-clock SLA across 7-9 commits.
+> **Sub-phase status (2026-05-19, P9.4a0 land)**: P9.0 closed, P9.1 closed (Nit-3 of 5 cleared; 4 ride to G-RC-9), P9.2 closed (parity 6/6, contract 36/36), P9.3 NodeScheduler closed (parity 4/4, contract 12/12, all 4 G-RC-9.2 nits folded in, no v1 touch). P9.4 OrgCommandService IN FLIGHT -- P9.4a0 + P9.4a shipped (models + 7 Protocols + service skeleton implementing CommandDispatcher). Charter: 700 src + 500 tests + ADR-0013 wall-clock SLA across 7-9 commits.
 
 > Source of truth for every commit landed on ``revamp/v3-orgs``
 > during the P-RC-9 ``src/openakita/orgs/`` integral migration.
@@ -149,5 +149,6 @@ current_phase: P-RC-9
 
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
-| _this commit_ | P-RC-9 P9.4a0 | feat(runtime/orgs): add v2 command models (Request/Response/Source/ForwardTarget + Surface/Scope enums + monotonic-counter id mint) | +PLACEHOLDER (command_models.py NEW 374 + __init__.py +12 + ledger) | 0 | ADR-0011 (subsystem decomposition; shared model layer for OrgCommandService); ADR-0012 (no shim under v1); Nit-1 fold-in from G-RC-9.2 (monotonic-counter id mint) |
+| ``9a085922`` | P-RC-9 P9.4a0 | feat(runtime/orgs): add v2 command models (Request/Response/Source/ForwardTarget + Surface/Scope enums + monotonic-counter id mint) | +367 (command_models.py NEW 324 + __init__.py +24 -0 + ledger +19 -1) | 0 | ADR-0011 (subsystem decomposition; shared model layer for OrgCommandService); ADR-0012 (no shim under v1); Nit-1 fold-in from G-RC-9.2 (monotonic-counter id mint) |
+| _this commit_ | P-RC-9 P9.4a | feat(runtime/orgs): OrgCommandServiceProtocol + 6 injected Protocols (Lookup/Runtime/Session/Gateway/Emitter/Brain) + OrgCommandService skeleton implementing CommandDispatcher (dispatch + accessors) | +PLACEHOLDER (command_service.py NEW + __init__.py + ledger) | 0 | ADR-0011 (Protocol-typed subsystem decomposition; CommandRuntimeProtocol replaces v1 runtime reach-ins); ADR-0012 (no shim under v1); ADR-0013 (BrainProtocol scaffolds the P9.4e wall-clock SLA tests) |
 

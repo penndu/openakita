@@ -54,6 +54,18 @@ from .command_models import (
     new_command_id,
     origin_surface_label_cn,
 )
+from .command_service import (
+    BrainProtocol,
+    ChannelGatewayProtocol,
+    CommandRuntimeProtocol,
+    EventEmitterProtocol,
+    OrgCommandService,
+    OrgCommandServiceProtocol,
+    OrgLookupProtocol,
+    SessionManagerProtocol,
+    get_command_service,
+    set_command_service,
+)
 from .memory_models import MemoryScope, MemoryType, OrgMemoryEntry
 from .node_scheduler import (
     CLEAN_THRESHOLD,
@@ -90,8 +102,12 @@ from .store import JsonOrgStore, OrgNotFound, get_default_store, reset_default_s
 
 __all__ = [
     "BlackboardBackendProtocol",
+    "BrainProtocol",
     "CLEAN_THRESHOLD",
+    "ChannelGatewayProtocol",
     "CommandDispatcher",
+    "CommandRuntimeProtocol",
+    "EventEmitterProtocol",
     "FREQUENCY_MULTIPLIER",
     "ForwardTarget",
     "JsonFileBlackboardBackend",
@@ -110,8 +126,11 @@ __all__ = [
     "OrgCommandError",
     "OrgCommandRequest",
     "OrgCommandResponse",
+    "OrgCommandService",
+    "OrgCommandServiceProtocol",
     "OrgCommandSource",
     "OrgCommandSurface",
+    "OrgLookupProtocol",
     "OrgMemoryEntry",
     "OrgNodeScheduler",
     "OrgNotFound",
@@ -125,6 +144,7 @@ __all__ = [
     "ScheduleStore",
     "ScheduleType",
     "SchedulerRuntimeProbe",
+    "SessionManagerProtocol",
     "SqliteBlackboardBackend",
     "SqliteOrgStore",
     "SqliteProjectStore",
@@ -132,6 +152,7 @@ __all__ = [
     "build_schedule_prompt",
     "compute_next_fire_time",
     "default_scope_for_surface",
+    "get_command_service",
     "get_default_blackboard_backend",
     "get_default_project_store",
     "get_default_store",
@@ -142,4 +163,5 @@ __all__ = [
     "origin_surface_label_cn",
     "reset_default_project_stores",
     "reset_default_store",
+    "set_command_service",
 ]
