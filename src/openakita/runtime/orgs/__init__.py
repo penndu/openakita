@@ -5,11 +5,15 @@
   create / patch / delete + close. Default JSON; opt into SQLite
   via ``ORGS_V2_BACKEND=sqlite``.
 * **Org subsystems** (P-RC-9): ADR-0011''s six Protocol-typed
-  subsystems. P9.1 ships :class:`OrgBlackboard` -- three-tier
-  shared memory -- plus the :class:`BlackboardBackendProtocol`
-  abstraction and default :class:`JsonFileBlackboardBackend`.
-  P9.1b adds :class:`SqliteBlackboardBackend` and the
-  ``get_default_blackboard`` factory.
+  subsystems.
+
+  - P9.1 ships :class:`OrgBlackboard` -- three-tier shared
+    memory -- plus the :class:`BlackboardBackendProtocol`
+    abstraction, default :class:`JsonFileBlackboardBackend`,
+    :class:`SqliteBlackboardBackend` and the
+    ``get_default_blackboard_backend`` factory.
+  - P9.2 ships :class:`ProjectStoreProtocol` + the v2 project
+    + task models. Backends and factory land in P9.2b/c.
 """
 
 from __future__ import annotations
@@ -25,6 +29,15 @@ from .blackboard import (
     get_default_blackboard_backend,
 )
 from .memory_models import MemoryScope, MemoryType, OrgMemoryEntry
+from .project_models import (
+    OrgProject,
+    ProjectStatus,
+    ProjectTask,
+    ProjectType,
+    TaskStatus,
+    new_project_id,
+    new_task_id,
+)
 from .sqlite_store import SqliteOrgStore
 from .store import JsonOrgStore, OrgNotFound, get_default_store, reset_default_store
 
@@ -40,9 +53,16 @@ __all__ = [
     "OrgBlackboard",
     "OrgMemoryEntry",
     "OrgNotFound",
+    "OrgProject",
+    "ProjectStatus",
+    "ProjectTask",
+    "ProjectType",
     "SqliteBlackboardBackend",
     "SqliteOrgStore",
+    "TaskStatus",
     "get_default_blackboard_backend",
     "get_default_store",
+    "new_project_id",
+    "new_task_id",
     "reset_default_store",
 ]

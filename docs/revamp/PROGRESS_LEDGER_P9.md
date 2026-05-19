@@ -86,3 +86,17 @@ current_phase: P-RC-9
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-9 P9.2.nit3 | docs(revamp): fix Q_DECISIONS.md date placeholders (G-RC-9.1 Nit-3) | +6 (Q_DECISIONS.md 3-line edit + ledger 3) | 0 | --- (process; G-RC-9.1 audit follow-up) |
+
+## P9.2 -- ProjectStore (charter subsystem #2)
+
+> Implements ADR-0011 subsystem #2 (charter section 1).
+> Replaces v1 ``openakita.orgs.project_store.ProjectStore``
+> (281 LOC, 15 public + 5 private methods, single JSON-file
+> backend) with a Protocol-typed, backend-pluggable v2 surface
+> under ``runtime/orgs/`` while preserving v1''s public sync
+> API verbatim (parity gate per P-RC-9-PLAN section 0.2 and
+> section 5.2 ProjectStore ignore set).
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-9 P9.2a0 | feat(runtime/orgs): add v2 project models (OrgProject/ProjectTask + enums + ULID-style ids) | +PLACEHOLDER (project_models.py NEW + __init__.py +28/-1 + ledger) | 0 | ADR-0011 (subsystem decomposition; shared model layer for ProjectStore) |
