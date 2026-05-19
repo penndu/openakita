@@ -232,7 +232,8 @@ the residual-risk note.
 | `3c12e579` | P-RC-7 P7.0c | test(parity): diff-test sanity wrapper for V2Agent (N-G6-2) | +130 (new file, 2 xfail tests) | +2 (xfailed) | --- |
 | `d16a47f8` | P-RC-7 P7.1 | refactor(sessions): retarget smart_truncate imports to openakita.agent.tools | +2 / -2 (2 production callers) | 0 | ADR-0001, ADR-0003 |
 | `716f622f` | P-RC-7 P7.2 | refactor(memory): retarget smart_truncate + Brain imports to openakita.agent.* | +10 / -10 (5 files, 10 imports rewritten) | 0 | ADR-0001, ADR-0003 |
-| _this commit_ | P-RC-7 P7.3 | refactor(tools): retarget smart_truncate imports to openakita.agent.tools | +2 / -2 (1 file, 2 imports) | 0 | ADR-0001, ADR-0003 |
+| `8af86b08` | P-RC-7 P7.3 | refactor(tools): retarget smart_truncate imports to openakita.agent.tools | +2 / -2 (1 file, 2 imports) | 0 | ADR-0001, ADR-0003 |
+| _this commit_ | P-RC-7 P7.4 | refactor(agents/factory): retarget Agent + get_primary_agent imports to openakita.agent.core | +2 / -2 (1 file, 2 imports) | 0 | ADR-0001, ADR-0003 |
 
 ## P-RC-8 — Endgame (renames, docs, acceptance, release)
 
