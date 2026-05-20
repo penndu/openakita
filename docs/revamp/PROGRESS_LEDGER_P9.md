@@ -485,3 +485,29 @@ current_phase: P-RC-9
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-9 P9.7gamma-1c | test(api/contracts): mint cluster contracts for projects (36 cases) -- closes gamma-1 (184/184) | +PLACEHOLDER LOC (test_orgs_v2_contracts_projects.py NEW 284; ledger +PLACEHOLDER) | +36 contract (B68-B83); gate slice tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/ 542 -> 578 passed (73.08s); contract suite total 184/184 across 6 cluster files | ADR-0011 (D-3 layer separation; ProjectStore + OrgCommandService cross-subsystem dispatch covered); ADR-0012 (no shim under v1; ProjectStatus / ProjectType / TaskStatus enums imported only from openakita.runtime.orgs); cites P-RC-9-P9.7-CHARTER.md section 6 (~120 contract cases / ~1 600 LOC) |
+
+## P9.7gamma-2 -- REST contract sentinel + OpenAPI snapshot (this turn)
+
+> Activates the **7th P-RC-9 sentinel** -- the first that is
+> NOT a parity sentinel; it asserts an active REST contract
+> invariant rather than v1<->v2 equivalence. Three pieces:
+> (a) ``test_route_counts_match_inventory`` pins the surface
+> at 84 mint+health method-routes / 9 spec method-routes /
+> 9 308 redirect shims; (b)
+> ``test_every_minted_endpoint_has_a_contract_test`` scans the
+> contract suite + beta smoke for ``test_b<N>_*`` markers and
+> asserts every B1-B83 endpoint has at least one test; (c)
+> ``test_openapi_snapshot_matches`` diffs the canonical pruned
+> schema (paths + methods only) against
+> ``tests/parity/orgs/_openapi_snapshot.json`` (76 paths / 93
+> method-routes; charter section 7 alternative chosen --
+> snapshot diff vs schemathesis fuzz, simpler + no new
+> dependency). Operator regenerates the snapshot via
+> ``WRITE_SNAPSHOT=1 pytest``; otherwise byte-for-byte parity
+> is enforced. The sentinel does NOT use ``@pytest.mark.xfail``
+> because in P9.x convention "sentinel" means **active
+> assertion**.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-9 P9.7gamma-2 | test(parity/orgs): activate 7th sentinel -- REST contract (3 cases: route count + coverage + OpenAPI snapshot) | +PLACEHOLDER LOC (test_rest_contract_sentinel.py NEW 162 + _openapi_snapshot.json NEW ~190 lines / 76 paths; ledger +PLACEHOLDER) | +3 sentinel cases (route counts / coverage matrix / OpenAPI snapshot); 6 parity sentinels still 0 active xfail; gate slice 578 -> 581 passed | ADR-0011 (no NEW Protocol; sentinel asserts the FastAPI / OpenAPI surface contract -- not a Protocol contract); ADR-0012 (snapshot includes Group A relocated paths under /api/v2/orgs-spec; the 9 308 shims under /api/v2/orgs are intentionally excluded from openapi() -- their contract is "redirect, no body"); cites P-RC-9-P9.7-CHARTER.md section 7 ("REST contract sentinel"; charter chose ``app.openapi()`` route iteration; gamma-1 brief upgraded to snapshot diff per simpler+no-new-deps lesson) |
