@@ -5,7 +5,7 @@
 <!-- machine-readable phase marker; do NOT remove.
      Parsed by tests/revamp/_ledger.py + tests/parity/test_no_facade.py. -->
 current_phase: P-RC-9
-> **Sub-phase status (2026-05-20, P9.7 CLOSED -- P-RC-9 phase v2 REST mint complete; P9.8 caller migration is next (apps/setup-center/src/api/{orgs,v2Stream}.ts + IM gateway adapter swap))**: P9.0-P9.6 closed (6/6 ADR-0011 subsystems v2 with 60/60 parity green and 6/6 parity sentinels active). **P9.7 v2 REST endpoint mint CLOSED** -- 83 / 83 mint endpoints under /api/v2/orgs/* (B1-B83 across 6 cluster siblings: orgs B1-B17 + nodes B18-B33 + dispatch B34-B41 + state B42-B53 + ops B54-B67 + projects B68-B83) + 1 health stub + Group A (9 endpoints) relocated to /api/v2/orgs-spec/* with 9 308 shim redirects (D-1 R3 LOCKED). 184 / 184 contract cases across 6 cluster files + 3 / 3 REST contract sentinel cases (route counts + B-marker coverage + OpenAPI snapshot). **7 P-RC-9 sentinels ACTIVE** (6 parity P9.1c-P9.6gamma + 1 REST contract P9.7gamma-2). G-RC-9.7 mini-gate signed off; NIT-A (schemas/__init__.py shadow regression introduced by P9.7a-2b) folded in by sibling commit ``b9b74df7`` (P9.7gamma-3a). **P-RC-9 wiring + deletion remain**: P9.8 frontend + channels caller migration, then P9.9 physical deletion of src/openakita/orgs/ + 410 shim under api/routes/orgs.py.
+> **Sub-phase status (2026-05-20, P9.8 CLOSED -- P-RC-9 caller migration complete; P9.9 v1 physical deletion is next (delete ``src/openakita/orgs/``, ``src/openakita/api/routes/orgs.py``, ``tests/orgs/*``, and possibly retire the 308 shim at v2.1.0 per Q-B ACCEPTED (b)))**: P9.0-P9.6 closed (6/6 ADR-0011 subsystems v2 with 60/60 parity green and 6/6 parity sentinels active). **P9.7 v2 REST endpoint mint CLOSED** -- 83 / 83 mint endpoints under /api/v2/orgs/* (B1-B83 across 6 cluster siblings) + 1 health stub + Group A (9 endpoints) relocated to /api/v2/orgs-spec/* with 9 308 shim redirects (D-1 R3 LOCKED); 184 / 184 contract cases + 3 / 3 REST contract sentinel cases. **P9.8 caller migration CLOSED** -- 55 frontend hits swapped (51 HTTP literals + 4 narrative comments) across 10 source files in apps/setup-center/src/ (gamma-1 Group A retarget to ``-spec`` + gamma-2 OrgEditorView + gamma-3 OrgProjectBoard + OrgChatPanel + gamma-4 long-tail 7 view/component files); 7 legitimate residuals preserved (4 TS module imports that are relative-path specifiers, not URLs; 3 Group C HTTP paths in OrgEditorView.tsx for deprecated debug-only endpoints scheduled for P9.9 deletion); G-RC-9.8 mini-gate signed off. **8 P-RC-9 sentinels ACTIVE** (6 parity P9.1c-P9.6gamma + 1 REST contract P9.7gamma-2 + 1 frontend stale-path P9.8delta-1). Strict-additive backend boundary held absolutely across all 8 P9.8 commits (src/openakita/ BYTE-LEVEL UNTOUCHED). **Only P9.9 physical deletion remains** for full P-RC-9 closure (delete v1 subsystem + v1 router + tests/orgs/* + 90 + 228 ``from openakita.orgs.X`` import rewrite sites + ADR-0015 for 308 shim retirement governance).
 
 > Source of truth for every commit landed on ``revamp/v3-orgs``
 > during the P-RC-9 ``src/openakita/orgs/`` integral migration.
@@ -877,3 +877,64 @@ sentinel held off-limits), so it needs its own planning round.
 >
 > P9.8delta-2 (G-RC-9.8 mini-gate + P9.8 ledger close section)
 > follows next in this same delta phase per charter sec 3.
+
+| _this commit_ | P-RC-9 P9.8delta-2 | docs(revamp): P9.8delta-2 G-RC-9.8 mini-gate + P9.8 ledger close | +PLACEHOLDER LOC (docs/revamp/gates/G-RC-9.8.md NEW ~410 LOC + ledger close summary section + ledger this row + body ~30 LOC) | 0 (gate doc + ledger; no test churn this commit; main gate measured 6 858 passed / 12 failed / 116 skipped / 5 xfailed in 1 063.36 s for §3.1; narrow slice 585 passed in 77.26 s; parity/orgs 66 passed in 6.49 s) | ADR-0011 (no new Protocol; gate doc is process artefact, not abstraction); ADR-0012 (gate asserts v1 subsystem + v1 router byte-level untouched across all 8 P9.8 commits per §10 piece 3); ADR-0014 (LOC budget: impl-only ~983, right at charter sec 6 ~700-950 upper bound; +3 % drift inside ADR-0014 small-wiring tolerance); **ADR-0015 NOT filed this round** (charter sec 13 deferred; P9.9 charter reassesses for 308 shim retirement governance) |
+
+> P9.8delta-2 gate commit landed; **P9.8 caller migration phase
+> CLOSED**. Wrote ``docs/revamp/gates/G-RC-9.8.md`` (~410 LOC
+> mirroring G-RC-9.7's 13-section structure) and appended this
+> ledger close summary. Gate doc covers: §1 commit table (8
+> commits since ``4b8a9ad8``); §2 implementation summary (55 hits
+> + 7 residuals); §3 test math (MEASURED full main gate 6 858
+> passed vs 6 853 baseline = +5 delta = +3 new sentinel + 2
+> self-recoveries; 12 failed all carry-over from G-RC-9.7's "12
+> match G-RC-9.6 verbatim" list, zero P9.8-introduced); §4
+> frontend swap evidence (4 cluster commits, 10 source files);
+> §5 sentinel status (7 + 1 = 8 / 8 ACTIVE); §6 reference matrix
+> (NIT-E-1 all 12 inputs rejected, 0 net adoption); §7
+> architecture decisions (ADR-0011 / 0012 / 0013 / 0014 invariants
+> held; ADR-0015 NOT filed); §8 NIT fold-in (0 new NITs); §9
+> Protocol audit (0 new Protocols; total 13 unchanged); §10
+> sentinel three-piece (7 residuals allowlisted + 8th sentinel
+> ACTIVE + ``git diff src/openakita/`` empty bytes); §11 NIT
+> fold-in roster (6 closed + 6 ride to G-RC-9 final); §12 HARD
+> STOP (P9.9 NOT started); §13 P-RC-9 completion panorama (4
+> layers complete + 8 / 8 sentinels active; only P9.9 deletion
+> remains).
+>
+> Cumulative P9.8 stats: **8 commits** (charter ``95b9f9b6`` +
+> alpha-1 ``35f7ad9c`` + gamma-1 ``754ff465`` + gamma-2
+> ``5708cce5`` + gamma-3 ``591e8f94`` + gamma-4 ``fbed86ac`` +
+> delta-1 ``a31c679f`` + delta-2 _this commit_); **55 frontend
+> hits swapped** (51 HTTP literal swaps + 4 narrative comment
+> updates across 10 source files); **7 legitimate residuals
+> preserved** with rationale (4 TS module imports
+> ``../api/orgs`` / ``../../api/orgs`` -- relative-path
+> specifiers, not HTTP URLs; 3 Group C HTTP paths in
+> OrgEditorView.tsx -- ``/reset`` ``/heartbeat/trigger``
+> ``/standup/trigger`` deprecated debug-only endpoints scheduled
+> for P9.9 deletion alongside the v1 router); **strict-additive
+> backend boundary held absolutely** (``git diff
+> 4b8a9ad8..HEAD -- src/openakita/`` returns empty bytes across
+> all 8 commits); **8 / 8 P-RC-9 sentinels ACTIVE** (6 parity
+> P9.1c-P9.6gamma + 1 REST contract P9.7gamma-2 + 1 frontend
+> stale-path P9.8delta-1). Impl-only LOC delta ~983 (gamma 301
+> moved + delta-1 256 + delta-2 ~460 = 1 017 incl ledger close;
+> right at charter sec 6 ~700-950 upper bound; +3 % drift inside
+> ADR-0014 small-wiring tolerance). Planning paperwork (charter
+> 499 + alpha-1 342) booked separately at their own commits.
+>
+> **P-RC-9 phase status**: 6 / 6 ADR-0011 subsystem rewrites
+> complete + parity-validated; 83 / 83 v2 REST mint endpoints +
+> 9 Group A relocated + 9 308 shims; 55 / 55 frontend caller
+> hits swapped; 7 / 7 residuals allowlisted; 8 / 8 sentinels
+> ACTIVE. **Only P9.9 physical deletion remains** -- ``git rm -r
+> src/openakita/orgs/`` (~18 000 LOC, 6 subsystems) + v1 router
+> -> 410-Gone or hard ``git rm`` (~2 533 LOC, 89 endpoints) +
+> optional 308 shim retirement at v2.1.0 per Q-B + ``tests/orgs/``
+> deletion (~13 000 LOC) + ~90 src + ~228 test
+> ``from openakita.orgs.X`` import rewrite sites. P9.9 charter
+> needs ADR-0015 (308 shim retirement governance) per Q-B
+> ACCEPTED (b) single-window discipline. G-RC-9 final gate signs
+> off after P9.9 PASS. **HARD STOP per brief**: P9.9 NOT started
+> this turn; opens in the next agent run on operator signal.
