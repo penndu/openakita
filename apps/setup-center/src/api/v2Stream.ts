@@ -1,5 +1,5 @@
 ﻿/**
- * V2 SSE stream client for ``GET /api/v2/orgs/{id}/stream``.
+ * V2 SSE stream client for ``GET /api/v2/orgs-spec/{id}/stream``.
  *
  * Wraps the browser ``EventSource`` API with a typed handler
  * registry so callers do not have to remember channel-name
@@ -109,7 +109,7 @@ export function createV2Stream(
     throw new Error("createV2Stream: orgId must be a non-empty string");
   }
   const apiBase = (opts.apiBase ?? "").replace(/\/+$/, "");
-  const url = `${apiBase}/api/v2/orgs/${encodeURIComponent(orgId)}/stream`;
+  const url = `${apiBase}/api/v2/orgs-spec/${encodeURIComponent(orgId)}/stream`;
   const factory = opts.eventSourceFactory ?? defaultFactory;
   const source = factory(url);
 

@@ -8,14 +8,14 @@
  * component's state plumbing.
  *
  * Endpoints covered:
- *   GET    /api/v2/orgs/templates                      listTemplates
- *   GET    /api/v2/orgs/templates/{id}                  getTemplate
- *   POST   /api/v2/orgs/templates/{id}/instantiate      instantiateTemplate
- *   GET    /api/v2/orgs                                 listOrgs
- *   POST   /api/v2/orgs                                 createOrg
- *   GET    /api/v2/orgs/{id}                            getOrg
- *   PATCH  /api/v2/orgs/{id}                            patchOrg
- *   DELETE /api/v2/orgs/{id}                            deleteOrg
+ *   GET    /api/v2/orgs-spec/templates                      listTemplates
+ *   GET    /api/v2/orgs-spec/templates/{id}                  getTemplate
+ *   POST   /api/v2/orgs-spec/templates/{id}/instantiate      instantiateTemplate
+ *   GET    /api/v2/orgs-spec                                 listOrgs
+ *   POST   /api/v2/orgs-spec                                 createOrg
+ *   GET    /api/v2/orgs-spec/{id}                            getOrg
+ *   PATCH  /api/v2/orgs-spec/{id}                            patchOrg
+ *   DELETE /api/v2/orgs-spec/{id}                            deleteOrg
  *
  * The frontend uses these wrappers from a Template-picker drawer (the
  * Phase-6 entry point for v2 org creation) and, in Phase 7, from the
@@ -101,11 +101,11 @@ export interface PatchOrgBody {
 // ---------------------------------------------------------------------------
 
 export function listTemplates(apiBase: string): Promise<ListTemplatesResponse> {
-  return apiGet<ListTemplatesResponse>(apiUrl(apiBase, "api", "v2", "orgs", "templates"));
+  return apiGet<ListTemplatesResponse>(apiUrl(apiBase, "api", "v2", "orgs-spec", "templates"));
 }
 
 export function getTemplate(apiBase: string, templateId: string): Promise<TemplateWire> {
-  return apiGet<TemplateWire>(apiUrl(apiBase, "api", "v2", "orgs", "templates", templateId));
+  return apiGet<TemplateWire>(apiUrl(apiBase, "api", "v2", "orgs-spec", "templates", templateId));
 }
 
 export function instantiateTemplate(
@@ -114,7 +114,7 @@ export function instantiateTemplate(
   body: InstantiateBody,
 ): Promise<OrgWire> {
   return apiPost<OrgWire>(
-    apiUrl(apiBase, "api", "v2", "orgs", "templates", templateId, "instantiate"),
+    apiUrl(apiBase, "api", "v2", "orgs-spec", "templates", templateId, "instantiate"),
     body,
   );
 }
@@ -124,15 +124,15 @@ export function instantiateTemplate(
 // ---------------------------------------------------------------------------
 
 export function listOrgs(apiBase: string): Promise<ListOrgsResponse> {
-  return apiGet<ListOrgsResponse>(apiUrl(apiBase, "api", "v2", "orgs"));
+  return apiGet<ListOrgsResponse>(apiUrl(apiBase, "api", "v2", "orgs-spec"));
 }
 
 export function createOrg(apiBase: string, org: OrgWire): Promise<OrgWire> {
-  return apiPost<OrgWire>(apiUrl(apiBase, "api", "v2", "orgs"), { org });
+  return apiPost<OrgWire>(apiUrl(apiBase, "api", "v2", "orgs-spec"), { org });
 }
 
 export function getOrg(apiBase: string, orgId: string): Promise<OrgWire> {
-  return apiGet<OrgWire>(apiUrl(apiBase, "api", "v2", "orgs", orgId));
+  return apiGet<OrgWire>(apiUrl(apiBase, "api", "v2", "orgs-spec", orgId));
 }
 
 export async function patchOrg(
@@ -140,7 +140,7 @@ export async function patchOrg(
   orgId: string,
   body: PatchOrgBody,
 ): Promise<OrgWire> {
-  const res = await safeFetch(apiUrl(apiBase, "api", "v2", "orgs", orgId), {
+  const res = await safeFetch(apiUrl(apiBase, "api", "v2", "orgs-spec", orgId), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -149,7 +149,7 @@ export async function patchOrg(
 }
 
 export async function deleteOrg(apiBase: string, orgId: string): Promise<void> {
-  await safeFetch(apiUrl(apiBase, "api", "v2", "orgs", orgId), { method: "DELETE" });
+  await safeFetch(apiUrl(apiBase, "api", "v2", "orgs-spec", orgId), { method: "DELETE" });
 }
 
 // Re-export apiPostRaw so callers can opt into low-level error inspection

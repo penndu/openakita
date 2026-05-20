@@ -65,7 +65,7 @@ describe("createV2Stream", () => {
   it("constructs the canonical URL with the org id encoded", () => {
     const stream = createV2Stream("org abc/?", { eventSourceFactory: fakeFactory });
     expect(factorySource).not.toBeNull();
-    expect(factorySource!.url).toBe("/api/v2/orgs/org%20abc%2F%3F/stream");
+    expect(factorySource!.url).toBe("/api/v2/orgs-spec/org%20abc%2F%3F/stream");
     stream.close();
   });
 

@@ -652,6 +652,7 @@ sentinel held off-limits), so it needs its own planning round.
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-9 P9.8.charter | docs(revamp): P9.8 caller migration charter (planning round) | +PLACEHOLDER LOC (P-RC-9-P9.8-CHARTER.md NEW ~483 + ledger this section ~15) | 0 (planning only; no source/test edits) | ADR-0011 (no new Protocol; section 7 8th sentinel is a grep, not an abstraction); ADR-0012 (v1 deletion deferred to P9.9; 308 shim retirement per charter section 8); cites ADR-0014 LOC discipline (~750 LOC budget vs P9.7's 2 845, well inside tolerance) |
 | _this commit_ | P-RC-9 P9.8alpha-1 | docs(revamp): P9.8alpha-1 caller inventory (60 v1 + 17 v2 + 5 channels) | +PLACEHOLDER LOC (P-RC-9-P9.8-CALLER-INVENTORY.md NEW ~327 + ledger this row) | 0 (docs only; no source/test edits) | ADR-0011 (no new Protocol; inventory is a docs artefact, not an abstraction); ADR-0012 (no shim semantics changed; 308 retirement still scheduled for v2.1.0 per charter sec 8) |
+| _this commit_ | P-RC-9 P9.8gamma-1 | feat(frontend): P9.8gamma-1 swap Group A API calls from /api/v2/orgs to /api/v2/orgs-spec | +PLACEHOLDER LOC (api/orgs.ts 16 swap lines + api/v2Stream.ts 2 swap lines + api/__tests__/v2Stream.test.ts 1 swap line = 19 frontend swap LOC; ledger this row + body ~22 LOC) | 0 (no new tests; existing v2Stream.test.ts mock URL string updated in place) | ADR-0011 (no new Protocol; pure URL string swap on frontend; no abstraction introduced); ADR-0012 (308 shim ``_orgs_v2_legacy_redirects.py`` continues to serve any legacy callers through v2.0.x per Q-B single-window contract); charter D-1 R3 LOCKED (Group A canonical literal lives at ``/api/v2/orgs-spec``; v2.1.0 shim retirement is a no-op once frontend literals are direct) |
 
 > P9.8alpha-1 caller inventory landed. Measured frontend
 > ``apps/setup-center/src/``: **62** ``/api/orgs/`` hits
@@ -677,3 +678,34 @@ sentinel held off-limits), so it needs its own planning round.
 > Strict additive verified: ``git diff 95b9f9b6..HEAD --
 > src/openakita/ tests/ apps/`` returns empty bytes.
 > P9.8gamma-1 NOT started -- HARD STOP per charter sec 13.
+
+> P9.8gamma-1 first ``apps/`` source touch landed. Swapped Group A
+> frontend API call sites in 3 files: ``api/orgs.ts`` 16 swaps
+> (8 JSDoc literals at lines 11-18 + 8 ``apiUrl(...)`` segment lists
+> for listTemplates / getTemplate / instantiateTemplate / listOrgs /
+> createOrg / getOrg / patchOrg / deleteOrg); ``api/v2Stream.ts`` 2
+> swaps (1 JSDoc + 1 SSE URL builder); ``api/__tests__/v2Stream.test.ts``
+> 1 swap (mock URL expectation). Total 19 line-pair swaps with
+> 0 net LOC delta (19 deletions + 19 insertions); well under the
+> 100 LOC cap. Canonical Group A literal now lives at
+> ``/api/v2/orgs-spec/*`` per charter D-1 R3 LOCKED; the 308 shim
+> (``api/routes/_orgs_v2_legacy_redirects.py``) continues to serve
+> any straggling legacy callers through v2.0.x per ADR-0012 Q-B
+> single-window contract (shim retires in v2.1.0 as a no-op now
+> that canonical literals are direct). Verification: TypeScript
+> ``tsc -b`` clean (exit 0); frontend ``vitest run`` 14 passed
+> across 5 suites including the touched ``v2Stream.test.ts``;
+> backend ``tests/integration/test_v2_im_canary_e2e.py`` 1 passed
+> (the canary intentionally hits the legacy
+> ``/api/v2/orgs/templates/{id}/instantiate`` path so this asserts
+> the 308 shim is still doing its job); narrowed slice
+> ``tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/`` 581
+> passed (= baseline at HEAD ``35f7ad9c``; no regression). 7 / 7
+> P-RC-9 sentinels remain ACTIVE (6 parity slices + 1 REST contract
+> sentinel; the REST contract sentinel asserts the OpenAPI route
+> inventory is unchanged -- backend untouched so it stays green).
+> Strict additive verified: ``git diff 35f7ad9c..HEAD --
+> src/openakita/`` returns empty bytes. P9.8gamma-2
+> (``views/OrgEditorView.tsx``, 20 hits, ~120 LOC) NOT started --
+> HARD STOP per charter sec 3 + sec 13 (different blast radius:
+> views/ cluster vs api/ cluster).
