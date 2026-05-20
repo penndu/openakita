@@ -73,14 +73,27 @@
     the manager that the P9.6 runtime.py main class
     composes to satisfy the four ``CommandRuntimeProtocol``
     stub methods left by P9.6a.
+  - P9.6f1 ships :class:`AgentCache` +
+    :class:`AgentBuilderProtocol` + :class:`AgentSpec`
+    dataclass + :class:`ProfileResolver` in
+    ``_runtime_agent_pipeline.py`` (~275 LOC). This is the
+    agent-build / agent-cache scaffolding the executor
+    (P9.6f2) consumes. v1 ``_get_or_create_agent`` /
+    ``_node_agents`` dict / ``evict_node_agent`` /
+    ``_build_profile_for_node`` / ``_get_shared_profile`` /
+    ``_resolve_org_workspace`` / ``_prepare_unattended_session``
+    (~150 v1 LOC) collapse here.
 """
 
 from __future__ import annotations
 
-from ._runtime_event_bus import (
-    InMemoryEventBus,
-    WebSocketEventBus,
-    get_default_event_bus,
+from ._runtime_agent_pipeline import (
+    ORG_STATE_ACTIVE,
+    ORG_STATE_PAUSED,
+    AgentBuilderProtocol,
+    AgentCache,
+    AgentSpec,
+    ProfileResolver,
 )
 from ._runtime_dispatch import (
     TRACKER_CANCELLED,
@@ -88,6 +101,11 @@ from ._runtime_dispatch import (
     TRACKER_FINALIZED,
     TRACKER_RUNNING,
     CommandDispatchManager,
+)
+from ._runtime_event_bus import (
+    InMemoryEventBus,
+    WebSocketEventBus,
+    get_default_event_bus,
 )
 from ._runtime_lifecycle import (
     STATE_ACTIVE,
@@ -184,6 +202,9 @@ from .sqlite_store import SqliteOrgStore
 from .store import JsonOrgStore, OrgNotFound, get_default_store, reset_default_store
 
 __all__ = [
+    "AgentBuilderProtocol",
+    "AgentCache",
+    "AgentSpec",
     "BlackboardBackendProtocol",
     "BrainProtocol",
     "CLEAN_THRESHOLD",
@@ -230,6 +251,7 @@ __all__ = [
     "OrgPersistenceProtocol",
     "OrgProject",
     "ProjectStatus",
+    "ProfileResolver",
     "ProjectStoreProtocol",
     "ProjectTask",
     "ProjectType",
@@ -272,6 +294,8 @@ __all__ = [
     "EventBusProtocol",
     "InMemoryEventBus",
     "NodeLifecycleProtocol",
+    "ORG_STATE_ACTIVE",
+    "ORG_STATE_PAUSED",
     "OrgRuntime",
     "RuntimeStateProtocol",
     "WebSocketEventBus",
