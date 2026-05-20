@@ -1897,3 +1897,46 @@ sentinel held off-limits), so it needs its own planning round.
 > **HARD STOP per brief**: δ-4 (atomic ``git rm -r tests/orgs/``
 > -- 48 files / ~12 238 LOC) NOT started this turn; next step is the
 > δ-4 pre-sanity re-run with #3 now green.
+
+## P9.9δ-4 -- atomic delete tests/orgs/ (48 files / 12 238 LOC, R2 RETIRED)
+
+| _this commit_ | P-RC-9 P9.9δ-4 | chore(tests): P9.9δ-4 atomic delete tests/orgs/ (48 files / 12238 LOC, R2 RETIRED) [P-RC-9 P9.9δ-4] | 48 v1 test files deleted (-12 238 LOC) + ledger this section (+28); deletion-only commit | post-deletion ``git ls-files tests/orgs/`` = 0; ``git grep -ln "openakita\.orgs\." -- tests/`` = **0 files**; narrow slice 585 / 585 PASS; v2 IM canary 1 / 1 PASS x3 within +/- 5% of baseline; ``pytest --collect-only`` no v1 ImportError | ADR-0012 (v1 deletion at P9.9 per Q-B ACCEPTED (b)); ADR-0014 (R2 RETIRED per ``a3a5fde6`` audit) |
+
+> **Deletion-only commit; +28 ledger / -12 238 v1 test code.** P9.9δ-4
+> closes the δ phase with atomic ``git rm -r tests/orgs/`` per P-RC-9
+> P9.9 CHARTER §5.4 and the R2 RETIRED verdict in
+> ``P-RC-9-P9.9-COVERAGE-AUDIT.md`` (``a3a5fde6``). All 48 v1 test files
+> (1 ``__init__.py`` + 1 ``conftest.py`` + 46 ``test_*.py``; 12 238 LOC by
+> LF-byte sum) removed in one commit. Cluster verdicts R2 RETIRED for C1
+> (parity 6 / 60 cases + 5 golden) + C2 (absorbed via P9.1..P9.7 runtime
+> shards) + C3 (v2-only smoke + canary at tests/api/ + tests/integration)
+> + C4 (delegation chain via tests/unit/ + gateway integration).
+> OPTIONAL gaps O1 (cross-process Blackboard concurrency) + O2 (multi-org
+> Manager scaling) **deferred to P-RC-10+** per audit OPTIONAL section.
+>
+> Pre-deletion sanity 5 / 5 PASS at HEAD ``d057724d``: (1) status clean,
+> branch ``revamp/v3-orgs``; (2) ``git diff a3a5fde6..HEAD --
+> src/openakita/orgs/`` = 0 bytes; (3) grep 47 hits all inside
+> ``tests/orgs/`` (0 outside leakage after δ-4-pre README sweep); (4)
+> narrow slice 585 / 585 in 68.57s; (5) canary 1 / 1 x3 at 1.59s /
+> 1.61s / 1.62s (pytest core).
+>
+> Post-deletion: ``git ls-files tests/orgs/`` = 0; ``git grep -ln
+> "openakita\.orgs\." -- tests/`` = **0 files**; narrow slice 585 / 585
+> PASS unchanged; canary 1 / 1 x3 within +/- 5%; ``pytest --collect-only``
+> drops ~777 v1 test functions with no ``ImportError`` /
+> ``ModuleNotFoundError`` collection error; ``git diff 338dd78e..HEAD
+> -- src/openakita/orgs/`` still 0 bytes (strict-additive on v1 src
+> preserved through entire δ phase); ``ls tests/orgs/`` returns
+> ``No such file or directory``.
+>
+> 8 / 8 P-RC-9 sentinels still ACTIVE (case counts 8 / 6 / 4 / 10 / 12 /
+> 20 / 1 / 1); 9th sentinel deferred to η phase. δ phase = 6 commits
+> (5 originally chartered + 1 docs nit): δ-1 ``a3a5fde6`` audit / δ-2a
+> ``e1043df9`` parity / δ-2b ``af1e115e`` unit / δ-3 ``338dd78e`` e2e
+> +integ+api / δ-4-pre ``d057724d`` README docs / δ-4 (_this_).
+>
+> **HARD STOP**: ε phase (physical deletion of ``src/openakita/orgs/``
+> ~26 files / ~18 000 LOC) NOT started; MUST be chartered / audited
+> before execution.
+
