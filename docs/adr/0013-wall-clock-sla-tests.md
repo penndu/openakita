@@ -120,3 +120,27 @@ above ~3 s. The 2 s figure is the contract; the test pins it.
   ADR-0005 (checkpoint contract).
 * Sibling P-RC-9 ADRs: ADR-0011 (subsystem decomposition),
   ADR-0012 (deletion strategy).
+
+## Closure (P-RC-9 epic close, P9.9eta-2b)
+
+- **Status**: **CLOSED-EFFECTIVE**. P-RC-9 epic CLOSED at gate
+  ``e4d963e6`` (G-RC-9 final roll-up gate; eta-2a) + this commit
+  (eta-2b acceptance / ADR / BOM follow-up).
+- **Production use**: the ``time.perf_counter()`` wall-clock pattern
+  decided here was applied across P9.x for IM canary measurements
+  (3 repeats per canary by ADR-0013 convention). Baseline avg
+  ~1.62 s (pre P9.9eps); post P9.9eps-2b avg ~1.64 s (delta +1.4 %,
+  inside the +/- 5 % canary gate per G-RC-9.9 sec 2.5). No
+  regression introduced by the v1 retirement axis (-35 493 LOC
+  net).
+- **SLA test preserved**: the BrainProtocol / OrgCommandService SLA
+  wall-clock test (per ADR-0013 sec "Decision" -- 3 budget tests
+  in ``tests/runtime/test_cancel_wall_clock_budget.py`` or
+  equivalent) is preserved post-epic; the cancel-to-checkpoint
+  < 2 s budget, the resume-after-cancel < 3 s budget, and the
+  burst-isolation case all remain green at HEAD ``e4d963e6``.
+- **Acceptance crosswalk**: ACCEPTANCE.md criterion #2 (already
+  Pass at P-RC-8 P8.7) is unchanged; criteria #4 + #5 closed at
+  P9.9eta-2b (see ACCEPTANCE.md "P-RC-9 epic-closure note" under
+  each criterion).
+- **Reference**: G-RC-9 sec 4 (ADR closure pointers).

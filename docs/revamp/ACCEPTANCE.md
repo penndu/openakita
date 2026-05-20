@@ -211,6 +211,12 @@ contract is structurally enforced.
   `src/openakita/runtime/nodes/manifest.py`.
 * ADR-0009 (plugin workbench manifest).
 
+**P-RC-9 epic-closure note (P9.9eta-2b).** Status: **CLOSED**.
+Additional evidence backing this criterion at P-RC-9 epic close:
+satisfied by G-RC-9 sec 2; v1 surface retired in P9.9eps-2a
+(``857a5a35``) + P9.9eps-2b (``90a7d77f``); v2 REST mint completed
+in P9.7beta (G-RC-9.7 mini-gate ``8b0a1bbf``).
+
 ---
 
 ## Criterion 5 — All built-in templates load on first launch; one-click instantiation
@@ -242,14 +248,15 @@ the ``TemplatePickerDrawer`` UI flow.
   The drawer reads the v2 endpoints and ``instantiate`` is wired
   to the same backend route.
 
-**Status: Partial — "load on first launch" is **Pass**, "one-click
-create from UI" is **Partial / Deferred-to-P-RC-9** because the
-existing v1 ``/api/orgs/templates`` UI is still the default
-front-door in the setup-center until the v1 ``orgs/`` package is
-deleted (R-RC-7-A residual; see ``P-RC-9-CHARTER.md``). Operators
-running v2 in production can create orgs from any v2 template
-today via the REST surface; the UI one-click default uses the v1
-catalogue until P-RC-9 lands.
+**Status: CLOSED** (upgraded from Partial at P9.9eta-2b).
+The deferred UI default-front-door caveat is moot: the v1 ``orgs/``
+package + the v1 ``/api/orgs/`` router were physically retired in
+P9.9eps-2a (``857a5a35``) and P9.9eps-2b (``90a7d77f``), so the v2
+REST surface is now the only orgs front-door by construction.
+Parity with the retired v1 surface is locked by the 9 / 9 sentinel
+matrix (G-RC-9.9 sec 2.3; 68 collected cases) -- sentinel #9
+(``test_v1_src_retired_sentinel.py``) was added in P9.9eta-1a
+(``21e26467``) and pins the zero-import + zero-residue invariant.
 
 **Evidence.**
 
@@ -263,6 +270,11 @@ catalogue until P-RC-9 lands.
 * Deferred caveat: `docs/revamp/P-RC-9-CHARTER.md`
   (orgs/ integral migration).
 
+**P-RC-9 epic-closure note (P9.9eta-2b).** Status: **CLOSED**.
+Evidence: satisfied by G-RC-9.9 sec 2.3 sentinel matrix
+(9 / 9 ACTIVE; 68 cases) + sentinel #9 added in P9.9eta-1a
+(``21e26467``); v2 REST surface live, v1 ``/api/orgs/`` retired.
+
 ---
 
 ## Summary
@@ -272,14 +284,21 @@ catalogue until P-RC-9 lands.
 | 1 | AIGC video kickoff E2E no duplicate storyboard | Pass |
 | 2 | IM cancel cooperative + checkpoint save < 2s | Pass |
 | 3 | Resume after cancel from last checkpoint | Pass |
-| 4 | happyhorse-video single multi-mode WorkbenchNode | Pass |
-| 5 | Built-in templates load + one-click from any | Partial (deferred to P-RC-9 for the UI default-front-door swap) |
+| 4 | happyhorse-video single multi-mode WorkbenchNode | **CLOSED** |
+| 5 | Built-in templates load + one-click from any | **CLOSED** (P9.9eta-2b; v1 UI surface retired in P9.9eps) |
 
-**4 Pass + 1 Partial** is the v2.0.0-rc2 acceptance posture.
-Criterion 5's Partial rating maps to the R-RC-7-A residual risk
-G-RC-7 escalated and that P-RC-9 will close (see
-``P-RC-9-CHARTER.md``). Operators using v2 in production today
-keep the v1 ``orgs/`` UI as the default front-door and reach for
-the v2 REST surface explicitly; the v2 backend serves the
-templates and the one-click flow already, only the UI default
-has not been swapped.
+**5 / 5 CLOSED** is the P-RC-9 epic-closure acceptance posture
+(P9.9eta-2b). Criteria #1..#3 retained their P-RC-8 Pass rating;
+criterion #4 promoted to CLOSED with a P-RC-9 epic stamp
+(v2 REST mint live, v1 surface retired); criterion #5 promoted
+from Partial to CLOSED -- the deferred UI default-front-door
+caveat is moot because the v1 ``orgs/`` package and ``/api/orgs/``
+router were physically retired in P9.9eps. The original v2.0.0-rc2
+P-RC-8 posture (4 Pass + 1 Partial) is preserved in the per-criterion
+narrative above for historical reference.
+Historical note: criterion #5's earlier Partial rating mapped to
+the R-RC-7-A residual risk G-RC-7 escalated and that P-RC-9 has
+now closed (see ``P-RC-9-CHARTER.md`` + G-RC-9 sec 2). The v1
+``orgs/`` UI is no longer a candidate front-door because the v1
+package itself is gone; the v2 REST surface is the sole orgs
+front-door at HEAD.

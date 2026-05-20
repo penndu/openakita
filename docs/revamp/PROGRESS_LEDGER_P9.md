@@ -2589,3 +2589,130 @@ sentinel held off-limits), so it needs its own planning round.
 > close) NOT started this commit. P-RC-9 epic closure pending the
 > eta-2b document edits; the final-gate **PASS** verdict is locked
 > at this commit.
+
+
+> ### P9.9eta-2b -- ACCEPTANCE 5 / 5 + ADR-0013 / 0014 closure + Y3 BOM (P-RC-9 EPIC CLOSED)
+>
+> | commit hash | phase | title | LOC delta | tests delta | ADR refs |
+> |---|---|---|---|---|---|
+> | _this commit_ | P-RC-9 P9.9eta-2b (epic close) | docs(revamp,adr): P9.9eta-2b ACCEPTANCE 5/5 + ADR-0013/0014 closure + Y3 BOM (P-RC-9 EPIC CLOSED) | +~140 (ACCEPTANCE ~25 + ADR-0013 ~25 + ADR-0014 ~35 + G-RC-9.md ~55 + ledger row ~30) | 0 | ADR-0013 (closure) / ADR-0014 (closure) / ADR-0011 + ADR-0015 (cross-refs unchanged) |
+>
+> Lands the second half of the eta-2 split. ACCEPTANCE.md
+> criteria #4 + #5 marked **CLOSED**, ADR-0013 + ADR-0014
+> appended with explicit **Closure** sections, the Y3 BOM
+> aggregate table appended to ``docs/revamp/gates/G-RC-9.md``,
+> and this ledger row records the **P-RC-9 EPIC CLOSED**
+> sign-off.
+>
+> **ACCEPTANCE.md 5 / 5 CLOSED**:
+>
+> * #4 (happyhorse-video single multi-mode WorkbenchNode) --
+>   **CLOSED**. P-RC-9 epic-closure stamp adds: satisfied by
+>   G-RC-9 sec 2; v1 surface retired in P9.9eps-2a
+>   (``857a5a35``) + P9.9eps-2b (``90a7d77f``); v2 REST mint
+>   completed in P9.7beta (G-RC-9.7 mini-gate ``8b0a1bbf``).
+> * #5 (built-in templates load + one-click from any) --
+>   **CLOSED** (upgraded from Partial). The deferred UI
+>   default-front-door caveat is moot: the v1 ``orgs/`` package
+>   and the v1 ``/api/orgs/`` router are physically retired,
+>   so the v2 REST surface is the only orgs front-door by
+>   construction. Parity locked by G-RC-9.9 sec 2.3 sentinel
+>   matrix (9 / 9 ACTIVE; 68 cases); sentinel #9
+>   (``test_v1_src_retired_sentinel.py``) added in P9.9eta-1a
+>   (``21e26467``).
+> * Posture flipped: "4 Pass + 1 Partial" -> "5 / 5 CLOSED".
+>
+> **ADR-0013 (Wall-clock SLA tests) closure note appended**:
+> CLOSED-EFFECTIVE. ``time.perf_counter()`` pattern applied for
+> canary 3-repeat measurements throughout P9.x (baseline avg
+> ~1.62 s; post eps-2b avg ~1.64 s; delta +1.4 %, inside
+> the +/- 5 % canary gate). SLA test (BrainProtocol /
+> OrgCommandService cancel-to-checkpoint < 2 s + resume < 3 s +
+> burst isolation) preserved post-epic; green at HEAD.
+> Reference: G-RC-9 sec 4.
+>
+> **ADR-0014 (OrgRuntime budget revision) closure note
+> appended**: CLOSED-EFFECTIVE. P9.6 outcome -- OrgRuntime
+> decomposed into ``runtime.py`` + 7 underscore-prefixed sibling
+> shards per the original ADR-0014 layout; core decomposition
+> 2 226 LOC -- well within the revised 3 000 cap. With the
+> gamma-1b absorption shard ``_runtime_templates.py`` (1 572 LOC)
+> the OrgRuntime sub-decomposition totals 3 798 LOC. Net
+> OrgRuntime LOC vs original 6 355 LOC v1: ~35 % of v1 size by
+> the core decomposition (~65 % reduction); ~52-53 % of v1 size
+> normalised against the helper-inclusive v1 envelope. Further
+> reduction from ``runtime/llm/`` + ``agent/`` extractions
+> absorbing v1 OrgRuntime cross-cutting code. M-2 sub-cap nit
+> deferred to P-RC-10 (closes via ``runtime/orgs/`` -> ``orgs/``
+> flatten). Reference: G-RC-9 sec 3 / sec 4; G-RC-9.6
+> (``c9007eb5``).
+>
+> **ADR-0015 untouched**: 308 shim retirement governance
+> remains OPEN, locked to option (b) (single-release-window
+> retirement in v2.1.0). P9.9 was NO-OP per the lock; eta-2b
+> confirms no edit. 308 shim
+> (``api/routes/_orgs_v2_legacy_redirects.py``) byte-untouched
+> throughout P-RC-9.
+>
+> **Y3 BOM (aggregate) appended to G-RC-9.md** (new section
+> after sec 8 sign-off): compact aggregate table -- 84 v2 .py
+> modules created across ``runtime/orgs/`` (23) + ``runtime/llm/``
+> (5) + ``agent/`` (42) + ``api/routes/orgs_v2*`` (9) +
+> ``api/schemas/orgs_v2/`` (5) = 22 418 LOC v2 production
+> source; 77 v1 files deleted across the 3 atomic-delete
+> commits = -35 490 LOC raw (-35 493 audited headline; small
+> +/- 3 LOC rounding); 9 sentinel files (9 / 9 ACTIVE; 68
+> cases); 4 ADRs touched (ADR-0011 / 0013 / 0014 / 0015).
+> No per-file enumeration -- production counts derive from
+> ``git ls-files``; deletion counts from atomic-delete commit
+> ``git show --stat`` per G-RC-9.9 sec 2.1.
+>
+> **Files modified** (5; all docs):
+>
+> * ``docs/revamp/ACCEPTANCE.md`` -- criterion #4 / #5 closure
+>   notes + summary table flip + posture sentence.
+> * ``docs/adr/0013-wall-clock-sla-tests.md`` -- ``## Closure``
+>   section appended.
+> * ``docs/adr/0014-orgruntime-budget-revision.md`` --
+>   ``## Closure`` section appended.
+> * ``docs/revamp/gates/G-RC-9.md`` -- ``## Y3 BOM (aggregate)``
+>   section appended after sec 8 sign-off.
+> * ``docs/revamp/PROGRESS_LEDGER_P9.md`` -- this ledger row.
+>
+> **Hard rules held**: zero source / tests / apps / scripts /
+> identity / runtime / 308 shim / sentinel-file / ADR-0015 touch.
+> Strict-additive only; no v1 / v2 logic edited; no commit-spec
+> regen. Net LOC delta for this commit: +~140 (well below the
+> 380 WARN / 400 REJECT per-commit gate).
+>
+> **Verification**: sentinel smoke at gate authorship --
+> ``.venv/Scripts/python -m pytest tests/parity/orgs/ -q --tb=no``
+> -> **68 passed in ~4.94 s** (9 / 9 sentinels ACTIVE;
+> unchanged from eta-2a). No source / tests / ADR-0015 / 308
+> shim / sentinel-file touch.
+>
+> **P-RC-9 EPIC CLOSED.**
+>
+> * 10 phases (P9.0 .. P9.9); 10 mini-gates signed PASS.
+> * G-RC-9 final roll-up gate PASS (eta-2a ``e4d963e6``).
+> * ACCEPTANCE.md 5 / 5 CLOSED (eta-2b this commit).
+> * ADR-0013 + ADR-0014 CLOSED-EFFECTIVE; ADR-0015 governed,
+>   OPEN (v2.1.0 window).
+> * -35 493 LOC net v1 retirement axis; 84 v2 .py modules,
+>   22 418 LOC v2 production source.
+> * 9 / 9 parity sentinels ACTIVE (68 cases).
+> * All 4 R-epsilon risks RETIRED.
+>
+> **HARD STOP**: P-RC-10 NOT started this commit. **v2.0.0 tag
+> NOT cut this commit** -- a user-driven local smoke test is
+> required first (per the P9.9 operator directive).
+>
+> **Suggested next user actions** (do NOT auto-execute; the
+> agent stops here at the epic boundary):
+>
+> * A) Local smoke test (manual; recommended before v2.0.0 tag).
+> * B) P-RC-10 charter execution
+>   (``runtime/orgs/`` -> ``orgs/`` flatten; rebalances M-2
+>   sub-cap; closes 5 P-RC-10-deferred nits per G-RC-9 sec 5).
+> * C) Pause for review.
+

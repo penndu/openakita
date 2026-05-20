@@ -253,3 +253,50 @@ smoke test per the P9.9 operator directive.
 **HARD STOP**: eta-2b NOT started this commit. eta-2b carries
 ACCEPTANCE.md #4 / #5 closure, ADR-0013 / 0014 closure notes,
 and the full Y3 BOM inventory.
+
+## Y3 BOM (aggregate)
+
+P-RC-9 epic-close Bill of Materials, aggregated. No per-file
+enumeration here; production source counts come from
+``git ls-files`` over the v2 sub-packages at HEAD ``e4d963e6``;
+deletion counts come from the three atomic-delete commits per
+sec 6 (full inventory). Sentinels are listed by file name in
+sec 6.
+
+| Category | Count | LOC (approx) | Notes |
+|---|--:|--:|---|
+| v2 modules created -- ``runtime/orgs/*`` | 23 | 9 491 | ``runtime.py`` (271) + 8 ``_runtime_*`` slices (2 226 core + 1 572 ``_runtime_templates``) + 5 subsystem shards (blackboard / project_store / node_scheduler / command_service / manager) + 5 ``*_models.py`` (org / project / scheduler / command / memory) + ``store`` / ``sqlite_store`` + ``_org_layout`` + ``__init__`` |
+| v2 modules created -- ``runtime/llm/*`` | 5 | 486 | extracted during P-RC-4 (``circuit_breaker`` + ``failover`` + ``multimodal`` + ``stream`` + ``__init__``) |
+| v2 modules created -- ``agent/*`` | 42 | 10 392 | P-RC-5 / 6 / 7 rewrites (Agent stack supporting orgs orchestration) |
+| v2 routers created -- ``api/routes/orgs_v2*`` | 9 | 1 795 | mint + 7 sibling runtime routers + ``_orgs_v2_legacy_redirects.py`` 308 shim (ADR-0015 LOCKED option b) |
+| v2 schemas created -- ``api/schemas/orgs_v2/*`` | 5 | 254 | P9.7alpha-2b Pydantic (commands / nodes / orgs / projects + ``__init__``) |
+| v2 sub-total (created) | **84** | **22 418** | aggregate v2 production source backing the retired v1 surface |
+| v1 deleted -- ``src/openakita/orgs/*`` | 26 | **-20 237** | P9.9eps-2b atomic (``90a7d77f``) -- R-eps-1 RETIRED |
+| v1 deleted -- ``tests/orgs/*`` | 48 | **-12 238** | P9.9delta-4 atomic (``4b5499a6``) -- R2 RETIRED |
+| v1 deleted -- ``api/routes/orgs.py`` (v1 router; 89 endpoints) | 1 | **-2 533** | P9.9eps-2a (``857a5a35``) |
+| v1 deleted -- dev scripts referencing v1 surface | 2 | **-482** | P9.9eps-2a (``857a5a35``) |
+| v1 sub-total (deleted) | **77** | **-35 490** | small +/- 3 LOC measurement rounding vs the -35 493 audited headline (see G-RC-9.9 sec 2.1 per-commit tally) |
+| Sentinels (test files) | 9 | _(see sec 6 / G-RC-9.9 sec 2.3)_ | 9 / 9 ACTIVE; 68 collected cases (8 / 6 / 4 / 10 / 12 / 20 / 3 / 3 / 2); zero ``@xfail`` |
+| ADRs touched in P-RC-9 | 4 | -- | ADR-0011 (subsystem decomposition; baseline ratified at charter) + ADR-0013 (closure note at eta-2b) + ADR-0014 (closure note at eta-2b) + ADR-0015 (308 shim governance; OPEN; locked to option b, no edit at eta-2b) |
+| **Net LOC delta (retirement axis)** | -- | **-35 493** | audited headline; matches G-RC-9.9 sec 2.1 (sum of the 3 atomic delete commits per ``git show --stat``) |
+
+**Notes.**
+
+1. The "v2 sub-total LOC" (22 418) is a positive-axis figure --
+   total v2 production source at HEAD across the 5 sub-packages
+   above. The "net LOC delta" (-35 493) is the retirement-axis
+   figure -- summed from the three atomic-delete commits per
+   ``git show --stat``. The two axes are not subtracted; v2
+   creation is spread across the whole P-RC-9 epic (and
+   pre-existing v2 code from earlier P-RC-* epics).
+2. The 77-file v1 deletion total does **not** include any
+   prior-epic v2 file deletions; it is strictly the v1 surface
+   formerly under ``src/openakita/orgs/`` + ``tests/orgs/`` +
+   the 1 v1 router + 2 dev scripts.
+3. ``agent/`` LOC (10 392 across 42 files) includes pre-existing
+   v2 modules from P-RC-5 / 6 / 7 that were leveraged by the
+   v2 OrgRuntime composition; not all 10 392 LOC are
+   P-RC-9-net new.
+4. ``runtime/llm/`` (5 files, 486 LOC) is the P-RC-4 extraction
+   that the v2 OrgRuntime composition depends on; included
+   for the BOM completeness, not the P-RC-9 net delta.

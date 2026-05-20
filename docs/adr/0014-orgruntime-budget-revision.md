@@ -138,3 +138,47 @@ the per-commit ceiling.
 * ADR-0012 (no shim under v1; v2 must be deletion-eligible).
 * ADR-0013 (wall-clock SLA tests; the P9.4e SLAs remain in
   force for the v2 OrgRuntime cancel pipeline).
+
+## Closure (P-RC-9 epic close, P9.9eta-2b)
+
+- **Status**: **CLOSED-EFFECTIVE**. P-RC-9 epic CLOSED at gate
+  ``e4d963e6`` (G-RC-9 final roll-up gate; eta-2a) + this commit
+  (eta-2b acceptance / ADR / BOM follow-up).
+- **P9.6 outcome**: OrgRuntime decomposed across the original
+  ADR-0014 layout -- ``runtime.py`` + 7 underscore-prefixed
+  sibling shards under ``src/openakita/runtime/orgs/``
+  (``_runtime_agent_pipeline.py`` / ``_runtime_dispatch.py`` /
+  ``_runtime_node_lifecycle.py`` / ``_runtime_lifecycle.py`` /
+  ``_runtime_plugin_assets.py`` / ``_runtime_watchdog.py`` /
+  ``_runtime_event_bus.py``). Core OrgRuntime decomposition LOC at
+  HEAD ``e4d963e6``: **2 226** -- well within the revised
+  **3 000 LOC** cap (cross-ref G-RC-9.6 sec 4 / ``runtime/orgs/_runtime_*.py``).
+- **gamma-1b absorption shard**: ``_runtime_templates.py`` (1 572
+  LOC) absorbs v1 plugin / template helpers per G-RC-9 sec 1 P9.6
+  row. With this absorption shard, the OrgRuntime sub-decomposition
+  totals **3 798 LOC** across 9 files; classified as a separate
+  absorption per G-RC-9.6 sec 4 and not counted against the
+  OrgRuntime LOC cap.
+- **Net delivery vs original 1 200 LOC budget**: the revised
+  3 000 cap is honored by the core decomposition; +1 800 LOC delta
+  vs original budget absorbed as predicted; v1 retirement
+  feasibility preserved (P9.9eps-2b retired the 6 355 LOC v1
+  ``runtime.py`` together with the rest of ``src/openakita/orgs/``;
+  the -20 237 LOC v1 src delete + the broader -35 493 LOC net
+  retirement axis were unblocked by the real-rewrite path that
+  this ADR ratified).
+- **Net OrgRuntime LOC vs original 6 355 LOC v1** (retired in
+  eps-2b): the core decomposition is **~35 %** of the v1 size by
+  net code (~65 % reduction); with the gamma-1b absorption shard
+  included, the OrgRuntime sub-decomposition is **~52-53 %** of
+  the v1 size when normalised against an estimated v1 envelope
+  that includes the helpers later absorbed elsewhere; further
+  reduction comes from the ``runtime/llm/`` (5 shards, 486 LOC)
+  and ``agent/`` (42 shards, 10 392 LOC) extractions that
+  absorbed v1 OrgRuntime cross-cutting code into their respective
+  canonical homes.
+- **M-2 (sub-cap rebalance)**: deferred to P-RC-10; closes
+  naturally during the ``runtime/orgs/`` -> ``orgs/`` flattening.
+- **Reference**: G-RC-9 sec 3 (charter vs delivery diff) +
+  G-RC-9 sec 4 (ADR closure pointers); G-RC-9.6 mini-gate
+  (``c9007eb5``).
