@@ -1061,3 +1061,58 @@ sentinel held off-limits), so it needs its own planning round.
 > hits). **HARD STOP per brief**: P9.9β-1 NOT started this turn
 > -- next operator signal opens β-1 (``channels/gateway.py``
 > 5-site swap; R3 invariant: β before ε).
+
+## P9.9β-1 -- channels gateway swap (R3 invariant: β before ε)
+
+| _this commit_ | P-RC-9 P9.9β-1 | refactor(channels): P9.9β-1 swap gateway imports v1→v2 runtime (R3 invariant β-before-ε) [P-RC-9 P9.9β-1] | +~12 net LOC (``src/openakita/channels/gateway.py`` 6 ins / 6 del at 5 import sites — 4 single-line + 1 multi-line block split per α-1 §3 absorption table since ``OrgCommandSource`` / ``OrgCommandSurface`` / ``default_scope_for_surface`` were absorbed into ``runtime/orgs/command_models`` in P9.4c parallel to v1 ``models.py`` 4-shard split; this ledger section + row + blockquote ~6 LOC; total ~18 LOC; positive insertions stay far below the 50-LOC cap and the per-commit 350-LOC charter §6 budget) | 0 (channels-only source touch; ``git diff 0c2e567f..HEAD -- src/openakita/orgs/ src/openakita/api/ src/openakita/runtime/ apps/ tests/`` returns empty bytes; v1 ``src/openakita/orgs/`` byte-untouched per ε deletion deferral; 8 / 8 P-RC-9 sentinels unchanged at HEAD — REST contract sentinel #7 OpenAPI snapshot byte-identical because no router/server registration change, frontend stale-path sentinel #8 path-only scan unaffected, 6 parity sentinels green via narrow-slice run) | ADR-0011 (no new Protocol; sweep is mechanical re-routing of existing imports onto v2 ``openakita.runtime.orgs.command_service`` + ``command_models`` per ADR-0011 six-subsystem decomposition); ADR-0012 (β-before-ε ordering operationalises Q-B ACCEPTED (b) v1 deletion: gateway must resolve to v2 BEFORE ``src/openakita/orgs/`` ``git rm`` lands in ε-1, otherwise IM channel boot fails at module-import time per charter R3); R3 invariant per charter §4 (channels gateway swap order MEDIUM risk; mitigation = β before ε + import-time smoke green); canary 3/3 PASS (``tests/integration/test_v2_im_canary_e2e.py`` exercises channels→gateway→runtime path — the most-exercised channels code path; G-RC-1 + R3 dual regression check) |
+
+> P9.9β-1 closes the channels-leg sweep with a focused 5-site
+> import rewrite in ``src/openakita/channels/gateway.py`` —
+> the only ``src/openakita/channels/`` file under α-1's STRICT
+> regex grep at HEAD ``0c2e567f``. The 4 single-line deferred
+> imports inside ``MessageGateway`` IM handler / command-status /
+> cancel / fast-path methods (lines 3182, 3256, 3335, 3449) get
+> verbatim 1-to-1 module-prefix swap ``openakita.orgs.command_service → openakita.runtime.orgs.command_service``
+> (``get_command_service`` survives same-named in v2 per α-1 §3
+> 1-to-1 family of 8 same-name v2 modules). Site #5 (line 3739,
+> multi-line 5-name import inside ``_handle_org_command`` IM submit
+> path) requires α-1 §3 absorption-table consultation: while
+> ``command_service`` is listed 1-to-1, three of the five imported
+> names — ``OrgCommandSource``, ``OrgCommandSurface``,
+> ``default_scope_for_surface`` — were defined in v1's monolith
+> ``command_service.py`` but absorbed into v2's
+> ``runtime/orgs/command_models.py`` typed shard during P9.4c
+> (parallel to v1 ``models.py`` → 4-shard split documented in
+> §3 absorption row). Resolution: split site #5 into two imports
+> — ``command_models`` (4 data-class names) + ``command_service``
+> (``get_command_service``). Net diff: 6 insertions / 6 deletions /
+> +1 logical line, all confined to the gateway module.
+>
+> Verification: (1) canary 3/3 PASS — ``tests/integration/test_v2_im_canary_e2e.py`` green at 4.14s /
+> 1.64s / 1.58s across 3 sequential reruns; this is the
+> channels→gateway→runtime test exercising the very ``submit``
+> + ``cancel`` + ``get_command_service`` surfaces we just rewrote
+> (G-RC-1 + R3 dual regression check). (2) Narrow slice 584 / 584
+> PASS (``tests/api/`` + ``tests/runtime/orgs/`` + ``tests/parity/orgs/`` 68.51s; +3 vs G-RC-9.8 baseline ~581 within
+> charter "+/- a few" channel-test drift band). (3) Ruff lint
+> clean (``ruff check src/openakita/channels/gateway.py`` — All
+> checks passed!). (4) Module-import smoke green
+> (``python -c "import openakita.channels.gateway"`` resolves
+> cleanly at module-import time — R3 mitigation per charter §4
+> R3 row). Ruff ``format --check`` reports cosmetic drift on the
+> 5544-line gateway.py that is **byte-identical at parent HEAD**
+> ``0c2e567f`` (NOT introduced by β-1 — verified via
+> ``git stash`` round-trip); deferred to a separate ruff-format-only
+> NIT per channels-only hard rule and per ε deletion deferral
+> discipline.
+>
+> Strict-additive boundary verified: ``git diff 0c2e567f..HEAD --
+> src/openakita/orgs/ src/openakita/api/ src/openakita/runtime/ apps/
+> tests/`` returns empty bytes — only ``src/openakita/channels/gateway.py`` (1 source file) + this
+> ``docs/revamp/PROGRESS_LEDGER_P9.md`` (+1 row) touched. v1
+> ``src/openakita/orgs/`` byte-untouched (ε will delete; β
+> does not preview). 8 / 8 P-RC-9 sentinels remain ACTIVE.
+>
+> **HARD STOP per brief**: γ-1 (backend src sweep — 3 api/
+> files / 7 sites) NOT started this turn; next operator signal
+> opens γ-1.
