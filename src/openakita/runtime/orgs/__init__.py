@@ -83,6 +83,16 @@
     ``_build_profile_for_node`` / ``_get_shared_profile`` /
     ``_resolve_org_workspace`` / ``_prepare_unattended_session``
     (~150 v1 LOC) collapse here.
+- P9.6f2 ships :class:`AgentPipelineExecutor` in the same
+  sibling -- the activate-and-run loop. Replaces v1
+  ``_activate_and_run`` + ``_activate_and_run_inner``
+  (556 LOC) + ``_run_agent_task`` + ``_emit_llm_usage`` +
+  ``_pause_org_for_quota`` + ``_is_quota_auth_error``
+  (~800 v1 LOC) with one ~180 LOC class. Detects quota /
+  auth errors and pauses the org via injected callback;
+  emits ``agent_run_started`` / ``agent_run_finished`` /
+  ``agent_run_failed`` / ``org_paused_quota`` /
+  ``llm_usage`` events through the bus.
 """
 
 from __future__ import annotations
@@ -92,6 +102,7 @@ from ._runtime_agent_pipeline import (
     ORG_STATE_PAUSED,
     AgentBuilderProtocol,
     AgentCache,
+    AgentPipelineExecutor,
     AgentSpec,
     ProfileResolver,
 )
@@ -204,6 +215,7 @@ from .store import JsonOrgStore, OrgNotFound, get_default_store, reset_default_s
 __all__ = [
     "AgentBuilderProtocol",
     "AgentCache",
+    "AgentPipelineExecutor",
     "AgentSpec",
     "BlackboardBackendProtocol",
     "BrainProtocol",
