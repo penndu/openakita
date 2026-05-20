@@ -96,7 +96,7 @@ def create_org(request: Request, body: OrgCreate) -> dict[str, Any]:
 
 @router.get("/avatar-presets", summary="B3 list avatar presets")
 def get_avatar_presets() -> list[dict[str, Any]]:
-    from openakita.orgs.tool_categories import list_avatar_presets
+    from openakita.runtime.orgs._runtime_templates import list_avatar_presets
 
     return list_avatar_presets()
 
@@ -131,7 +131,7 @@ def list_templates(request: Request) -> list[dict[str, Any]]:
 
 @router.get("/plugin-workbench-templates", summary="B6 list workbench templates")
 def list_plugin_workbench_templates(request: Request) -> list[dict[str, Any]]:
-    from openakita.orgs.plugin_workbench_templates import build_workbench_templates
+    from openakita.runtime.orgs._runtime_templates import build_workbench_templates
 
     agent = getattr(request.app.state, "agent", None)
     pm = getattr(agent, "_plugin_manager", None) if agent else None

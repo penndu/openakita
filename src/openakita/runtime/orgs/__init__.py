@@ -202,6 +202,11 @@ from ._runtime_plugin_assets import (
     react_trace_has_tool,
     safe_asset_filename,
 )
+from ._runtime_templates import (
+    build_workbench_templates,
+    ensure_builtin_templates,
+    list_avatar_presets,
+)
 from ._runtime_watchdog import CommandWatchdog, IdleProbeLoop
 from .blackboard import (
     MAX_DEPT_MEMORIES,
@@ -401,9 +406,11 @@ __all__ = [
     "UserPersona",
     "WebSocketEventBus",
     "build_schedule_prompt",
+    "build_workbench_templates",
     "collect_tool_stats_from_trace",
     "compute_next_fire_time",
     "default_scope_for_surface",
+    "ensure_builtin_templates",
     "ext_for_url",
     "extract_accepted_chain_ids",
     "format_incoming_message",
@@ -417,6 +424,7 @@ __all__ = [
     "infer_agent_profile_id_for_node",
     "is_plugin_tool",
     "is_stop_intent",
+    "list_avatar_presets",
     "new_command_id",
     "new_org_id",
     "new_project_id",

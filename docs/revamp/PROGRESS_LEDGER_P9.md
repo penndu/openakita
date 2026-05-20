@@ -1387,3 +1387,154 @@ sentinel held off-limits), so it needs its own planning round.
 > helpers) rides next; δ-1 (test coverage audit doc)
 > NOT started this turn.
 
+## P9.9γ-1b -- absorb 3 v1 plugin / template helpers into new _runtime_templates shard (~1500 v1 LOC absorbed)
+
+| _this commit_ | P-RC-9 P9.9γ-1b | feat(runtime/orgs): P9.9γ-1b absorb 3 v1 plugin / template helpers into new ``_runtime_templates`` shard [P-RC-9 P9.9γ-1b] | +1660 LOC new shard / +8 net ``__init__.py`` ins / +3 lines / -3 lines net across 2 callers (``api/server.py:363`` + ``api/routes/orgs_v2_runtime_orgs.py:99/134``); ledger +~90 LOC; total ~+1770 LOC NEW under absorption-budget allowance | 0 (v2-only source touch; ``git diff ef8ebfd7..HEAD -- src/openakita/orgs/`` returns empty bytes; cumulative ``git diff ebd8153d..HEAD -- src/openakita/orgs/`` also empty; 8 / 8 P-RC-9 sentinels unchanged) | ADR-0011 (templates / workbench / avatar shard sibling to existing ``_runtime_plugin_assets`` / ``_runtime_event_bus`` / ``_runtime_lifecycle`` / etc.); ADR-0012 (no shim under v1; the new shard is the v2-native home, not a re-export); canary 3/3 PASS |
+
+> P9.9γ-1b absorbs the 3 v1 helpers deferred at P9.9γ-1
+> (parent ledger row "absorption-debt deferral on 3
+> plugin / template helpers"): ``ensure_builtin_templates``
+> (api/server.py:363), ``list_avatar_presets``
+> (api/routes/orgs_v2_runtime_orgs.py:99), and
+> ``build_workbench_templates``
+> (api/routes/orgs_v2_runtime_orgs.py:134) into a NEW
+> ``runtime/orgs/_runtime_templates`` shard, sibling of the
+> existing ``_runtime_plugin_assets`` /
+> ``_runtime_event_bus`` / ``_runtime_lifecycle`` /
+> ``_runtime_node_lifecycle`` / ``_runtime_watchdog``
+> shards. α-1 inventory §3 had aspirationally placed all
+> three under ``_runtime_plugin_assets``, but the
+> combined LOC (>1500) would have ballooned that file
+> from 564 to >2100 lines -- a NEW dedicated shard
+> per option B (charter §3) is the cleaner factoring.
+>
+> Absorbed (3 inventoried + N hidden deps -- see lesson
+> below):
+>
+> * From v1 ``openakita.orgs.templates`` (~1230 LOC):
+>   ``ensure_builtin_templates`` (the inventoried helper)
+>   + 4 large built-in template constants (``STARTUP_COMPANY``,
+>   ``SOFTWARE_TEAM``, ``CONTENT_OPS``, ``AIGC_VIDEO_STUDIO``)
+>   + ``_HAPPYHORSE_PLUGIN_ORIGIN`` helper constant +
+>   ``ALL_TEMPLATES`` index + ``TEMPLATE_POLICY_MAP`` +
+>   5 private helpers (``_with_builtin_metadata`` /
+>   ``_auto_assign_avatars`` / ``_auto_assign_agent_profiles`` /
+>   ``_is_legacy_aigc_video_studio`` /
+>   ``_archive_removed_template``).
+> * From v1 ``openakita.orgs.plugin_workbench_templates``
+>   (~225 LOC): ``build_workbench_templates`` (the
+>   inventoried helper) + 5 private helpers
+>   (``_default_goal_for`` / ``_default_prompt_for`` /
+>   ``_tool_summary`` / ``_collect_host_tool_defs`` /
+>   ``_resolve_tool_dict``) + companion exporter
+>   ``deprecated_tools_for_node`` absorbed alongside.
+> * From v1 ``openakita.orgs.tool_categories`` (~55 LOC
+>   excerpt): ``list_avatar_presets`` (the inventoried
+>   helper) + ``AVATAR_PRESETS`` constant (20-item
+>   role-avatar palette) + ``AVATAR_MAP`` index +
+>   ``_ROLE_AVATAR_KEYWORDS`` matching dict +
+>   ``get_avatar_for_role`` (HIDDEN dependency surfaced
+>   during absorption -- ``_auto_assign_avatars`` calls it
+>   via a deferred import).
+>
+> Byte-equal port: every constant value, function body,
+> dict-key spelling, and template node-graph dict is
+> preserved verbatim from v1; smoke test
+> (``tmp_p10/_smoke_g1b.py``) confirms v1 vs v2
+> ``ensure_builtin_templates`` writes byte-identical JSON
+> for all 4 templates, ``list_avatar_presets()`` returns
+> the same 20 dicts, ``build_workbench_templates(None)``
+> returns the same empty list, and constants
+> (``ALL_TEMPLATES`` / ``TEMPLATE_POLICY_MAP`` /
+> ``AVATAR_PRESETS``) are equal across v1 and v2 modules.
+>
+> The only edits applied to the absorbed code:
+>
+> 1. ``_auto_assign_avatars`` drops its v1 deferred ``from
+>    openakita.orgs.tool_categories import get_avatar_for_role``
+>    line -- the function now lives in the same module,
+>    no import needed.
+> 2. ``_auto_assign_agent_profiles`` reroutes its v1
+>    deferred ``from openakita.orgs.models import
+>    infer_agent_profile_id_for_node`` onto the v2
+>    ``runtime/orgs/org_models`` shard landed in P9.9γ-2b.
+> 3. ``deprecated_tools_for_node`` drops its v1 relative
+>    ``from .tool_categories import ALL_CATEGORY_NAMES``
+>    import and falls back to an empty frozenset
+>    (documented inline; no v2 caller currently exercises
+>    this exporter, so the false-positive surface only
+>    expands, never contracts -- safe).
+>
+> Caller updates (3 sites / 2 files):
+>
+> * ``api/server.py:363``: ``from openakita.orgs.templates
+>   import ensure_builtin_templates`` ->
+>   ``from openakita.runtime.orgs._runtime_templates
+>   import ensure_builtin_templates``.
+> * ``api/routes/orgs_v2_runtime_orgs.py:99``:
+>   ``from openakita.orgs.tool_categories import
+>   list_avatar_presets`` ->
+>   ``from openakita.runtime.orgs._runtime_templates
+>   import list_avatar_presets``.
+> * ``api/routes/orgs_v2_runtime_orgs.py:134``:
+>   ``from openakita.orgs.plugin_workbench_templates
+>   import build_workbench_templates`` ->
+>   ``from openakita.runtime.orgs._runtime_templates
+>   import build_workbench_templates``.
+>
+> Public re-exports added to ``runtime/orgs/__init__.py``
+> (alphabetical placement between ``_runtime_plugin_assets``
+> and ``_runtime_watchdog``): 3 names
+> (``build_workbench_templates`` / ``ensure_builtin_templates``
+> / ``list_avatar_presets``) + ``__all__`` extended from
+> 130 to 133 entries.
+>
+> Verification: (1) canary 3/3 PASS --
+> ``tests/integration/test_v2_im_canary_e2e.py`` green at
+> 1.51s / 1.56s / 1.57s (canary path now exercises
+> channels β-1 + api/server γ-1 + γ-1b + core/ γ-2 +
+> v2-internal manager γ-2b + new ``_runtime_templates``
+> shard end-to-end). (2) Narrow slice **584 / 584 PASS**
+> in 64.12s; identical to baseline at parent γ-2b HEAD
+> (``ef8ebfd7``); zero test delta. (3) v1<->v2 byte-equal
+> smoke (``tmp_p10/_smoke_g1b.py``): 5 PASS --
+> ``list_avatar_presets`` (20 items), ``build_workbench_templates(None)``,
+> ``ensure_builtin_templates`` (4 JSON files identical),
+> ``ALL_TEMPLATES`` / ``TEMPLATE_POLICY_MAP`` /
+> ``AVATAR_PRESETS`` constants equal. (4) Module-import
+> smoke green: ``python -c "import openakita.api.server;
+> import openakita.api.routes.orgs_v2_runtime_orgs;
+> import openakita.runtime.orgs.manager;
+> import openakita.runtime.orgs.org_models;
+> import openakita.runtime.orgs._runtime_templates"``
+> returns clean. (5) Ruff lint clean on all edited files
+> (``ruff check src/openakita/runtime/orgs/_runtime_templates.py
+> src/openakita/runtime/orgs/__init__.py
+> src/openakita/api/server.py
+> src/openakita/api/routes/orgs_v2_runtime_orgs.py``
+> all checks passed!).
+>
+> Strict-additive boundary: ``git diff ef8ebfd7..HEAD
+> -- src/openakita/orgs/`` returns empty bytes; cumulative
+> ``git diff ebd8153d..HEAD -- src/openakita/orgs/`` also
+> empty (γ-2b + γ-1b together touch only the v2 tree).
+> 8 / 8 P-RC-9 sentinels ACTIVE.
+>
+> Lesson captured: α-1 inventory §3 mapping
+> "tool_categories -> absorbed inline" was correct on the
+> headline helper (``list_avatar_presets``) but
+> under-counted the hidden dependency. Absorbing
+> ``ensure_builtin_templates`` requires ``get_avatar_for_role``
+> (called by ``_auto_assign_avatars`` via deferred
+> import) plus its data deps (``AVATAR_PRESETS`` +
+> ``AVATAR_MAP`` + ``_ROLE_AVATAR_KEYWORDS``) -- inventory
+> under-counted by ~50 LOC. The 3-helper headline was
+> accurate; the supporting cast was not. The wider
+> ``tool_categories.TOOL_CATEGORIES`` constants stay
+> in v1 and ε-1-delete alongside the parent.
+>
+> **HARD STOP per brief**: δ-1 (test coverage audit doc)
+> NOT started this turn. γ-1b + γ-2b together absorb the
+> 11 v1 symbols (8 org-graph + 3 plugin/template) that ε
+> needs cleared before v1 deletion.
+
