@@ -709,3 +709,43 @@ sentinel held off-limits), so it needs its own planning round.
 > (``views/OrgEditorView.tsx``, 20 hits, ~120 LOC) NOT started --
 > HARD STOP per charter sec 3 + sec 13 (different blast radius:
 > views/ cluster vs api/ cluster).
+
+| _this commit_ | P-RC-9 P9.8gamma-2 | feat(frontend): P9.8gamma-2 swap OrgEditorView v1->v2 mint API paths | +PLACEHOLDER LOC (views/OrgEditorView.tsx 16 swap lines + ledger this row + body ~22 LOC) | 0 (no new tests; touched suites stay green: tsc -b clean, vitest 14/14 across 5 suites, canary 1/1, narrowed slice 581/581, REST contract sentinel 3/3) | ADR-0011 (no new Protocol; pure URL string swap on frontend; no abstraction introduced); ADR-0012 (308 shim ``_orgs_v2_legacy_redirects.py`` continues to serve any legacy callers through v2.0.x per Q-B single-window contract); charter D-1 R3 LOCKED (mint canonical literal lives at ``/api/v2/orgs/*``, distinct from Group A ``/api/v2/orgs-spec/*``); inventory sec 1.2 (3 Group C paths -- ``/reset``, ``/heartbeat/trigger``, ``/standup/trigger`` -- have no v2 mint equivalent and remain on v1 pending P9.9 v1 deletion) |
+
+> P9.8gamma-2 second ``apps/`` source touch landed. Swapped mint-semantic
+> frontend API call sites in ``views/OrgEditorView.tsx`` (the single
+> largest caller file, 5347 LOC; 19 HTTP sites + 1 TS module import).
+> 16 HTTP literals migrated ``/api/orgs/*`` -> ``/api/v2/orgs/*`` covering
+> list / get / create / update / delete / from-template / templates list /
+> import / export (twice; mid-component duplicate retained verbatim) /
+> start / stop / stats / node unfreeze / avatar upload / prompt-preview
+> (B1 / B5 / B7 / B8 / B9 / B10 / B11 / B12 / B17 / B27 / B32 / B34 / B35 /
+> B64 per ``P-RC-9-P9.7-ENDPOINT-INVENTORY.md`` sec 3). Line 73 TS module
+> import (``from "../api/orgs"``) is a relative module path, not an HTTP
+> URL -- left untouched (gamma-1 already retargeted that module's
+> internal Group A literals to ``/api/v2/orgs-spec/*``). Three Group C
+> paths held on v1 per inventory sec 1.2 (no v2 mint equivalent;
+> deprecation candidates folded into the P9.9 v1 deletion sweep): line
+> 1148 ``/reset`` (legacy OrgManager.reset_org); line 5343
+> ``/heartbeat/trigger`` and line 5346 ``/standup/trigger`` (debug-only
+> manual triggers). The B11 update endpoint at ``/api/v2/orgs/{org_id}``
+> remains ``PUT`` (orgs_v2_runtime_orgs.py:218); verb stays as-is per the
+> "pure URL string swap" charter contract for this turn -- inventory's
+> earlier R2 PUT->PATCH proposal is moot because the mint endpoint
+> already accepts PUT (the prior charter assumed PATCH from a stale
+> Pydantic snapshot). Diff: 16 insertions + 16 deletions, net 0 LOC delta
+> in the source file. Verification: ``tsc -b`` exit 0 (no type drift);
+> ``vitest run`` 14 passed / 5 suites (no new test files; existing
+> coverage exercises the URL strings indirectly via mocked safeFetch);
+> ``pytest tests/integration/test_v2_im_canary_e2e.py`` 1 passed (canary
+> still rides 308 shim, asserting Q-B single-window survival); narrowed
+> backend slice ``tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/``
+> 581 passed (= baseline at HEAD ``754ff465``; no regression);
+> ``tests/parity/orgs/test_rest_contract_sentinel.py`` 3 passed (OpenAPI
+> route inventory unchanged -- frontend-only touch, no schema delta).
+> Strict additive verified: ``git diff 754ff465..HEAD -- src/openakita/``
+> returns empty bytes; only ``apps/`` and ``docs/revamp/PROGRESS_LEDGER_P9.md``
+> moved this commit. 7 / 7 P-RC-9 sentinels remain ACTIVE. P9.8gamma-3
+> (``components/OrgProjectBoard.tsx`` + ``components/OrgChatPanel.tsx``,
+> 20 hits, ~110 LOC) follows in the same turn per the gamma boundary
+> proposal in inventory sec 9.

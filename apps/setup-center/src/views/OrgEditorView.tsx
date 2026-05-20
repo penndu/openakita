@@ -840,7 +840,7 @@ export function OrgEditorView({
 
   const fetchOrgList = useCallback(async (): Promise<OrgSummary[]> => {
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs`);
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs`);
       const data = await res.json();
       const list = Array.isArray(data) ? (data as OrgSummary[]) : [];
       list.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
@@ -854,7 +854,7 @@ export function OrgEditorView({
 
   const fetchTemplates = useCallback(async () => {
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/templates`);
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/templates`);
       const data = await res.json();
       setTemplates(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -866,7 +866,7 @@ export function OrgEditorView({
     setLoading(true);
     setActiveDrawer(null);
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}`);
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}`);
       const data: OrgFull = await res.json();
       if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
       setSaveStatus("idle");
@@ -1040,7 +1040,7 @@ export function OrgEditorView({
   const handleStartOrg = useCallback(async () => {
     if (!currentOrg) return;
     try {
-      await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/start`, { method: "POST" });
+      await safeFetch(`${apiBaseUrl}/api/v2/orgs/${currentOrg.id}/start`, { method: "POST" });
       setCurrentOrg({ ...currentOrg, status: "active" });
       setOrgList((prev) => prev.map((o) => o.id === currentOrg.id ? { ...o, status: "active" } : o));
       const mode = (currentOrg as any).operation_mode || "command";
@@ -1063,7 +1063,7 @@ export function OrgEditorView({
     if (!currentOrg || stoppingRef.current) return;
     stoppingRef.current = true;
     try {
-      await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/stop`, { method: "POST" });
+      await safeFetch(`${apiBaseUrl}/api/v2/orgs/${currentOrg.id}/stop`, { method: "POST" });
       setCurrentOrg((prev) => prev ? { ...prev, status: "dormant" } : prev);
       setOrgList((prev) => prev.map((o) => o.id === currentOrg.id ? { ...o, status: "dormant" } : o));
       // 不再依赖 WS：HTTP 成功立即把所有节点视觉状态清零，避免装机版 WS 被
@@ -1102,12 +1102,12 @@ export function OrgEditorView({
           filters: [{ name: "JSON", extensions: ["json"] }],
         });
         if (!savePath) return;
-        const res = await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/export`, { method: "POST" });
+        const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${currentOrg.id}/export`, { method: "POST" });
         const data = await res.json();
         await writeTextFile(savePath, JSON.stringify(data, null, 2));
         showToast(t("org.editor.exportedTo", { path: savePath }));
       } else {
-        const res = await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/export`, { method: "POST" });
+        const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${currentOrg.id}/export`, { method: "POST" });
         const data = await res.json();
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -1127,7 +1127,7 @@ export function OrgEditorView({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/import`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/import`, {
         method: "POST",
         body: formData,
       });
@@ -1236,7 +1236,7 @@ export function OrgEditorView({
     if (snapshot === lastSavedRef.current) return true;
     setSaveStatus("saving");
     try {
-      const resp = await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}`, {
+      const resp = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${currentOrg.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: snapshot,
@@ -1288,7 +1288,7 @@ export function OrgEditorView({
     setCreatingOrg(true);
     const defaultName = t("org.editor.newOrg");
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: defaultName, description: "" }),
@@ -1319,7 +1319,7 @@ export function OrgEditorView({
     orgCreateBusyRef.current = true;
     setCreatingOrg(true);
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/from-template`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/from-template`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template_id: templateId }),
@@ -1385,7 +1385,7 @@ export function OrgEditorView({
 
   const handleDeleteOrg = useCallback(async (orgId: string) => {
     try {
-      await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}`, { method: "DELETE" });
+      await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}`, { method: "DELETE" });
       if (selectedOrgId === orgId) {
         if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
         setActiveDrawer(null);
@@ -1606,7 +1606,7 @@ export function OrgEditorView({
     }
     const fetchStats = async () => {
       try {
-        const res = await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/stats`);
+        const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${currentOrg.id}/stats`);
         if (res.ok) setOrgStats(await res.json());
       } catch (e) { /* ignore */ }
     };
@@ -1747,7 +1747,7 @@ export function OrgEditorView({
     setContextMenu(null);
     if (!selectedOrgId) return;
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${selectedOrgId}/nodes/${nodeId}/unfreeze`, { method: "POST" });
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${selectedOrgId}/nodes/${nodeId}/unfreeze`, { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
       setNodes((prev) => prev.map((n) => {
         if (n.id !== nodeId) return n;
@@ -3821,7 +3821,7 @@ export function OrgEditorView({
                         const form = new FormData();
                         form.append("file", file);
                         try {
-                          const res = await safeFetch(`${apiBaseUrl}/api/orgs/avatars/upload`, {
+                          const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/avatars/upload`, {
                             method: "POST",
                             body: form,
                           });
@@ -4098,7 +4098,7 @@ export function OrgEditorView({
                           if (!currentOrg) return;
                           setPromptPreviewLoading(true);
                           try {
-                            const resp = await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/nodes/${selectedNode.id}/prompt-preview`);
+                            const resp = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${currentOrg.id}/nodes/${selectedNode.id}/prompt-preview`);
                             if (resp.ok) {
                               const data = await resp.json();
                               setFullPromptPreview(data.full_prompt);
