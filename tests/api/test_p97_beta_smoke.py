@@ -830,3 +830,209 @@ def test_path_traversal_blocked(mint_app: FastAPI, mint_client: TestClient, tmp_
     resp = mint_client.get("/api/v2/orgs/org_x/policies/..%2Fsecret")
     # FastAPI's percent-decode preserves ``..``; the route checks string ``..``
     assert resp.status_code in (400, 404)
+
+
+# ===========================================================================
+# Cluster 3.5 -- Inbox + Scaling + Reports + Stats + Status (B54-B67).
+# ===========================================================================
+
+
+def _wire_inbox(mint_app: FastAPI) -> Any:
+    inbox = MagicMock()
+    inbox.unread_count.return_value = 0
+    inbox.pending_approval_count.return_value = 0
+    inbox.list_messages.return_value = []
+    inbox.mark_read.return_value = True
+    inbox.mark_all_read.return_value = 0
+    mint_app.state.org_runtime.get_inbox.return_value = inbox
+    return inbox
+
+
+def _wire_scaler(mint_app: FastAPI) -> Any:
+    scaler = MagicMock()
+    mint_app.state.org_runtime.get_scaler = MagicMock(return_value=scaler)
+    return scaler
+
+
+# ---------------------------------------------------------------------------
+# B54-B57: inbox
+# ---------------------------------------------------------------------------
+
+
+def test_b54_list_inbox_empty(mint_app: FastAPI, mint_client: TestClient) -> None:
+    _wire_inbox(mint_app)
+    resp = mint_client.get("/api/v2/orgs/org_x/inbox")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["messages"] == []
+    assert body["unread_count"] == 0
+
+
+def test_b55_mark_inbox_read_ok(mint_app: FastAPI, mint_client: TestClient) -> None:
+    _wire_inbox(mint_app)
+    resp = mint_client.post("/api/v2/orgs/org_x/inbox/m1/read")
+    assert resp.status_code == 200
+
+
+def test_b55_mark_inbox_read_404(mint_app: FastAPI, mint_client: TestClient) -> None:
+    inbox = _wire_inbox(mint_app)
+    inbox.mark_read.return_value = False
+    resp = mint_client.post("/api/v2/orgs/org_x/inbox/m1/read")
+    assert resp.status_code == 404
+
+
+def test_b56_mark_all_read(mint_app: FastAPI, mint_client: TestClient) -> None:
+    inbox = _wire_inbox(mint_app)
+    inbox.mark_all_read.return_value = 5
+    resp = mint_client.post("/api/v2/orgs/org_x/inbox/read-all")
+    assert resp.status_code == 200
+    assert resp.json()["marked"] == 5
+
+
+def test_b57_resolve_approval(mint_app: FastAPI, mint_client: TestClient) -> None:
+    inbox = _wire_inbox(mint_app)
+    fake = MagicMock(spec=["to_dict"])
+    fake.to_dict.return_value = {"id": "m1", "status": "resolved"}
+    inbox.resolve_approval.return_value = fake
+    resp = mint_client.post("/api/v2/orgs/org_x/inbox/m1/resolve", json={"decision": "approve"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "resolved"
+
+
+def test_b57_resolve_approval_400_bad_decision(mint_app: FastAPI, mint_client: TestClient) -> None:
+    _wire_inbox(mint_app)
+    resp = mint_client.post("/api/v2/orgs/org_x/inbox/m1/resolve", json={"decision": "bogus"})
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# B58-B62: scaling
+# ---------------------------------------------------------------------------
+
+
+def test_b58_list_scaling_requests(mint_app: FastAPI, mint_client: TestClient) -> None:
+    scaler = _wire_scaler(mint_app)
+    req = MagicMock(
+        id="r1",
+        request_type="clone",
+        requester_node_id="n1",
+        role_title="Worker",
+        status="pending",
+        created_at="2026-01-01",
+    )
+    scaler.get_pending_requests.return_value = [req]
+    resp = mint_client.get("/api/v2/orgs/org_x/scaling/requests")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["id"] == "r1"
+    assert body[0]["status"] == "pending"
+
+
+def test_b59_approve_scaling(mint_app: FastAPI, mint_client: TestClient) -> None:
+    scaler = _wire_scaler(mint_app)
+    req = MagicMock(id="r1", status="approved", result_node_id="n2")
+
+    async def _ok(*args, **kwargs):
+        return req
+
+    scaler.approve_request = MagicMock(side_effect=_ok)
+    resp = mint_client.post("/api/v2/orgs/org_x/scaling/r1/approve")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "approved"
+
+
+def test_b60_reject_scaling(mint_app: FastAPI, mint_client: TestClient) -> None:
+    scaler = _wire_scaler(mint_app)
+    scaler.reject_request.return_value = MagicMock(id="r1", status="rejected")
+    resp = mint_client.post("/api/v2/orgs/org_x/scaling/r1/reject", json={"reason": "no"})
+    assert resp.status_code == 200
+
+
+def test_b61_scale_clone(mint_app: FastAPI, mint_client: TestClient) -> None:
+    scaler = _wire_scaler(mint_app)
+    req = MagicMock(id="r2", status="approved", result_node_id="n3")
+
+    async def _ok(*args, **kwargs):
+        return req
+
+    scaler.request_clone = MagicMock(side_effect=_ok)
+    resp = mint_client.post("/api/v2/orgs/org_x/scale/clone", json={"source_node_id": "n1"})
+    assert resp.status_code == 200
+    assert resp.json()["result_node_id"] == "n3"
+
+
+def test_b61_scale_clone_400(mint_app: FastAPI, mint_client: TestClient) -> None:
+    _wire_scaler(mint_app)
+    resp = mint_client.post("/api/v2/orgs/org_x/scale/clone", json={})
+    assert resp.status_code == 400
+
+
+def test_b62_scale_recruit(mint_app: FastAPI, mint_client: TestClient) -> None:
+    scaler = _wire_scaler(mint_app)
+    scaler.request_recruit.return_value = MagicMock(id="r3", status="pending")
+    resp = mint_client.post(
+        "/api/v2/orgs/org_x/scale/recruit",
+        json={"role_title": "Marketer", "parent_node_id": "n1"},
+    )
+    assert resp.status_code == 200
+
+
+def test_b62_scale_recruit_400(mint_app: FastAPI, mint_client: TestClient) -> None:
+    _wire_scaler(mint_app)
+    resp = mint_client.post("/api/v2/orgs/org_x/scale/recruit", json={"role_title": "x"})
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# B63-B67: status / stats / reports
+# ---------------------------------------------------------------------------
+
+
+def test_b63_status_snapshot(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_runtime.get_status_snapshot = MagicMock(
+        return_value={"org_id": "org_x", "status": "active"}
+    )
+    resp = mint_client.get("/api/v2/orgs/org_x/status")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "active"
+
+
+def test_b63_status_404_when_missing(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_runtime.get_status_snapshot = MagicMock(return_value=None)
+    resp = mint_client.get("/api/v2/orgs/org_x/status")
+    assert resp.status_code == 404
+
+
+def test_b64_stats(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_runtime.get_stats = MagicMock(
+        return_value={"org_id": "org_x", "node_count": 3}
+    )
+    resp = mint_client.get("/api/v2/orgs/org_x/stats")
+    assert resp.status_code == 200
+    assert resp.json()["node_count"] == 3
+
+
+def test_b65_list_reports_empty(mint_app: FastAPI, mint_client: TestClient, tmp_path) -> None:
+    mint_app.state.org_manager.get_org_dir.return_value = str(tmp_path / "org_x")
+    resp = mint_client.get("/api/v2/orgs/org_x/reports")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_b66_report_summary(mint_app: FastAPI, mint_client: TestClient) -> None:
+    es = MagicMock()
+    es.generate_summary_report.return_value = {"summary": "ok", "days": 7}
+    mint_app.state.org_runtime.get_event_store.return_value = es
+    resp = mint_client.get("/api/v2/orgs/org_x/reports/summary")
+    assert resp.status_code == 200
+    assert resp.json()["summary"] == "ok"
+
+
+def test_b67_generate_report(mint_app: FastAPI, mint_client: TestClient, tmp_path) -> None:
+    es = MagicMock()
+    out = tmp_path / "report.md"
+    es.generate_report_markdown.return_value = out
+    mint_app.state.org_runtime.get_event_store.return_value = es
+    resp = mint_client.post("/api/v2/orgs/org_x/reports/generate", json={"days": 3})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True

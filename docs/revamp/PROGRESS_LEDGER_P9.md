@@ -393,3 +393,19 @@ current_phase: P-RC-9
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-9 P9.7beta-4 | feat(api/routes): mint cluster 3.4 Memory + Events + Activity + Messages + audit + Policies (12 endpoints: B42-B53) in orgs_v2_runtime_state.py + side-effect import + 17 smoke tests | +PLACEHOLDER LOC (orgs_v2_runtime_state.py NEW 255 + orgs_v2_runtime.py +1 multi-line import addition; test_p97_beta_smoke.py +164 cluster 3.4 smokes; ledger +PLACEHOLDER) | +17 smoke (B42-B53 wiring smokes + 400-on-bad-scope + 400-on-empty-content + 404 on memory delete + 400 on policies search empty q + policy file write/read verification + path-traversal guard); gate slice tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/ 336 -> 353 passed (58.81s) | ADR-0011 (D-3 layer separation -- ``MemoryScope`` / ``MemoryType`` enums imported from ``openakita.runtime.orgs``; D-4 R4 granularity ceiling preserved); ADR-0012 (no shim under v1; policies + messages file IO uses ``OrgManager.get_org_dir`` only -- v1 ``_org_dir`` never reached) |
+
+## P9.7beta-5 -- mint cluster 3.5 Inbox + Scaling + Reports + Stats + Status (14 endpoints) (this turn)
+
+> Fifth beta mint commit. 14 endpoints (B54-B67 per
+> ``P-RC-9-P9.7-ENDPOINT-INVENTORY.md`` section 3.5) land in a
+> new sub-module ``orgs_v2_runtime_ops.py``. Cluster covers org
+> inbox CRUD (4 -> ``OrgRuntime.get_inbox``), scaling governance
+> (5 -> ``OrgRuntime.get_scaler``: requests / approve / reject /
+> clone / recruit), status snapshot (1 JSON; SSE divergence
+> documented), stats aggregation (1), and reports list / summary
+> / generate (3). v1 ``GET /{org_id}/status`` SSE -> v2 JSON
+> snapshot envelope (charter R5 divergence; SSE rides beta-7).
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-9 P9.7beta-5 | feat(api/routes): mint cluster 3.5 Inbox + Scaling + Reports + Stats + Status (14 endpoints: B54-B67) in orgs_v2_runtime_ops.py + side-effect import + 19 smoke tests | +PLACEHOLDER LOC (orgs_v2_runtime_ops.py NEW 292 + orgs_v2_runtime.py +1 multi-line import addition; test_p97_beta_smoke.py +213 cluster 3.5 smokes; ledger +PLACEHOLDER) | +19 smoke (B54-B67 wiring smokes + inbox 404 branch + bad-decision 400 + scaling 400 branches x2 + status 404 branch); gate slice tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/ 353 -> 372 passed (53.04s) | ADR-0011 (D-3 layer separation; D-4 R4 granularity ceiling preserved); ADR-0012 (no shim under v1; status endpoint diverges from v1 SSE to JSON snapshot -- charter R5 documented); cites P-RC-9-P9.7-CHARTER.md section 3 beta-7 (SSE riding optional commit) |
