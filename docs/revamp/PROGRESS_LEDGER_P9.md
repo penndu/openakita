@@ -468,3 +468,20 @@ current_phase: P-RC-9
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-9 P9.7gamma-1b | test(api/contracts): mint cluster contracts for dispatch (20 cases) + state (29 cases) + ops (30 cases) | +PLACEHOLDER LOC (test_orgs_v2_contracts_dispatch.py NEW 141 + test_orgs_v2_contracts_state.py NEW 233 + test_orgs_v2_contracts_ops.py NEW 228; ledger +PLACEHOLDER) | +79 contract (B34-B41 20 + B42-B53 29 + B54-B67 30); gate slice tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/ 463 -> 542 passed (70.45s) | ADR-0011 (D-3 layer separation; dispatch + state + ops touch P9.4 OrgCommandService / P9.6 OrgRuntime / P9.1 OrgBlackboard surface only via the v2 routes); ADR-0012 (no shim under v1; assertions reach only v2 schemas + runtime.orgs subsystems); cites P-RC-9-P9.7-CHARTER.md section 6 (~120 contract cases / ~1 600 LOC) |
+
+## P9.7gamma-1c -- contract cluster projects (B68-B83) + closes gamma-1 contract suite (this turn)
+
+> Third gamma-1 commit: lands the largest cluster's contract
+> file (16 endpoints / 36 cases). Project + task CRUD covers
+> happy / 404 / 422 (ProjectCreate / ProjectPatch ``extra="forbid"``)
+> branches; B76 dispatch wires both ProjectStore + OrgCommandService
+> + asserts the chain_id is generated; B77 cancel exercises the
+> ``TaskStatus.IN_PROGRESS`` gate (returns ``{"ok": False}`` not
+> 4xx when the task is not in_progress -- v1 oracle parity); B81
+> timeline merges execution_log + event-store query results.
+> Closes the gamma-1 contract suite at **184 contract cases /
+> ~1500 LOC** across 6 cluster files + 1 conftest.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-9 P9.7gamma-1c | test(api/contracts): mint cluster contracts for projects (36 cases) -- closes gamma-1 (184/184) | +PLACEHOLDER LOC (test_orgs_v2_contracts_projects.py NEW 284; ledger +PLACEHOLDER) | +36 contract (B68-B83); gate slice tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/ 542 -> 578 passed (73.08s); contract suite total 184/184 across 6 cluster files | ADR-0011 (D-3 layer separation; ProjectStore + OrgCommandService cross-subsystem dispatch covered); ADR-0012 (no shim under v1; ProjectStatus / ProjectType / TaskStatus enums imported only from openakita.runtime.orgs); cites P-RC-9-P9.7-CHARTER.md section 6 (~120 contract cases / ~1 600 LOC) |
