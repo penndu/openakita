@@ -343,3 +343,21 @@ current_phase: P-RC-9
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-9 P9.7beta-1 | feat(api/routes): mint cluster 3.1 Org CRUD + templates + lifecycle (17 endpoints: B1-B17) in orgs_v2_runtime_orgs.py + side-effect import from orgs_v2_runtime.py + 23 smoke tests + reframe 8 alpha-2 redirect tests for mint-claimed paths | +PLACEHOLDER LOC (orgs_v2_runtime_orgs.py NEW 303 + orgs_v2_runtime.py +13 sub-module import; test_p97_beta_smoke.py NEW 301 + test_p97_alpha2_smoke.py +31 reframe; ledger +PLACEHOLDER) | +23 smoke (B1-B17 wiring smokes via TestClient + MagicMock subsystems); gate slice tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/ 280 -> 303 passed (54.09s) | ADR-0011 (D-3 layer separation -- ``OrgCreate``/``OrgPatch`` schemas consumed for input validation; response stays dict for v1 parity); ADR-0012 (no shim under v1; v2 mint reaches v1 free-function helpers ``list_avatar_presets`` / ``build_workbench_templates`` because they are NOT v1 ``OrgManager`` methods; the no-shim invariant covers class boundary, not free-function helpers); cites P-RC-9-P9.7-ENDPOINT-INVENTORY.md section 3.1 B1-B17 |
+
+## P9.7beta-2 -- mint cluster 3.2 Node lifecycle + schedules (16 endpoints) (this turn)
+
+> Second beta mint commit. 16 endpoints across
+> ``/api/v2/orgs/{org_id}/nodes/{node_id}[...]`` (B18-B33 per
+> ``P-RC-9-P9.7-ENDPOINT-INVENTORY.md`` section 3.2) land in a
+> new sub-module ``orgs_v2_runtime_nodes.py``. Cluster covers
+> node schedules CRUD (4), identity markdown files (2), MCP
+> config JSON (2), status controllers freeze/unfreeze/offline/
+> online (4), and observability snapshots dismiss/thinking/
+> prompt-preview/status (4). Wiring: schedules + identity + MCP
+> -> ``_get_manager`` (P9.5 OrgManager + ``get_org_dir``
+> file-IO); status controllers + snapshots -> ``_get_runtime``
+> (P9.6 OrgRuntime duck-typed method calls).
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-9 P9.7beta-2 | feat(api/routes): mint cluster 3.2 Node lifecycle + schedules + identity + MCP (16 endpoints: B18-B33) in orgs_v2_runtime_nodes.py + side-effect import from orgs_v2_runtime.py + 20 smoke tests | +PLACEHOLDER LOC (orgs_v2_runtime_nodes.py NEW 264 + orgs_v2_runtime.py +3 sub-module import; test_p97_beta_smoke.py +233 cluster 3.2 smokes; ledger +PLACEHOLDER) | +20 smoke (B18-B33 wiring smokes -- schedules CRUD x4 + identity file IO x2 + MCP file IO x2 + status controllers x4 + observability snapshots x4 + 404 branches x4); gate slice tests/api/ + tests/runtime/orgs/ + tests/parity/orgs/ 303 -> 323 passed (53.67s) | ADR-0011 (D-3 layer separation -- ``NodeRegister`` Pydantic shape exported for future node-create POST endpoints; D-4 R4 granularity ceiling preserved; OrgRuntime methods consumed are duck-typed -- no new Protocols); ADR-0012 (no shim under v1; v2 manager exposes ``get_org_dir`` so file-IO never reaches v1 OrgManager) |

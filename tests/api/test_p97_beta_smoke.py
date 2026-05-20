@@ -30,6 +30,7 @@ from __future__ import annotations
 import io
 import json
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -299,3 +300,235 @@ def test_b17_export_org_returns_envelope(mint_app: FastAPI, mint_client: TestCli
     body = resp.json()
     assert body["format"] == "akita-org"
     assert body["organization"]["id"] == "org_a"
+
+
+# ===========================================================================
+# Cluster 3.2 -- Node lifecycle + schedules + identity + MCP (B18-B33).
+# ===========================================================================
+
+
+def _fake_org_with_node(org_id: str = "org_x", node_id: str = "n1") -> Any:
+    org = MagicMock(spec=["get_node", "to_dict"])
+    node = MagicMock(id=node_id, role_title="r", status=MagicMock(value="idle"))
+    org.get_node.return_value = node
+    org.to_dict.return_value = {"id": org_id, "name": "X", "nodes": [{"id": node_id}]}
+    return org
+
+
+def _wire_org_node(mint_app: FastAPI, tmp_path) -> None:
+    mint_app.state.org_manager.get.return_value = _fake_org_with_node()
+    mint_app.state.org_manager.get_org_dir.return_value = str(tmp_path / "org_x")
+
+
+# ---------------------------------------------------------------------------
+# B18-B21: schedules CRUD
+# ---------------------------------------------------------------------------
+
+
+def test_b18_list_node_schedules(mint_app: FastAPI, mint_client: TestClient) -> None:
+    _wire_org_node(mint_app, Path("./_unused"))
+    sched = MagicMock(spec=["to_dict"])
+    sched.to_dict.return_value = {"id": "s1", "type": "cron"}
+    mint_app.state.org_manager.get_node_schedules.return_value = [sched]
+    resp = mint_client.get("/api/v2/orgs/org_x/nodes/n1/schedules")
+    assert resp.status_code == 200
+    assert resp.json() == [{"id": "s1", "type": "cron"}]
+
+
+def test_b18_list_404_missing_node(mint_app: FastAPI, mint_client: TestClient) -> None:
+    org = MagicMock(spec=["get_node", "to_dict"])
+    org.get_node.return_value = None
+    mint_app.state.org_manager.get.return_value = org
+    resp = mint_client.get("/api/v2/orgs/org_x/nodes/missing/schedules")
+    assert resp.status_code == 404
+
+
+def test_b19_create_node_schedule(
+    mint_app: FastAPI, mint_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _wire_org_node(mint_app, Path("./_unused"))
+    fake = MagicMock(spec=["to_dict"])
+    fake.to_dict.return_value = {"id": "s1", "type": "interval"}
+    # ``NodeSchedule.from_dict`` is exercised inside the route; stub it.
+    from openakita.runtime.orgs import NodeSchedule
+
+    monkeypatch.setattr(NodeSchedule, "from_dict", staticmethod(lambda d: d), raising=False)
+    mint_app.state.org_manager.add_node_schedule.return_value = fake
+    resp = mint_client.post("/api/v2/orgs/org_x/nodes/n1/schedules", json={"type": "interval"})
+    assert resp.status_code == 201
+    assert resp.json()["id"] == "s1"
+
+
+def test_b20_update_node_schedule(mint_app: FastAPI, mint_client: TestClient) -> None:
+    fake = MagicMock(spec=["to_dict"])
+    fake.to_dict.return_value = {"id": "s1"}
+    mint_app.state.org_manager.update_node_schedule.return_value = fake
+    resp = mint_client.put("/api/v2/orgs/org_x/nodes/n1/schedules/s1", json={"enabled": True})
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "s1"
+
+
+def test_b20_update_404(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_manager.update_node_schedule.return_value = None
+    resp = mint_client.put("/api/v2/orgs/org_x/nodes/n1/schedules/missing", json={})
+    assert resp.status_code == 404
+
+
+def test_b21_delete_node_schedule(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_manager.delete_node_schedule.return_value = True
+    resp = mint_client.delete("/api/v2/orgs/org_x/nodes/n1/schedules/s1")
+    assert resp.status_code == 200
+
+
+def test_b21_delete_404(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_manager.delete_node_schedule.return_value = False
+    resp = mint_client.delete("/api/v2/orgs/org_x/nodes/n1/schedules/missing")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# B22-B25: identity + MCP file IO
+# ---------------------------------------------------------------------------
+
+
+def test_b22_get_node_identity_missing_files(
+    mint_app: FastAPI, mint_client: TestClient, tmp_path
+) -> None:
+    _wire_org_node(mint_app, tmp_path)
+    resp = mint_client.get("/api/v2/orgs/org_x/nodes/n1/identity")
+    assert resp.status_code == 200
+    assert resp.json() == {"SOUL.md": None, "AGENT.md": None, "ROLE.md": None}
+
+
+def test_b23_update_node_identity_writes_file(
+    mint_app: FastAPI, mint_client: TestClient, tmp_path
+) -> None:
+    _wire_org_node(mint_app, tmp_path)
+    resp = mint_client.put(
+        "/api/v2/orgs/org_x/nodes/n1/identity",
+        json={"ROLE.md": "I am a node"},
+    )
+    assert resp.status_code == 200
+    written = tmp_path / "org_x" / "nodes" / "n1" / "identity" / "ROLE.md"
+    assert written.read_text(encoding="utf-8") == "I am a node"
+
+
+def test_b24_get_node_mcp_default_inherit(
+    mint_app: FastAPI, mint_client: TestClient, tmp_path
+) -> None:
+    _wire_org_node(mint_app, tmp_path)
+    resp = mint_client.get("/api/v2/orgs/org_x/nodes/n1/mcp")
+    assert resp.status_code == 200
+    assert resp.json() == {"mode": "inherit"}
+
+
+def test_b25_update_node_mcp_writes_file(
+    mint_app: FastAPI, mint_client: TestClient, tmp_path
+) -> None:
+    _wire_org_node(mint_app, tmp_path)
+    resp = mint_client.put(
+        "/api/v2/orgs/org_x/nodes/n1/mcp",
+        json={"mode": "override", "servers": []},
+    )
+    assert resp.status_code == 200
+    written = tmp_path / "org_x" / "nodes" / "n1" / "mcp_config.json"
+    assert json.loads(written.read_text(encoding="utf-8"))["mode"] == "override"
+
+
+# ---------------------------------------------------------------------------
+# B26-B29: status controllers
+# ---------------------------------------------------------------------------
+
+
+def test_b26_freeze_node_calls_runtime(mint_app: FastAPI, mint_client: TestClient) -> None:
+    async def _ok(*args, **kwargs):
+        return {"result": "frozen"}
+
+    mint_app.state.org_runtime.freeze_node = MagicMock(side_effect=_ok)
+    resp = mint_client.post("/api/v2/orgs/org_x/nodes/n1/freeze", json={"reason": "test"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_b27_unfreeze_node(mint_app: FastAPI, mint_client: TestClient) -> None:
+    async def _ok(*args, **kwargs):
+        return {"result": "unfrozen"}
+
+    mint_app.state.org_runtime.unfreeze_node = MagicMock(side_effect=_ok)
+    resp = mint_client.post("/api/v2/orgs/org_x/nodes/n1/unfreeze")
+    assert resp.status_code == 200
+
+
+def test_b28_set_node_offline(mint_app: FastAPI, mint_client: TestClient) -> None:
+    async def _ok(*args, **kwargs):
+        return None
+
+    mint_app.state.org_runtime.set_node_status = MagicMock(side_effect=_ok)
+    resp = mint_client.post("/api/v2/orgs/org_x/nodes/n1/offline")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "offline"
+
+
+def test_b29_set_node_online(mint_app: FastAPI, mint_client: TestClient) -> None:
+    async def _ok(*args, **kwargs):
+        return None
+
+    mint_app.state.org_runtime.set_node_status = MagicMock(side_effect=_ok)
+    resp = mint_client.post("/api/v2/orgs/org_x/nodes/n1/online")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "idle"
+
+
+# ---------------------------------------------------------------------------
+# B30-B33: dismiss + observability snapshots
+# ---------------------------------------------------------------------------
+
+
+def test_b30_dismiss_node(mint_app: FastAPI, mint_client: TestClient) -> None:
+    async def _ok(*args, **kwargs):
+        return True
+
+    mint_app.state.org_runtime.dismiss_node = MagicMock(side_effect=_ok)
+    resp = mint_client.delete("/api/v2/orgs/org_x/nodes/n1/dismiss")
+    assert resp.status_code == 200
+
+
+def test_b30_dismiss_node_400(mint_app: FastAPI, mint_client: TestClient) -> None:
+    async def _no(*args, **kwargs):
+        return False
+
+    mint_app.state.org_runtime.dismiss_node = MagicMock(side_effect=_no)
+    resp = mint_client.delete("/api/v2/orgs/org_x/nodes/n1/dismiss")
+    assert resp.status_code == 400
+
+
+def test_b31_get_node_thinking(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_runtime.get_node_thinking.return_value = {
+        "node_id": "n1",
+        "timeline": [],
+    }
+    resp = mint_client.get("/api/v2/orgs/org_x/nodes/n1/thinking")
+    assert resp.status_code == 200
+    assert resp.json()["node_id"] == "n1"
+
+
+def test_b32_preview_node_prompt(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_runtime.preview_node_prompt.return_value = {
+        "node_id": "n1",
+        "full_prompt": "...",
+        "char_count": 3,
+    }
+    resp = mint_client.get("/api/v2/orgs/org_x/nodes/n1/prompt-preview")
+    assert resp.status_code == 200
+    assert resp.json()["char_count"] == 3
+
+
+def test_b33_get_node_status_snapshot(mint_app: FastAPI, mint_client: TestClient) -> None:
+    mint_app.state.org_runtime.get_node_status_snapshot.return_value = {
+        "id": "n1",
+        "role_title": "r",
+        "status": "idle",
+    }
+    resp = mint_client.get("/api/v2/orgs/org_x/nodes/n1/status")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "idle"
