@@ -48,6 +48,7 @@ from .routes import (
     memory_repair,
     orgs,
     orgs_v2,
+    orgs_v2_runtime,
     orgs_v2_stream,
     pending_approvals,
     qqbot_onboard,
@@ -417,6 +418,11 @@ def create_app(
     # ``orgs_v2.router`` -- always-mount, refuse-to-serve when
     # ``runtime_v2_enabled`` is False.
     app.include_router(orgs_v2_stream.router)
+    # P-RC-9 P9.7a-2c: v2 runtime router skeleton (`/api/v2/orgs`).
+    # Registered BEFORE the 308 redirect shim so the future P9.7
+    # mint endpoints (and the current `/_p97/health` probe) take
+    # precedence over the redirect for any path they claim.
+    app.include_router(orgs_v2_runtime.router)
     # P-RC-9 P9.7a-2a: 308 Permanent Redirect shim for the
     # original P-RC-3 Group A paths under ``/api/v2/orgs[/...]``
     # (frontend rewiring lands in P9.8). See DECISIONS.md D-1
