@@ -136,8 +136,8 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
     setTaskTimeline([]);
     try {
       const [detailRes, timelineRes] = await Promise.all([
-        safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/tasks/${taskId}`),
-        safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/tasks/${taskId}/timeline`),
+        safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/tasks/${taskId}`),
+        safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/tasks/${taskId}/timeline`),
       ]);
       if (detailRes.ok) setTaskDetail(await detailRes.json());
       if (timelineRes.ok) {
@@ -161,7 +161,7 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
 
   const fetchProjects = useCallback(async () => {
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/projects`);
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/projects`);
       if (res.ok) {
         const data = await res.json();
         setProjects(data);
@@ -266,8 +266,8 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
     try {
       await safeFetch(
         editingProject
-          ? `${apiBaseUrl}/api/orgs/${orgId}/projects/${editingProject.id}`
-          : `${apiBaseUrl}/api/orgs/${orgId}/projects`,
+          ? `${apiBaseUrl}/api/v2/orgs/${orgId}/projects/${editingProject.id}`
+          : `${apiBaseUrl}/api/v2/orgs/${orgId}/projects`,
         {
         method: editingProject ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -287,7 +287,7 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
   const createTask = async () => {
     if (!newTaskTitle.trim() || !selectedProjectId) return;
     try {
-      await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/projects/${selectedProjectId}/tasks`, {
+      await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/projects/${selectedProjectId}/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: newTaskTitle, description: newTaskDesc, assignee_node_id: newTaskAssignee || null, status: "todo" }),
@@ -299,7 +299,7 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
 
   const deleteProject = async (projectId: string) => {
     try {
-      await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/projects/${projectId}`, { method: "DELETE" });
+      await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/projects/${projectId}`, { method: "DELETE" });
       if (selectedProjectId === projectId) setSelectedProjectId(null);
       fetchProjects();
     } catch { /* ignore */ }
@@ -307,7 +307,7 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
 
   const updateTaskStatus = async (projectId: string, taskId: string, newStatus: string) => {
     try {
-      await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/projects/${projectId}/tasks/${taskId}`, {
+      await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/projects/${projectId}/tasks/${taskId}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
@@ -317,7 +317,7 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
 
   const deleteTask = async (projectId: string, taskId: string) => {
     try {
-      await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/projects/${projectId}/tasks/${taskId}`, { method: "DELETE" });
+      await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/projects/${projectId}/tasks/${taskId}`, { method: "DELETE" });
       if (selectedTask?.id === taskId) closeTaskDetail();
       fetchProjects();
     } catch { /* ignore */ }
@@ -334,7 +334,7 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
   const dispatchTask = async (projectId: string, taskId: string) => {
     setDispatchingTaskId(taskId);
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/projects/${projectId}/tasks/${taskId}/dispatch`, { method: "POST" });
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/projects/${projectId}/tasks/${taskId}/dispatch`, { method: "POST" });
       if (res.ok) fetchProjects();
     } catch { /* ignore */ }
     finally { setDispatchingTaskId(null); }
@@ -343,7 +343,7 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
   const cancelTask = async (projectId: string, taskId: string) => {
     setCancellingTaskId(taskId);
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/projects/${projectId}/tasks/${taskId}/cancel`, { method: "POST" });
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/projects/${projectId}/tasks/${taskId}/cancel`, { method: "POST" });
       if (res.ok) fetchProjects();
     } catch { /* ignore */ }
     finally { setCancellingTaskId(null); }

@@ -749,3 +749,39 @@ sentinel held off-limits), so it needs its own planning round.
 > (``components/OrgProjectBoard.tsx`` + ``components/OrgChatPanel.tsx``,
 > 20 hits, ~110 LOC) follows in the same turn per the gamma boundary
 > proposal in inventory sec 9.
+
+| _this commit_ | P-RC-9 P9.8gamma-3 | feat(frontend): P9.8gamma-3 swap OrgProjectBoard + OrgChatPanel v1->v2 mint API paths | +PLACEHOLDER LOC (components/OrgProjectBoard.tsx 11 swap lines + components/OrgChatPanel.tsx 6 HTTP swap lines + 3 comment-line text updates + ledger this row + body ~24 LOC) | 0 (no new tests; tsc -b clean, vitest 14/14 across 5 suites, canary 1/1, narrowed slice 581/581, REST contract sentinel 3/3) | ADR-0011 (no new Protocol; pure URL string swap + 3 narrative comment updates on frontend; no abstraction introduced); ADR-0012 (308 shim ``_orgs_v2_legacy_redirects.py`` continues to serve any legacy callers through v2.0.x per Q-B single-window contract); charter D-1 R3 LOCKED (mint canonical literal lives at ``/api/v2/orgs/*``); inventory sec 1.3 (all 11 OrgProjectBoard hits Group B, including B68-B83 ProjectStore + dispatch / cancel) + sec 1.4 (OrgChatPanel: 6 HTTP B + 3 comment updates) |
+
+> P9.8gamma-3 third ``apps/`` source touch landed. Swapped mint-semantic
+> frontend API call sites in two component-cluster files:
+> ``components/OrgProjectBoard.tsx`` and ``components/OrgChatPanel.tsx``
+> (the project board + chat panel cluster per inventory sec 9).
+> OrgProjectBoard: 11 HTTP literals migrated covering the full
+> ProjectStore + dispatch / cancel surface -- ``get_task`` (B79),
+> ``get_task_timeline`` (B81), ``list_projects`` (B68),
+> ``update_project`` (B71), ``create_project`` (B69), ``create_task``
+> (B73), ``delete_project`` (B72), ``update_task`` (B74),
+> ``delete_task`` (B75), ``dispatch_task`` (B76), ``cancel_dispatched_task``
+> (B77). All 11 are template-literal Group B swaps with no verb or
+> body change. OrgChatPanel: 6 HTTP literals migrated for
+> ``activity_view`` (B46; lines 492 + 582), ``get_command`` (B39;
+> lines 685 + 1252), ``cancel`` (B40; line 792), and ``submit``
+> (B38; line 1203). Additionally, 3 narrative comment lines updated
+> in OrgChatPanel for ledger / diagram coherence -- line 105 JSDoc
+> referring to legacy WS-vs-HTTP context, line 159 inline CJK comment
+> documenting the activity timeline renderer, and line 479 CJK
+> comment describing the org-view merge logic. Net file deltas: 11+11
+> (OrgProjectBoard) + 9+9 (OrgChatPanel) = 40 lines moved, 0 LOC net.
+> Verification: ``tsc -b`` exit 0 (no type drift; 6 + 11 = 17 HTTP
+> path strings all flow through the same mocked ``safeFetch`` so type
+> shape is unchanged); ``vitest run`` 14 passed / 5 suites; ``pytest
+> tests/integration/test_v2_im_canary_e2e.py
+> tests/parity/orgs/test_rest_contract_sentinel.py -q`` 4 passed;
+> narrowed backend slice ``tests/api/ + tests/runtime/orgs/ +
+> tests/parity/orgs/`` 581 passed (= baseline at HEAD ``5708cce5``;
+> = baseline at HEAD ``754ff465``; no regression). Strict additive
+> verified: ``git diff 754ff465..HEAD -- src/openakita/`` returns
+> empty bytes; only ``apps/`` and ``docs/revamp/PROGRESS_LEDGER_P9.md``
+> moved this commit. 7 / 7 P-RC-9 sentinels remain ACTIVE.
+> P9.8gamma-4 (7 remaining view / component files; 18 HTTP + 1 comment
+> = 19 hits; ~90 LOC) follows in the same turn per inventory sec 9.

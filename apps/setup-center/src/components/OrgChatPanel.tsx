@@ -102,7 +102,7 @@ export interface OrgChatPanelProps {
   nodeNames?: Record<string, string>;
   /**
    * Which supervisor runtime drives this org. ``"v1"`` keeps the
-   * legacy WS + ``onWsEvent`` + ``/api/orgs/.../activity`` path
+   * legacy WS + ``onWsEvent`` + ``/api/v2/orgs/.../activity`` path
    * (every existing call site). ``"v2"`` ALSO subscribes to the
    * SSE feed at ``/api/v2/orgs/{id}/stream`` and renders a
    * :class:`ProgressLedgerTimeline` above the chat list. The v1
@@ -156,7 +156,7 @@ function isSoftOrgExitReason(reason?: string): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// P11: 组织活动时间线（/api/orgs/{org}/activity）的中性渲染器。
+// P11: 组织活动时间线（/api/v2/orgs/{org}/activity）的中性渲染器。
 //
 // 之前的行为是把每个 activity item（user_command / task_assigned /
 // workbench_started / workbench_succeeded / task_completed …）映射成一条
@@ -476,7 +476,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   }, [apiBaseUrl]);
 
   // Load history: backend first, localStorage fallback
-  // 整组织视图额外合并 /api/orgs/{org}/activity（含 IM/桌面/指挥台所有来源），
+  // 整组织视图额外合并 /api/v2/orgs/{org}/activity（含 IM/桌面/指挥台所有来源），
   // 让 IM 来的指令、节点互发的消息也能在指挥台直接看到。
   useEffect(() => {
     let cancelled = false;
@@ -489,7 +489,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       if (!wholeOrgView) return [];
       try {
         const r = await safeFetch(
-          `${apiBaseUrl}/api/orgs/${encodeURIComponent(orgId)}/activity?limit=${ORG_HISTORY_PAGE_LIMIT}`,
+          `${apiBaseUrl}/api/v2/orgs/${encodeURIComponent(orgId)}/activity?limit=${ORG_HISTORY_PAGE_LIMIT}`,
         );
         const j = await r.json();
         const arr = Array.isArray(j?.items) ? (j.items as ActivityItem[]) : [];
@@ -579,7 +579,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         ).then(r => r.json()).catch(() => ({}));
         const activityPromise = wholeOrgView
           ? safeFetch(
-              `${apiBaseUrl}/api/orgs/${encodeURIComponent(orgId)}/activity?limit=${ORG_HISTORY_PAGE_LIMIT}`,
+              `${apiBaseUrl}/api/v2/orgs/${encodeURIComponent(orgId)}/activity?limit=${ORG_HISTORY_PAGE_LIMIT}`,
             ).then(r => r.json()).catch(() => ({ items: [] }))
           : Promise.resolve({ items: [] });
         const [histData, actData] = await Promise.all([histPromise, activityPromise]);
@@ -682,7 +682,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         }
 
         try {
-          const res = await safeFetch(`${apiBaseUrl}/api/orgs/${pending.orgId}/commands/${pending.commandId}`);
+          const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${pending.orgId}/commands/${pending.commandId}`);
           const data = await res.json();
           if (data.status === "done" || data.status === "error") {
             if (!_pendingCmds.has(convId)) break;
@@ -789,7 +789,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
     setStopping(true);
     try {
       await safeFetch(
-        `${apiBaseUrl}/api/orgs/${encodeURIComponent(orgId)}/commands/${encodeURIComponent(pendingCmdId)}/cancel`,
+        `${apiBaseUrl}/api/v2/orgs/${encodeURIComponent(orgId)}/commands/${encodeURIComponent(pendingCmdId)}/cancel`,
         { method: "POST" },
       );
     } catch (e) {
@@ -1200,7 +1200,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
 
     let finalContent = "";
     try {
-      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/command`, {
+      const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/command`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1249,7 +1249,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           await new Promise(r => setTimeout(r, 5000));
           if (resolved) break;
           try {
-            const poll = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/commands/${commandId}`);
+            const poll = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}/commands/${commandId}`);
             const pd = await poll.json();
             if (pd.status === "running" && typeof pd.blocker_summary === "string" && pd.blocker_summary.trim()) {
               const blockerSummary = pd.blocker_summary.trim();
