@@ -293,3 +293,11 @@ current_phase: P-RC-9
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-9 P9.7.charter | docs(revamp): add P9.7 v2 REST endpoint charter (planning round) | +PLACEHOLDER (P-RC-9-P9.7-CHARTER.md NEW ~380 + ledger ~16) | 0 (planning only; ``git diff 89703a28..HEAD -- src/openakita/ tests/`` empty) | ADR-0011 (no new Protocols per R4); ADR-0012 (v1 delete waits for P9.9 per Q-B 410); ADR-0013 (perf_counter SLA extended to ~5 REST cases); ADR-0014 (budget precedent; ADR-0015 NOT needed this round) |
+
+## P9.7a -- scaffold + Group A reconciliation (this turn)
+
+> Docs-only kickoff. Catalogues the real surface (89 v1 + 9 Group A + 6 Group C -> 83 v2 mint, vs charter's ~80 anchored on v1=86), locks D-1 R3 (Group A relocates to ``/api/v2/orgs-spec/`` with 308 shims), records frontend recon (``apps/setup-center/src/config.ts`` MISSING; API base is computed by ``httpApiBase()`` + passed as ``apiBaseUrl``/``apiBase`` prop), locks D-3 (schemas/orgs_v2/* layer per ADR-0011) + D-4 (reuse v1 ``request.app.state`` Depends-free pattern). P9.7a-2 (Pydantic + router skeleton + 308 shim) NOT started.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-9 P9.7a-1 | docs(revamp): P9.7a-1 endpoint inventory + decisions (R1=R3 locked, R2 recon) | +482 LOC (P-RC-9-P9.7-ENDPOINT-INVENTORY.md NEW 254 + P-RC-9-P9.7-DECISIONS.md NEW 220 + ledger +8) | 0 (docs-only; ``git diff 096a5571..HEAD -- src/openakita/ tests/ apps/`` empty) | ADR-0011 (D-3 layer separation: schemas/orgs_v2/* decoupled from router; D-4 flat helpers per R4 granularity ceiling); ADR-0012 (D-1 R3 308 redirect shim is the only relaxation; physical v1 delete still waits for P9.9); cites P-RC-9-P9.7-CHARTER.md sec 1 + 4 + 8 |
