@@ -59,21 +59,29 @@ in-process imports ride to P9.9).
 
 Group A retargets in gamma-1 (``api/orgs.ts`` + ``api/v2Stream.ts``
 + test mock) move 8 wrapper bodies + 1 SSE URL + 1 mock string
-from ``"orgs"`` to ``"orgs-spec"`` per D-1 R3 LOCKED. One verb
-change at ``views/OrgEditorView.tsx:1239`` swapped ``PUT /api/orgs/${id}``
--> ``PATCH /api/v2/orgs/${id}`` per inventory sec 7.2 R2 (Pydantic
-``OrgPatch`` partial body). Other 54 hits are path-only.
+from ``"orgs"`` to ``"orgs-spec"`` per D-1 R3 LOCKED. **All 55
+mint-side swaps are path-only -- no verb changes.** The inventory
+sec 7.2 R2 proposal to convert ``PUT`` -> ``PATCH`` at
+``views/OrgEditorView.tsx:1239`` was withdrawn during gamma-2
+because the backend mint at ``orgs_v2_runtime_orgs.py:218``
+already accepts ``PUT`` (the prior proposal assumed ``PATCH``
+from a stale Pydantic snapshot); the gamma-2 ledger row
+self-discloses this withdrawal. NIT-Y1 (G-RC-9.8 audit cosmetic)
+was closed by P9.8.nit-a.
 
-**LOC delta vs charter**: charter sec 6 budget ~700-950. Actual
-~993 impl-only (charter sec 6 budget ~700-950; +~3% drift; planning
-paperwork charter 499 + inventory 342 booked separately) (499 charter +
-342 inventory + 70+72+76+83
-gamma + 256 delta-1 + ~386 this gate). Inside the
-upper bound; charter / inventory came in heavier than the 200 / 50
-estimate because they were written as substantive planning rounds.
-Frontend swap aggregate (gamma-1..gamma-4): **301 lines moved**
-(227 insertions + 74 deletions), **+153 net** -- inside charter's
-``~250-350 LOC`` window.
+**LOC delta vs charter** (auditor measured per ``git diff --shortstat``): charter sec 6 upper bound 950. **Measured 1030 LOC**
+impl + sentinel + gate (gamma 70+72+76+83 = 301 + delta-1 256 +
+delta-2 473 [= 410 gate body + 63 ledger close]) = **+8.4% drift**
+vs the 950 upper bound, **still within ADR-0014 +/-10% planning
+tolerance** (950 x 1.10 = 1045; 1030 < 1045); **ADR-0015 not
+triggered** (P9.8 is mechanical literal swap, not a new
+architectural decision per charter sec 13). delta-2 erratum: 473
+measured vs ~386 estimated in sec 1 commit table (see sec 7 for
+breakdown). Planning paperwork (charter 499 + inventory 342) booked
+separately. NIT-Y2 (G-RC-9.8 audit cosmetic) was closed by
+P9.8.nit-a. Frontend swap aggregate (gamma-1..gamma-4): **301 lines
+moved** (227 insertions + 74 deletions), **+153 net** -- inside
+charter's ``~250-350 LOC`` window.
 
 ## 3. Test counts (MEASURED full main gate; NOT extrapolated)
 
@@ -245,8 +253,14 @@ nothing superior for a literal-string path swap + grep sentinel.
 * **ADR-0013** (perf_counter SLA): NOT exercised by P9.8 (caller
   migration asserts URL strings; 8th sentinel is a grep with no
   wall-clock measurement).
-* **ADR-0014** (LOC budget): total ~993 impl-only (charter sec 6 budget ~700-950; +~3% drift; planning paperwork charter 499 + inventory 342 booked separately) inside
-  charter sec 6 ``~700-950`` window. **No ADR-0015 filed** this
+* **ADR-0014** (LOC budget): auditor-measured **1030 LOC** total
+  (gamma 301 + delta-1 256 + delta-2 473 [gate body 410 + ledger
+  close 63]) vs charter sec 6 ``~700-950`` upper bound = **+8.4%
+  drift**, **still within ADR-0014 +/-10% planning tolerance**
+  (950 x 1.10 = 1045; 1030 < 1045). delta-2 errata: 473 measured
+  vs ~386 estimated in sec 1 commit table. Planning paperwork
+  (charter 499 + inventory 342) booked separately. **No ADR-0015
+  filed** this
   round -- the 8th sentinel is another instance of the
   established grep-sentinel pattern (precedent: 7th sentinel at
   ``6421508a``), and caller migration is mechanical literal swap.

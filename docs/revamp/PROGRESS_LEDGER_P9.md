@@ -878,7 +878,7 @@ sentinel held off-limits), so it needs its own planning round.
 > P9.8delta-2 (G-RC-9.8 mini-gate + P9.8 ledger close section)
 > follows next in this same delta phase per charter sec 3.
 
-| _this commit_ | P-RC-9 P9.8delta-2 | docs(revamp): P9.8delta-2 G-RC-9.8 mini-gate + P9.8 ledger close | +PLACEHOLDER LOC (docs/revamp/gates/G-RC-9.8.md NEW ~410 LOC + ledger close summary section + ledger this row + body ~30 LOC) | 0 (gate doc + ledger; no test churn this commit; main gate measured 6 858 passed / 12 failed / 116 skipped / 5 xfailed in 1 063.36 s for §3.1; narrow slice 585 passed in 77.26 s; parity/orgs 66 passed in 6.49 s) | ADR-0011 (no new Protocol; gate doc is process artefact, not abstraction); ADR-0012 (gate asserts v1 subsystem + v1 router byte-level untouched across all 8 P9.8 commits per §10 piece 3); ADR-0014 (LOC budget: impl-only ~983, right at charter sec 6 ~700-950 upper bound; +3 % drift inside ADR-0014 small-wiring tolerance); **ADR-0015 NOT filed this round** (charter sec 13 deferred; P9.9 charter reassesses for 308 shim retirement governance) |
+| _this commit_ | P-RC-9 P9.8delta-2 | docs(revamp): P9.8delta-2 G-RC-9.8 mini-gate + P9.8 ledger close | +PLACEHOLDER LOC (docs/revamp/gates/G-RC-9.8.md NEW ~410 LOC + ledger close summary section + ledger this row + body ~30 LOC) | 0 (gate doc + ledger; no test churn this commit; main gate measured 6 858 passed / 12 failed / 116 skipped / 5 xfailed in 1 063.36 s for §3.1; narrow slice 585 passed in 77.26 s; parity/orgs 66 passed in 6.49 s) | ADR-0011 (no new Protocol; gate doc is process artefact, not abstraction); ADR-0012 (gate asserts v1 subsystem + v1 router byte-level untouched across all 8 P9.8 commits per §10 piece 3); ADR-0014 (LOC budget: auditor-measured 1030 LOC total = gamma 301 + delta-1 256 + delta-2 473; +8.4% drift vs 950 upper bound, still within ADR-0014 +/-10% planning tolerance; corrected by P9.8.nit-a errata); **ADR-0015 NOT filed this round** (charter sec 13 deferred; P9.9 charter reassesses for 308 shim retirement governance) |
 
 > P9.8delta-2 gate commit landed; **P9.8 caller migration phase
 > CLOSED**. Wrote ``docs/revamp/gates/G-RC-9.8.md`` (~410 LOC
@@ -918,11 +918,16 @@ sentinel held off-limits), so it needs its own planning round.
 > 4b8a9ad8..HEAD -- src/openakita/`` returns empty bytes across
 > all 8 commits); **8 / 8 P-RC-9 sentinels ACTIVE** (6 parity
 > P9.1c-P9.6gamma + 1 REST contract P9.7gamma-2 + 1 frontend
-> stale-path P9.8delta-1). Impl-only LOC delta ~983 (gamma 301
-> moved + delta-1 256 + delta-2 ~460 = 1 017 incl ledger close;
-> right at charter sec 6 ~700-950 upper bound; +3 % drift inside
-> ADR-0014 small-wiring tolerance). Planning paperwork (charter
-> 499 + alpha-1 342) booked separately at their own commits.
+> stale-path P9.8delta-1). Auditor-measured LOC delta **1030**
+> (gamma 70+72+76+83 = 301 + delta-1 256 + delta-2 473 [= 410 gate
+> body + 63 ledger close]) vs charter sec 6 ~700-950 upper bound
+> = **+8.4% drift**, still within **ADR-0014 +/-10% planning
+> tolerance** (950 x 1.10 = 1045; 1030 < 1045); **ADR-0015 not
+> triggered** (P9.8 is mechanical literal swap, not a new
+> architectural decision per charter sec 13). NIT-Y2 (G-RC-9.8
+> audit cosmetic) was closed by P9.8.nit-a. Planning paperwork
+> (charter 499 + alpha-1 342) booked separately at their own
+> commits.
 >
 > **P-RC-9 phase status**: 6 / 6 ADR-0011 subsystem rewrites
 > complete + parity-validated; 83 / 83 v2 REST mint endpoints +
@@ -938,3 +943,41 @@ sentinel held off-limits), so it needs its own planning round.
 > ACCEPTED (b) single-window discipline. G-RC-9 final gate signs
 > off after P9.9 PASS. **HARD STOP per brief**: P9.9 NOT started
 > this turn; opens in the next agent run on operator signal.
+
+## P9.8.nit-a -- G-RC-9.8 audit cosmetic cleanup (NIT-Y1 + NIT-Y2)
+
+| _this commit_ | P-RC-9 P9.8.nit-a | docs(revamp): P9.8.nit-a clean up G-RC-9.8 audit NIT-Y1 + NIT-Y2 (cosmetic doc errata) | +PLACEHOLDER LOC (docs/revamp/gates/G-RC-9.8.md sec 2 + sec 7 errata; docs/revamp/PROGRESS_LEDGER_P9.md delta-2 row + close section LOC summary + this nit-a section; <= 80 LOC narrow doc edits) | 0 (docs only; no source/test edits; ``git diff 99606d6c..HEAD -- src/openakita/ apps/ tests/`` empty bytes; 8 / 8 sentinels still ACTIVE -- ``pytest tests/parity/orgs/ -q`` 66 passed) | ADR-0011 (no new Protocol; cosmetic doc errata, not abstraction); ADR-0012 (v1 subsystem + v1 router + 308 shim BYTE-LEVEL UNTOUCHED); ADR-0014 (auditor-measured 1030 LOC total = +8.4% drift inside +/-10% planning tolerance; corrects sec 2 + sec 7 + ledger close section's earlier ~993 / ~983 / +3% miscount); **ADR-0015 not filed** (P9.8 is mechanical literal swap, not a new architectural decision per charter sec 13; reassessed in P9.9 charter for 308 shim retirement governance per Q-B ACCEPTED (b)) |
+
+> P9.8.nit-a docs-only commit lands G-RC-9.8 audit follow-up.
+> NIT-Y1 (sec 2 PUT->PATCH narrative mismatch with code): replaced
+> the "one verb change" sentence with honest disclosure that all
+> 55 mint-side swaps are path-only and the inventory sec 7.2 R2
+> PUT->PATCH proposal was withdrawn during gamma-2 because the
+> backend mint at ``orgs_v2_runtime_orgs.py:218`` already accepts
+> PUT. Verification: HEAD ``apps/setup-center/src/views/
+> OrgEditorView.tsx`` line 1239-1243 shows ``method: "PUT"`` for
+> ``/api/v2/orgs/${currentOrg.id}`` (verb stayed PUT). Backend
+> verification: ``src/openakita/api/routes/orgs_v2_runtime_orgs.py``
+> line 218 ``@router.put("/{org_id}", summary="B11 update
+> organization")`` (PUT accepted at runtime). gamma-2 ledger row
+> body (this file lines 732-737) self-discloses the withdrawal
+> with the same wording: "earlier R2 PUT->PATCH proposal is moot
+> because the mint endpoint already accepts PUT". NIT-Y2 (sec 2 +
+> sec 7 + close section LOC drift miscount): replaced executor's
+> ~993 / ~983 / +~3% / +3% with auditor-measured **1030 LOC**
+> (gamma 70+72+76+83 = 301 per ``git diff --shortstat`` per
+> commit + delta-1 256 + delta-2 473 [= 410 gate body + 63 ledger
+> close section]) = **+8.4% drift** vs charter sec 6 950 upper
+> bound, still within ADR-0014 +/-10% planning tolerance
+> (950 x 1.10 = 1045; 1030 < 1045); **ADR-0015 not triggered**
+> (P9.8 is mechanical literal swap per charter sec 13). delta-2
+> erratum: 473 measured vs ~386 estimated. References G-RC-9.8
+> audit report's PASS-WITH-NITS verdict (NIT-Y3 BOM is
+> pre-existing, defers to P-RC-10). Strict-additive boundary
+> verified: ``git diff 99606d6c..HEAD -- src/openakita/ apps/
+> tests/`` returns empty bytes (docs-only commit). 8 / 8 P-RC-9
+> sentinels remain ACTIVE: ``pytest tests/parity/orgs/ -q`` 66
+> passed. Existing G-RC-9 final NIT roster (B-1, M-1 / M-2 / M-3
+> / M-4, P9.7-B) untouched -- they continue to ride. **HARD STOP**
+> per brief: P9.9 charter NOT started (last charter of P-RC-9;
+> ~31 000 LOC net deletion needs its own scoped delegation).
