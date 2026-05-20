@@ -981,3 +981,41 @@ sentinel held off-limits), so it needs its own planning round.
 > / M-4, P9.7-B) untouched -- they continue to ride. **HARD STOP**
 > per brief: P9.9 charter NOT started (last charter of P-RC-9;
 > ~31 000 LOC net deletion needs its own scoped delegation).
+
+## P9.9.adr -- ADR-0015 308 shim retirement governance (planning ratification)
+
+| _this commit_ | P-RC-9 P9.9.adr | docs(adr): ADR-0015 308 shim retirement governance (option b -- v2.1.0 retirement; P9.9 NO-OP) | +PLACEHOLDER LOC (docs/adr/0015-308-shim-retirement-governance.md NEW 198 LOC mirroring ADR-0014 6-section layout; ledger this section + row ~6 LOC; Q_DECISIONS.md Q-B governance ratification note ~5 LOC; total 239 LOC <= 250 cap; target ~170) | 0 (docs-only commit; no source/test/apps edits; ``git diff d1bec779..HEAD -- src/openakita/ tests/ apps/`` returns empty bytes; 8 / 8 P-RC-9 sentinels unchanged) | ADR-0011 (no new Protocol; ADR is governance ratification, not abstraction); ADR-0012 (symmetric v2-side counterpart: ADR-0012 governs v1 deletion while ADR-0015 governs the v2-side compat-layer retirement window); ADR-0014 (mirrors 6-section ADR layout: Title/metadata + Context + Decision + Consequences + Alternatives rejected + Refs); **ADR-0015 FILED** ratifying G-RC-9.7 + G-RC-9.8 audit recommendation = option (b) -- 308 shim NO-OP in P9.9, physical retirement at v2.1.0 per Q-B ACCEPTED (b) 1-release-window discipline |
+
+> P9.9.adr docs-only commit ratifies the auditor recommendation
+> from two consecutive mini-gates (G-RC-9.7 sec 13 + G-RC-9.8 sec
+> 8 + sec 13) for the 9-route 308 redirect shim
+> (``api/routes/_orgs_v2_legacy_redirects.py``; landed at P9.7a-2a
+> commit ``31332276``). **Decision: option (b)** -- P9.9 leaves the
+> shim byte-level untouched; physical retirement (file delete +
+> ``server.py`` mount drop + sentinel #7 OpenAPI snapshot
+> regeneration to drop 9 shim entries + sentinel #8 sweep if
+> Group C affected) becomes a single concrete v2.1.0 milestone
+> task. Option (a) (retire in same window as v1 deletion) was
+> rejected because it would compress P9.7 path rename + P9.9 v1
+> deletion + 308 retirement into the v2.0 cycle, violating the
+> spirit of Q-B's ``1-release HTTP shim`` answer (Q-B explicitly
+> defers ``api/routes/orgs.py`` hard-delete to v2.1.0 for the
+> same reason). Option (c) (hybrid 410 Gone / 404) was rejected
+> because 410 inverts the shim's 308 ``moved permanently, retry
+> here`` semantic and contradicts the P9.7a-2a method+body
+> preservation rationale. The 9 shim routes (paths under prefix
+> ``/api/v2/orgs``): ``GET /templates`` + ``GET
+> /templates/{id}`` + ``POST /templates/{id}/instantiate`` + 6
+> org CRUD/stream variants -- enumerated in ADR-0015
+> Implementation notes. Strict-additive boundary verified: ``git
+> diff d1bec779..HEAD -- src/openakita/ tests/ apps/`` returns
+> empty bytes (docs-only commit; no source/test/apps edits). 8
+> / 8 P-RC-9 sentinels unchanged at HEAD; the shim continues to
+> serve any legacy callers through v2.0.x per the
+> 1-release-window contract. Q_DECISIONS.md Q-B rationale recap
+> annotated with a governance ratification note pointing at
+> ADR-0015. **HARD STOP per brief**: P-RC-9-P9.9-CHARTER NOT
+> started this turn -- it is the next agent task and will own the
+> ~31000 LOC v1 deletion event execution plan; this ADR only
+> ratifies the governance question that the charter section 8
+> needs as a stable input.

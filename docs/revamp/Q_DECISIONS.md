@@ -70,6 +70,9 @@ codebase carry actual passthrough wiring. Mirrors the P-RC-7
 shim cadence (``core/agent.py`` shim removed at v2.0.0-rc2).
 Hard-delete moves to v2.1.0.
 
+
+**Governance ratification (2026-05-20)**: ADR-0015 (``docs/adr/0015-308-shim-retirement-governance.md``) extends Q-B's 1-release-window discipline symmetrically to the v2-side P9.7 308 shim (``_orgs_v2_legacy_redirects.py``, 9 routes; landed P9.7a-2a ``31332276``). G-RC-9.7 + G-RC-9.8 audits both recommended option (b); ADR-0015 ratifies. Both 308 (v2-side) and 410 (v1-side) shims retire at v2.1.0; P9.9 is a documented NO-OP for the 308 shim per the same single-window contract.
+
 ### Q-C rationale recap
 
 4 weeks matches the charter projection and P-RC-4..P-RC-7
