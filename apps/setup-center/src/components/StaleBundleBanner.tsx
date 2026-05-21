@@ -25,6 +25,17 @@
  * The component is intentionally framework-light (plain CSS
  * inline styles, no shadcn imports) so it can render even
  * before the rest of the app boots.
+ *
+ * **Dev-sentinel short-circuit** (smoke-banner fix):
+ * ``vite.config.ts`` falls back to ``dev-<timestamp>`` when
+ * ``VITE_BUILD_ID`` is not set (i.e. local ``npm run dev``).
+ * The backend's ``/api/build-info`` returns the ``openakita``
+ * package version in that mode, so the comparison would
+ * permanently mismatch and the banner would lock on. We detect
+ * the ``dev-`` prefix on the embedded bundle id and skip
+ * polling entirely; CI/production builds set an explicit
+ * ``VITE_BUILD_ID`` (no ``dev-`` prefix) and keep the full
+ * stale-bundle detection active.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -58,6 +69,22 @@ export function StaleBundleBanner({
   const stickyRef = useRef(false);
 
   useEffect(() => {
+    // smoke-banner fix: when ``__BUILD_ID__`` is the
+    // ``dev-<timestamp>`` sentinel emitted by vite.config.ts
+    // (i.e. local ``npm run dev`` without VITE_BUILD_ID), the
+    // backend's package-version build_id can never match by
+    // design, so suppress the banner instead of locking it on.
+    if (!myId || myId.startsWith("dev-")) {
+      if (typeof console !== "undefined" && console.info) {
+        console.info(
+          "[StaleBundleBanner] dev-sentinel bundle id detected (",
+          myId,
+          ") -- skipping stale-bundle poll.",
+        );
+      }
+      return;
+    }
+
     let cancelled = false;
     const fx = fetchImpl ?? fetch;
 

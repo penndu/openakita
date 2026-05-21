@@ -45,6 +45,38 @@ describe("StaleBundleBanner", () => {
     vi.useRealTimers();
   });
 
+  it("stays hidden in dev mode when bundle id is the dev-<timestamp> sentinel", async () => {
+    // smoke-banner regression guard: vite.config.ts falls back to
+    // ``dev-<Date.now().toString(36)>`` when VITE_BUILD_ID is
+    // absent (local ``npm run dev``). The backend returns its
+    // package version, so the comparison would permanently
+    // mismatch and lock the banner on. The component must
+    // short-circuit before issuing any fetch.
+    vi.useFakeTimers();
+    const fetchImpl = makeFetchReturning("1.27.9");
+    render(
+      <StaleBundleBanner
+        bundleId="dev-mfh3xyz"
+        apiBase="http://test"
+        pollMs={1000}
+        initialDelayMs={10}
+        fetchImpl={fetchImpl}
+      />,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(120_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // No fetch must have been issued; no banner must be in the DOM.
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("stale-bundle-banner")).toBeNull();
+    vi.useRealTimers();
+  });
+
   it("stays hidden when the backend build_id matches the bundle", async () => {
     vi.useFakeTimers();
     const fetchImpl = makeFetchReturning("bundle-SAME");
