@@ -483,3 +483,40 @@ def test_contract_active_root_intent_most_recent_running() -> None:
     asyncio.run(rt.send_command("o1", "n2", "second"))
     intent = rt._dispatch.get_active_root_intent("o1")
     assert intent in {"first", "second"}  # most-recent wins; ties OK
+
+
+# ===========================================================================
+# Group I -- smoke-B5 lifecycle wire-up (3 cases)
+# ===========================================================================
+
+
+def test_contract_lifecycle_methods_present() -> None:
+    """case id: smoke_b5.lifecycle.methods_present
+
+    Regression for smoke-B5: ``getattr(OrgRuntime, 'start_org')`` must
+    resolve to a callable; otherwise the dispatch route at
+    ``orgs_v2_runtime_dispatch._call_lifecycle`` returns
+    ``503 OrgRuntime.start_org not wired``.
+    """
+    rt, _cs, _bus = _make_runtime()
+    for verb in ("start_org", "stop_org", "pause_org", "resume_org"):
+        method = getattr(rt, verb, None)
+        assert callable(method), f"OrgRuntime.{verb} missing or not callable"
+
+
+def test_contract_start_org_transitions_state() -> None:
+    """case id: smoke_b5.start_org.state_transition"""
+    rt, _cs, _bus = _make_runtime()
+    out = asyncio.run(rt.start_org("o-smoke"))
+    assert out["ok"] is True
+    assert out["status"].upper() == "ACTIVE"
+
+
+def test_contract_start_then_stop_org_lifecycle() -> None:
+    """case id: smoke_b5.start_then_stop.full_cycle"""
+    rt, _cs, _bus = _make_runtime()
+    started = asyncio.run(rt.start_org("o-cycle"))
+    assert started["ok"] is True
+    stopped = asyncio.run(rt.stop_org("o-cycle"))
+    assert stopped["ok"] is True
+    assert stopped["status"].upper() == "STOPPED"

@@ -299,6 +299,18 @@ class OrgRuntime:
                 event_bus=self._event_bus,
             )
         )
+        # smoke-B5 -- compose the lifecycle sibling so the
+        # B34-B37 router endpoints (POST /{id}/start /stop /pause /resume)
+        # have real backing methods.  Without this, the dispatch route
+        # in ``orgs_v2_runtime_dispatch._call_lifecycle`` returned 503
+        # ``OrgRuntime.start_org not wired`` because ``getattr(rt,
+        # 'start_org', None)`` resolved to None.
+        from ._runtime_lifecycle import OrgLifecycleManager  # local import: avoid cycle
+
+        self._lifecycle: OrgLifecycleManager = OrgLifecycleManager(
+            state=self._state,
+            event_bus=self._event_bus,
+        )
         # Per-org accessors backing the OrgLookupProtocol +
         # CommandRuntimeProtocol surfaces. Populated lazily by
         # the lifecycle sibling (P9.6d).
@@ -337,6 +349,56 @@ class OrgRuntime:
         """v1 ``OrgRuntime.get_command_tracker_snapshot`` parity (delegates to dispatch sibling P9.6e)."""
 
         return self._dispatch.get_command_tracker_snapshot(org_id, command_id)
+
+    # ------------------------------------------------------------------
+    # Lifecycle verbs (smoke-B5 wire-up) -- delegate to OrgLifecycleManager
+    # ------------------------------------------------------------------
+
+    async def start_org(self, org_id: str) -> dict[str, Any]:
+        """Transition org -> ACTIVE (B34).
+
+        Returns a v1-shape envelope ``{'status': 'active', 'ok': bool}``
+        so the API layer's ``_to_dict`` shim is a no-op.  Raises
+        :class:`ValueError` on illegal transitions (mapped to HTTP 400
+        by ``_call_lifecycle`` in the dispatch route).
+        """
+        from ._runtime_lifecycle import IllegalOrgTransition  # local import
+
+        try:
+            ok = await self._lifecycle.start_org(org_id)
+        except IllegalOrgTransition as exc:
+            raise ValueError(str(exc)) from exc
+        return {"ok": ok, "status": self._state.get_org_state(org_id) or "unknown"}
+
+    async def stop_org(self, org_id: str, *, reason: str = "stop") -> dict[str, Any]:
+        """Transition org -> STOPPED (B35)."""
+        from ._runtime_lifecycle import IllegalOrgTransition  # local import
+
+        try:
+            ok = await self._lifecycle.stop_org(org_id, reason=reason)
+        except IllegalOrgTransition as exc:
+            raise ValueError(str(exc)) from exc
+        return {"ok": ok, "status": self._state.get_org_state(org_id) or "unknown"}
+
+    async def pause_org(self, org_id: str) -> dict[str, Any]:
+        """Transition org -> PAUSED (B36)."""
+        from ._runtime_lifecycle import IllegalOrgTransition  # local import
+
+        try:
+            ok = await self._lifecycle.pause_org(org_id)
+        except IllegalOrgTransition as exc:
+            raise ValueError(str(exc)) from exc
+        return {"ok": ok, "status": self._state.get_org_state(org_id) or "unknown"}
+
+    async def resume_org(self, org_id: str) -> dict[str, Any]:
+        """Transition org -> ACTIVE from PAUSED (B37)."""
+        from ._runtime_lifecycle import IllegalOrgTransition  # local import
+
+        try:
+            ok = await self._lifecycle.resume_org(org_id)
+        except IllegalOrgTransition as exc:
+            raise ValueError(str(exc)) from exc
+        return {"ok": ok, "status": self._state.get_org_state(org_id) or "unknown"}
 
     def get_event_store(self, org_id: str) -> Any:
         return self._event_stores.get(org_id)
