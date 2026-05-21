@@ -771,10 +771,19 @@ class OrgManager:
         for p in sorted(self._templates_dir.glob("*.json")):
             try:
                 data = json.loads(p.read_text(encoding="utf-8"))
+                # F-4 §A-2: display_name is the human-readable label (may
+                # contain CJK / emoji); id is the URL-safe ASCII slug used
+                # by URL path-params, log scrapers, and SDK builders.
+                # For legacy templates whose file stem is itself the
+                # display name (e.g. pre-A-2 user-saved CJK ids), the
+                # JSON `name` is still preferred for the display label;
+                # the stem is only the fallback.
+                display_name = data.get("name") or p.stem
                 result.append(
                     {
                         "id": p.stem,
-                        "name": data.get("name", p.stem),
+                        "name": display_name,
+                        "display_name": display_name,
                         "description": data.get("description", ""),
                         "icon": data.get("icon", "\u2728"),
                         "node_count": len(data.get("nodes", [])),
@@ -836,7 +845,21 @@ class OrgManager:
         data["total_tasks_completed"] = 0
         data["total_messages_exchanged"] = 0
         data["total_tokens_used"] = 0
-        tid = template_id or org.name.lower().replace(" ", "-")
+        # F-4 §A-2: auto-generated template ids MUST be URL-safe ASCII
+        # so they roundtrip cleanly through HTTP path params and SDK
+        # URL builders. The previous fallback `org.name.lower().replace(
+        # " ", "-")` was a no-op for pure-CJK names (.lower() and the
+        # space->dash replace both ignore CJK), producing template ids
+        # like "内容运营团队" that broke non-JS HTTP clients.
+        # When the caller supplies an explicit `template_id`, we still
+        # use it verbatim (caller knows what they want); the slugify
+        # pass only kicks in for the auto-derive-from-org-name branch.
+        if template_id:
+            tid = template_id
+        else:
+            from openakita.runtime.orgs._slug import slugify_template_id
+
+            tid = slugify_template_id(org.name)
         p = self._templates_dir / f"{tid}.json"
         p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("[OrgManager] Saved template: %s", tid)
