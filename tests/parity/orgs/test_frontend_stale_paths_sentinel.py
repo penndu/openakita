@@ -62,15 +62,18 @@ _V1_HTTP_RE = re.compile(r"(?<!\.)/api/orgs")
 # deletion alongside ``src/openakita/api/routes/orgs.py``.
 # Each entry: (repo-relative path, line, canonical HTTP-path suffix).
 GROUP_C_ALLOWLIST: list[tuple[str, int, str]] = [
+    # Bumped by smoke-B2 follow-up: the two B2 sidebar toolbar inserts
+    # (L~1971 empty-state, L~2147 compact) added 3 lines above these
+    # paths; line numbers below shift 5344 -> 5347 and 5347 -> 5350.
     ("apps/setup-center/src/views/OrgEditorView.tsx", 1148, "/api/orgs/${currentOrg.id}/reset"),
     (
         "apps/setup-center/src/views/OrgEditorView.tsx",
-        5344,
+        5347,
         "/api/orgs/${currentOrg.id}/heartbeat/trigger",
     ),
     (
         "apps/setup-center/src/views/OrgEditorView.tsx",
-        5347,
+        5350,
         "/api/orgs/${currentOrg.id}/standup/trigger",
     ),
 ]
