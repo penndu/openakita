@@ -10,24 +10,20 @@ vi.mock("../../api/orgs", async () => {
       id: "tpl_a",
       name: "Newsroom",
       description: "A two-node v2 newsroom",
-      nodes: [{ id: "n1" }, { id: "n2" }],
-      edges: [],
+      node_count: 2,
       preset_id: "newsroom",
     },
     {
       id: "tpl_b",
       name: "Solo Writer",
       description: "single-node",
-      nodes: [{ id: "n1" }],
-      edges: [],
+      node_count: 1,
       preset_id: "solo",
     },
   ];
   return {
     __esModule: true,
-    listTemplates: vi.fn(() =>
-      Promise.resolve({ templates: tpls, count: tpls.length }),
-    ),
+    listTemplates: vi.fn(() => Promise.resolve(tpls)),
     instantiateTemplate: vi.fn((_b: string, id: string, body: { name: string }) =>
       Promise.resolve({
         id: "org_new",

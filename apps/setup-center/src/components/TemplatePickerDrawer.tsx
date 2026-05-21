@@ -65,9 +65,9 @@ export function TemplatePickerDrawer({
     setError(null);
     try {
       const resp = await listTemplates(apiBase);
-      setTemplates(resp.templates);
-      if (resp.templates.length > 0 && selectedId === null) {
-        setSelectedId(resp.templates[0].id);
+      setTemplates(resp);
+      if (resp.length > 0 && selectedId === null) {
+        setSelectedId(resp[0].id);
       }
     } catch (e) {
       // v2 disabled returns 404 with a friendly detail — surface it
@@ -154,7 +154,7 @@ export function TemplatePickerDrawer({
                       </div>
                     )}
                     <div className="text-[11px] text-muted-foreground mt-1">
-                      节点 {t.nodes.length} · 边 {t.edges.length}
+                      节点 {t.node_count}
                     </div>
                   </button>
                 </li>

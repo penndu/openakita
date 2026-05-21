@@ -70,7 +70,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { OrgAvatar, AVATAR_PRESETS, AVATAR_MAP } from "../components/OrgAvatars";
 import { OrgChatPanel } from "../components/OrgChatPanel";
 import { TemplatePickerDrawer } from "../components/TemplatePickerDrawer";
-import { createOrg as createOrgV2, type OrgWire } from "../api/orgs";
+import type { OrgWire } from "../api/orgs";
 import { OrgBlackboardPanel, type OrgBlackboardPanelHandle } from "../components/OrgBlackboardPanel";
 import { OrgMonitorPanel } from "../components/OrgMonitorPanel";
 import { OrgDashboard } from "../components/OrgDashboard";
@@ -1344,18 +1344,19 @@ export function OrgEditorView({
     }
   }, [apiBaseUrl, fetchOrgList, showToast, t]);
 
-  // P-RC-2 P2.7: persist a v2 OrgWire returned by TemplatePickerDrawer
-  // (from POST /api/v2/orgs/templates/{id}/instantiate) via POST
-  // /api/v2/orgs, then refresh and select the new org.
+  // P9.8gamma fix: TemplatePickerDrawer now POSTs to mint runtime's
+  // /api/v2/orgs/from-template (B8), which instantiates AND persists
+  // in one call. The OrgWire handed to onCreated is the already-saved
+  // mint-runtime org, so this handler only needs to refresh the
+  // sidebar list (so the new id surfaces) and select the new org.
   const handleCreateOrgV2FromTemplate = useCallback(
     async (org: OrgWire) => {
       if (orgCreateBusyRef.current) return;
       orgCreateBusyRef.current = true;
       setCreatingOrg(true);
       try {
-        const created = await createOrgV2(apiBaseUrl, org);
         const list = await fetchOrgList();
-        let newId = typeof created?.id === "string" ? created.id : "";
+        let newId = typeof org?.id === "string" ? org.id : "";
         if (!newId && list.length > 0) {
           const sorted = [...list].sort((a, b) =>
             (b.created_at || "").localeCompare(a.created_at || ""),
@@ -1371,14 +1372,14 @@ export function OrgEditorView({
         );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        console.error("Failed to persist v2 org from template:", e);
+        console.error("Failed to refresh after v2 create-from-template:", e);
         showToast(t("org.editor.createFromTemplateFailed", { error: msg }), "error");
       } finally {
         orgCreateBusyRef.current = false;
         setCreatingOrg(false);
       }
     },
-    [apiBaseUrl, fetchOrgList, showToast, t],
+    [fetchOrgList, showToast, t],
   );
 
   const [confirmDeleteOrgId, setConfirmDeleteOrgId] = useState<string | null>(null);

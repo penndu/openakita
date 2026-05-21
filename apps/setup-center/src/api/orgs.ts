@@ -1,25 +1,26 @@
 /**
- * V2 organisation API client wrappers.
+ * V2 organisation API client wrappers (P9.8gamma smoke-blocker fix).
  *
- * Mirrors the v2 endpoints in ``src/openakita/api/routes/orgs_v2.py``
- * exposed by the backend behind ``settings.runtime_v2_enabled``. All
- * functions take ``apiBase`` (the result of ``httpApiBase()``) as the
- * first argument so they stay decoupled from any single React
- * component's state plumbing.
+ * Routes the v2 org create + template flow against the **mint
+ * runtime** endpoints in
+ * ``src/openakita/api/routes/orgs_v2_runtime_orgs.py`` (B1-B12 of the
+ * P9.7 inventory) -- backed by ``runtime/orgs.OrgManager``, the same
+ * store the sidebar ``GET /api/v2/orgs`` reads from. The older
+ * Group A spec sub-app (``orgs-spec``) at the parallel namespace (a separate
+ * ``JsonOrgStore``) is intentionally *not* used here: orgs landed
+ * there via the previous ``listTemplates`` / ``instantiateTemplate``
+ * / ``createOrg`` (orgs-spec) chain were invisible to the sidebar.
+ * The only legitimate Group A caller in the frontend is the SSE
+ * stream client at ``api/v2Stream.ts`` -- see sentinel #8 allowlist.
  *
  * Endpoints covered:
- *   GET    /api/v2/orgs-spec/templates                      listTemplates
- *   GET    /api/v2/orgs-spec/templates/{id}                  getTemplate
- *   POST   /api/v2/orgs-spec/templates/{id}/instantiate      instantiateTemplate
- *   GET    /api/v2/orgs-spec                                 listOrgs
- *   POST   /api/v2/orgs-spec                                 createOrg
- *   GET    /api/v2/orgs-spec/{id}                            getOrg
- *   PATCH  /api/v2/orgs-spec/{id}                            patchOrg
- *   DELETE /api/v2/orgs-spec/{id}                            deleteOrg
- *
- * The frontend uses these wrappers from a Template-picker drawer (the
- * Phase-6 entry point for v2 org creation) and, in Phase 7, from the
- * full org editor.
+ *   GET    /api/v2/orgs/templates                       listTemplates
+ *   GET    /api/v2/orgs/templates/{id}                  getTemplate
+ *   POST   /api/v2/orgs/from-template                   instantiateTemplate (B8 instantiate+persist)
+ *   GET    /api/v2/orgs                                 listOrgs
+ *   GET    /api/v2/orgs/{id}                            getOrg
+ *   PATCH  /api/v2/orgs/{id}                            patchOrg
+ *   DELETE /api/v2/orgs/{id}                            deleteOrg
  */
 
 import { apiGet, apiPost, apiPostRaw } from "../api";
@@ -27,16 +28,16 @@ import { apiUrl } from "../platform/apiUrl";
 import { safeFetch } from "../providers";
 
 // ---------------------------------------------------------------------------
-// Wire types — kept loose on purpose. The backend ships ``to_jsonable``
+// Wire types -- kept loose on purpose. The backend ships ``to_dict``
 // snapshots that may grow new optional fields without breaking older
 // frontends.
 // ---------------------------------------------------------------------------
 
 export interface TemplateNodeWire {
   id: string;
-  type: string;
-  role: string;
-  label: string;
+  type?: string;
+  role?: string;
+  label?: string;
   persona_prompt?: string | null;
   parent_id?: string | null;
   [key: string]: unknown;
@@ -44,19 +45,25 @@ export interface TemplateNodeWire {
 
 export interface TemplateEdgeWire {
   id: string;
-  org_id: string;
-  src: string;
-  dst: string;
-  kind: string;
+  org_id?: string;
+  src?: string;
+  dst?: string;
+  kind?: string;
   [key: string]: unknown;
 }
 
 export interface TemplateWire {
+  /** Template-summary shape returned by ``GET /api/v2/orgs/templates``. */
   id: string;
   name: string;
+  display_name?: string;
   description?: string | null;
-  nodes: TemplateNodeWire[];
-  edges: TemplateEdgeWire[];
+  icon?: string;
+  node_count: number;
+  tags?: string[];
+  /** Present only on the full-detail ``GET /api/v2/orgs/templates/{id}`` response. */
+  nodes?: TemplateNodeWire[];
+  edges?: TemplateEdgeWire[];
   [key: string]: unknown;
 }
 
@@ -73,22 +80,12 @@ export interface OrgWire {
   [key: string]: unknown;
 }
 
-export interface ListTemplatesResponse {
-  templates: TemplateWire[];
-  count: number;
-}
-
-export interface ListOrgsResponse {
-  orgs: OrgWire[];
-  count: number;
-}
-
 export interface InstantiateBody {
+  /** New org name. Forwarded to mint runtime as a ``create_from_template`` override. */
   name: string;
   description?: string | null;
-  defaults?: Record<string, unknown>;
-  node_persona_prompts?: Record<string, string>;
-  node_runtime_overrides?: Record<string, Record<string, unknown>>;
+  /** Further overrides forwarded verbatim to ``OrgManager.create_from_template``. */
+  [key: string]: unknown;
 }
 
 export interface PatchOrgBody {
@@ -97,15 +94,15 @@ export interface PatchOrgBody {
 }
 
 // ---------------------------------------------------------------------------
-// Templates
+// Templates (mint runtime: ``/api/v2/orgs/templates*``)
 // ---------------------------------------------------------------------------
 
-export function listTemplates(apiBase: string): Promise<ListTemplatesResponse> {
-  return apiGet<ListTemplatesResponse>(apiUrl(apiBase, "api", "v2", "orgs-spec", "templates"));
+export function listTemplates(apiBase: string): Promise<TemplateWire[]> {
+  return apiGet<TemplateWire[]>(apiUrl(apiBase, "api", "v2", "orgs", "templates"));
 }
 
 export function getTemplate(apiBase: string, templateId: string): Promise<TemplateWire> {
-  return apiGet<TemplateWire>(apiUrl(apiBase, "api", "v2", "orgs-spec", "templates", templateId));
+  return apiGet<TemplateWire>(apiUrl(apiBase, "api", "v2", "orgs", "templates", templateId));
 }
 
 export function instantiateTemplate(
@@ -113,26 +110,26 @@ export function instantiateTemplate(
   templateId: string,
   body: InstantiateBody,
 ): Promise<OrgWire> {
-  return apiPost<OrgWire>(
-    apiUrl(apiBase, "api", "v2", "orgs-spec", "templates", templateId, "instantiate"),
-    body,
-  );
+  // P9.8gamma fix: the mint runtime collapses orgs-spec's
+  // ``instantiate`` + ``persist`` into a single B8 call. Posting to
+  // ``/from-template`` (mint) returns a 201 with the already-persisted
+  // org, so the drawer no longer needs a follow-up ``createOrg`` POST.
+  return apiPost<OrgWire>(apiUrl(apiBase, "api", "v2", "orgs", "from-template"), {
+    template_id: templateId,
+    ...body,
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Orgs CRUD
+// Orgs CRUD (mint runtime: ``/api/v2/orgs*``)
 // ---------------------------------------------------------------------------
 
-export function listOrgs(apiBase: string): Promise<ListOrgsResponse> {
-  return apiGet<ListOrgsResponse>(apiUrl(apiBase, "api", "v2", "orgs-spec"));
-}
-
-export function createOrg(apiBase: string, org: OrgWire): Promise<OrgWire> {
-  return apiPost<OrgWire>(apiUrl(apiBase, "api", "v2", "orgs-spec"), { org });
+export function listOrgs(apiBase: string): Promise<OrgWire[]> {
+  return apiGet<OrgWire[]>(apiUrl(apiBase, "api", "v2", "orgs"));
 }
 
 export function getOrg(apiBase: string, orgId: string): Promise<OrgWire> {
-  return apiGet<OrgWire>(apiUrl(apiBase, "api", "v2", "orgs-spec", orgId));
+  return apiGet<OrgWire>(apiUrl(apiBase, "api", "v2", "orgs", orgId));
 }
 
 export async function patchOrg(
@@ -140,7 +137,7 @@ export async function patchOrg(
   orgId: string,
   body: PatchOrgBody,
 ): Promise<OrgWire> {
-  const res = await safeFetch(apiUrl(apiBase, "api", "v2", "orgs-spec", orgId), {
+  const res = await safeFetch(apiUrl(apiBase, "api", "v2", "orgs", orgId), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -149,7 +146,7 @@ export async function patchOrg(
 }
 
 export async function deleteOrg(apiBase: string, orgId: string): Promise<void> {
-  await safeFetch(apiUrl(apiBase, "api", "v2", "orgs-spec", orgId), { method: "DELETE" });
+  await safeFetch(apiUrl(apiBase, "api", "v2", "orgs", orgId), { method: "DELETE" });
 }
 
 // Re-export apiPostRaw so callers can opt into low-level error inspection

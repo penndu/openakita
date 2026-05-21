@@ -65,12 +65,12 @@ GROUP_C_ALLOWLIST: list[tuple[str, int, str]] = [
     ("apps/setup-center/src/views/OrgEditorView.tsx", 1148, "/api/orgs/${currentOrg.id}/reset"),
     (
         "apps/setup-center/src/views/OrgEditorView.tsx",
-        5343,
+        5344,
         "/api/orgs/${currentOrg.id}/heartbeat/trigger",
     ),
     (
         "apps/setup-center/src/views/OrgEditorView.tsx",
-        5346,
+        5347,
         "/api/orgs/${currentOrg.id}/standup/trigger",
     ),
 ]
@@ -88,7 +88,7 @@ TS_MODULE_IMPORTS: list[tuple[str, int, str]] = [
     ),
     (
         "apps/setup-center/src/components/__tests__/TemplatePickerDrawer.test.tsx",
-        47,
+        43,
         '"../../api/orgs"',
     ),
     ("apps/setup-center/src/views/OrgEditorView.tsx", 73, '"../api/orgs"'),
@@ -206,4 +206,123 @@ def test_module_imports_use_relative_path() -> None:
         "specifiers; if a discriminator false-positives, fix the regex "
         "(do NOT add entries to GROUP_C_ALLOWLIST):\n"
         + "\n".join(f"  {rel}:{ln}  {reason}" for rel, ln, reason in drift)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sentinel #8 augment (smoke-blocker-v2-create, P9.8gamma):
+# guard against unauthorized ``/api/v2/orgs-spec/`` HTTP literals.
+#
+# The Group A relocation (``/api/v2/orgs-spec/...``, P9.7a-2a) is a
+# *separate* persistence sub-app from the P9.7 mint runtime
+# (``/api/v2/orgs/...``). When a frontend caller meant to create
+# orgs lands on ``orgs-spec`` instead of mint, the new org goes to
+# the wrong store and the sidebar (which reads from mint) never
+# shows it -- the BLOCKER discovered during smoke UX investigation.
+#
+# This augment locks down the post-fix state: the only legitimate
+# Group A frontend callers are the SSE stream client + its unit
+# test (the SSE route is genuinely served by the orgs-spec router,
+# see ``api/routes/orgs_v2_stream.py``). All other ``orgs-spec``
+# HTTP literals must use the mint runtime instead.
+# ---------------------------------------------------------------------------
+
+_ORGS_SPEC_HTTP_RE = re.compile(r"/api/v2/orgs-spec")
+
+# Strict allowlist of legitimate Group A ``/api/v2/orgs-spec/``
+# HTTP literals in the frontend tree. Each entry: (repo-relative
+# path, line, justification).
+LEGITIMATE_ORGS_SPEC_CALLERS: list[tuple[str, int, str]] = [
+    (
+        "apps/setup-center/src/api/v2Stream.ts",
+        2,
+        "Module docstring documenting the Group A SSE endpoint "
+        "the client wraps (`GET /api/v2/orgs-spec/{id}/stream`).",
+    ),
+    (
+        "apps/setup-center/src/api/v2Stream.ts",
+        112,
+        "Canonical SSE URL literal -- Group A's stream sub-app "
+        "(`api/routes/orgs_v2_stream.py`) is the actual server.",
+    ),
+    (
+        "apps/setup-center/src/api/__tests__/v2Stream.test.ts",
+        68,
+        "Unit-test assertion pinning the SSE URL shape; mirrors "
+        "the canonical literal at v2Stream.ts L112.",
+    ),
+]
+
+
+def _scan_orgs_spec_http_hits() -> list[tuple[Path, int, str]]:
+    """Return (file, line, stripped_line) for every regex hit."""
+    hits: list[tuple[Path, int, str]] = []
+    for ext in ("*.ts", "*.tsx"):
+        for file in sorted(_FRONTEND_SRC.rglob(ext)):
+            try:
+                text = file.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for n, line in enumerate(text.splitlines(), 1):
+                if _ORGS_SPEC_HTTP_RE.search(line):
+                    hits.append((file, n, line.strip()))
+    return hits
+
+
+def test_frontend_no_unauthorized_orgs_spec_paths() -> None:
+    """Zero ``/api/v2/orgs-spec/`` HTTP literals outside the Group A SSE allowlist.
+
+    The mint runtime at ``/api/v2/orgs/...`` is the canonical v2
+    orgs surface; orgs-spec is a parallel Group A sub-app reserved
+    for the SSE stream + the original spec serializer. Any *new*
+    frontend literal targeting orgs-spec is almost certainly a
+    routing bug (orgs go to a separate store, sidebar misses them).
+    Add to ``LEGITIMATE_ORGS_SPEC_CALLERS`` only when there is a
+    real Group A endpoint behind the URL with a justification.
+    """
+    allowed_keys = {(rel, ln) for rel, ln, _ in LEGITIMATE_ORGS_SPEC_CALLERS}
+    unauthorized: list[tuple[str, int, str]] = []
+    for file, ln, snippet in _scan_orgs_spec_http_hits():
+        rel = file.relative_to(_REPO).as_posix()
+        if (rel, ln) not in allowed_keys:
+            unauthorized.append((rel, ln, snippet))
+    assert not unauthorized, (
+        "Unauthorized ``/api/v2/orgs-spec/`` HTTP literal(s) found in "
+        "apps/setup-center/src/. The mint runtime at /api/v2/orgs/... "
+        "is the canonical v2 orgs surface; orgs-spec is a separate "
+        "Group A sub-app whose only legitimate frontend caller is the "
+        "SSE stream client. Switch to /api/v2/orgs/... or, if the new "
+        "site is a genuine Group A endpoint, add it to "
+        "LEGITIMATE_ORGS_SPEC_CALLERS with rationale.\n"
+        + "\n".join(f"  {rel}:{ln}  {snippet}" for rel, ln, snippet in unauthorized)
+    )
+
+
+def test_legitimate_orgs_spec_callers_still_present() -> None:
+    """Allowlisted Group A SSE literals must still be at their recorded sites.
+
+    Drift alarm twin to ``test_group_c_allowlist_paths_still_present``:
+    if v2Stream.ts gets refactored or the SSE endpoint relocates, the
+    allowlist becomes stale and the augment silently permits paths
+    that no longer exist anywhere in the tree.
+    """
+    missing: list[tuple[str, int, str]] = []
+    for rel, ln, justification in LEGITIMATE_ORGS_SPEC_CALLERS:
+        path = _REPO / rel
+        if not path.is_file():
+            missing.append((rel, ln, f"file missing: {path}"))
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        start = max(0, ln - 5)
+        end = min(len(lines), ln + 5)
+        if not any(_ORGS_SPEC_HTTP_RE.search(s) for s in lines[start:end]):
+            missing.append(
+                (rel, ln, f"no orgs-spec literal in window L{start + 1}..L{end} ({justification!r})")
+            )
+    assert not missing, (
+        "LEGITIMATE_ORGS_SPEC_CALLERS drift: an allowlisted Group A "
+        "SSE literal is no longer at its recorded location. Re-pin "
+        "the line number, or remove the entry if the SSE client has "
+        "migrated off orgs-spec:\n"
+        + "\n".join(f"  {rel}:{ln}  {reason}" for rel, ln, reason in missing)
     )
