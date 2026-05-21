@@ -570,6 +570,18 @@ class Settings(BaseSettings):
         description="每隔多少轮对话触发一次记忆回顾（0 表示禁用）",
     )
 
+    # === Plugin reseed drift detection ===
+    # When True (default), PluginManager logs WARN at startup if any
+    # ``plugins/<id>/<file>.py`` (git-tracked seed) is NEWER than its
+    # ``data/plugins/<id>/<file>.py`` (runtime copy) counterpart -- a
+    # signal that the runtime is executing stale plugin code.  Operators
+    # who intentionally ship without the seed tree (e.g. pip-installed
+    # distributions) can set this to False to silence the warning.
+    plugins_drift_warn_enabled: bool = Field(
+        default=True,
+        description="启动时是否检测 plugins/ vs data/plugins/ 漂移并发出 WARN 日志",
+    )
+
     # === Smart Approval 配置 ===
     smart_approval_enabled: bool = Field(
         default=False,

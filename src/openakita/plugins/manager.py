@@ -437,6 +437,14 @@ class PluginManager:
             logger.debug("No plugins found in %s", self._plugins_dir)
             return
 
+        # Hygiene check (commit feat(plugins) reseed): warn if any plugin
+        # under the git-tracked seed tree (``<project>/plugins``) has been
+        # edited but not yet re-copied into the runtime tree we are about
+        # to load from (``<project>/data/plugins``).  Silent when in sync;
+        # gated by ``settings.plugins_drift_warn_enabled`` for prod images
+        # that ship without the seed tree.
+        self._maybe_warn_on_source_drift()
+
         # Parse all manifests first for topological sorting
         parsed: list[tuple[Path, PluginManifest]] = []
         for plugin_dir in plugin_dirs:
@@ -1745,6 +1753,30 @@ class PluginManager:
         all_lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
         tail = all_lines[-lines:]
         return "\n".join(tail)
+
+
+    def _maybe_warn_on_source_drift(self) -> None:
+        """Emit WARN logs if ``plugins/`` is newer than ``data/plugins/``.
+
+        Best-effort and self-contained: any failure (settings missing,
+        seed tree absent, walk error) downgrades to DEBUG so the drift
+        check never blocks plugin startup.  See
+        :func:`openakita.plugins.reseed.warn_on_drift` for the details.
+        """
+        try:
+            from ..config import settings
+
+            if not getattr(settings, "plugins_drift_warn_enabled", True):
+                return
+            # data/plugins -> data -> project_root -> project_root/plugins
+            source_root = self._plugins_dir.parent.parent / "plugins"
+            if not source_root.is_dir() or source_root.resolve() == self._plugins_dir.resolve():
+                return
+            from .reseed import warn_on_drift
+
+            warn_on_drift(source_root, self._plugins_dir, logger)
+        except Exception as exc:  # pragma: no cover - never block startup
+            logger.debug("plugin drift check skipped: %s", exc)
 
 
 class _LoadedPlugin:
