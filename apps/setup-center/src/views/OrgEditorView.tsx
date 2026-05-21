@@ -69,7 +69,7 @@ import { WorkbenchNodePicker, type WorkbenchTemplate } from "../components/Workb
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { OrgAvatar, AVATAR_PRESETS, AVATAR_MAP } from "../components/OrgAvatars";
 import { OrgChatPanel } from "../components/OrgChatPanel";
-import { TemplatePickerDrawer } from "../components/TemplatePickerDrawer";
+import { TemplatePickerDialog } from "../components/TemplatePickerDialog";
 import type { OrgWire } from "../api/orgs";
 import { OrgBlackboardPanel, type OrgBlackboardPanelHandle } from "../components/OrgBlackboardPanel";
 import { OrgMonitorPanel } from "../components/OrgMonitorPanel";
@@ -1344,7 +1344,7 @@ export function OrgEditorView({
     }
   }, [apiBaseUrl, fetchOrgList, showToast, t]);
 
-  // P9.8gamma fix: TemplatePickerDrawer now POSTs to mint runtime's
+  // P9.8gamma fix: TemplatePickerDialog (formerly Drawer) POSTs to mint runtime's
   // /api/v2/orgs/from-template (B8), which instantiates AND persists
   // in one call. The OrgWire handed to onCreated is the already-saved
   // mint-runtime org, so this handler only needs to refresh the
@@ -1982,8 +1982,8 @@ export function OrgEditorView({
             borderRadius: 12, overflow: "hidden",
             boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
           }}>
-            <div style={{ padding: "12px 12px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontWeight: 600, fontSize: 14 }}>{t("orgEditor.title")}</span>
+            <div style={{ padding: "12px 12px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+              <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", flexShrink: 0 }}>{t("orgEditor.title")}</span>
               <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
@@ -2001,12 +2001,12 @@ export function OrgEditorView({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span data-testid="org-editor-v2-template-trigger">
-                        <TemplatePickerDrawer
+                        <TemplatePickerDialog
                           apiBase={apiBaseUrl}
                           onCreated={(org) => void handleCreateOrgV2FromTemplate(org)}
                         >
                           <Button variant="link" size="sm" disabled={creatingOrg} className="h-7 px-2 text-xs text-primary cursor-pointer">新建 v2 组织（从模板）</Button>
-                        </TemplatePickerDrawer>
+                        </TemplatePickerDialog>
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">{t("org.editor.createFromTemplate")}</TooltipContent>
@@ -2142,8 +2142,8 @@ export function OrgEditorView({
           boxShadow: "0 8px 24px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)",
         }}
       >
-        <div style={{ padding: "12px 12px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>{t("orgEditor.title")}</span>
+        <div style={{ padding: "12px 12px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+          <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", flexShrink: 0 }}>{t("orgEditor.title")}</span>
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             <TooltipProvider delayDuration={300}>
               <Tooltip>
@@ -2165,14 +2165,14 @@ export function OrgEditorView({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span data-testid="org-editor-v2-template-trigger-compact">
-                    <TemplatePickerDrawer
+                    <TemplatePickerDialog
                       apiBase={apiBaseUrl}
                       onCreated={(org) => void handleCreateOrgV2FromTemplate(org)}
                     >
                       <Button variant="link" size="sm" disabled={creatingOrg} className="h-7 px-2 text-xs text-primary cursor-pointer">
                         新建 v2 组织（从模板）
                       </Button>
-                    </TemplatePickerDrawer>
+                    </TemplatePickerDialog>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{t("org.editor.createFromTemplate")}</TooltipContent>

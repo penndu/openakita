@@ -80,14 +80,14 @@ GROUP_C_ALLOWLIST: list[tuple[str, int, str]] = [
 # here so a future drift (e.g. someone turning ``from "../api/orgs"``
 # into a literal URL string) trips the discriminator self-test.
 TS_MODULE_IMPORTS: list[tuple[str, int, str]] = [
-    ("apps/setup-center/src/components/TemplatePickerDrawer.tsx", 39, '"../api/orgs"'),
+    ("apps/setup-center/src/components/TemplatePickerDialog.tsx", 48, '"../api/orgs"'),
     (
-        "apps/setup-center/src/components/__tests__/TemplatePickerDrawer.test.tsx",
+        "apps/setup-center/src/components/__tests__/TemplatePickerDialog.test.tsx",
         7,
         '"../../api/orgs"',
     ),
     (
-        "apps/setup-center/src/components/__tests__/TemplatePickerDrawer.test.tsx",
+        "apps/setup-center/src/components/__tests__/TemplatePickerDialog.test.tsx",
         43,
         '"../../api/orgs"',
     ),
