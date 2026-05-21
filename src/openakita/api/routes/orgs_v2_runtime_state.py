@@ -57,7 +57,7 @@ def _org_dir(mgr: Any, org_id: str) -> Path:
 
 @router.get("/{org_id}/memory", summary="B42 query org memory")
 def query_memory(request: Request, org_id: str) -> list[dict[str, Any]]:
-    from openakita.runtime.orgs import MemoryScope, MemoryType
+    from openakita.orgs import MemoryScope, MemoryType
 
     bb = _get_blackboard(request)
     qp = request.query_params
@@ -76,7 +76,7 @@ def query_memory(request: Request, org_id: str) -> list[dict[str, Any]]:
 
 @router.post("/{org_id}/memory", status_code=201, summary="B43 add memory entry")
 async def add_memory(request: Request, org_id: str) -> dict[str, Any]:
-    from openakita.runtime.orgs import MemoryScope, MemoryType
+    from openakita.orgs import MemoryScope, MemoryType
 
     bb = _get_blackboard(request)
     body = await request.json()

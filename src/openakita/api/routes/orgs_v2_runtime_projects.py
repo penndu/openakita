@@ -57,7 +57,7 @@ def list_projects(request: Request, org_id: str) -> list[dict[str, Any]]:
 
 @router.post("/{org_id}/projects", summary="B69 create project")
 def create_project(request: Request, org_id: str, body: ProjectCreate) -> dict[str, Any]:
-    from openakita.runtime.orgs import OrgProject, ProjectStatus, ProjectType
+    from openakita.orgs import OrgProject, ProjectStatus, ProjectType
 
     proj = OrgProject(
         org_id=org_id,
@@ -82,7 +82,7 @@ def get_project(request: Request, org_id: str, project_id: str) -> dict[str, Any
 def update_project(
     request: Request, org_id: str, project_id: str, body: ProjectPatch
 ) -> dict[str, Any]:
-    from openakita.runtime.orgs import ProjectStatus, ProjectType
+    from openakita.orgs import ProjectStatus, ProjectType
 
     updates: dict[str, Any] = body.model_dump(exclude_none=True)
     if "status" in updates:
@@ -109,7 +109,7 @@ def delete_project(request: Request, org_id: str, project_id: str) -> dict[str, 
 
 @router.post("/{org_id}/projects/{project_id}/tasks", summary="B73 create task")
 async def create_task(request: Request, org_id: str, project_id: str) -> dict[str, Any]:
-    from openakita.runtime.orgs import ProjectTask, TaskStatus
+    from openakita.orgs import ProjectTask, TaskStatus
 
     body = await request.json()
     task = ProjectTask(
@@ -132,7 +132,7 @@ async def create_task(request: Request, org_id: str, project_id: str) -> dict[st
 async def update_task(
     request: Request, org_id: str, project_id: str, task_id: str
 ) -> dict[str, Any]:
-    from openakita.runtime.orgs import TaskStatus
+    from openakita.orgs import TaskStatus
 
     body = await request.json()
     updates: dict[str, Any] = {}
@@ -206,7 +206,7 @@ async def dispatch_task(
 async def cancel_dispatched_task(
     request: Request, org_id: str, project_id: str, task_id: str
 ) -> dict[str, Any]:
-    from openakita.runtime.orgs import TaskStatus
+    from openakita.orgs import TaskStatus
 
     store = _get_project_store(request)
     task_data, _ = store.get_task(task_id)

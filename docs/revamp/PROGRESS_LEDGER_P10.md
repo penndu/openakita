@@ -103,3 +103,38 @@ current_phase: P-RC-10
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-10 P10.2 | feat(orgs): add openakita.runtime.orgs deprecation shim re-exporting from new location [P-RC-10 P10.2] | +~46 (shim) / +~20 / -~22 (sentinel #9 Test 1 Option-Z relax) / +~50 (this ledger block) -- net ~+95 | 0 (slice still 262 / 192) | ADR-0011 (subsystem decomposition; no Protocol change); ADR-0015 (308 shim retirement -- explicitly OUT-OF-SCOPE; byte-untouched) |
+
+## P10.3a -- Sweep ``src/openakita/`` import sites to canonical ``openakita.orgs``
+
+> **Sub-phase status (2026-05-21, P10.3a LANDED)**: Mechanical
+> 1:1 prefix swap of every ``from|import openakita.runtime.orgs``
+> line under ``src/openakita/`` (excl. the deliberate shim
+> ``runtime/orgs/__init__.py``) to the post-flatten canonical
+> ``openakita.orgs`` path. **31 sites across 12 files**: api
+> 9 files / 23 sites (orgs_v2_runtime_orgs 7 + orgs_v2_runtime_projects 5
+> + server 4 + orgs_v2_runtime_state 2 + chat / orgs_v2 /
+> orgs_v2_runtime_dispatch / orgs_v2_runtime_nodes /
+> orgs_v2_stream 1 each), channels 1 file / 6 sites
+> (gateway.py), core 1 file / 1 site
+> (_reasoning_engine_legacy.py), runtime 1 file / 1 site
+> (channel_routing.py). RECON section 2.1 projected ``8 files /
+> 31 sites``; the 12-file count reflects the same 31 sites plus
+> the api-cluster row enumerated 5 files but conflated 4
+> sibling routes with 1 site each into ``+ 1 sibling route``
+> (recon row drift, not a new site). 1:1 byte-equivalent
+> semantics; one isort-driven re-sort in
+> ``runtime/channel_routing.py`` (the rewritten line moves up
+> two slots in alphabetic block order). DeprecationWarning
+> count from src/ paths drops 1 -> 0
+> (``orgs_v2.py:55`` was the last src-side site emitting the
+> shim warning). Slice expected on next sweep:
+> ``test_v1_src_retired_sentinel.py::test_production_imports_v1_free``
+> trips on the new ``from openakita.orgs.X`` lines because the
+> sentinel's v1-era regex is now inverted post-flatten; charter
+> section 2 P10.4 augment / regex inversion is the explicit
+> remediation and MUST land before P10.3b to keep the slice
+> green between mini-commits.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-10 P10.3a | refactor(src/openakita): P10.3a sweep openakita.runtime.orgs imports to canonical openakita.orgs (31 sites / 12 files) [P-RC-10 P10.3a] | +31 / -31 (mechanical prefix swap) + ~5 ledger row | 261 parity+contracts (1 sentinel-#9 Test 2 break expected per inverted regex; P10.4 fix-forward) / 192 runtime-orgs (unchanged) | ADR-0011 (subsystem decomposition; no Protocol change) |

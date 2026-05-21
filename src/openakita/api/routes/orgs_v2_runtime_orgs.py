@@ -80,7 +80,7 @@ def list_orgs(request: Request, include_archived: bool = False) -> list[dict[str
 
 @router.post("", status_code=201, summary="B2 create organization")
 def create_org(request: Request, body: OrgCreate) -> dict[str, Any]:
-    from openakita.runtime.orgs import OrgNameConflictError
+    from openakita.orgs import OrgNameConflictError
 
     try:
         org = _get_manager(request).create(body.model_dump(exclude_none=True))
@@ -96,7 +96,7 @@ def create_org(request: Request, body: OrgCreate) -> dict[str, Any]:
 
 @router.get("/avatar-presets", summary="B3 list avatar presets")
 def get_avatar_presets() -> list[dict[str, Any]]:
-    from openakita.runtime.orgs._runtime_templates import list_avatar_presets
+    from openakita.orgs._runtime_templates import list_avatar_presets
 
     return list_avatar_presets()
 
@@ -131,7 +131,7 @@ def list_templates(request: Request) -> list[dict[str, Any]]:
 
 @router.get("/plugin-workbench-templates", summary="B6 list workbench templates")
 def list_plugin_workbench_templates(request: Request) -> list[dict[str, Any]]:
-    from openakita.runtime.orgs._runtime_templates import build_workbench_templates
+    from openakita.orgs._runtime_templates import build_workbench_templates
 
     agent = getattr(request.app.state, "agent", None)
     pm = getattr(agent, "_plugin_manager", None) if agent else None
@@ -153,7 +153,7 @@ def get_template(request: Request, template_id: str) -> dict[str, Any]:
 
 @router.post("/from-template", status_code=201, summary="B8 create org from template")
 async def create_from_template(request: Request) -> dict[str, Any]:
-    from openakita.runtime.orgs import OrgNameConflictError
+    from openakita.orgs import OrgNameConflictError
 
     body = await request.json()
     template_id = body.pop("template_id", None)
@@ -217,7 +217,7 @@ def get_org(request: Request, org_id: str) -> dict[str, Any]:
 
 @router.put("/{org_id}", summary="B11 update organization")
 def update_org(request: Request, org_id: str, body: OrgPatch) -> dict[str, Any]:
-    from openakita.runtime.orgs import OrgNameConflictError
+    from openakita.orgs import OrgNameConflictError
 
     mgr = _get_manager(request)
     if mgr.get(org_id) is None:
@@ -247,7 +247,7 @@ def patch_org(request: Request, org_id: str, body: OrgPatch) -> dict[str, Any]:
     tighten PUT to a full-replace contract without touching this
     handler.
     """
-    from openakita.runtime.orgs import OrgNameConflictError
+    from openakita.orgs import OrgNameConflictError
 
     mgr = _get_manager(request)
     if mgr.get(org_id) is None:
@@ -275,7 +275,7 @@ def delete_org(request: Request, org_id: str) -> dict[str, Any]:
 
 @router.post("/{org_id}/duplicate", status_code=201, summary="B13 duplicate organization")
 async def duplicate_org(request: Request, org_id: str) -> dict[str, Any]:
-    from openakita.runtime.orgs import OrgNameConflictError
+    from openakita.orgs import OrgNameConflictError
 
     mgr = _get_manager(request)
     if mgr.get(org_id) is None:

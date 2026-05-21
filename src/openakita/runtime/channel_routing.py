@@ -35,8 +35,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from openakita.orgs import OrgNotFound, get_default_store
 from openakita.runtime.models import NodeV2, OrgV2
-from openakita.runtime.orgs import OrgNotFound, get_default_store
 from openakita.runtime.state_graph import StateGraph, compile_from_org
 
 __all__ = [

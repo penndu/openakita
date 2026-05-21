@@ -24,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from openakita.config import settings
-from openakita.runtime.orgs import OrgNotFound, get_default_store
+from openakita.orgs import OrgNotFound, get_default_store
 from openakita.runtime.stream import StreamEvent
 from openakita.runtime.stream_registry import (
     get_or_create_org_stream_bus,

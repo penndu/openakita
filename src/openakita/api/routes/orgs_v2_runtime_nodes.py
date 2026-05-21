@@ -72,7 +72,7 @@ def list_node_schedules(request: Request, org_id: str, node_id: str) -> list[dic
 async def create_node_schedule(request: Request, org_id: str, node_id: str) -> dict[str, Any]:
     mgr = _get_manager(request)
     _require_org_and_node(mgr, org_id, node_id)
-    from openakita.runtime.orgs import NodeSchedule
+    from openakita.orgs import NodeSchedule
 
     body = await request.json()
     schedule = NodeSchedule.from_dict(body) if hasattr(NodeSchedule, "from_dict") else body

@@ -85,7 +85,7 @@ async def resume_org(request: Request, org_id: str) -> Any:
 @router.post("/{org_id}/command", summary="B38 submit user command")
 async def send_command(request: Request, org_id: str, body: CommandSubmit) -> dict[str, Any]:
     """``POST /command`` -- builds ``OrgCommandRequest`` and submits via the service."""
-    from openakita.runtime.orgs import (
+    from openakita.orgs import (
         ForwardTarget,
         OrgCommandConflict,
         OrgCommandError,

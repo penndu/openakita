@@ -1508,7 +1508,7 @@ async def _stream_org_command_chat(
             yield _sse("done")
             return
 
-        from openakita.runtime.orgs.command_models import (
+        from openakita.orgs.command_models import (
             OrgCommandError,
             OrgCommandRequest,
             OrgCommandSource,

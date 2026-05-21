@@ -52,7 +52,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from openakita.config import settings
-from openakita.runtime.orgs import OrgNotFound, get_default_store
+from openakita.orgs import OrgNotFound, get_default_store
 from openakita.runtime.templates import (
     GLOBAL_REGISTRY,
     TemplateValidationError,

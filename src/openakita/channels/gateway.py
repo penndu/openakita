@@ -3179,7 +3179,7 @@ class MessageGateway:
         IM 端按名字/ID 解析组织时用。拿不到（服务未就绪）时返回 None。
         """
         try:
-            from openakita.runtime.orgs.command_service import get_command_service
+            from openakita.orgs.command_service import get_command_service
 
             svc = get_command_service()
             if svc is None:
@@ -3253,7 +3253,7 @@ class MessageGateway:
         org_name = str(cur.get("org_name") or "")
         preview = str(cur.get("task_preview") or "")
         try:
-            from openakita.runtime.orgs.command_service import get_command_service
+            from openakita.orgs.command_service import get_command_service
 
             svc = get_command_service()
             status_obj = svc.get_status(org_id, command_id) if svc else None
@@ -3332,7 +3332,7 @@ class MessageGateway:
             org_id = str(cur.get("org_id") or "")
             command_id = str(cur.get("command_id") or "")
             try:
-                from openakita.runtime.orgs.command_service import get_command_service
+                from openakita.orgs.command_service import get_command_service
 
                 svc = get_command_service()
                 if svc is None:
@@ -3446,7 +3446,7 @@ class MessageGateway:
         if not org_id or not command_id:
             return False
         try:
-            from openakita.runtime.orgs.command_service import get_command_service
+            from openakita.orgs.command_service import get_command_service
 
             svc = get_command_service()
             if svc is None:
@@ -3736,13 +3736,13 @@ class MessageGateway:
             return True
 
         try:
-            from openakita.runtime.orgs.command_models import (
+            from openakita.orgs.command_models import (
                 OrgCommandRequest,
                 OrgCommandSource,
                 OrgCommandSurface,
                 default_scope_for_surface,
             )
-            from openakita.runtime.orgs.command_service import get_command_service
+            from openakita.orgs.command_service import get_command_service
 
             svc = get_command_service()
             if svc is None:
