@@ -49,6 +49,10 @@ def __getattr__(name: str) -> Any:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
     module_name, attr_name = target
+    # smoke-F6: pre-load openakita.agent so the brain/llm/errors cycle resolves
+    # in the safe order when ``openakita.core`` is the FIRST entry point.
+    if module_name in ("._brain_legacy", "._reasoning_engine_legacy", "._agent_legacy"):
+        import_module("openakita.agent")
     module = import_module(module_name, __name__)
     value = getattr(module, attr_name)
     globals()[name] = value

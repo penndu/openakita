@@ -13,6 +13,8 @@ Skills 系统遵循 Agent Skills 规范 (agentskills.io)
 MCP 系统遵循 Model Context Protocol 规范 (modelcontextprotocol.io)
 """
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import contextlib
@@ -32,9 +34,15 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..sessions import Session
 
-from openakita.agent.confirmation import (
-    get_confirmation_store,  # P7.7: break circular import via canonical home
-)
+    # smoke-F0/F6: keep these names visible to type checkers + ruff F821
+    # without triggering the runtime cycle (the real imports live inside
+    # ``Agent.__init__`` further down).
+    from ._brain_legacy import Brain
+
+# NOTE: ``get_confirmation_store`` is imported lazily at each call site below
+# (smoke-F0/F6) -- importing ``openakita.agent.confirmation`` at module-top
+# triggers ``openakita.agent.__init__`` which immediately re-enters this very
+# module via ``agent.core -> openakita.core._agent_legacy``.
 
 from ..config import settings
 
@@ -44,8 +52,11 @@ from ..memory.json_utils import coerce_text
 
 # Prompt 编译管线 (v2)
 # 技能系统 (SKILL.md 规范)
-from ..skills import SkillCatalog, SkillLoader, SkillRegistry
-
+# NOTE: SkillCatalog / SkillLoader / SkillRegistry are imported lazily inside
+# Agent.__init__ to break the circular import discovered in the 80-round
+# smoke (F-0 / F-6): prompt -> builder -> skills.__init__ -> registry ->
+# core.capabilities -> agent.__init__ -> agent.core -> core._agent_legacy ->
+# ..skills (re-entry while skills/__init__ is still mid-init).
 # 系统工具目录（渐进式披露）
 from ..tools.catalog import ToolCatalog
 
@@ -58,7 +69,10 @@ from ..tools.handlers import SystemHandlerRegistry
 from ..tools.handlers.agent import create_handler as create_agent_tool_handler
 from ..tools.handlers.agent_hub import create_handler as create_agent_hub_handler
 from ..tools.handlers.agent_package import create_handler as create_agent_package_handler
-from ..tools.handlers.browser import create_handler as create_browser_handler
+
+# NOTE: ``create_browser_handler`` is imported lazily inside ``_init_handlers``
+# (smoke-F0/F6) -- its module top-loads ``openakita.agents.lock_manager`` which
+# would re-enter ``core.capabilities`` mid-init if pulled here.
 from ..tools.handlers.cli_anything import create_handler as create_cli_anything_handler
 from ..tools.handlers.cli_anything import is_available as cli_anything_available
 from ..tools.handlers.code_quality import create_handler as create_code_quality_handler
@@ -81,11 +95,17 @@ from ..tools.handlers.profile import create_handler as create_profile_handler
 from ..tools.handlers.scheduled import create_handler as create_scheduled_handler
 from ..tools.handlers.search import create_handler as create_search_handler
 from ..tools.handlers.skill_store import create_handler as create_skill_store_handler
-from ..tools.handlers.skills import create_handler as create_skills_handler
+
+# NOTE: ``create_skills_handler`` is imported lazily inside ``_init_handlers``
+# (smoke-F0/F6) -- its module top-loads ``..skills.catalog`` which would
+# re-enter the cycle when this module is reached via ``prompt -> skills``.
 from ..tools.handlers.sleep import create_handler as create_sleep_handler
 from ..tools.handlers.sticker import create_handler as create_sticker_handler
 from ..tools.handlers.structured_output import create_handler as create_structured_output_handler
-from ..tools.handlers.system import create_handler as create_system_handler
+
+# NOTE: ``create_system_handler`` is imported lazily inside ``_init_handlers``
+# (smoke-F0/F6) -- its module top-loads ``..skills.exposure -> .loader ->
+# .registry`` which would re-enter the cycle when reached via ``prompt -> skills``.
 from ..tools.handlers.tool_search import create_handler as create_tool_search_handler
 from ..tools.handlers.web_fetch import create_handler as create_web_fetch_handler
 from ..tools.handlers.web_search import create_handler as create_web_search_handler
@@ -96,10 +116,17 @@ from ..tools.mcp import mcp_client
 from ..tools.mcp_catalog import mcp_catalog as _shared_mcp_catalog
 from ..tools.shell import ShellTool
 from ..tools.web import WebTool
-from ._brain_legacy import Brain, Context
+
+# NOTE: ``Brain`` + ``Context`` are imported lazily inside Agent.__init__
+# (smoke-F0/F6) -- importing ``_brain_legacy`` at module top would trigger
+# the ``llm.client -> core.errors -> agent.errors -> agent.brain -> _brain_legacy``
+# cycle whenever this module is loaded BEFORE ``openakita.agent``.
 from ._context_manager_legacy import ContextManager
 from ._context_manager_legacy import _CancelledError as _CtxCancelledError
-from ._reasoning_engine_legacy import ReasoningEngine
+
+# NOTE: ``ReasoningEngine`` is imported lazily inside Agent.__init__
+# (smoke-F0/F6) -- ``_reasoning_engine_legacy`` top-loads ``api.routes.websocket``
+# which back-edges into ``api.auth`` and other partially-initialized siblings.
 from ._tool_executor_legacy import ToolExecutor
 from .agent_state import AgentState
 from .context_utils import get_max_context_tokens as _shared_get_max_context_tokens
@@ -659,15 +686,15 @@ risks_or_ambiguities:
 # 只在主 Agent 完成一次"完整初始化"（非 lightweight）后设置，
 # 防止 sub-agent 拿到一个还没加载完插件的 parent。
 # ─────────────────────────────────────────────────────────────
-_PRIMARY_AGENT: "Agent | None" = None
+_PRIMARY_AGENT: Agent | None = None
 
 
-def set_primary_agent(agent: "Agent | None") -> None:
+def set_primary_agent(agent: Agent | None) -> None:
     global _PRIMARY_AGENT
     _PRIMARY_AGENT = agent
 
 
-def get_primary_agent() -> "Agent | None":
+def get_primary_agent() -> Agent | None:
     return _PRIMARY_AGENT
 
 
@@ -801,6 +828,11 @@ class Agent:
         self.name = name or settings.agent_name
 
         # 初始化核心组件
+        # NOTE: ``Brain`` / ``Context`` / ``ReasoningEngine`` imported lazily here
+        # (smoke-F0/F6) -- see top-of-file comment blocks for cycle rationale.
+        from ._brain_legacy import Brain, Context  # noqa: F401
+        from ._reasoning_engine_legacy import ReasoningEngine  # noqa: F401
+
         self.identity = Identity()
         self.brain = brain or Brain(api_key=api_key)
         self.ralph = RalphLoop(
@@ -816,6 +848,8 @@ class Agent:
         self.web_tool = WebTool()
 
         # 初始化技能系统 (SKILL.md 规范)
+        # NOTE: lazy here (not module-top) -- see top-of-file smoke-F0/F6 comment.
+        from ..skills import SkillCatalog, SkillLoader, SkillRegistry
         from ..skills.categories import CategoryRegistry
         from ..skills.category_store import CategoryStore
 
@@ -1652,7 +1686,7 @@ class Agent:
         self,
         start_scheduler: bool = True,
         lightweight: bool = False,
-        share_from: "Agent | None" = None,
+        share_from: Agent | None = None,
     ) -> None:
         """
         初始化 Agent
@@ -1874,7 +1908,7 @@ class Agent:
                 self.name,
             )
 
-    def _attach_shared_runtime(self, parent: "Agent") -> None:
+    def _attach_shared_runtime(self, parent: Agent) -> None:
         """让 sub-agent 直接复用主 Agent 已经初始化好的注册表/客户端/目录。
 
         被 ``initialize(share_from=parent)`` 调用。原本每个 sub-agent 都要重新
@@ -2093,6 +2127,11 @@ class Agent:
         self.handler_registry.register("memory", create_memory_handler(self))
 
         # 浏览器
+        # NOTE: lazy import -- see top-of-file smoke-F0/F6 comment for rationale.
+        from ..tools.handlers.browser import (
+            create_handler as create_browser_handler,
+        )
+
         self.handler_registry.register("browser", create_browser_handler(self))
 
         # 定时任务
@@ -2108,12 +2147,22 @@ class Agent:
         self.handler_registry.register("plan", create_todo_handler(self))
 
         # 系统工具
+        # NOTE: lazy import -- see top-of-file smoke-F0/F6 comment for rationale.
+        from ..tools.handlers.system import (
+            create_handler as create_system_handler,
+        )
+
         self.handler_registry.register("system", create_system_handler(self))
 
         # IM 渠道
         self.handler_registry.register("im_channel", create_im_channel_handler(self))
 
         # 技能管理
+        # NOTE: lazy import -- see top-of-file smoke-F0/F6 comment for rationale.
+        from ..tools.handlers.skills import (
+            create_handler as create_skills_handler,
+        )
+
         self.handler_registry.register("skills", create_skills_handler(self))
 
         # Web 搜索
@@ -2377,7 +2426,7 @@ class Agent:
 
     def propagate_skill_change(
         self,
-        action: "Any" = None,
+        action: Any = None,
         *,
         rescan: bool = True,
     ) -> None:
@@ -3068,7 +3117,7 @@ class Agent:
     def _resolve_model_lookup_id(
         self,
         *,
-        session: "Session | None" = None,
+        session: Session | None = None,
         conversation_id: str | None = None,
         session_id: str | None = None,
     ) -> str | None:
@@ -3090,7 +3139,7 @@ class Agent:
     def _current_model_info_for_turn(
         self,
         *,
-        session: "Session | None" = None,
+        session: Session | None = None,
         conversation_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
@@ -3109,7 +3158,7 @@ class Agent:
     def _record_effective_model_metadata(
         self,
         *,
-        session: "Session | None",
+        session: Session | None,
         selected_endpoint: str | None,
         endpoint_policy: str = "prefer",
         model_info: dict[str, Any],
@@ -3141,7 +3190,7 @@ class Agent:
         *,
         endpoint_override: str | None,
         endpoint_policy: str = "prefer",
-        session: "Session | None",
+        session: Session | None,
         conversation_id: str | None,
         session_id: str | None,
         reason: str,
@@ -3203,7 +3252,7 @@ class Agent:
         task_description: str = "",
         session_type: str = "cli",
         tools_enabled: bool = True,
-        session: "Session | None" = None,
+        session: Session | None = None,
         mode: str | None = None,
         conversation_id: str | None = None,
     ) -> str:
@@ -4491,7 +4540,7 @@ class Agent:
         *,
         attachments: list | None = None,
         mode: str = "agent",
-    ) -> tuple[list[dict], str, "TaskMonitor", str, Any]:
+    ) -> tuple[list[dict], str, TaskMonitor, str, Any]:
         """
         会话流水线 - 共享准备阶段。
 
@@ -5489,7 +5538,7 @@ class Agent:
         response_text: str,
         session: Any,
         session_id: str,
-        task_monitor: "TaskMonitor",
+        task_monitor: TaskMonitor,
     ) -> None:
         """
         会话流水线 - 共享收尾阶段。
@@ -5928,6 +5977,10 @@ class Agent:
                 and not _risk_pre_authorized
             ):
                 response_text = _build_destructive_intent_question(message, _risk_intent)
+                from openakita.agent.confirmation import (
+                    get_confirmation_store,  # smoke-F0/F6: lazy here to break cycle
+                )
+
                 get_confirmation_store().create(
                     conversation_id=session_id,
                     original_message=message,
@@ -6408,6 +6461,10 @@ class Agent:
                 and _risk_intent.requires_confirmation
                 and not _risk_pre_authorized
             ):
+                from openakita.agent.confirmation import (
+                    get_confirmation_store,  # smoke-F0/F6: lazy here to break cycle
+                )
+
                 pending = get_confirmation_store().create(
                     conversation_id=conversation_id,
                     original_message=message,
