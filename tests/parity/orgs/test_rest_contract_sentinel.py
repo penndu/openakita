@@ -7,7 +7,7 @@ invariant the gate enforces with **active** (non-xfail) assertions.
 Three invariants:
 
 1. **Route count parity** -- the v2 OpenAPI surface lands exactly
-   84 routes under ``/api/v2/orgs/*`` (83 mint per
+   85 routes under ``/api/v2/orgs/*`` (84 mint per
    ``docs/revamp/P-RC-9-P9.7-ENDPOINT-INVENTORY.md`` section 3 +
    1 ``GET /_p97/health`` wiring stub) plus 9 routes under
    ``/api/v2/orgs-spec/*`` (Group A relocated by P9.7a-2a per
@@ -15,7 +15,7 @@ Three invariants:
    ``_orgs_v2_legacy_redirects`` router contributes 9 308 shims
    that live in ``app.routes`` but are excluded from the OpenAPI
    schema (``include_in_schema=False``).
-2. **Coverage matrix** -- every minted B-marker (B1-B83) has at
+2. **Coverage matrix** -- every minted B-marker (B1-B84) has at
    least one test function named ``test_b<N>_*`` in either the
    contract suite (``tests/api/contracts/``) or the beta smoke
    suite (``tests/api/test_p97_beta_smoke.py``). Future regressions
@@ -51,7 +51,7 @@ from openakita.api.routes import (
 
 # Charter inventory anchors -- count any drift here as a sentinel break
 # even if the OpenAPI schema disagrees.
-_MINT_ENDPOINTS = 83  # B1-B83 per inventory section 3
+_MINT_ENDPOINTS = 84  # B1-B84 per inventory section 3 (B84 = PATCH partial-update, smoke-F5)
 _HEALTH_STUBS = 1  # GET /_p97/health
 _SPEC_ENDPOINTS = 9  # Group A relocated (8 CRUD + 1 SSE)
 _SHIM_ROUTES = 9  # 308 legacy redirects
@@ -113,7 +113,7 @@ def test_route_counts_match_inventory() -> None:
     counts = _route_counts(_build_app())
     expected_mint = _MINT_ENDPOINTS + _HEALTH_STUBS
     assert counts["mint"] == expected_mint, (
-        f"Expected {expected_mint} mint method-routes (83 mint + 1 health), "
+        f"Expected {expected_mint} mint method-routes (84 mint + 1 health), "
         f"got {counts['mint']}; spec={counts['spec']}, shim={counts['shim']}"
     )
     assert counts["spec"] == _SPEC_ENDPOINTS, (
@@ -146,7 +146,7 @@ def _scan_b_markers() -> set[int]:
 
 
 def test_every_minted_endpoint_has_a_contract_test() -> None:
-    """Each B1-B83 has >= 1 test function across contracts/ + beta_smoke."""
+    """Each B1-B84 has >= 1 test function across contracts/ + beta_smoke."""
     found = _scan_b_markers()
     expected = set(range(1, _MINT_ENDPOINTS + 1))
     missing = expected - found

@@ -231,6 +231,36 @@ def update_org(request: Request, org_id: str, body: OrgPatch) -> dict[str, Any]:
     return _to_dict(org)
 
 
+@router.patch("/{org_id}", summary="B11p partial update organization")
+def patch_org(request: Request, org_id: str, body: OrgPatch) -> dict[str, Any]:
+    """Partial update -- mirrors :func:`update_org` (PUT) semantics.
+
+    Closes smoke F-5: without an explicit PATCH handler on this mint
+    runtime route, FastAPI's first-match routing fell through to the
+    Group A 308 shim (``_orgs_v2_legacy_redirects._r_patch_org``), which
+    redirected the request to ``/api/v2/orgs-spec/{org_id}`` -- backed
+    by a *different* persistence store -- producing apparent 404s on
+    orgs that had just been created via this runtime mint ``POST``.
+
+    The body schema (:class:`OrgPatch`) is already all-optional so
+    PATCH and PUT are semantically equivalent today; future work can
+    tighten PUT to a full-replace contract without touching this
+    handler.
+    """
+    from openakita.runtime.orgs import OrgNameConflictError
+
+    mgr = _get_manager(request)
+    if mgr.get(org_id) is None:
+        raise HTTPException(404, f"Organization not found: {org_id}")
+    try:
+        org = mgr.update(org_id, body.model_dump(exclude_none=True))
+    except OrgNameConflictError as exc:
+        _raise_org_name_conflict(exc)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(400, f"Invalid org data: {exc}") from exc
+    return _to_dict(org)
+
+
 @router.delete("/{org_id}", summary="B12 delete organization")
 def delete_org(request: Request, org_id: str) -> dict[str, Any]:
     if not _get_manager(request).delete(org_id):

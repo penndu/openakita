@@ -301,6 +301,53 @@ def test_b11_update_org_409_on_conflict(mint_app: FastAPI, mint_client: TestClie
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# B84: PATCH /api/v2/orgs/{org_id} (partial update; smoke F-5 closure)
+# ---------------------------------------------------------------------------
+
+
+def test_b84_patch_org_partial_name(mint_app: FastAPI, mint_client: TestClient) -> None:
+    """Smoke F-5: PATCH must hit the mint runtime store, not the 308 shim."""
+    mint_app.state.org_manager.get.return_value = fake_org("org_p", "old")
+    mint_app.state.org_manager.update.return_value = fake_org("org_p", "renamed")
+    resp = mint_client.patch("/api/v2/orgs/org_p", json={"name": "renamed"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "renamed"
+    # Confirm only the name field reached the manager (exclude_none semantics).
+    args, kwargs = mint_app.state.org_manager.update.call_args
+    payload = args[1] if len(args) > 1 else kwargs.get("data") or kwargs
+    assert payload == {"name": "renamed"}
+
+
+def test_b84_patch_org_partial_description(
+    mint_app: FastAPI, mint_client: TestClient
+) -> None:
+    """Smoke F-5: description-only PATCH must not nuke the existing name."""
+    mint_app.state.org_manager.get.return_value = fake_org("org_p", "keepme")
+    mint_app.state.org_manager.update.return_value = fake_org(
+        "org_p", "keepme", description="brand new desc"
+    )
+    resp = mint_client.patch(
+        "/api/v2/orgs/org_p", json={"description": "brand new desc"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "keepme"
+    assert body["description"] == "brand new desc"
+    args, kwargs = mint_app.state.org_manager.update.call_args
+    payload = args[1] if len(args) > 1 else kwargs.get("data") or kwargs
+    assert payload == {"description": "brand new desc"}
+
+
+def test_b84_patch_org_404_when_missing(
+    mint_app: FastAPI, mint_client: TestClient
+) -> None:
+    """Smoke F-5: PATCH on an unknown id must 404 (not 308 -> spec store)."""
+    mint_app.state.org_manager.get.return_value = None
+    resp = mint_client.patch("/api/v2/orgs/nope", json={"name": "x"})
+    assert resp.status_code == 404, resp.text
+
+
 # B12: DELETE /api/v2/orgs/{org_id}
 # ---------------------------------------------------------------------------
 

@@ -51,6 +51,7 @@
   "/api/v2/orgs/{org_id}": [
     "DELETE",
     "GET",
+    "PATCH",
     "PUT"
   ],
   "/api/v2/orgs/{org_id}/activity": [
