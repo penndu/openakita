@@ -113,7 +113,7 @@ def migrate(
 ) -> MigrationReport:
     """Perform (or dry-run) the migration. Returns a structured report."""
     from openakita.runtime.models import OrgV2
-    from openakita.runtime.orgs.sqlite_store import SqliteOrgStore
+    from openakita.orgs.sqlite_store import SqliteOrgStore
 
     rows, malformed = _load_json_orgs(json_path)
     seen = len(rows) + malformed

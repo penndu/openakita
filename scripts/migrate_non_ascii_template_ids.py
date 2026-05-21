@@ -14,7 +14,7 @@ What it does in --apply mode (atomic within a single template):
   1. Scan ``<templates_dir>/*.json`` for files whose stem contains
      non-ASCII characters.
   2. For each such file, compute the new ASCII slug via
-     ``openakita.runtime.orgs._slug.slugify_template_id`` using the
+     ``openakita.orgs._slug.slugify_template_id`` using the
      ORIGINAL file stem as input (so the slug is deterministic and
      reversible via the alias map).
   3. Rename ``<old_stem>.json`` -> ``<new_slug>.json``. If a file
@@ -48,7 +48,7 @@ _SRC = _REPO_ROOT / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from openakita.runtime.orgs._slug import slugify_template_id  # noqa: E402
+from openakita.orgs._slug import slugify_template_id  # noqa: E402
 
 
 def scan_for_non_ascii_ids(templates_dir: Path) -> list[dict[str, Any]]:

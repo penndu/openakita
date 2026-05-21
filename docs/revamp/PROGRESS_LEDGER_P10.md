@@ -280,3 +280,76 @@ current_phase: P-RC-10
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-10 P10.3d | refactor(tests/unit,tests/integration,tests/e2e): P10.3d sweep openakita.runtime.orgs imports to canonical openakita.orgs (19 sites / 10 files) [P-RC-10 P10.3d] | +22 / -22 (mechanical prefix swap: 19 import lines + 3 mock-target strings) + ~30 ledger row | 262 parity+contracts (unchanged) / 192 runtime-orgs (unchanged) | ADR-0011 (subsystem decomposition; no Protocol change) |
+
+## P10.3e -- Sweep ``scripts/`` import sites to canonical ``openakita.orgs``
+
+> **Sub-phase status (2026-05-21, P10.3e LANDED)**: Mechanical
+> 1:1 prefix swap of every ``from|import openakita.runtime.orgs``
+> reference under ``scripts/`` to the canonical
+> ``openakita.orgs`` path, plus the 2 Sphinx-style module-
+> docstring strings on the two migrator scripts.
+> **5 sites across 3 files** (3 import-line rewrites + 2
+> docstring strings): migrate_non_ascii_template_ids.py 2
+> sites (1 import + 1 docstring), migrate_orgs_to_v2.py 2
+> sites (1 import + 1 docstring),
+> migrate_orgs_v2_json_to_sqlite.py 1 site (1 import). RECON
+> section 2 projected ~3 sites / ~3 files; observed 3 import
+> sites / 3 files (exact match). 1:1 byte-equivalent
+> semantics; ``ruff`` not invoked. 
+>
+> **P10.3 cluster import-line sweep complete**: across
+> P10.3a..P10.3e the cluster swept 92 import-line rewrites +
+> 25 string-literal rewrites = 117 total sites across 50
+> files (P10.3a 31 imports / 12 src files; P10.3b 30 imports
+> + 7 docstrings / 18 files; P10.3c 37 imports + 6 docstrings
+> / 18 files; P10.3d 19 imports + 3 mock-targets / 10 files;
+> P10.3e 3 imports + 2 docstrings / 3 files). Slice green at
+> every mid-phase checkpoint: 262 parity+contracts / 192
+> runtime-orgs.
+>
+> **DeprecationWarning emission**: drops to 0 in both narrow
+> slices (262 slice cleared at P10.3c; 192 slice cleared at
+> P10.3e). Backend boot smoke
+> (``python -c 'from openakita.api.server import create_app;
+> create_app()'`` with ``-W always::DeprecationWarning``)
+> emits 0 lines sourced from ``openakita.runtime.orgs`` (the
+> only DeprecationWarnings remaining are unrelated FastAPI
+> ``on_event`` deprecations).
+>
+> **Adversarial sentinel #9 extended-scope probe**: locally-
+> augmented (NOT committed) replay of the strict legacy-
+> import regex (
+> ``^\s*(?:from|import)\s+openakita\.runtime\.orgs(?:\.|$|\s)``)
+> with ``EXTENDED_ROOTS = [src/openakita, tests, scripts]``
+> and the natural 2-file allowlist (the P10.2 shim itself +
+> the sentinel's own banned-string needle) returned 0
+> banned-import hits. Probe lives at
+> ``tmp_p10/_p10_3e_adversarial.py``; not committed.
+>
+> **Residual ``openakita.runtime.orgs`` mentions outside
+> docs/revamp/ + tmp_p10/ + the shim**: 21 lines remain:
+>
+> - 9 in ``tests/parity/orgs/test_v1_src_retired_sentinel.py``
+>   (legitimate banned-string needle + assertion-message
+>   strings; in the charter ZERO-touch list and consumed by
+>   the sentinel's own assertion logic).
+> - 12 in ``src/openakita/`` source as docstring / Sphinx-
+>   role / inline code-quoted comments (``:mod:``, ``:class:``,
+>   ``:func:``, ``:py:meth:``, ``# managers are reachable
+>   via ...``). **NO import lines** in this set; P10.3a
+>   was scoped strictly to ``from|import`` statements and
+>   left these documentation references intact. The src
+>   files were not touched by P10.3b..P10.3e per the
+>   ``ZERO touch src/openakita/`` hard scope. Sub-phase
+>   discrepancy surfaced for charter review, not silently
+>   swept: candidate P10.3f mechanical docstring sweep
+>   under ``src/openakita/`` (12 files, 12 sites) would
+>   bring repo-wide residual to 0 ahead of P10.6 shim
+>   removal; alternatively the docstring set can be
+>   absorbed into P10.6 in the same commit that ``git rm``s
+>   the shim (the references go stale at that point so
+>   that commit must touch them either way).
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-10 P10.3e | refactor(scripts): P10.3e sweep openakita.runtime.orgs imports to canonical openakita.orgs (3 sites / 3 files) [P-RC-10 P10.3e] | +5 / -5 (mechanical prefix swap: 3 import lines + 2 docstring strings) + ~70 ledger row | 262 parity+contracts (unchanged) / 192 runtime-orgs (unchanged; 0 DeprecationWarning -- was 1 from this script imported by tests/runtime/orgs/test_migrate_json_to_sqlite.py) | ADR-0011 (subsystem decomposition; no Protocol change); ADR-0015 (308 shim retirement -- OUT-OF-SCOPE; byte-untouched) |

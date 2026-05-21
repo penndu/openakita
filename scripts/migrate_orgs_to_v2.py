@@ -1,5 +1,5 @@
 """Phase 7 migration — move legacy ``data/orgs.db`` to ``data/orgs.legacy.db``
-and populate the v2 :mod:`openakita.runtime.orgs` JSON store.
+and populate the v2 :mod:`openakita.orgs` JSON store.
 
 The plan calls for a re-entrant script (running twice is a no-op) so
 operators can include it in their boot sequence without worrying about
@@ -125,7 +125,7 @@ def _migrate_orgs_from_legacy(legacy_db: Path, *, apply: bool) -> tuple[int, int
         conn.close()
         return 0, 0, 0
 
-    from openakita.runtime.orgs import get_default_store
+    from openakita.orgs import get_default_store
     from openakita.runtime.templates import GLOBAL_REGISTRY
 
     store = get_default_store()
