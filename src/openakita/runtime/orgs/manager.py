@@ -795,11 +795,60 @@ class OrgManager:
         return result
 
     def get_template(self, template_id: str) -> dict[str, Any] | None:
-        """Raw template dict or None on miss."""
+        """Raw template dict or ``None`` on miss.
+
+        F-4 §A-3 backward-compat: when a direct file lookup misses, we
+        consult an optional ``_aliases.json`` map in the templates
+        directory and retry once. This lets legacy callers that hold
+        a pre-migration template id (e.g. a pure-CJK id from before
+        F-4 §A-2 enforced ASCII slugs) keep working after the user
+        has run the §A-4 migration script.
+
+        ``_aliases.json`` format::
+
+            {"内容运营团队": "content-ops-zh", ...}
+
+        Absent file -> behavior is identical to pre-§A-3. The alias
+        lookup is one hop only (no chains) and cycle-safe.
+        """
         p = self._templates_dir / f"{template_id}.json"
-        if not p.is_file():
+        if p.is_file():
+            return json.loads(p.read_text(encoding="utf-8"))
+
+        aliased = self._resolve_template_alias(template_id)
+        if aliased is not None and aliased != template_id:
+            p2 = self._templates_dir / f"{aliased}.json"
+            if p2.is_file():
+                return json.loads(p2.read_text(encoding="utf-8"))
+        return None
+
+    def _resolve_template_alias(self, template_id: str) -> str | None:
+        """Look up ``template_id`` in ``_aliases.json``; return canonical id or None.
+
+        Reads the file every call (cheap; ``_aliases.json`` is small
+        and the OS page cache covers re-reads). Never raises: malformed
+        or unreadable alias files are logged at WARNING and treated as
+        absent, so a corrupted alias map cannot regress the direct-file
+        path that the call site has already tried.
+        """
+        alias_path = self._templates_dir / "_aliases.json"
+        if not alias_path.is_file():
             return None
-        return json.loads(p.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(alias_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[OrgManager] _aliases.json unreadable: %s", exc)
+            return None
+        if not isinstance(data, dict):
+            logger.warning(
+                "[OrgManager] _aliases.json root must be an object; got %s -- ignoring",
+                type(data).__name__,
+            )
+            return None
+        resolved = data.get(template_id)
+        if resolved is None or not isinstance(resolved, str) or not resolved:
+            return None
+        return resolved
 
     def create_from_template(
         self, template_id: str, overrides: dict[str, Any] | None = None
