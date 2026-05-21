@@ -32,7 +32,7 @@ from openakita.runtime.cancel_token import CancellationToken, CancelledByToken
 from openakita.runtime.channel_routing import dispatch_inbound_message_to_v2
 from openakita.runtime.checkpoint import CheckpointStatus, MemoryCheckpointer
 from openakita.runtime.models import NodeType, NodeV2, OrgV2
-from openakita.runtime.orgs import reset_default_store
+from openakita.orgs import reset_default_store
 from openakita.runtime.supervisor import FinalOutcome, SupervisorBrain
 from tests.fixtures.factories import create_channel_message
 

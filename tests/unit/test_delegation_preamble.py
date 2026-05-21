@@ -141,11 +141,11 @@ class TestOrgModeUnaffected:
         # skip until the absorption commit lands; ``Organization`` +
         # ``OrgNode`` swap to ``org_models`` (1:1 with v1 shape).
         try:
-            from openakita.runtime.orgs.manager import OrgIdentity  # type: ignore[attr-defined]
+            from openakita.orgs.manager import OrgIdentity  # type: ignore[attr-defined]
         except ImportError as _absorb_err:
             import pytest as _pt
             _pt.skip(f"v2 OrgIdentity absorption pending: {_absorb_err}")
-        from openakita.runtime.orgs.org_models import Organization, OrgNode
+        from openakita.orgs.org_models import Organization, OrgNode
 
         with tempfile.TemporaryDirectory() as tmpdir:
             org_dir = Path(tmpdir) / "org"

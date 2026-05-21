@@ -48,7 +48,7 @@ from openakita.runtime import channel_routing as cr_module
 from openakita.runtime import supervisor as sup_module
 from openakita.runtime.cancel_token import CancelledByToken
 from openakita.runtime.checkpoint import CheckpointStatus, MemoryCheckpointer
-from openakita.runtime.orgs import reset_default_store
+from openakita.orgs import reset_default_store
 from openakita.runtime.supervisor import SupervisorBrain
 from tests.fixtures.factories import create_channel_message
 

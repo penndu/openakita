@@ -223,7 +223,7 @@ class TestOrgEventStoreLockingFix:
         # ``runtime.orgs._runtime_event_bus`` (inventory §3) was not landed
         # at this commit; lazy try-import + skip until absorption.
         try:
-            from openakita.runtime.orgs._runtime_event_bus import (  # noqa: I001  # type: ignore[attr-defined]
+            from openakita.orgs._runtime_event_bus import (  # noqa: I001  # type: ignore[attr-defined]
                 OrgEventStore,
             )
         except ImportError as _absorb_err:
@@ -274,7 +274,7 @@ class TestOrgEventStoreLockingFix:
         """
         # P-RC-9 P9.9δ-2b: v2 absorption pending; same guard as above.
         try:
-            from openakita.runtime.orgs._runtime_event_bus import (  # noqa: I001  # type: ignore[attr-defined]
+            from openakita.orgs._runtime_event_bus import (  # noqa: I001  # type: ignore[attr-defined]
                 OrgEventStore,
             )
         except ImportError as _absorb_err:

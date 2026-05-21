@@ -247,3 +247,36 @@ current_phase: P-RC-10
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-10 P10.3c | refactor(tests/api,tests/parity): P10.3c sweep openakita.runtime.orgs imports to canonical openakita.orgs (37 sites / 18 files) [P-RC-10 P10.3c] | +43 / -43 (mechanical prefix swap: 37 import lines + 6 docstring strings; 1 BOM-bearing file preserved) + ~40 ledger row | 262 parity+contracts (unchanged; 0 warnings -- was 1) / 192 runtime-orgs (unchanged; 1 warning remains from scripts/ -- cleared by P10.3e) | ADR-0011 (subsystem decomposition; no Protocol change) |
+
+## P10.3d -- Sweep ``tests/unit/`` + ``tests/integration/`` + ``tests/e2e/`` import sites to canonical ``openakita.orgs``
+
+> **Sub-phase status (2026-05-21, P10.3d LANDED)**: Mechanical
+> 1:1 prefix swap of every ``from|import openakita.runtime.orgs``
+> reference under ``tests/unit/``, ``tests/integration/`` and
+> ``tests/e2e/`` to the canonical ``openakita.orgs`` path,
+> including the 3 ``unittest.mock.patch`` / ``monkeypatch.setattr``
+> target-string literals (test_p0_regression.py:273
+> ``project_store.ProjectStore``; test_org_setup_tool.py:670,
+> :681 ``runtime.get_runtime``) which would otherwise patch a
+> module no longer present after the P10.6 shim removal.
+> **22 sites across 10 files** (19 import-line rewrites + 3
+> mock-target string rewrites): ``tests/e2e/`` 1 file / 3
+> sites (test_p0_regression: 2 imports + 1 mock-target),
+> ``tests/integration/`` 3 files / 7 sites
+> (test_gateway_org_control 5, test_v2_im_canary_e2e 1,
+> test_v2_im_cancel 1), ``tests/unit/`` 6 files / 12 sites
+> (test_c17_second_pass_audit 2, test_delegation_preamble 2,
+> test_failure_diagnoser_tone 1, test_org_delegation_validator
+> 1, test_org_setup_tool 5 [3 imports + 2 mock-targets],
+> test_remaining_qa_fixes 1). RECON section 2 projected ~19
+> sites / ~10 files; observed 19 import sites / 10 files
+> (exact match). 1:1 byte-equivalent semantics; ``ruff`` not
+> invoked. Slice green: 262 parity+contracts / 192
+> runtime-orgs (both unchanged). Sole residual
+> DeprecationWarning still comes from
+> ``scripts/migrate_orgs_v2_json_to_sqlite.py:116``; cleared
+> by P10.3e.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-10 P10.3d | refactor(tests/unit,tests/integration,tests/e2e): P10.3d sweep openakita.runtime.orgs imports to canonical openakita.orgs (19 sites / 10 files) [P-RC-10 P10.3d] | +22 / -22 (mechanical prefix swap: 19 import lines + 3 mock-target strings) + ~30 ledger row | 262 parity+contracts (unchanged) / 192 runtime-orgs (unchanged) | ADR-0011 (subsystem decomposition; no Protocol change) |

@@ -18,7 +18,7 @@ import pytest
 # commit; the v2 watchdog module exports CommandWatchdog + IdleProbeLoop
 # only. Module-level guarded import + skip until the absorption commit.
 try:
-    from openakita.runtime.orgs._runtime_watchdog import (  # type: ignore[attr-defined]
+    from openakita.orgs._runtime_watchdog import (  # type: ignore[attr-defined]
         _DIAGNOSIS_TEMPLATES,
         format_human_summary,
     )

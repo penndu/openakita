@@ -17,7 +17,7 @@ from openakita.core.validators import (
 # commit. Lazy resolver + per-test skip until absorption.
 def _summarize_or_skip():
     try:
-        from openakita.runtime.orgs._runtime_watchdog import summarize  # type: ignore[attr-defined]
+        from openakita.orgs._runtime_watchdog import summarize  # type: ignore[attr-defined]
         return summarize
     except ImportError as _absorb_err:
         pytest.skip(f"v2 summarize absorption pending: {_absorb_err}")

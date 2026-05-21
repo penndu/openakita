@@ -1,7 +1,7 @@
 import pytest
 
 from openakita.core.risk_intent import OperationKind, RiskIntentClassifier, TargetKind
-from openakita.runtime.orgs.org_models import OrgNode
+from openakita.orgs.org_models import OrgNode
 
 # P-RC-9 P9.9δ-2b: v1 ``OrgRuntime._collect_tool_stats_from_trace`` was
 # absorbed into v2 ``_runtime_plugin_assets.collect_tool_stats_from_trace``

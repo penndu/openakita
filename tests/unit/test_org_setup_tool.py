@@ -19,7 +19,7 @@ import pytest
 
 
 def test_organization_watchdog_disabled_by_default():
-    from openakita.runtime.orgs.org_models import Organization
+    from openakita.orgs.org_models import Organization
 
     org = Organization(name="default watchdog")
     assert org.watchdog_enabled is True
@@ -340,7 +340,7 @@ class TestToolRegistration:
 @pytest.fixture
 def created_org(handler, tmp_data_dir):
     """Create a test org and return (org_id, data_dir)."""
-    from openakita.runtime.orgs.manager import OrgManager
+    from openakita.orgs.manager import OrgManager
     manager = OrgManager(tmp_data_dir)
     org = manager.create({
         "name": "测试修改组织",
@@ -393,7 +393,7 @@ def created_org(handler, tmp_data_dir):
 
 def _fresh_manager(data_dir):
     """Create a fresh OrgManager to bypass in-memory cache."""
-    from openakita.runtime.orgs.manager import OrgManager
+    from openakita.orgs.manager import OrgManager
     return OrgManager(data_dir)
 
 
@@ -667,7 +667,7 @@ class TestDeleteOrg:
     @pytest.mark.asyncio
     async def test_delete_nonexistent(self, handler, tmp_data_dir):
         with patch("openakita.config.settings") as ms, patch(
-            "openakita.runtime.orgs.runtime.get_runtime", return_value=None
+            "openakita.orgs.runtime.get_runtime", return_value=None
         ):
             ms.data_dir = tmp_data_dir
             result = await handler._delete_org({"org_id": "nonexistent"})
@@ -678,7 +678,7 @@ class TestDeleteOrg:
     async def test_delete_success(self, handler, tmp_data_dir, created_org):
         org_id, data_dir = created_org
         with patch("openakita.config.settings") as ms, patch(
-            "openakita.runtime.orgs.runtime.get_runtime", return_value=None
+            "openakita.orgs.runtime.get_runtime", return_value=None
         ):
             ms.data_dir = data_dir
             result = await handler._delete_org({"org_id": org_id})

@@ -177,7 +177,7 @@ def test_p0_2_phase3_source_tag_consistent_passes():
 
 def test_p0_3_command_store_atomic_update():
     """P0-3 D：命令状态更新必须保证 status='done' 时 phase 同步。"""
-    from openakita.runtime.orgs.command_service import OrgCommandService
+    from openakita.orgs.command_service import OrgCommandService
 
     service = OrgCommandService(runtime=None, session_manager=None)
     cmd_id = "test_p0_3_atomic"
@@ -244,7 +244,7 @@ async def test_p1_7_org_list_delegated_tasks_backoff(tmp_path: Path, monkeypatch
     # P-RC-10 完成对应迁移后本 skip 自动失效；参见
     # docs/revamp/P-RC-9-P9.9-IMPORT-SWEEP-INVENTORY.md §2.1#2。
     try:
-        from openakita.runtime.orgs._runtime_agent_pipeline import (  # type: ignore[attr-defined]
+        from openakita.orgs._runtime_agent_pipeline import (  # type: ignore[attr-defined]
             OrgToolHandler,
         )
     except ImportError:
@@ -270,7 +270,7 @@ async def test_p1_7_org_list_delegated_tasks_backoff(tmp_path: Path, monkeypatch
             return []
 
     monkeypatch.setattr(
-        "openakita.runtime.orgs.project_store.ProjectStore",
+        "openakita.orgs.project_store.ProjectStore",
         _FakeStore,
         raising=False,
     )
