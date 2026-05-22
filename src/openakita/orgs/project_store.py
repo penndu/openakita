@@ -10,7 +10,7 @@ P9.8 caller migration is one import-line change.
 
 ID minting switches from v1''s ``uuid.uuid4().hex[:12]`` to a
 ULID-style ``<13-digit ms>_<10 hex>`` (see
-:mod:`openakita.runtime.orgs.project_models`); parity tests
+:mod:`openakita.orgs.project_models`); parity tests
 ignore IDs because the timestamp prefix differs across runs
 (P-RC-9-PLAN section 5.2).
 

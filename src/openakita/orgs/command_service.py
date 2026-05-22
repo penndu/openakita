@@ -4,7 +4,7 @@ Replaces v1 ``openakita.orgs.command_service.OrgCommandService``
 (963 LOC, 24 methods, ``OrgRuntime``-coupled) with a
 Protocol-typed surface decoupled from the runtime via injected
 Protocols (ADR-0011). Implements
-:class:`openakita.runtime.orgs.node_scheduler.CommandDispatcher`
+:class:`openakita.orgs.node_scheduler.CommandDispatcher`
 so P9.3 NodeScheduler can call ``service.dispatch`` without
 circular imports.
 

@@ -4,7 +4,7 @@ Replaces v1 ``openakita.orgs.manager.OrgManager`` (683 LOC,
 24 public methods + ``OrgNameConflictError``) with a
 :class:`typing.Protocol`-typed v2 surface under
 ``runtime/orgs/``. Implements
-:class:`openakita.runtime.orgs.command_service.OrgLookupProtocol`
+:class:`openakita.orgs.command_service.OrgLookupProtocol`
 (REUSE from P9.4) so P9.4 ``OrgCommandService`` can consume
 the v2 manager structurally once P9.8 redirects callers.
 

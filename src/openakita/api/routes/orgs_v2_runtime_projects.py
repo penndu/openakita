@@ -18,7 +18,7 @@ Wiring matrix:
 
 ADR refs: ADR-0011 (D-3 layer separation), ADR-0012 (no shim
 under v1; ``OrgProject`` / ``ProjectTask`` constructed from
-``openakita.runtime.orgs`` not v1).
+``openakita.orgs`` not v1).
 """
 
 from __future__ import annotations

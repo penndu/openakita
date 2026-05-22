@@ -20,7 +20,7 @@ Wiring matrix:
 
 ADR refs: ADR-0011 (D-3 layer separation), ADR-0012 (no shim
 under v1; ``MemoryScope`` / ``MemoryType`` enums imported from
-``openakita.runtime.orgs`` not v1 ``openakita.orgs``).
+``openakita.orgs`` (canonical v2 runtime, not the legacy v1 layout).
 """
 
 from __future__ import annotations

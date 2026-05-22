@@ -1,9 +1,9 @@
 """SQLite-backed :class:`OrgV2` store for the v2 API facade.
 
 P-RC-3 commit P3.4. Mirrors the public surface of
-:class:`openakita.runtime.orgs.store.JsonOrgStore` so the two
+:class:`openakita.orgs.store.JsonOrgStore` so the two
 backends are interchangeable through the
-:func:`openakita.runtime.orgs.get_default_store` factory and the
+:func:`openakita.orgs.get_default_store` factory and the
 shared contract suite under ``tests/runtime/orgs/``.
 
 Why SQLite: the JSON store rewrites the entire file on every

@@ -353,3 +353,23 @@ current_phase: P-RC-10
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-10 P10.3e | refactor(scripts): P10.3e sweep openakita.runtime.orgs imports to canonical openakita.orgs (3 sites / 3 files) [P-RC-10 P10.3e] | +5 / -5 (mechanical prefix swap: 3 import lines + 2 docstring strings) + ~70 ledger row | 262 parity+contracts (unchanged) / 192 runtime-orgs (unchanged; 0 DeprecationWarning -- was 1 from this script imported by tests/runtime/orgs/test_migrate_json_to_sqlite.py) | ADR-0011 (subsystem decomposition; no Protocol change); ADR-0015 (308 shim retirement -- OUT-OF-SCOPE; byte-untouched) |
+
+## P10.3f -- Sweep ``src/openakita/`` docstring/Sphinx/comment refs to canonical ``openakita.orgs``
+
+> **Sub-phase status (2026-05-22, P10.3f LANDED)**: 1:1 prefix
+> swap of 12 ``openakita.runtime.orgs`` mentions in
+> ``src/openakita/`` (11 files); these doc-only refs survived
+> because P10.3a was scoped strictly to ``from|import`` statements
+> and P10.3b..P10.3e were banned from touching ``src/``. SPECIAL
+> semantic rewrite at ``orgs_v2_runtime_state.py:23`` (legacy
+> ``openakita.runtime.orgs`` not v1 ``openakita.orgs`` -> 
+> ``openakita.orgs`` (canonical v2 runtime, not the legacy v1
+> layout); intent preserved, factually correct post-flatten).
+> Repo-wide grep (excl. ``docs/revamp/`` + ``tmp_p10/``) now 12
+> lines residual: 3 in the shim + 9 in the sentinel; zero in
+> ``src/openakita/`` proper. 262 / 192 baselines unchanged;
+> backend boot smoke 0 ``runtime.orgs`` DeprecationWarning.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-10 P10.3f | docs(src/openakita): P10.3f sweep openakita.runtime.orgs docstring/comment refs in src/ to canonical openakita.orgs (12 sites / 11 files) [P-RC-10 P10.3f] | +12 / -12 (12 single-line prefix swaps incl. 1 semantic rewrite at orgs_v2_runtime_state.py:23) + ~20 ledger row | 262 parity+contracts (unchanged) / 192 runtime-orgs (unchanged; 0 runtime.orgs DeprecationWarning) | ADR-0011 (subsystem decomposition; no Protocol change); ADR-0015 (308 shim retirement -- OUT-OF-SCOPE; byte-untouched) |

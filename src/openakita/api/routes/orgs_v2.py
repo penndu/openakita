@@ -38,7 +38,7 @@ P9.7 mint can claim the original ``/api/v2/orgs`` namespace.
 308 Permanent Redirect shims at the old paths ride v2.0.x via
 ``_orgs_v2_legacy_redirects.router``.
 
-Persistence layer: :mod:`openakita.runtime.orgs` (JSON file under
+Persistence layer: :mod:`openakita.orgs` (JSON file under
 ``data/orgs_v2.json``). Phase 7 upgrades this to the SQLite-backed
 checkpointer; the API contract stays the same.
 """

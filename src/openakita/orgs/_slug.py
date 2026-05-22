@@ -1,7 +1,7 @@
 """Slug generator for org template ids (F-4 §A-1).
 
 Auto-generated template ids (from
-:py:meth:`openakita.runtime.orgs.manager.OrgManager.save_as_template`
+:py:meth:`openakita.orgs.manager.OrgManager.save_as_template`
 fallback) must be URL-safe ASCII so they roundtrip cleanly through
 HTTP path params, SDK URL builders, and log-scrape pipelines that
 key on ASCII slugs.

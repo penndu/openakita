@@ -194,7 +194,7 @@ _DEFAULT_LOCK = threading.RLock()
 def _build_store(backend: str, path: Path | str | None) -> object:
     """Construct a backend by name. Defaults to JSON for unknown values."""
     if backend == "sqlite":
-        # Local import keeps ``import openakita.runtime.orgs`` cheap
+        # Local import keeps ``import openakita.orgs`` cheap
         # when the JSON backend is in use (the SQLite store eagerly
         # opens a connection in its __init__).
         from .sqlite_store import SqliteOrgStore

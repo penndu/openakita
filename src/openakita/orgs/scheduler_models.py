@@ -86,7 +86,7 @@ class ScheduleType(StrEnum):
        nor v2 evaluates the ``NodeSchedule.cron`` field --
        v1 ``OrgNodeScheduler._schedule_loop`` falls through to
        interval timing for any non-``ONCE`` schedule (see
-       :func:`openakita.runtime.orgs.node_scheduler.compute_next_fire_time`).
+       :func:`openakita.orgs.node_scheduler.compute_next_fire_time`).
        Cron-string evaluation is intentionally deferred to a
        future P-RC-10+ semantic upgrade; lifting it forward
        here would break the P-RC-9-PLAN section 0.2 parity gate.

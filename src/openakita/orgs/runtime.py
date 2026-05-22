@@ -285,7 +285,7 @@ class OrgRuntime:
         # 4 CommandRuntimeProtocol methods below have a
         # real backing manager (no more NotImplementedError).
         # The agent-pipeline / node-lifecycle / plugin-asset
-        # managers are reachable via ``openakita.runtime.orgs``
+        # managers are reachable via ``openakita.orgs``
         # exports and get wired into the runtime by the
         # composition root (P9.6gamma will exercise this via
         # parity fixtures + contract tests).
