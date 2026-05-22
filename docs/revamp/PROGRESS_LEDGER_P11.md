@@ -341,3 +341,34 @@ single-row summary table at the end.
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-11 P11.2 | fix(core,agent,llm): P11.2 break core/agent/llm circular import (clusters B + G; +0 passing tests, cycle exposes pre-existing missing legacy aliases) [P-RC-11 P11.2] | +3 _brain_legacy.py (4 function-local imports - 1 module-level) + ~+14 errors.py (PEP 562 hook + docstring update - 1 eager import); ~+90 ledger row = ~+107 (charter envelope ~+10 source LOC respected; ledger row drove the overrun) | +0 passed (full-suite 6048 / 6048 byte-identical; narrow slice 459 / 459 unchanged; cluster B / G failures unchanged because their real root cause is missing legacy aliases `_is_recap_context` / `_get_mode_ruleset`, not the cycle -- recon section 2.1 hypothesis re-examined empirically) | ADR-0003 (`UserCancelledError` ownership stays at `agent.errors`; PEP 562 hook is a structural fix, not a re-home) -- informational, no ADR edits
+
+
+## P11.3 ledger -- 2026-05-22
+
+> Cluster C (308 redirect shim smoke; 3 cases in
+> `tests/api/test_p97_alpha2_smoke.py`) marked xfail per
+> ADR-0015 option (b): the 308 -> mint shim retirement is
+> locked for v2.1.0; the 503 the shim returns in v2.0.0 is
+> the spec-compliant behaviour, not a regression. `strict=False`
+> per task brief so the day the shim retires and the tests start
+> passing again the suite stays green automatically; the v2.1.0
+> retirement PR removes the decorators in the same commit.
+>
+> Targets (3 decorators, 1-line each):
+> * `test_legacy_patch_org_returns_308` (line 116)
+> * `test_legacy_stream_returns_308` (line 139)
+> * `test_redirect_preserves_query_string_for_unclaimed_path`
+>   (line 145)
+>
+> Verification: `pytest tests/api/test_p97_alpha2_smoke.py
+> -q --tb=no -rxX` -> `12 passed, 3 xfailed` (was `12 passed,
+> 3 failed`). Narrow slice `tests/parity/orgs/ +
+> tests/api/contracts/ + tests/runtime/orgs/` =
+> `459 / 459 passed` unchanged.
+>
+> ZERO source / sentinel / ADR / gate / charter / recon edits;
+> only the 3 test decorators + this ledger row.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-11 P11.3 | test(api): P11.3 mark 3 v1 308-shim smoke tests xfail pending v2.1.0 retirement (cluster C; ADR-0015) [P-RC-11 P11.3] | +3 decorator lines in `tests/api/test_p97_alpha2_smoke.py` + ledger row; net +3 test LOC | -3 failed / +3 xfailed in cluster C narrow run; narrow slice `459 / 459` unchanged | ADR-0015 (option (b) v2.1.0 retirement lock) -- informational, no ADR edits |
