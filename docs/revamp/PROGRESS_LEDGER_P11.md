@@ -133,3 +133,96 @@ single-row summary table at the end.
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-11 P11.0b | docs(revamp): P11.0b add P-RC-11 reconnaissance doc with per-cluster carry-over inventory [P-RC-11 P11.0b] | +434 P-RC-11-RECON.md (NEW) + ~+18 ledger row = ~+452 docs-only | unchanged (baseline 6026 / 60 carry-overs) | ADR-0015 (Cluster C xfail; LOCKED) + ADR-0011 / ADR-0014 (informational) |
+
+---
+
+## P11.1 -- Cluster A landed (`openakita.orgs.tool_categories` private shard restored)
+
+> **Sub-phase status (2026-05-22, P11.1 LANDED)**: Re-instates
+> the v1 ``openakita.orgs.tool_categories`` module that
+> P9.9 epsilon-2b ``90a7d77f`` atomic-deleted alongside the
+> rest of ``src/openakita/orgs/`` (26 files / 20 237 LOC).
+> The deletion stranded 4 in-tree callers
+> (``agents/factory.py:370``, ``agents/profile.py:129``
+> comment, ``orgs/_runtime_templates.py`` 6 comment-only
+> sites, ``tools/handlers/org_setup.py:129/440/731``) and
+> caused 17 ``tests/unit/test_org_setup_tool.py`` failures
+> + 1 ``TestGetResources::test_returns_tool_categories``
+> case G-RC-10 mis-bucketed under Cluster F (= 18 cleared
+> here per charter section 2 P11.1).
+>
+> **Restoration** -- charter R-11-2 option (b) ratified at
+> recon section 1.4 step 2:
+>
+> 1. New private shard
+>    ``src/openakita/orgs/_runtime_tool_categories.py``
+>    (188 LOC = 16-line restoration banner + 172-line v1
+>    body restored verbatim from
+>    ``git show 90a7d77f~1:src/openakita/orgs/tool_categories.py``).
+>    Naming follows P10.5a M-2 split convention; ADR-0011
+>    6-subsystem layout. Symbols restored: ``TOOL_CATEGORIES``,
+>    ``ROLE_TOOL_PRESETS``, ``ALL_CATEGORY_NAMES``,
+>    ``expand_tool_categories``, ``get_preset_for_role``,
+>    ``list_categories``, ``AVATAR_PRESETS``, ``AVATAR_MAP``,
+>    ``get_avatar_for_role``, ``list_avatar_presets`` (10
+>    public + 2 private ``_ROLE_KEYWORDS`` /
+>    ``_ROLE_AVATAR_KEYWORDS``).
+> 2. New 9-LOC public re-export shim
+>    ``src/openakita/orgs/tool_categories.py`` =
+>    ``from ._runtime_tool_categories import *  # noqa: F401,F403``
+>    (preserves the v1 public import path; the 4 known
+>    callers stay byte-untouched per charter R-11-2 mitigation
+>    "post-commit static grep ``git grep tool_categories`` zero
+>    outside the new shard").
+>
+> **Test evidence** (``revamp/v3-orgs`` HEAD pre-commit):
+>
+> * Target file ``tests/unit/test_org_setup_tool.py``:
+>   **58 / 58 passed in 2.63 s** (was 41 passed / 17 failed at
+>   G-RC-10; all 17 cleared, plus the 1 absorbed
+>   ``TestGetResources::test_returns_tool_categories`` case).
+> * Narrow slice
+>   ``tests/parity/orgs/ + tests/api/contracts/ + tests/runtime/orgs/``:
+>   **459 / 459 passed in 77.10 s** -- byte-identical to the
+>   G-RC-10 narrow-slice baseline (acceptance criterion 4 holds).
+> * Backend boot smoke:
+>   ``python -c "from openakita.api.server import create_app; create_app()"``
+>   **succeeds** (417 routes mounted; sentinels #1..#9 untouched
+>   so OpenAPI byte-stable per acceptance criterion 5).
+> * ``ruff check`` on the 2 new files: **All checks passed!**
+>
+> **Post-fix invariant verified** (recon section 1.5):
+> ``git grep --untracked tool_categories -- src/`` returns
+> hits in exactly the new shard + the new public re-export +
+> the 4 callers (factory.py 2 sites, profile.py 1 comment,
+> _runtime_templates.py 6 comment-only sites,
+>  org_setup.py 5 sites including 3 imports + 2 ``result["tool_categories"]``
+> dict-write lines) -- **zero stragglers** outside this set.
+>
+> **What this commit does NOT do (hard stop)**: ZERO touch on
+> ``src/openakita/core/`` / ``src/openakita/agent/`` /
+> ``src/openakita/llm/`` (concurrent Cluster B+G worker
+> territory per task brief), ZERO test edits, ZERO sentinel /
+> ADR / charter / recon / gate edits, ZERO touch on
+> ``api/routes/_orgs_v2_legacy_redirects.py`` (308 shim) or
+> ``MERGE_TO_MAIN_v2.md``. The 4 caller sites stay
+> byte-identical (no ``re.sub`` rewrite needed; charter
+> R-11-2 (b) deliberately routes through the public shim).
+>
+> **Hard-rule compliance**: only
+> ``src/openakita/orgs/_runtime_tool_categories.py`` (NEW;
+> 188 LOC) + ``src/openakita/orgs/tool_categories.py`` (NEW;
+> 9 LOC) + ``docs/revamp/PROGRESS_LEDGER_P11.md`` (this row;
+> ~+85 LOC) modified. Both source files written with
+> ``pathlib.Path.write_bytes(text.encode('utf-8'))`` (no BOM,
+> LF newlines); post-write verify
+> ``b[:3] == b'\xef\xbb\xbf'`` returns ``False`` and
+> ``b'\r' in b`` returns ``False`` for both new files.
+>
+> Next: P11.2 (Cluster B + G -- ``core.errors`` circular
+> import; ~+10 LOC) opens in parallel-safe slot once
+> operator green-lights the concurrent Cluster B+G worker.
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-11 P11.1 | feat(orgs): P11.1 restore openakita.orgs._runtime_tool_categories private shard (cluster A; +17-18 passing tests) [P-RC-11 P11.1] | +188 _runtime_tool_categories.py (NEW) + +9 tool_categories.py public shim (NEW) + ~+85 ledger row = ~+282 (charter envelope ~+155; banner + ledger row drove the overrun, body itself restored verbatim 172 LOC) | +18 passed (17 ``test_org_setup_tool.py`` Cluster A + 1 ``TestGetResources::test_returns_tool_categories`` absorbed from F); narrow slice 459 / 459 unchanged; backend boot OK | ADR-0011 (6-subsystem layout; new shard slots in cleanly) + ADR-0014 (per-shard soft cap; 188 LOC well within budget) -- both informational, no ADR edits |
