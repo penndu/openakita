@@ -34,6 +34,8 @@ from ..config import settings
 from ..llm.converters.tools import PARSE_ERROR_KEY
 from ..tracing.tracer import get_tracer
 from .agent_state import AgentState, TaskState, TaskStatus
+from .abort_scope import current_abort_scope
+from .cancel_cleanup import synthesize_tool_results_for_orphans
 from .context_manager import ContextManager
 from .context_manager import _CancelledError as _CtxCancelledError
 from .errors import UserCancelledError
@@ -1893,9 +1895,30 @@ class ReasoningEngine:
         task).
         """
         captured_state_ref: dict[str, Any] = {"state": None}
+        _scope_attach: dict[str, Any] = {"parent": None, "attached": False}
 
         def _on_state_resolved(st: Any) -> None:
             captured_state_ref["state"] = st
+            # v1.28 S3: sub-agent attachment (see reason_stream outer wrapper
+            # for full rationale).
+            try:
+                _parent = current_abort_scope.get()
+                if (
+                    _parent is not None
+                    and _parent is not st.abort_root
+                    and st.abort_root.parent is None
+                ):
+                    _parent.children.append(st.abort_root)
+                    st.abort_root.parent = _parent
+                    _scope_attach["parent"] = _parent
+                    _scope_attach["attached"] = True
+                    if _parent.event.is_set() and not st.abort_root.event.is_set():
+                        st.abort_root.abort(_parent.reason, _from=_parent.name)
+            except Exception:
+                logger.debug(
+                    "[ReAct] sub-agent AbortScope attach failed",
+                    exc_info=True,
+                )
 
         try:
             return await self._run_impl(
@@ -1930,6 +1953,16 @@ class ReasoningEngine:
                         "[ReAct] mark_settled failed in run() outer wrapper finally",
                         exc_info=True,
                     )
+            # v1.28 S3: detach (see reason_stream outer wrapper)
+            if _scope_attach.get("attached"):
+                _parent = _scope_attach.get("parent")
+                if _parent is not None and st is not None:
+                    try:
+                        _parent.remove_child(st.abort_root)
+                    except Exception:
+                        pass
+                    if st.abort_root.parent is _parent:
+                        st.abort_root.parent = None
 
     async def _run_impl(
         self,
@@ -2028,6 +2061,14 @@ class ReasoningEngine:
 
         self._context_manager.set_cancel_event(state.cancel_event)
 
+        # v1.28 S3 (plan: conversation concurrency v1.28): publish the task's
+        # AbortScope so downstream code (tool_executor.execute_tool, sub-agent
+        # delegates) can derive child scopes via ``current_abort_scope.get()``
+        # without explicit parameter threading.  Set is task-local —
+        # contextvar is reset automatically when the asyncio.Task wrapping
+        # this coroutine completes, so no manual cleanup required.
+        current_abort_scope.set(state.abort_root)
+
         tracer = get_tracer()
         tracer.begin_trace(
             session_id=state.session_id,
@@ -2058,6 +2099,29 @@ class ReasoningEngine:
         state.original_user_messages = [msg for msg in messages if self._is_human_user_message(msg)]
 
         working_messages = list(messages)
+
+        # v1.28 S3 (plan: conversation concurrency v1.28): repair orphan
+        # ``tool_use`` blocks at turn start.  If the previous turn was cancelled
+        # mid-tool, ``working_messages`` may contain an assistant message with
+        # ``tool_use`` blocks that never got a matching ``tool_result`` (the
+        # cancel happened before the tool's result was appended).  Sending that
+        # to Anthropic API yields HTTP 400 "tool_use ids were found without
+        # tool_result blocks immediately after".  We synthesize a stub
+        # tool_result right after the orphan assistant message so the next LLM
+        # call sees a well-formed sequence.  This compensation is *only* in
+        # the LLM-facing ``working_messages`` and never written to
+        # ``session.context.messages`` — users keep seeing the clean cancel
+        # marker that v1.27.15 ``aborted_partial`` already provides.
+        _n_synth = synthesize_tool_results_for_orphans(working_messages)
+        if _n_synth > 0:
+            logger.info(
+                "[ReAct] Repaired %d orphan tool_use block(s) at turn start "
+                "(conversation_id=%s, task=%s)",
+                _n_synth,
+                conversation_id or "?",
+                state.task_id[:8] if state else "?",
+            )
+
         current_model = getattr(self._brain, "model", "")
 
         # === 端点覆盖 ===
@@ -3718,9 +3782,37 @@ class ReasoningEngine:
         race).
         """
         captured_state_ref: dict[str, Any] = {"state": None}
+        # v1.28 S3: track sub-agent AbortScope attachment for cleanup in finally
+        _scope_attach: dict[str, Any] = {"parent": None, "attached": False}
 
         def _on_state_resolved(st: Any) -> None:
             captured_state_ref["state"] = st
+            # v1.28 S3 (plan: conversation concurrency v1.28): sub-agent
+            # attachment.  When the caller already has an AbortScope on the
+            # contextvar (typical: ``orchestrator.delegate`` invokes sub-agent
+            # from inside the parent's reasoning loop), wire ``st.abort_root``
+            # as a child of that parent so the parent's ``cancel()`` fans
+            # out down here too.  ``current_abort_scope.set(state.abort_root)``
+            # in ``_reason_stream_impl`` then publishes this sub-scope to
+            # *its* downstream (tools, deeper sub-agents).
+            try:
+                _parent = current_abort_scope.get()
+                if (
+                    _parent is not None
+                    and _parent is not st.abort_root
+                    and st.abort_root.parent is None
+                ):
+                    _parent.children.append(st.abort_root)
+                    st.abort_root.parent = _parent
+                    _scope_attach["parent"] = _parent
+                    _scope_attach["attached"] = True
+                    if _parent.event.is_set() and not st.abort_root.event.is_set():
+                        st.abort_root.abort(_parent.reason, _from=_parent.name)
+            except Exception:
+                logger.debug(
+                    "[ReAct-Stream] sub-agent AbortScope attach failed",
+                    exc_info=True,
+                )
 
         try:
             async for event in self._reason_stream_impl(
@@ -3786,6 +3878,18 @@ class ReasoningEngine:
                         "[ReAct-Stream] mark_settled failed in outer wrapper finally",
                         exc_info=True,
                     )
+            # v1.28 S3: detach this sub-agent's abort_root from the parent
+            # tree so the parent's ``children`` list doesn't grow with each
+            # delegation.  Safe to call multiple times.
+            if _scope_attach.get("attached"):
+                _parent = _scope_attach.get("parent")
+                if _parent is not None and st is not None:
+                    try:
+                        _parent.remove_child(st.abort_root)
+                    except Exception:
+                        pass
+                    if st.abort_root.parent is _parent:
+                        st.abort_root.parent = None
 
     async def _reason_stream_impl(
         self,
@@ -3892,6 +3996,9 @@ class ReasoningEngine:
 
         self._context_manager.set_cancel_event(state.cancel_event)
 
+        # v1.28 S3: publish AbortScope; see ``_run_inner`` for full rationale.
+        current_abort_scope.set(state.abort_root)
+
         try:
             # === 动态 System Prompt（追加活跃 Plan） ===
             _base_sp = base_system_prompt or system_prompt
@@ -3990,6 +4097,21 @@ class ReasoningEngine:
             self._max_iterations_override = None  # consume once
             self._empty_content_retries = 0
             working_messages = list(messages)
+
+            # v1.28 S3 (plan: conversation concurrency v1.28): mirror of the
+            # repair in ``_run_inner``.  Streaming entry point sees the same
+            # cancel-leftover risk; we patch orphan tool_use here too so
+            # /api/chat resume after a cancel doesn't blow up at the first
+            # Anthropic call. See ``_run_inner`` for full rationale.
+            _n_synth_s = synthesize_tool_results_for_orphans(working_messages)
+            if _n_synth_s > 0:
+                logger.info(
+                    "[ReAct-Stream] Repaired %d orphan tool_use block(s) at turn start "
+                    "(conversation_id=%s, task=%s)",
+                    _n_synth_s,
+                    conversation_id or "?",
+                    state.task_id[:8] if state else "?",
+                )
 
             # ForceToolCall 配置
             im_floor = max(0, int(getattr(settings, "force_tool_call_im_floor", 2)))

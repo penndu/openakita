@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from .abort_scope import AbortScope
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,7 +122,14 @@ class TaskState:
     # 取消机制
     cancelled: bool = False
     cancel_reason: str = ""
-    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    # v1.28 S3 plan: cancel signal moved into a hierarchical AbortScope tree so
+    # tool workers and sub-agents propagate cancel automatically (see
+    # ``core/abort_scope.py``).  ``cancel_event`` is kept as a property below
+    # delegating to ``abort_root.event`` — preserves the 11+ existing read
+    # call sites (``task.cancel_event.wait() / .is_set()``) zero-change.
+    abort_root: AbortScope = field(
+        default_factory=lambda: AbortScope(name="root")
+    )
 
     # Settle 机制（v1.27.14, plan: conversation concurrency v1.28, S1.5）
     # ``settled_event`` 由 reasoning_engine 在任意出口路径（正常完成 / cancel /
@@ -205,12 +214,54 @@ class TaskState:
         self.status = new_status
         logger.debug(f"[State] {old_status.value} -> {new_status.value} (task={self.task_id[:8]})")
 
+    # v1.28 S3: ``cancel_event`` is now a thin alias for ``abort_root.event``.
+    # All existing readers (``task.cancel_event.wait()``, ``.is_set()``) and
+    # the four ``state.cancel_event = asyncio.Event()`` reset points in
+    # ``reasoning_engine`` keep working through the setter.
+    @property
+    def cancel_event(self) -> asyncio.Event:
+        return self.abort_root.event
+
+    @cancel_event.setter
+    def cancel_event(self, ev: asyncio.Event) -> None:
+        # Reset path used by ``reasoning_engine`` LLM retry: swap the underlying
+        # event so the next iteration starts fresh.  Children scopes (tool
+        # scopes spawned during the previous attempt) keep their own event
+        # references, so they are not affected — which is the intended behaviour
+        # for a retry: don't un-cancel an in-flight tool.
+        self.abort_root.event = ev
+        self.abort_root._aborted_by = None
+        if not ev.is_set():
+            self.abort_root.reason = ""
+
     def cancel(self, reason: str = "用户请求停止") -> None:
-        """取消任务，同时触发 cancel_event 通知所有等待方（跨循环安全）"""
+        """Cancel this task and fan out to every tool / sub-agent scope below.
+
+        Fan-out is handled by :meth:`AbortScope.abort` walking the children
+        tree (registered at tool dispatch / sub-agent delegation time).
+        ``_safe_event_set`` is still used on the root event so callers on a
+        different event loop (e.g. signal handler, IM gateway thread) can
+        invoke ``cancel()`` without raising "no current event loop".
+        """
         prev_status = self.status.value if hasattr(self.status, "value") else str(self.status)
         self.cancelled = True
         self.cancel_reason = reason
-        _safe_event_set(self.cancel_event)
+
+        # Synchronous fan-out: walk the AbortScope tree and set each event.
+        # ``_safe_event_set`` on the root handles cross-loop dispatch; children
+        # are walked synchronously here because they live in the same
+        # ``TaskState`` object and asyncio.Event.set() itself is loop-safe to
+        # call from any thread per CPython source (it's a state flip + waiter
+        # wake; the wake is the loop-sensitive part and is deferred via
+        # ``loop.call_soon_threadsafe`` inside the Event impl).
+        _safe_event_set(self.abort_root.event)
+        # Propagate reason/_aborted_by to children too. We don't go through
+        # ``abort_root.abort()`` directly because we already set the root event
+        # via the cross-loop helper above.
+        self.abort_root.reason = reason
+        for _child in list(self.abort_root.children):
+            _child.abort(reason, _from=self.abort_root.name)
+
         if self.status != TaskStatus.CANCELLED:
             try:
                 self.transition(TaskStatus.CANCELLED)
@@ -223,6 +274,7 @@ class TaskState:
             f"[State] Task {self.task_id[:8]} cancel(): "
             f"prev_status={prev_status}, new_status={self.status.value}, "
             f"cancel_event.is_set={self.cancel_event.is_set()}, "
+            f"abort_scope_children={len(self.abort_root.children)}, "
             f"reason={reason!r}"
         )
 

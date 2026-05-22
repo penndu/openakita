@@ -29,6 +29,7 @@ from ..tools.handlers import SystemHandlerRegistry
 from ..tools.input_normalizer import normalize_tool_input
 from ..tools.tool_hints import ConfigHint, ToolConfigError
 from ..tracing.tracer import get_tracer
+from .abort_scope import AbortScope, current_abort_scope
 from .agent_state import TaskState
 
 logger = logging.getLogger(__name__)
@@ -505,7 +506,57 @@ class ToolExecutor:
         if grounding_block:
             return grounding_block, None
 
-        return await self._execute_tool_impl(tool_name, tool_input)
+        # v1.28 S3 (plan: conversation concurrency v1.28): derive a per-tool
+        # AbortScope so subprocesses, nested awaits, and tool handlers can
+        # observe cancel without explicit parameter threading.  The parent
+        # scope comes from contextvar (set by ReasoningEngine at turn start);
+        # if absent we fall back to the current task's ``abort_root`` so the
+        # cancel signal still propagates downstream.  Child is removed in the
+        # finally so the parent's children list doesn't grow unboundedly
+        # over a long turn.
+        parent_scope: AbortScope | None = current_abort_scope.get()
+        if parent_scope is None:
+            parent_scope = self._resolve_parent_scope(session_id)
+
+        tool_scope: AbortScope | None = None
+        scope_token = None
+        if parent_scope is not None:
+            tool_scope = parent_scope.create_child(f"tool:{tool_name}")
+            scope_token = current_abort_scope.set(tool_scope)
+        try:
+            return await self._execute_tool_impl(tool_name, tool_input)
+        finally:
+            if scope_token is not None:
+                try:
+                    current_abort_scope.reset(scope_token)
+                except (LookupError, ValueError):
+                    # Task boundary differences can make reset fail; safe to ignore.
+                    pass
+            if tool_scope is not None and parent_scope is not None:
+                parent_scope.remove_child(tool_scope)
+
+    def _resolve_parent_scope(self, session_id: str | None) -> AbortScope | None:
+        """Fallback to find the current task's ``abort_root`` when the caller
+        didn't set ``current_abort_scope`` (older code paths, scheduler-spawned
+        tasks).  Returns ``None`` if no active task — execute_tool then runs
+        without scope tracking (still works; just loses sub-tool fan-out)."""
+        agent = self._agent_ref
+        if agent is None:
+            return None
+        state = getattr(agent, "agent_state", None)
+        if state is None:
+            return None
+        task = None
+        try:
+            if session_id:
+                task = state.get_task_for_session(session_id)
+            if task is None:
+                task = state.current_task
+        except Exception:
+            return None
+        if task is None:
+            return None
+        return getattr(task, "abort_root", None)
 
     async def _dispatch_hook(self, hook_name: str, **kwargs) -> None:
         """Fire a plugin hook if a HookRegistry is attached. Never raises.
