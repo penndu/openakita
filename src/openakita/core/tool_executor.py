@@ -508,20 +508,20 @@ class ToolExecutor:
 
         # v1.28 S3 + S4 (plan: conversation concurrency v1.28).
         #
-        # Two parallel concerns, both want the active TaskState:
+        # S3 — per-tool AbortScope so subprocesses, nested awaits, and
+        #   tool handlers can observe cancel without explicit parameter
+        #   threading.  Parent scope comes from the contextvar (set by
+        #   ReasoningEngine at turn start); if absent we fall back to the
+        #   task's ``abort_root``.
+        # S4 — register the running tool in ``TaskState.in_flight_tools``
+        #   so a sibling chat handler arriving with INTERRUPT policy can
+        #   downgrade to QUEUE when a block-class tool is mid-flight.
+        #   ``execute_tool_with_policy`` (the execute_batch path) wraps
+        #   the same in-flight tracking around ITS body for the
+        #   reasoning_engine code path; both entry points are covered.
         #
-        # * S3 — per-tool AbortScope so subprocesses, nested awaits, and tool
-        #   handlers can observe cancel without explicit parameter threading.
-        #   Parent scope comes from the contextvar set by ReasoningEngine at
-        #   turn start; if absent we fall back to the task's ``abort_root``.
-        # * S4 — register the running tool name in ``TaskState.in_flight_tools``
-        #   so a sibling chat handler arriving with INTERRUPT policy can ask
-        #   "is anything block-class running?" and downgrade to QUEUE when the
-        #   answer is yes (write_file / run_shell mid-flight → never cancel).
-        #
-        # Both effects need the same task lookup — do it once.  Child scope
-        # and in-flight entry are torn down in the same finally so they
-        # always pair up regardless of which arm raised.
+        # All teardown happens in the same finally so they pair up
+        # regardless of which arm raised.
         task = self._resolve_task(session_id)
         if task is not None:
             task.begin_tool(tool_name)
@@ -536,7 +536,9 @@ class ToolExecutor:
             tool_scope = parent_scope.create_child(f"tool:{tool_name}")
             scope_token = current_abort_scope.set(tool_scope)
         try:
-            return await self._execute_tool_impl(tool_name, tool_input)
+            return await self._execute_tool_impl(
+                tool_name, tool_input, session_id=session_id
+            )
         finally:
             if scope_token is not None:
                 try:
@@ -716,6 +718,8 @@ class ToolExecutor:
         self,
         tool_name: str,
         tool_input: dict,
+        *,
+        session_id: str | None = None,
     ) -> ToolResultWithHint:
         """Execute a tool after todo / permission gates have been handled.
 
@@ -723,6 +727,12 @@ class ToolExecutor:
         raised :class:`ToolConfigError` — that's the central catch site.
         Other error paths (``ToolError`` / generic ``Exception``) return
         ``(error_text, None)``.
+
+        ``session_id`` flows through as informational — the in-flight
+        tool tracking lives in the two public entry points
+        (:meth:`execute_tool` and :meth:`execute_tool_with_policy`) so
+        special pre-execution paths (sandbox, todo gate, grounding gate)
+        get tracked correctly too.
         """
         logger.info(f"Executing tool: {tool_name} with {tool_input}")
 
@@ -939,7 +949,52 @@ class ToolExecutor:
         return paths (todo gate / grounding gate / sandbox) return
         ``(text, None)`` because they don't carry user-correctable config
         signals.
+
+        v1.28.2 hotfix (FIX-S4-1): in-flight tracking + per-tool
+        AbortScope live at this entry point AND at :meth:`execute_tool` —
+        wrapping ``_execute_tool_impl`` alone would miss the sandbox /
+        todo-gate / grounding-gate early returns that exit before the
+        impl is reached, and the original S3/S4 wiring only at
+        ``execute_tool`` was bypassed by the ``execute_batch`` path.
         """
+        task = self._resolve_task(session_id)
+        if task is not None:
+            task.begin_tool(tool_name)
+
+        parent_scope: AbortScope | None = current_abort_scope.get()
+        if parent_scope is None and task is not None:
+            parent_scope = getattr(task, "abort_root", None)
+
+        tool_scope: AbortScope | None = None
+        scope_token = None
+        if parent_scope is not None:
+            tool_scope = parent_scope.create_child(f"tool:{tool_name}")
+            scope_token = current_abort_scope.set(tool_scope)
+        try:
+            return await self._execute_tool_with_policy_inner(
+                tool_name, tool_input, policy_result, session_id=session_id
+            )
+        finally:
+            if scope_token is not None:
+                try:
+                    current_abort_scope.reset(scope_token)
+                except (LookupError, ValueError):
+                    pass
+            if tool_scope is not None and parent_scope is not None:
+                parent_scope.remove_child(tool_scope)
+            if task is not None:
+                task.end_tool(tool_name)
+
+    async def _execute_tool_with_policy_inner(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        policy_result: Any,
+        *,
+        session_id: str | None = None,
+    ) -> ToolResultWithHint:
+        """Real body of :meth:`execute_tool_with_policy`; the public method
+        is a thin in-flight-tracking wrapper around this inner."""
         _policy_action = getattr(policy_result, "action", "")
         if str(getattr(_policy_action, "value", _policy_action)) == "defer":
             from .policy_v2.exceptions import DeferredApprovalRequired
@@ -1002,7 +1057,9 @@ class ToolExecutor:
                 sandbox_output += f"stderr:\n{sb_result.stderr}\n"
             return self._guard_truncate(tool_name, sandbox_output), None
 
-        return await self._execute_tool_impl(tool_name, tool_input)
+        return await self._execute_tool_impl(
+            tool_name, tool_input, session_id=session_id
+        )
 
     async def execute_batch(
         self,

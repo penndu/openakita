@@ -44,7 +44,6 @@ from openakita.core.tool_interrupt_behavior import (
     warn_unclassified_tools,
 )
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 
@@ -144,10 +143,15 @@ class TestInFlightTrackingPrimitives:
 
 
 class TestToolExecutorBeginEndWiring:
-    """Verify the source of ``ToolExecutor.execute_tool`` actually wires
-    in_flight tracking — we can't easily run a real executor in unit
-    tests, so we inspect the synthesized control-flow to lock in the
-    invariant that begin and end both fire and pair up via ``finally``."""
+    """Verify the source of ``ToolExecutor.execute_tool`` AND
+    ``execute_tool_with_policy`` wire in_flight tracking.
+
+    Critical: the original v1.28.2 ship had `begin_tool`/`end_tool` only
+    in `execute_tool`, but `execute_batch` (reasoning_engine's primary
+    dispatch path) calls `execute_tool_with_policy` directly — bypassing
+    the wrapper.  The v1.28.2 hotfix (FIX-S4-1) added tracking to BOTH
+    entry points; these tests lock that in.
+    """
 
     def test_execute_tool_source_contains_begin_and_end(self) -> None:
         import inspect
@@ -164,6 +168,25 @@ class TestToolExecutorBeginEndWiring:
         assert "finally" in src
         # Same task lookup serves S3 AbortScope + S4 in_flight tracking.
         assert "_resolve_task" in src or "task = self._resolve_task" in src
+
+    def test_execute_tool_with_policy_source_contains_begin_and_end(self) -> None:
+        """Regression guard for FIX-S4-1: execute_tool_with_policy is the
+        production-path entry from execute_batch.  Wiring begin/end here is
+        what actually makes in_flight_tools non-empty during a real LLM
+        turn."""
+        import inspect
+
+        from openakita.core.tool_executor import ToolExecutor
+
+        src = inspect.getsource(ToolExecutor.execute_tool_with_policy)
+        assert "task.begin_tool(tool_name)" in src, (
+            "FIX-S4-1 regression: execute_tool_with_policy must call "
+            "task.begin_tool — it is the primary dispatch path; wiring "
+            "only execute_tool leaves in_flight_tools empty in production."
+        )
+        assert "task.end_tool(tool_name)" in src
+        assert "finally" in src
+        assert "_resolve_task" in src
 
     def test_resolve_task_helper_returns_session_task(self) -> None:
         from openakita.core.tool_executor import ToolExecutor
@@ -204,6 +227,71 @@ class TestToolExecutorBeginEndWiring:
         executor = ToolExecutor.__new__(ToolExecutor)
         executor._agent_ref = None
         assert executor._resolve_task("s1") is None
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_with_policy_registers_in_flight(
+        self, monkeypatch
+    ) -> None:
+        """End-to-end smoke for FIX-S4-1: calling execute_tool_with_policy
+        with a real (stubbed) handler dispatch must observe the tool in
+        the task's in_flight list WHILE the handler is running.
+
+        Before the fix, this test would catch in_flight == [] at the
+        observe point — proving the original v1.28.2 ship was a no-op in
+        the execute_batch path."""
+        from openakita.core.tool_executor import ToolExecutor
+
+        executor = ToolExecutor.__new__(ToolExecutor)
+        agent_stub = MagicMock()
+        agent_stub.agent_state = AgentState()
+        task = agent_stub.agent_state.begin_task(session_id="e2e")
+        task.transition(TaskStatus.REASONING)
+        executor._agent_ref = agent_stub
+
+        # Capture in_flight state from inside the handler dispatch.
+        observed_during_exec: list[str] = []
+
+        async def fake_dispatch(tool_name, params):
+            observed_during_exec.extend(task.get_in_flight_tools())
+            return "ok"
+
+        # Wire the handler_registry stub
+        executor._handler_registry = MagicMock()
+        executor._handler_registry.has_tool = MagicMock(return_value=True)
+        executor._handler_registry.execute_by_tool = fake_dispatch
+
+        # Bypass policy / hook / experience / canonicalize side effects
+        executor._canonicalize_tool_name = lambda n: n
+        executor._check_todo_required = lambda *a, **kw: None
+        executor._check_current_turn_grounding = lambda *a, **kw: None
+        executor._dispatch_hook = MagicMock(
+            side_effect=lambda *a, **kw: asyncio.sleep(0)
+        )
+        executor._record_experience = MagicMock()
+        executor._observe_current_turn_tool_result = MagicMock()
+        executor._guard_truncate = lambda _n, r: r
+        executor._suggest_similar_tool = MagicMock(return_value="?")
+
+        # Build a fake policy_result that lets the call through.
+        policy_result = MagicMock()
+        policy_result.action = "allow"
+        policy_result.metadata = {}
+
+        result, _hint = await executor.execute_tool_with_policy(
+            "read_file",
+            {"path": "/x"},
+            policy_result,
+            session_id="e2e",
+        )
+
+        # FIX-S4-1 invariant: the tool was registered DURING execution.
+        assert observed_during_exec == ["read_file"], (
+            f"in_flight observed during execution: {observed_during_exec!r} — "
+            "expected ['read_file']; this is the test that would have caught "
+            "the original v1.28.2 bug (execute_tool wired but bypassed)"
+        )
+        # And cleared after.
+        assert task.get_in_flight_tools() == []
 
 
 # ── Preempt downgrade decisions ─────────────────────────────────────
