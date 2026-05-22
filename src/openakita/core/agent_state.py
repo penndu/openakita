@@ -101,6 +101,29 @@ _VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
 }
 
 
+class IllegalReasoningEntry(RuntimeError):
+    """v1.28.3 S5-A: raised by :meth:`TaskState.ensure_ready_for_reasoning`
+    when called on a terminal state (COMPLETED / FAILED / CANCELLED).
+
+    Post-S1+S3+S4 contract: this should NEVER happen in production.
+    The preempt protocol in :meth:`Agent._preempt_or_queue_prev_task`
+    is the only legitimate way to start reasoning on a session that
+    previously had an active task, and it always calls
+    :meth:`AgentState.begin_task` (returning a fresh IDLE TaskState)
+    before any reasoning entry.  If you see this exception in the
+    wild, S1's preempt protocol was bypassed somewhere — alarm and
+    fix the bypass, do **not** silently force-write ``state.status``
+    as the pre-v1.28.3 code did (that is the root cause of the
+    "completed -> reasoning" crash in issue #572).
+
+    The exception is converted to an SSE ``error`` event with code
+    ``illegal_state`` by ``ReasoningEngine.reason_stream``'s outer
+    ``try/except`` and accompanied by an
+    ``inc_illegal_reasoning_entry`` counter increment so ops can
+    pager-alert on it.
+    """
+
+
 @dataclass
 class TaskState:
     """
@@ -211,14 +234,32 @@ class TaskState:
     original_user_messages: list[dict] = field(default_factory=list)
 
     def transition(self, new_status: TaskStatus) -> None:
-        """
-        执行状态转换，带合法性验证。
+        """执行状态转换，带合法性验证。
 
         Args:
             new_status: 目标状态
 
         Raises:
             ValueError: 非法状态转换
+
+        CONTRACT (post-v1.28.3 S5):
+
+        * ``ValueError`` 表示非法转换，**fatal**——调用方 MUST NOT 静默吞。
+          v1.28.3 之前 reasoning_engine 里有 20 处 ``except ValueError: pass``
+          或 ``except ValueError: self.status = X`` 静默吞 / 强写，是
+          issue #572 "completed -> reasoning" 崩溃链的根因；那些路径在
+          v1.28.3 灰度后会被逐步删除。
+        * 唯一合法的 ``except ValueError: pass`` 在 :meth:`cancel` 里——
+          cancel 是 idempotent（cancel after cancel 等价 no-op），所以
+          强写 ``CANCELLED`` 是安全降级。
+        * 如果你需要"开新轮 reasoning"语义，**不要** force-write
+          ``state.status = REASONING``——改调
+          :meth:`AgentState.begin_task` （返回全新 IDLE TaskState）或
+          :meth:`ensure_ready_for_reasoning` （从 IDLE 转 REASONING，
+          已是 REASONING 时 idempotent，terminal 时抛
+          :class:`IllegalReasoningEntry`）。
+        * 任何 future contributor 重新加 ``except ValueError: state.status = X``
+          会被 ``test_no_force_write_state_transitions`` test 拦下。
         """
         valid_targets = _VALID_TRANSITIONS.get(self.status, set())
         if new_status not in valid_targets:
@@ -229,6 +270,37 @@ class TaskState:
         old_status = self.status
         self.status = new_status
         logger.debug(f"[State] {old_status.value} -> {new_status.value} (task={self.task_id[:8]})")
+
+    def ensure_ready_for_reasoning(self) -> None:
+        """v1.28.3 S5-A: idempotent entry guard for reasoning loops.
+
+        Semantics:
+
+        * Already ``REASONING`` → no-op (idempotent for retry loops).
+        * Terminal (``COMPLETED`` / ``FAILED`` / ``CANCELLED``) → raise
+          :class:`IllegalReasoningEntry`.  The S1 preempt protocol
+          guarantees a fresh IDLE TaskState before any reasoning entry;
+          a terminal state here means the protocol was bypassed.
+        * Anything else (IDLE / OBSERVING / etc.) → transition to
+          REASONING through the validated state-machine path; any
+          illegal transition still raises ``ValueError`` (also fatal —
+          see :meth:`transition` contract).
+
+        Use this whenever ``reason_stream`` or ``run`` re-enters the
+        REASONING phase on the same TaskState (continuation, retry,
+        post-tool-loop).  Don't use ``self.status = REASONING`` for the
+        same purpose — it bypasses the state machine and is exactly
+        what S5 is removing.
+        """
+        if self.status is TaskStatus.REASONING:
+            return
+        if self.is_terminal:
+            raise IllegalReasoningEntry(
+                f"ensure_ready_for_reasoning on {self.status.value} state "
+                f"(task_id={self.task_id[:8]}); caller must call "
+                f"AgentState.begin_task() first to obtain a fresh TaskState"
+            )
+        self.transition(TaskStatus.REASONING)
 
     # v1.28 S3: ``cancel_event`` is now a thin alias for ``abort_root.event``.
     # All existing readers (``task.cancel_event.wait()``, ``.is_set()``) and

@@ -30,7 +30,12 @@ import re
 
 import pytest
 
-from openakita.core.agent_state import AgentState, TaskState, TaskStatus
+from openakita.core.agent_state import (
+    AgentState,
+    IllegalReasoningEntry,
+    TaskState,
+    TaskStatus,
+)
 from openakita.core.reasoning_engine import ReasoningEngine
 
 
@@ -97,42 +102,56 @@ class TestReasonStreamRaceGuard:
     def test_reason_stream_main_loop_transition_is_guarded(self) -> None:
         # v1.27.14 (plan S1.5): hotfix 内容现在位于 _reason_stream_impl；
         # reason_stream 是薄的 outer wrapper 只做 settle hook，不含原循环。
+        # v1.28.3 S5-A: state.transition(REASONING) is now
+        # state.ensure_ready_for_reasoning() — idempotent helper that
+        # raises IllegalReasoningEntry on terminal states; the
+        # belt-and-suspenders ValueError catch is still present for any
+        # other illegal source -> REASONING transition.
         src = self._strip_comments(inspect.getsource(ReasoningEngine._reason_stream_impl))
-        # Find the main-loop guard: "if state.status != TaskStatus.REASONING:"
-        # followed (within a few lines) by `try:` then `state.transition(
-        # TaskStatus.REASONING)` then `except ValueError:`.
         pattern = re.compile(
             r"if\s+state\.status\s*!=\s*TaskStatus\.REASONING\s*:\s*"
             r"\n\s*try\s*:\s*"
-            r"\n\s*state\.transition\(TaskStatus\.REASONING\)\s*"
-            r"\n\s*except\s+ValueError\s*:",
+            r"\n\s*state\.ensure_ready_for_reasoning\(\)\s*"
+            r"\n\s*except\s+IllegalReasoningEntry",
             re.MULTILINE,
         )
         assert pattern.search(src), (
-            "issue #572 regression: the main-loop transition(REASONING) in "
-            "reason_stream MUST be wrapped in try/except ValueError. A bare "
-            "transition() crashes the SSE stream when a concurrent request "
-            "already pushed the shared TaskState to a terminal status."
+            "issue #572 regression: the main-loop reasoning-entry in "
+            "reason_stream MUST go through ensure_ready_for_reasoning() "
+            "and explicitly catch IllegalReasoningEntry — bare "
+            "transition() or silent except ValueError both reintroduce "
+            "the original crash + the silent-corruption rotation."
         )
 
     def test_reason_stream_terminal_branch_yields_graceful_error(self) -> None:
-        """When the race-guard catches ValueError AND the state is terminal,
-        we must short-circuit with an SSE error+done sequence instead of
-        force-overwriting state and continuing into a dead LLM call."""
+        """When ensure_ready_for_reasoning() raises IllegalReasoningEntry
+        (the terminal-state branch), we must short-circuit with an SSE
+        error+done sequence including a stable ``code`` for clients to
+        match on."""
         src = self._strip_comments(inspect.getsource(ReasoningEngine._reason_stream_impl))
-        assert "state.is_terminal" in src, (
-            "reason_stream must inspect state.is_terminal in the race-guard "
-            "branch (issue #572 fix)."
+        assert "IllegalReasoningEntry" in src, (
+            "reason_stream must catch IllegalReasoningEntry in the "
+            "race-guard branch (issue #572 fix, v1.28.3 S5-A)."
         )
-        # error-event + done-event + return inside the same block
+        # error event has the stable code, then done, then return
         assert re.search(
-            r'state\.is_terminal[\s\S]{0,800}?"type":\s*"error"[\s\S]{0,400}?'
-            r'"type":\s*"done"[\s\S]{0,200}?return',
+            r'IllegalReasoningEntry[\s\S]{0,1500}?"code"\s*:\s*"illegal_state"'
+            r'[\s\S]{0,400}?"type":\s*"done"[\s\S]{0,200}?return',
             src,
         ), (
             "When state is terminal mid-stream (concurrent request collision),"
-            " reason_stream must yield {error} + {done} and return — not try"
-            " to force-continue with a stale state."
+            " reason_stream must yield {error, code=illegal_state} + {done} "
+            "and return — not try to force-continue with a stale state."
+        )
+
+    def test_reason_stream_increments_illegal_reasoning_entry_counter(self) -> None:
+        """v1.28.3 S5-A: the IllegalReasoningEntry catch must call
+        inc_illegal_reasoning_entry so ops can pager-alert on it."""
+        src = self._strip_comments(inspect.getsource(ReasoningEngine._reason_stream_impl))
+        assert "inc_illegal_reasoning_entry" in src, (
+            "The IllegalReasoningEntry handler must increment the counter "
+            "for ops alerting; this is the only signal that S1's preempt "
+            "protocol was bypassed in production."
         )
 
     def test_handle_llm_error_model_switch_transition_is_guarded(self) -> None:
@@ -149,6 +168,162 @@ class TestReasonStreamRaceGuard:
             "_handle_llm_error.transition(MODEL_SWITCHING) must also be "
             "guarded — same race surface as reason_stream main loop."
         )
+
+
+class TestEnsureReadyForReasoning:
+    """v1.28.3 S5-A: ``TaskState.ensure_ready_for_reasoning`` is the
+    idempotent reasoning-entry helper that replaces the historical
+    ``try: state.transition(REASONING); except ValueError: ...`` pattern
+    scattered across reasoning_engine.
+
+    Contract:
+
+    * REASONING already → no-op (idempotent for retry / continuation).
+    * Non-terminal pre-REASONING → walks through validated
+      state-machine transition; illegal source still raises
+      ``ValueError`` (also fatal per :meth:`TaskState.transition` docstring).
+    * Terminal (COMPLETED / FAILED / CANCELLED) → raises
+      :class:`IllegalReasoningEntry`.
+    """
+
+    def test_idempotent_when_already_reasoning(self) -> None:
+        ts = TaskState(task_id="t1")
+        ts.transition(TaskStatus.REASONING)
+        ts.ensure_ready_for_reasoning()
+        ts.ensure_ready_for_reasoning()
+        assert ts.status is TaskStatus.REASONING
+
+    def test_idle_transitions_to_reasoning(self) -> None:
+        ts = TaskState(task_id="t1")
+        assert ts.status is TaskStatus.IDLE
+        ts.ensure_ready_for_reasoning()
+        assert ts.status is TaskStatus.REASONING
+
+    def test_observing_transitions_to_reasoning(self) -> None:
+        """Mid-loop continuation (OBSERVING -> REASONING) is the canonical
+        case ensure_ready_for_reasoning was built for."""
+        ts = TaskState(task_id="t1")
+        ts.transition(TaskStatus.REASONING)
+        ts.transition(TaskStatus.ACTING)
+        ts.transition(TaskStatus.OBSERVING)
+        ts.ensure_ready_for_reasoning()
+        assert ts.status is TaskStatus.REASONING
+
+    @pytest.mark.parametrize(
+        "terminal_status",
+        [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED],
+    )
+    def test_terminal_raises_illegal_reasoning_entry(
+        self, terminal_status: TaskStatus
+    ) -> None:
+        ts = TaskState(task_id="t1")
+        ts.transition(TaskStatus.REASONING)
+        ts.transition(terminal_status)
+        with pytest.raises(IllegalReasoningEntry, match="ensure_ready_for_reasoning"):
+            ts.ensure_ready_for_reasoning()
+
+    def test_terminal_exception_does_not_mutate_state(self) -> None:
+        """When IllegalReasoningEntry is raised, status MUST remain
+        terminal — the helper is the safety check, not a force-set."""
+        ts = TaskState(task_id="t1")
+        ts.transition(TaskStatus.REASONING)
+        ts.transition(TaskStatus.COMPLETED)
+        with pytest.raises(IllegalReasoningEntry):
+            ts.ensure_ready_for_reasoning()
+        assert ts.status is TaskStatus.COMPLETED
+
+    def test_after_begin_task_recovery_path_works(self) -> None:
+        """End-to-end S1 preempt-protocol shape: prev task terminal ->
+        begin_task() -> new IDLE task -> ensure_ready_for_reasoning()
+        succeeds without exception."""
+        agent_state = AgentState()
+        prev = agent_state.begin_task(session_id="conv-1")
+        prev.transition(TaskStatus.REASONING)
+        prev.transition(TaskStatus.COMPLETED)
+        assert prev.is_terminal
+
+        new_task = agent_state.begin_task(session_id="conv-1")
+        assert new_task is not prev
+        assert new_task.status is TaskStatus.IDLE
+        new_task.ensure_ready_for_reasoning()
+        assert new_task.status is TaskStatus.REASONING
+
+    def test_every_non_terminal_status_can_reach_reasoning(self) -> None:
+        """Contract guarantee: ``ensure_ready_for_reasoning`` cannot raise
+        ``ValueError`` in practice — every non-terminal status has REASONING
+        in its valid-transition set (post-v1.28.3 ``_VALID_TRANSITIONS``).
+        Terminal states are pre-caught with IllegalReasoningEntry; REASONING
+        itself is idempotent.  This pins the invariant so future contributors
+        editing ``_VALID_TRANSITIONS`` notice immediately if they break it."""
+        from openakita.core.agent_state import _VALID_TRANSITIONS
+
+        for src_status, targets in _VALID_TRANSITIONS.items():
+            if src_status is TaskStatus.REASONING:
+                continue  # idempotent path
+            ts = TaskState(task_id="t-contract")
+            ts.status = src_status  # bypass transition for setup
+            if src_status in (
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            ):
+                with pytest.raises(IllegalReasoningEntry):
+                    ts.ensure_ready_for_reasoning()
+                continue
+            # Non-terminal: REASONING must be in the legal targets.
+            assert TaskStatus.REASONING in targets, (
+                f"{src_status.value} -> REASONING is missing from "
+                f"_VALID_TRANSITIONS; ensure_ready_for_reasoning would "
+                f"surface a ValueError instead of converging cleanly. "
+                f"Either add the transition or update the S5-A contract."
+            )
+            ts.ensure_ready_for_reasoning()
+            assert ts.status is TaskStatus.REASONING
+
+
+class TestIllegalReasoningEntryAlerts:
+    """v1.28.3 S5-A: when IllegalReasoningEntry surfaces in
+    ``_reason_stream_impl``, an ``inc_illegal_reasoning_entry`` counter
+    fires (pager alert) and the SSE stream emits a stable
+    ``code=illegal_state`` error event before closing."""
+
+    def test_counter_is_imported_into_reason_stream_impl_handler(self) -> None:
+        """The counter import lives inside the except block to keep
+        startup imports lean — verify the contract via source inspection."""
+        src = inspect.getsource(ReasoningEngine._reason_stream_impl)
+        # Counter import must be co-located with the IllegalReasoningEntry handler.
+        assert re.search(
+            r"except\s+IllegalReasoningEntry[\s\S]{0,500}?inc_illegal_reasoning_entry",
+            src,
+        ), (
+            "inc_illegal_reasoning_entry must be called inside the "
+            "except IllegalReasoningEntry block — that's the only signal "
+            "to ops that S1's preempt protocol was bypassed."
+        )
+
+    def test_counter_fires_with_expected_label(self) -> None:
+        """The fire-site uses source ``reason_stream_iter`` so ops can
+        distinguish it from any future hot-path call sites we might add
+        (e.g. tool execution or run() iteration entry)."""
+        src = inspect.getsource(ReasoningEngine._reason_stream_impl)
+        assert "reason_stream_iter" in src
+
+    def test_counter_actually_increments(self) -> None:
+        """End-to-end: directly invoke the counter and read it back via
+        the in-memory snapshot."""
+        from openakita.core import conversation_metrics as metrics
+
+        metrics.reset_for_tests()
+        metrics.inc_illegal_reasoning_entry(source="reason_stream_iter")
+        snap = metrics.snapshot()
+        matching = [
+            s
+            for s in snap
+            if s["name"] == "illegal_reasoning_entry"
+            and s["labels"].get("source") == "reason_stream_iter"
+        ]
+        assert len(matching) == 1
+        assert matching[0]["value"] == 1
 
 
 class TestAllReasoningTransitionsGuarded:

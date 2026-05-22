@@ -33,7 +33,12 @@ from ..api.routes.websocket import broadcast_event
 from ..config import settings
 from ..llm.converters.tools import PARSE_ERROR_KEY
 from ..tracing.tracer import get_tracer
-from .agent_state import AgentState, TaskState, TaskStatus
+from .agent_state import (
+    AgentState,
+    IllegalReasoningEntry,
+    TaskState,
+    TaskStatus,
+)
 from .abort_scope import current_abort_scope
 from .cancel_cleanup import synthesize_tool_results_for_orphans
 from .context_manager import ContextManager
@@ -4358,31 +4363,52 @@ class ReasoningEngine:
                 )
 
                 # --- 状态转换: REASONING（与 run() 一致） ---
-                # 并发保护：如果用户在上一次回复尚未收尾时重复发送同一条消息，
-                # 共享的 TaskState 可能已经被另一个协程推到了终态
-                # (COMPLETED / FAILED / CANCELLED)，此时 transition(REASONING)
-                # 会抛 ValueError。run() 内的同名调用点（line 2283 / 2795 / 2826）
-                # 一直是 try/except 兜底，这里漏写了——issue #572 的崩溃链路就是
-                # 这一个无保护调用未捕获时整条 SSE 流断裂、前端"任务系统直接爆炸"。
+                # v1.28.3 S5-A: 用 ensure_ready_for_reasoning() idempotent
+                # helper 替换原 hotfix 06c67221 的 try/transition 块。
+                # terminal 路径现在抛 IllegalReasoningEntry 走显式 telemetry +
+                # 友好 error code; 其他非法转换的 belt-and-suspenders force-
+                # write 仍保留（v1.28.3 没有"必删"的灰度数据，S5-B 灰度 2 周
+                # 后再删）。
                 if state.status != TaskStatus.REASONING:
                     try:
-                        state.transition(TaskStatus.REASONING)
-                    except ValueError:
-                        if state.is_terminal:
-                            logger.warning(
-                                "[ReAct-Stream] state already terminal (%s) before "
-                                "iter %d; aborting stream (likely concurrent request on "
-                                "session=%r)",
-                                state.status.value,
-                                _iteration + 1,
-                                _session_key,
+                        state.ensure_ready_for_reasoning()
+                    except IllegalReasoningEntry as _illegal_entry:
+                        logger.warning(
+                            "[ReAct-Stream] IllegalReasoningEntry on iter %d "
+                            "(session=%r): %s",
+                            _iteration + 1,
+                            _session_key,
+                            _illegal_entry,
+                        )
+                        try:
+                            from .conversation_metrics import (
+                                inc_illegal_reasoning_entry,
                             )
-                            yield {
-                                "type": "error",
-                                "message": "上一条消息正在收尾，请稍候再试或新建会话。",
-                            }
-                            yield {"type": "done"}
-                            return
+                            inc_illegal_reasoning_entry(
+                                source="reason_stream_iter"
+                            )
+                        except Exception:
+                            pass
+                        yield {
+                            "type": "error",
+                            "code": "illegal_state",
+                            "message": "上一条消息正在收尾，请稍候再试或新建会话。",
+                        }
+                        yield {"type": "done"}
+                        return
+                    except ValueError:
+                        # Belt-and-suspenders (v1.28.3-pre): post-S5-B 灰度
+                        # 后这条分支理论上不可达——保留 force-write 避免
+                        # 任何未识别的 race 路径让 SSE 流硬崩。
+                        logger.error(
+                            "[ReAct-Stream] Illegal transition %s -> REASONING "
+                            "(non-terminal) on iter %d; forcing status overwrite. "
+                            "If you see this in production, S5-A's safety net "
+                            "is catching a race path that wasn't supposed to "
+                            "exist post-S1+S3+S4 — please file a bug.",
+                            state.status.value,
+                            _iteration + 1,
+                        )
                         state.status = TaskStatus.REASONING
 
                 _ctx_compressed_info: dict | None = None
