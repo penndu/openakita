@@ -21,22 +21,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-def _async_return(value):
-    async def _ok(*args, **kwargs):
-        return value
-
-    return MagicMock(side_effect=_ok)
-
-
-def _async_raise(exc: Exception):
-    async def _bad(*args, **kwargs):
-        raise exc
-
-    return MagicMock(side_effect=_bad)
-
-
 def _set_org_dir(app: FastAPI, org_dir: Path) -> None:
     app.state.org_manager.get_org_dir.return_value = str(org_dir)
+
+
+from tests.api.contracts.conftest import _async_return, _async_raise
 
 
 # ---------------------------------------------------------------------------

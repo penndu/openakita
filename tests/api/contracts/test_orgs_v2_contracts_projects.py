@@ -21,14 +21,7 @@ from unittest.mock import MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.api.contracts.conftest import fake_project, fake_task
-
-
-def _async_return(value):
-    async def _ok(*args, **kwargs):
-        return value
-
-    return MagicMock(side_effect=_ok)
+from tests.api.contracts.conftest import _async_return, fake_project, fake_task
 
 
 # ---------------------------------------------------------------------------

@@ -446,3 +446,47 @@ current_phase: P-RC-10
 | commit hash | phase | title | LOC delta | tests delta | ADR refs |
 |---|---|---|---|---|---|
 | _this commit_ | P-RC-10 P10.5e | refactor(frontend,parity): P10.5e clear deferred nit GroupC -- delete 3 stale v1 ``/api/orgs/*`` HTTP literals + empty sentinel #8 allowlist [P-RC-10 P10.5e] | +12 / -30 (OrgEditorView -4 net; sentinel allowlist -19 net + docstring +/-equal) + ~50 ledger row | 262 parity+contracts (unchanged; sentinel #8 5 / 5 with empty Group C list) / 192 runtime-orgs (unchanged; backend untouched) | ADR-0011 (v2 subsystem decomposition; v2 mint exposes no equivalent of the retired v1 debug-only endpoints; legitimate clean removal) |
+
+
+## P10.5b -- close deferred nit P9.7-B (contract fixture extract)
+
+> **Sub-phase status (2026-05-22, P10.5b LANDED)**: shared
+> contract-test helpers hoisted to ``tests/api/contracts/conftest.py``.
+> Nit P9.7-B (from ``docs/revamp/gates/G-RC-9.7.md`` section 11 row
+> P9.7-B) covered the ADR-0014 350-LOC soft-cap exceedance in the
+> two largest cluster files. The most duplicated piece of test
+> boilerplate was ``_async_return`` (4 cluster files, 19 call-sites)
+> followed by ``_async_raise`` (2 files, 6 call-sites). Per charter
+> section 1.3 second bullet, P10.5b extracts both into
+> ``conftest.py`` -- the canonical "fixture extract" disposition
+> with "Net LOC ~0" outcome.
+>
+> Per-file deltas (LOC):
+>
+> * ``conftest.py`` 109 -> 136 (+27; two helpers with docstrings
+>   noting the P10.5b hoist).
+> * ``test_orgs_v2_contracts_dispatch.py`` 203 -> 192 (-11; both
+>   helpers stripped, single conftest import added).
+> * ``test_orgs_v2_contracts_ops.py`` 313 -> 302 (-11; both helpers
+>   stripped, single conftest import added).
+> * ``test_orgs_v2_contracts_nodes.py`` 324 -> 320 (-4;
+>   ``_async_return`` stripped, conftest import added).
+> * ``test_orgs_v2_contracts_projects.py`` 380 -> 373 (-7;
+>   ``_async_return`` stripped, conftest import added).
+> * ``test_orgs_v2_contracts_state.py`` 314 (unchanged; never
+>   defined either helper).
+> * ``test_orgs_v2_contracts_orgs.py`` 483 (unchanged; never
+>   defined either helper -- this file's 133-LOC exceedance
+>   is NOT addressed by P9.7-B fixture extract since it has
+>   no duplicated fixtures to hoist; remains an accepted
+>   soft-cap exceedance per charter "extract shared fixtures"
+>   scope; deeper splitting deferred to a future hygiene epic).
+>
+> Net contract-suite LOC delta: -6 across 5 file edits
+> (charter target was ~0; -6 = effectively neutral within
+> rounding). 262 parity+contracts (unchanged; 184 / 184
+> contract cases still green) / 192 runtime-orgs (unchanged).
+
+| commit hash | phase | title | LOC delta | tests delta | ADR refs |
+|---|---|---|---|---|---|
+| _this commit_ | P-RC-10 P10.5b | test(api/contracts): P10.5b clear deferred nit P9.7-B -- hoist ``_async_return`` + ``_async_raise`` helpers to conftest [P-RC-10 P10.5b] | +33 / -39 across 5 files (net -6; conftest +27, dispatch -11, ops -11, nodes -4, projects -7) + ~36 ledger row | 262 parity+contracts (unchanged; 184 / 184 contract cases) / 192 runtime-orgs (unchanged; backend untouched) | ADR-0014 (per-shard soft-cap revision; this commit extracts shared fixtures per the soft-cap exceedance disposition, charter section 1.3 second bullet) |

@@ -28,11 +28,7 @@ def _wire_org_node(app: FastAPI, org_dir: Path, node_id: str = "n1") -> None:
     app.state.org_manager.get_org_dir.return_value = str(org_dir)
 
 
-def _async_return(value):
-    async def _ok(*args, **kwargs):
-        return value
-
-    return MagicMock(side_effect=_ok)
+from tests.api.contracts.conftest import _async_return
 
 
 # ---------------------------------------------------------------------------

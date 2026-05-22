@@ -17,18 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-def _async_return(value):
-    async def _ok(*args, **kwargs):
-        return value
-
-    return MagicMock(side_effect=_ok)
-
-
-def _async_raise(exc: Exception):
-    async def _bad(*args, **kwargs):
-        raise exc
-
-    return MagicMock(side_effect=_bad)
+from tests.api.contracts.conftest import _async_return, _async_raise
 
 
 # ---------------------------------------------------------------------------

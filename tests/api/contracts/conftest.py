@@ -49,6 +49,33 @@ def mint_client(mint_app: FastAPI) -> Iterator[TestClient]:
 # ---------------------------------------------------------------------------
 
 
+def _async_return(value: Any) -> Any:
+    """Return a ``MagicMock`` whose ``side_effect`` resolves to ``value``.
+
+    Hoisted to conftest at P-RC-10 P10.5b (closes nit P9.7-B fixture
+    extract). Originally duplicated across dispatch / nodes / ops /
+    projects cluster files; now a single shared helper.
+    """
+
+    async def _ok(*args: Any, **kwargs: Any) -> Any:
+        return value
+
+    return MagicMock(side_effect=_ok)
+
+
+def _async_raise(exc: Exception) -> Any:
+    """Return a ``MagicMock`` whose awaited call raises ``exc``.
+
+    Hoisted alongside ``_async_return`` at P-RC-10 P10.5b. Originally
+    duplicated in dispatch + ops cluster files.
+    """
+
+    async def _bad(*args: Any, **kwargs: Any) -> Any:
+        raise exc
+
+    return MagicMock(side_effect=_bad)
+
+
 def fake_org(org_id: str = "org_test", name: str = "Test Org", **extra: Any) -> Any:
     """Return an object with ``to_dict()`` returning a v1-shape envelope."""
     obj = MagicMock(spec=["to_dict"])
