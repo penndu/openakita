@@ -54,6 +54,13 @@ DOWNGRADE_RATE_THRESHOLD = 0.05     # v1.28.2.1 desktop INTERRUPT trigger
 ABANDON_RATE_THRESHOLD = 0.01
 QUEUE_EXTENDED_RATE_REPORT = 0.20   # FOLLOW-UP-S4-C reporting (not blocking)
 
+# Minimum total concurrency events required before any gate can issue
+# a [GO] verdict.  An empty snapshot {"counters": []} on a freshly
+# deployed instance is not evidence of safety — it's just absence of
+# evidence.  Audit fix BUG-A2-1.
+S5B_MIN_TRAFFIC_FLOOR = 1000        # total reasoning entries across labels
+GATE_MIN_TRAFFIC_FLOOR = 100        # any per-gate minimum activity
+
 
 # Five source labels for inc_illegal_reasoning_entry — adding a 6th
 # requires updating this list AND the architecture doc.
@@ -66,14 +73,25 @@ EXPECTED_ILLEGAL_ENTRY_LABELS = {
 }
 
 
+# Exit codes (audit fix BUG-A2-3 — HOLD ≠ BLOCK semantically):
+EXIT_ALL_GO = 0       # all gates [GO]; safe to ship the gated change
+EXIT_BLOCKED = 1      # at least one gate [BLOCK]; pager-worthy
+EXIT_INSUFFICIENT = 2 # at least one gate [HOLD] but none [BLOCK]; retry later
+
+
 @dataclass
 class GateVerdict:
     name: str
     status: str        # "GO" / "HOLD" / "BLOCK"
     detail: str
 
-    def is_blocking(self) -> bool:
-        return self.status in ("HOLD", "BLOCK")
+    @property
+    def is_block(self) -> bool:
+        return self.status == "BLOCK"
+
+    @property
+    def is_hold(self) -> bool:
+        return self.status == "HOLD"
 
 
 # ── snapshot loading ──────────────────────────────────────────────────
@@ -81,24 +99,57 @@ class GateVerdict:
 
 def _load_snapshot(source: str | None) -> dict[str, Any]:
     """Load a ``{"counters": [...]}`` payload from a file path, stdin,
-    or the live ``/api/diagnostics/conversation_metrics`` body."""
+    or the live ``/api/diagnostics/conversation_metrics`` body.
+
+    Audit fix BUG-A2-2: malformed JSON / missing key emits a
+    graceful, actionable error instead of a raw Python traceback.
+    """
     if source is None or source == "-":
         text = sys.stdin.read()
     else:
-        with open(source, encoding="utf-8") as f:
-            text = f.read()
+        try:
+            with open(source, encoding="utf-8") as f:
+                text = f.read()
+        except OSError as e:
+            raise SystemExit(
+                f"could not read snapshot file {source!r}: {e}\n"
+                f"Pass a JSON file path or pipe via stdin."
+            ) from None
     text = text.strip()
     if not text:
         raise SystemExit(
             "no input on stdin — pipe `curl /api/diagnostics/"
             "conversation_metrics` or pass a JSON file path"
         )
-    payload = json.loads(text)
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as e:
+        # Show first 200 chars of input so the user can see what
+        # actually arrived (helpful when curl piped HTML error pages
+        # because of auth / wrong port / etc.).
+        preview = text[:200].replace("\n", "\\n")
+        raise SystemExit(
+            f"input is not valid JSON ({e.msg} at line {e.lineno}). "
+            f"First 200 chars received:\n  {preview!r}\n"
+            f"Expected /api/diagnostics/conversation_metrics body, "
+            f"e.g. {{'counters': [...]}}."
+        ) from None
+    if not isinstance(payload, dict):
+        raise SystemExit(
+            f"snapshot top-level must be an object, got "
+            f"{type(payload).__name__}. Pass the raw "
+            f"/api/diagnostics/conversation_metrics body."
+        )
     if "counters" not in payload:
         raise SystemExit(
             "snapshot is missing the 'counters' key — pass the raw "
             "/api/diagnostics/conversation_metrics body, not a "
             "wrapped grafana export"
+        )
+    if not isinstance(payload["counters"], list):
+        raise SystemExit(
+            f"snapshot 'counters' must be a list of dicts, got "
+            f"{type(payload['counters']).__name__}."
         )
     return payload
 
@@ -197,6 +248,12 @@ def gate_s5b_delete_force_writes(
     """S5-B requires every ``inc_illegal_reasoning_entry`` source
     label to be at 0 for 2 weeks of production load.
 
+    Audit fix BUG-A2-1: an empty snapshot {"counters": []} is NOT
+    evidence of safety — it's absence of evidence.  We require a
+    minimum traffic floor (sum of preempt + queue counts) before
+    issuing a [GO] verdict.  Below the floor, the gate stays HOLD
+    regardless of whether any illegal_entry labels are hot.
+
     We also report the breakdown so partial progress is visible —
     if only ``reason_stream_iter`` is hot, S5-B can land more
     quickly than if all 5 labels are hot.
@@ -235,16 +292,39 @@ def gate_s5b_delete_force_writes(
                 f"shipping S5-B.",
             )
         )
-    else:
+        return verdicts
+
+    # Traffic floor check.  "Zero hits" only means something if
+    # there was real traffic.  Use preempt + queue (both fire on
+    # double-texting) as the activity proxy — these are the
+    # situations where a race could surface.
+    preempt_total = sum(_group_by_label(counters, "preempt", "channel").values())
+    queue_total = sum(_group_by_label(counters, "queue", "channel").values())
+    activity = preempt_total + queue_total
+    if activity < S5B_MIN_TRAFFIC_FLOOR:
         verdicts.append(
             GateVerdict(
                 "S5-B delete force-writes",
-                "GO",
-                "All 5 illegal_reasoning_entry source labels at 0 "
-                "in this snapshot. Confirm with 2 weeks of "
-                "consecutive snapshots before shipping S5-B.",
+                "HOLD",
+                f"Insufficient traffic to confirm zero hits: "
+                f"preempt+queue = {activity} (floor = "
+                f"{S5B_MIN_TRAFFIC_FLOOR}). Wait for more "
+                f"production load before issuing a GO verdict.  "
+                f"Absence of evidence ≠ evidence of absence.",
             )
         )
+        return verdicts
+
+    verdicts.append(
+        GateVerdict(
+            "S5-B delete force-writes",
+            "GO",
+            f"All 5 illegal_reasoning_entry source labels at 0 over "
+            f"{activity} preempt+queue events. Confirm with 2 weeks "
+            f"of consecutive snapshots showing the same before "
+            f"shipping S5-B.",
+        )
+    )
     return verdicts
 
 
@@ -254,9 +334,28 @@ def gate_followup_s4c_force_cancel(
     """FOLLOW-UP-S4-C reports — not a hard gate, just visibility on
     how often the QUEUE-extension mechanism kicks in.  High values
     mean users with long block-class tools could benefit from the
-    deferred ``double_texting_force_cancel`` escape hatch."""
+    deferred ``double_texting_force_cancel`` escape hatch.
+
+    Audit fix BUG-A2-1 (sibling): below GATE_MIN_TRAFFIC_FLOOR the
+    rate-based comparison is statistically meaningless — surface
+    HOLD so empty / new-deployment snapshots don't masquerade as
+    GO.
+    """
     queue_by_channel = _group_by_label(counters, "queue", "channel")
     extended_by_channel = _group_by_label(counters, "queue_extended", "channel")
+    total_queue = sum(queue_by_channel.values())
+
+    if total_queue < GATE_MIN_TRAFFIC_FLOOR:
+        return [
+            GateVerdict(
+                "FOLLOW-UP-S4-C signal",
+                "HOLD",
+                f"Insufficient QUEUE events to compute extension "
+                f"rate: total = {total_queue} (floor = "
+                f"{GATE_MIN_TRAFFIC_FLOOR}). Rates from tiny "
+                f"samples are noise.",
+            )
+        ]
 
     issues: list[str] = []
     for channel, q_count in queue_by_channel.items():
@@ -283,7 +382,9 @@ def gate_followup_s4c_force_cancel(
         GateVerdict(
             "FOLLOW-UP-S4-C signal",
             "GO",
-            "QUEUE extension within tolerable bounds across all channels.",
+            f"QUEUE extension within tolerable bounds across all "
+            f"{len(queue_by_channel)} channels ({total_queue} "
+            f"QUEUE events total).",
         )
     ]
 
@@ -340,7 +441,13 @@ def main() -> int:
     else:
         sys.stdout.write(_render(verdicts))
 
-    return 1 if any(v.is_blocking() for v in verdicts) else 0
+    # Audit fix BUG-A2-3: distinguish HOLD (transient — try again
+    # later) from BLOCK (permanent — fix root cause).
+    if any(v.is_block for v in verdicts):
+        return EXIT_BLOCKED
+    if any(v.is_hold for v in verdicts):
+        return EXIT_INSUFFICIENT
+    return EXIT_ALL_GO
 
 
 if __name__ == "__main__":

@@ -213,7 +213,7 @@ except IllegalStateTransition as e:
 (Replaces the current `except IllegalReasoningEntry` clause — wider
 catch, same handling.)
 
-## S5-B.3 — Delete 11 silent `except ValueError: pass`
+## S5-B.3 — Delete silent `except ValueError: pass` (with care for FIX-S5A-2)
 
 These are non-reasoning transition swallow sites in `_run_impl`:
 
@@ -222,10 +222,64 @@ rg -n "except ValueError:" src/openakita/core/reasoning_engine.py \
   | rg -v "s5b-allow-force-write|cancel-idempotent-force-write"
 ```
 
-Should list 11 hits (plus FIX-S5A-2's 3 telemetry-wired hits).
-Delete each one — let `IllegalStateTransition` propagate to the
-`run()` outer wrapper. The HTTP / IM channel adapter at the
-caller level catches the exception and returns a graceful error.
+This produces **11 hits**, split into two categories:
+
+### Category A: 8 pure-pass sites (delete entirely)
+
+The 8 sites where the body is literally just `pass` — no counter,
+no logging. Delete `try` + `except` + indent the wrapped
+`state.transition(...)` call back into the surrounding flow.
+`IllegalStateTransition` (post step S5-B.1) propagates to the
+`run()` outer wrapper and from there to the HTTP / IM channel
+adapter, which returns a graceful error.
+
+### Category B: 3 FIX-S5A-2 telemetry sites (preserve counter, drop swallow)
+
+Three sites in `_run_impl` carry the FIX-S5A-2 counter wiring
+(audit fix from 2612213b). They look like:
+
+```python
+except ValueError:
+    if state.is_terminal:
+        logger.warning(...)
+        inc_illegal_reasoning_entry(source="run_impl_main_loop")
+```
+
+**Do not delete these blocks naively** — the counter call lives
+INSIDE the `except` block, so removing the except also removes
+the telemetry that the whole S5-A audit was added to provide.
+Refactor each one to catch the typed exception and re-raise after
+telemetry:
+
+```python
+# Post-S5-B shape (telemetry preserved, swallow removed):
+except IllegalStateTransition:
+    if state.is_terminal:
+        logger.warning(
+            "[ReAct] Iter %d: state already terminal (%s) before "
+            "REASONING transition; preempt protocol bypassed "
+            "(session=%r)",
+            iteration + 1,
+            state.status.value,
+            conversation_id,
+        )
+        inc_illegal_reasoning_entry(source="run_impl_main_loop")
+    raise  # let the outer wrapper handle the user-facing error
+```
+
+The three sites and their source labels:
+
+| Lineno | Source label |
+|---|---|
+| ~2452 | `run_impl_main_loop` |
+| ~2989 | `run_impl_ask_user_reply` |
+| ~3039 | `run_impl_ask_user_timeout` |
+
+After this refactor, `inc_illegal_reasoning_entry` continues to
+fire on terminal-state races (so future audits can still see
+incidence rates), but the race no longer silently continues into
+the next loop iteration — the typed exception propagates and the
+HTTP layer emits a structured error.
 
 ### Audit risk 3: IM channel error handling
 
@@ -242,22 +296,41 @@ If any adapter doesn't gracefully handle a propagated
 
 ## S5-B.4 — Tighten tests and ratchet syntax guard
 
-1. `S5B_BACKLOG_FILES[reasoning_engine.py]` drops from 9 to 0 (or 1
-   if MODEL_SWITCHING is reclassified).
+1. **Update the syntax guard ratchet.** In
+   `tests/unit/test_no_force_write_state_transitions.py`:
+   * If MODEL_SWITCHING reclassified as architectural-permanent:
+     drop `S5B_BACKLOG_FILES[reasoning_engine.py]` from 9 to 0,
+     and add `ARCH_FORCE_WRITE_FILES[reasoning_engine.py] = 1`
+     for MODEL_SWITCHING. Add the new token
+     `model-switch-idempotent-force-write` to `RECOGNISED_TOKENS`.
+   * If MODEL_SWITCHING fully deleted:
+     drop `S5B_BACKLOG_FILES[reasoning_engine.py]` to 0; no new
+     architectural entries.
 2. `EXPECTED_ILLEGAL_ENTRY_LABELS` in
    `scripts/concurrency_telemetry_analyzer.py` doesn't change —
    S5-B doesn't add/remove source labels.
 3. `test_each_known_force_write_target_is_present` parametrize list
-   shrinks to whatever set survives.
-4. Add a new test: `test_illegal_state_transition_propagates_to_outer_catch`
-   — fire an illegal transition from inside `_reason_stream_impl`
+   shrinks to whatever set survives. If MODEL_SWITCHING is
+   reclassified, keep its parametrize entry but rename the test
+   class section to distinguish "permanent" from "backlog".
+4. Add a new test:
+   `test_illegal_state_transition_propagates_to_outer_catch` —
+   fire an illegal transition from inside `_reason_stream_impl`
    (mock a terminal state) and assert the outer `except`
-   surfaces a structured `code="illegal_state"` event.
-5. Update `docs/architecture/conversation_concurrency.md` —
-   remove the S5-B "pending" section, move the deferral notes
-   to history.
-6. Update `docs/release-notes/v1.28.md` — replace the
-   "draft" S5-B section with the actual shipping notes.
+   surfaces a structured `code="illegal_state"` event with the
+   correct source label.
+5. Add a regression test for the FIX-S5A-2 refactor:
+   `test_run_impl_terminal_race_increments_counter_and_raises` —
+   mock a terminal-state race in each of the 3 run_impl sites,
+   assert (a) `inc_illegal_reasoning_entry` fires with the
+   correct source label, and (b) the exception propagates (does
+   NOT silently continue the loop).
+6. Update `docs/architecture/conversation_concurrency.md` —
+   remove the S5-B "pending" section from "Deferred work", add
+   a brief note under "History" that S5-B shipped at vX.Y.Z.
+7. Update `docs/release-notes/v1.28.md` — replace the
+   "draft" S5-B section with the actual shipping notes including
+   the per-step diff sizes and the regression numbers.
 
 ## Rollback plan
 
@@ -284,9 +357,14 @@ If S5-B causes a production regression in the first 2 weeks:
 | Step | Time | Reviewer effort |
 |---|---|---|
 | S5-B.1 IllegalStateTransition | 0.5 day | 30 min |
-| S5-B.2 reasoning_engine.py deletions | 1 day | 1 hour (slow, careful) |
-| S5-B.3 _run_impl pass deletions | 0.5 day | 30 min |
+| S5-B.2 reasoning_engine.py deletions (8 deletes + 1 reclassify) | 1 day | 1 hour (slow, careful) |
+| S5-B.3 _run_impl: 8 pure-pass deletes + 3 telemetry refactors | 0.75 day | 45 min |
 | S5-B.4 test + docs ratchet | 0.5 day | 30 min |
-| **Total** | **~2.5 days** | **~2.5 hours review** |
+| **Total** | **~2.75 days** | **~2.75 hours review** |
 
 Plus the 2-week telemetry wait before starting.
+
+The S5-B.3 estimate grew slightly compared to the original (0.5d →
+0.75d) because of CHECK-A2-1 — the FIX-S5A-2 telemetry refactor
+needs more thought than a blind delete. Reviewer should verify each
+of the 3 sites still emits the counter AND raises.

@@ -49,22 +49,23 @@ correctness. v1.27.x had #2 and #4 partial; v1.28 closes all five.
 ```text
 src/openakita/
 ├── api/
-│   ├── conversation_lifecycle.py     # Rule #1: per-conv single-flight (entry lock)
-│   ├── routes/
-│   │   ├── chat.py                   # Rule #2: DoubleTextingPolicy dispatch
-│   │   └── double_texting.py         # Rule #2: Policy enum + per-channel map
-│   └── sse_session.py                # Rule #3: SSE ringbuffer (run-state only)
+│   └── routes/
+│       ├── conversation_lifecycle.py  # Rule #1: per-conv single-flight (entry lock)
+│       ├── chat.py                    # Rule #2: DoubleTextingPolicy dispatch
+│       └── double_texting.py          # Rule #2: Policy enum + per-channel map
 ├── core/
-│   ├── agent.py                      # Rule #2: _preempt_or_queue_prev_task
-│   ├── agent_state.py                # Rule #3+#5: TaskState lifecycle + abort tree
-│   ├── reasoning_engine.py           # Rule #3: ensure_ready_for_reasoning entry
-│   ├── tool_executor.py              # Rule #4+#5: orphan synth + in-flight tracking
-│   ├── tool_interrupt_behavior.py    # Rule #5: central interrupt registry
-│   ├── cancel_cleanup.py             # Rule #4: synthesize_tool_results_for_orphans
-│   ├── conversation_metrics.py       # observability counters for all 5 rules
-│   └── policy_v2/                    # (orthogonal — content safety, not concurrency)
+│   ├── agent.py                       # Rule #2: _preempt_or_queue_prev_task
+│   ├── agent_state.py                 # Rule #3+#5: TaskState lifecycle + abort tree
+│   ├── reasoning_engine.py            # Rule #3: ensure_ready_for_reasoning entry
+│   ├── tool_executor.py               # Rule #4+#5: orphan synth + in-flight tracking
+│   ├── tool_interrupt_behavior.py     # Rule #5: central interrupt registry
+│   ├── cancel_cleanup.py              # Rule #4: synthesize_tool_results_for_orphans
+│   ├── sse_replay.py                  # Rule #3: SSE ringbuffer (run-state replay)
+│   ├── sse_throttle.py                # Rule #3: DeltaCoalescer (S1+ P0-2)
+│   ├── conversation_metrics.py        # observability counters for all 5 rules
+│   └── policy_v2/                     # (orthogonal — content safety, not concurrency)
 └── sessions/
-    └── user.py                       # Rule #3: Session != TaskState boundary
+    └── user.py                        # Rule #3: Session != TaskState boundary
 ```
 
 ## How an agent turn actually runs (data flow)
@@ -125,37 +126,63 @@ src/openakita/
 ## The state machine
 
 ```text
-   IDLE ────── begin_task ──▶ REASONING ◀────────┐
-    │                          │  ▲              │
-    │                          ▼  │              │
-    │                       ACTING │              │
-    │                          │   │              │
-    │                          ▼   │              │
-    │                       OBSERVING ────────────┤
-    │                          │                  │
-    │                          ▼                  │
-    │                       VERIFYING ────────────┤
-    │                          │                  │
-    │                          ▼                  │
-    │                       WAITING_USER ─────────┤
-    │                          │                  │
-    ▼                          ▼                  │
-   COMPLETED ◀────────────── (any non-terminal)   │
-   FAILED                                         │
-   CANCELLED  ◀──── cancel() (from ANY state) ────┘
-   MODEL_SWITCHING ◀── _handle_llm_error ─────────┘
+   IDLE ──┬─▶ COMPILING ────┐
+          │                  │
+          └────────────────▶ REASONING ◀──────────────┐
+                              │  ▲                    │
+                              ▼  │                    │
+                            ACTING │                  │
+                              │    │                  │
+                              ▼    │                  │
+                            OBSERVING ────────────────┤
+                              │                       │
+                              ▼                       │
+                            VERIFYING ────────────────┤
+                              │                       │
+                              ▼                       │
+                            WAITING_USER ─────────────┤
+                              │  ▲                    │
+                              ▼  │                    │
+                            (any non-terminal) ◀── MODEL_SWITCHING
+                              │                       ▲
+                              ▼                       │
+                            COMPLETED ─┐              │
+                            FAILED ────┤              │
+                            CANCELLED  │              │
+                              │        │              │
+                              ▼        ▼              │
+                          (IDLE again via begin_task) │
+                                                      │
+   cancel() from ANY state  ────────────────────▶  CANCELLED
+   _handle_llm_error from non-terminal  ──────▶  MODEL_SWITCHING
 ```
 
-The terminal states (COMPLETED / FAILED / CANCELLED) have **no
-outbound edges**.  Once terminal, a TaskState is dead — the only
-recovery path is to create a fresh TaskState via `begin_task()`.
+Source of truth: `_VALID_TRANSITIONS` in `core/agent_state.py`.
+A few quirks worth knowing:
+
+* **Terminal states are NOT dead ends.** `COMPLETED → IDLE`,
+  `FAILED → IDLE`, `CANCELLED → IDLE` are all legal (and used by
+  `AgentState.begin_task()` to reuse a TaskState slot for the
+  next turn). Terminal states also retain `→ CANCELLED` so
+  `cancel()` is idempotent — that's the *one* permanent
+  force-write (see `agent_state.py` `# cancel-idempotent-force-write`).
+* **`REASONING → REASONING` is allowed** as a recovery edge — if a
+  preempted task is observed in `ACTING` when a new message arrives,
+  the new turn can re-enter REASONING via `ensure_ready_for_reasoning()`
+  without bouncing through IDLE.
+* **`COMPILING`** is the optional prompt-compilation phase before
+  REASONING (some agent profiles do template assembly outside the
+  reasoning loop). Most turns go `IDLE → REASONING` directly.
+* **The `is_terminal` property** still only returns True for
+  COMPLETED / FAILED / CANCELLED — it's the test
+  `ensure_ready_for_reasoning()` uses, not "no outbound edges".
 
 ### `ensure_ready_for_reasoning()` — the v1.28.3 contract
 
 Re-entering REASONING is a recurring pattern (main-loop iteration,
 post-tool-loop, post-observation, post-verify). Pre-S5-A this used
 to be `state.transition(REASONING); except ValueError: pass / state.status = REASONING`,
-a hot-fix from [`06c67221`](../release-notes/v1.28.md#stage-5-a---state-machine-contract-helper-v1283-pre)
+a hot-fix from [`06c67221`](../release-notes/v1.28.md#stage-5-a--state-machine-contract-helper-v1283-pre)
 that papered over the issue #572 race. Post-S5-A:
 
 ```python
@@ -182,7 +209,7 @@ except ValueError:  # s5b-allow-force-write
 | Source state | Action |
 |---|---|
 | `REASONING` | no-op (idempotent) |
-| `IDLE` / `ACTING` / `OBSERVING` / `VERIFYING` / `WAITING_USER` / `MODEL_SWITCHING` | `transition(REASONING)` |
+| `IDLE` / `COMPILING` / `ACTING` / `OBSERVING` / `VERIFYING` / `WAITING_USER` / `MODEL_SWITCHING` | `transition(REASONING)` |
 | `COMPLETED` / `FAILED` / `CANCELLED` | raise `IllegalReasoningEntry` |
 
 The exception type matters: `IllegalReasoningEntry` is a typed signal
@@ -275,38 +302,59 @@ counter — see telemetry catalog below.
 
 ## Tool interrupt behavior (Rule #5)
 
-Central registry at `core/tool_interrupt_behavior.py`:
+Central registry at `core/tool_interrupt_behavior.py`. The map itself
+is a module-private `_INTERRUPT_BEHAVIOR_MAP`; do NOT import it directly
+— use the public helper functions:
 
 ```python
-INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
+# Public API (callers should use these):
+from openakita.core.tool_interrupt_behavior import (
+    get_tool_interrupt_behavior,      # primary query: str → "cancel" | "block"
+    has_any_block_in_flight,          # mcp-aware aggregate check
+    resolve_mcp_tool_behavior,        # explicit MCP annotation path
+    encode_mcp_sub_tool,              # build "mcp:server:sub_tool" key
+    parse_mcp_sub_tool,               # inverse
+    known_tools,                      # frozenset of all classified names
+    is_unknown_tool,                  # for telemetry / unclassified warnings
+)
+
+# Inside the registry (private):
+_INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     # cancel-class: safe to kill mid-flight
     "ask_user": "cancel",
-    "delegate": "cancel",
     "web_search": "cancel",
     ...
     # block-class: kill causes data corruption or orphan resources
     "write_file": "block",
-    "shell_command": "block",
-    "browser_navigate": "block",
+    "run_shell": "block",
+    "browser_click": "block",
     "memory_save": "block",
     "call_mcp_tool": "block",  # conservative default; MCP annotations refine
     ...
 }
 ```
 
-139 built-in tools are explicitly classified. The
-`TestToolInterruptBehaviorCompleteness` AST scanner fails any
-addition that lands without classification.
+**139 built-in tools** are explicitly classified (70 block + 69
+cancel as of v1.28.3-pre — verify with
+`python -c "from openakita.core.tool_interrupt_behavior import _INTERRUPT_BEHAVIOR_MAP; print(len(_INTERRUPT_BEHAVIOR_MAP))"`).
+The `tests/unit/test_tool_interrupt_behavior_completeness.py` AST
+scanner fails any tool definition lacking explicit classification.
 
 MCP tools follow the encoding `mcp:<server>:<sub_tool>`. When
-resolving in-flight behavior:
+resolving in-flight behavior, the order in
+`resolve_in_flight_behavior()` is:
 
 1. If the full key (`mcp:server:sub_tool`) is in
-   `INTERRUPT_BEHAVIOR_MAP`, use it (allows per-sub-tool overrides
-   for the rare case a hostile MCP server lies in annotations).
+   `_INTERRUPT_BEHAVIOR_MAP`, use it (allows per-sub-tool
+   overrides for the rare case a hostile MCP server lies in
+   annotations).
 2. Else, ask the MCP client for the server's tool annotations
-   (`mcp_annotations.interruptBehavior`).
+   (`mcp_annotations.interruptBehavior`) via `resolve_mcp_tool_behavior`.
 3. Else, fall back to `block` (safety-by-default).
+
+Built-in classifications **always win** over MCP annotations. A
+malicious / buggy MCP server can't downgrade built-in `write_file`
+to "cancel" — that's a deliberate safety boundary.
 
 ## Telemetry catalog
 
