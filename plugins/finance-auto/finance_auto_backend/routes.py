@@ -735,10 +735,11 @@ def build_router(service: FinanceAutoService) -> APIRouter:
         )
         return RowListResponse(rows=rows, total=total, limit=limit, offset=offset)
 
-    # M1 W2 Stage 4 / 5 / 6 + W3 Stage 1 -- attach the optional endpoint
-    # families onto the same router.  Kept in separate modules so this file
-    # stays small.
+    # M1 W2 Stage 4 / 5 / 6 + W3 Stage 1 + M2 Biz Stage 2 / 3 / 6 -- attach
+    # the optional endpoint families onto the same router.  Kept in separate
+    # modules so this file stays small.
     from .audit_routes import register_audit_endpoints
+    from .collab_routes import register_collab_endpoints
     from .cross_period_routes import register_cross_period_endpoints
     from .industry_routes import register_industry_endpoints
     from .manual_input_routes import register_manual_input_endpoints
@@ -752,6 +753,21 @@ def build_router(service: FinanceAutoService) -> APIRouter:
     register_cross_period_endpoints(router, service)
     register_manual_input_endpoints(router, service)
     register_industry_endpoints(router, service)
+    # M2 Biz endpoints (Stage 2 collaboration / review workflow).  Stage 3
+    # reclassification + Stage 6 consolidation endpoints attach themselves
+    # once their modules ship (see commits 3 and 6); the try/except blocks
+    # let this routes.py file land before those endpoint families exist.
+    register_collab_endpoints(router, service)
+    try:  # Stage 3 (reclassification).
+        from .reclassification_routes import register_reclassification_endpoints
+        register_reclassification_endpoints(router, service)
+    except ImportError:
+        pass
+    try:  # Stage 6 (consolidation).
+        from .consolidation_routes import register_consolidation_endpoints
+        register_consolidation_endpoints(router, service)
+    except ImportError:
+        pass
 
     # M2 AI endpoints (Stage 3+ -- consent dialog channel, scenario admin,
     # consent listing, audit-log).  WebSocket lives at /ws under the same

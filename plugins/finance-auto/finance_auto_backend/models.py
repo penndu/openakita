@@ -794,3 +794,406 @@ class ManualInputSubmitRequest(BaseModel):
     source: ManualInputSource = "manual"
     notes: str | None = None
     decided_by: str = "local"
+
+
+# ---------------------------------------------------------------------------
+# M2 Biz Stage 2 — multi-auditor collaboration (v0.3 Part Biz §1)
+# ---------------------------------------------------------------------------
+
+UserRole = Literal["auditor", "manager", "partner", "admin"]
+"""Four roles per Part Biz §1.1 permission matrix.
+
+* ``auditor``  — drafts reports within assigned scope.
+* ``manager``  — reviews / approves / requests changes; cross-org consolidation.
+* ``partner``  — signs off final reports; un-restricted scope.
+* ``admin``    — user / system administration only (no report editing).
+"""
+
+ProjectRole = Literal["lead_auditor", "reviewer", "partner_signoff"]
+"""Per-assignment role; what this user *does* on a specific (org, period)."""
+
+ReviewStatus = Literal[
+    "draft",
+    "pending_review",
+    "reviewed",
+    "pending_signoff",
+    "signed_off",
+    "returned",
+]
+"""State machine per Part Biz §1.6 sequence diagram.
+
+``draft → pending_review → reviewed → pending_signoff → signed_off`` is the
+happy path; manager / partner may ``returned`` at any pending step to send
+the workflow back to the auditor for revision.
+"""
+
+CommentKind = Literal["general", "review_question", "answer", "audit_finding"]
+
+
+class UserCreateRequest(BaseModel):
+    """POST /users — request body."""
+
+    user_id: str = Field(..., min_length=3, max_length=64,
+                         description="Stable id; conventionally user_xxxxxxxx")
+    display_name: str = Field(..., min_length=1, max_length=128)
+    role: UserRole
+    email: str = Field(default="", max_length=256)
+    active: bool = True
+
+
+class UserModel(BaseModel):
+    """Persisted users row + API response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: str
+    display_name: str
+    role: UserRole
+    email: str = ""
+    active: bool = True
+    created_at: str
+    updated_at: str
+    version: int = 1
+
+
+class UserListResponse(BaseModel):
+    users: list[UserModel]
+    total: int
+
+
+class AssignmentCreateRequest(BaseModel):
+    """POST /orgs/{org_id}/assignments — request body."""
+
+    user_id: str
+    period_id: str | None = Field(
+        default=None,
+        description="None = 整账套（所有期间）",
+    )
+    role_in_project: ProjectRole
+    assigned_by: str = "local"
+
+
+class AssignmentModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: str
+    org_id: str
+    period_id: str | None = None
+    role_in_project: ProjectRole
+    assigned_at: str
+    assigned_by: str = "local"
+    revoked_at: str | None = None
+    version: int = 1
+
+
+class AssignmentListResponse(BaseModel):
+    assignments: list[AssignmentModel]
+    total: int
+
+
+class ReviewWorkflowModel(BaseModel):
+    """Persisted review_workflows row + API response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    workflow_id: int
+    org_id: str
+    period_id: str
+    report_id: str | None = None
+    target_kind: Literal["report_instance", "audit_evidence", "notes"] = "report_instance"
+    status: ReviewStatus
+    auditor_id: str | None = None
+    reviewer_id: str | None = None
+    partner_id: str | None = None
+    submitted_at: str | None = None
+    reviewed_at: str | None = None
+    signed_off_at: str | None = None
+    returned_at: str | None = None
+    return_reason: str | None = None
+    history: list[dict] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    version: int = 1
+
+
+class ReviewWorkflowSubmitRequest(BaseModel):
+    """POST /orgs/{org_id}/reports/{report_id}/review/submit — request body.
+
+    Caller is the auditor; ``reviewer_id`` / ``partner_id`` may be left
+    empty here and filled later when the manager / partner actually
+    picks up the workflow.
+    """
+
+    auditor_id: str = "local"
+    reviewer_id: str | None = None
+    partner_id: str | None = None
+    target_kind: Literal["report_instance", "audit_evidence", "notes"] = "report_instance"
+
+
+class ReviewWorkflowActionRequest(BaseModel):
+    """Generic action body for approve / sign_off / request_changes."""
+
+    actor_id: str = "local"
+    note: str | None = None
+    reason: str | None = None  # only used by request_changes
+
+
+class CommentCreateRequest(BaseModel):
+    body: str = Field(..., min_length=1, max_length=8000)
+    kind: CommentKind = "general"
+    author_id: str = "local"
+    parent_id: int | None = None
+    mentions: list[str] = Field(default_factory=list)
+
+
+class CommentModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    workflow_id: int | None = None
+    cell_id: str | None = None
+    report_id: str | None = None
+    org_id: str
+    parent_id: int | None = None
+    kind: CommentKind = "general"
+    author_id: str = "local"
+    body: str
+    mentions: list[str] = Field(default_factory=list)
+    resolved: bool = False
+    resolved_by: str | None = None
+    resolved_at: str | None = None
+    created_at: str
+    updated_at: str
+    version: int = 1
+
+
+class CommentListResponse(BaseModel):
+    comments: list[CommentModel]
+    total: int
+
+
+# ---------------------------------------------------------------------------
+# M2 Biz Stage 3 — reclassification rules (v0.3 Part Biz §3.6 / v0.1 §5.2)
+# ---------------------------------------------------------------------------
+
+ReclassificationMode = Literal["preview", "apply"]
+
+
+class ReclassificationRuleCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    when_condition: dict = Field(
+        default_factory=dict,
+        description="Predicate: account_code_starts:list, balance_direction, threshold",
+    )
+    action: dict = Field(
+        default_factory=dict,
+        description="Action: move_to_account_code, reason",
+    )
+    active: bool = True
+    priority: int = 100
+
+
+class ReclassificationRuleModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    rule_id: int
+    org_id: str | None = None
+    name: str
+    description: str | None = None
+    when_condition: dict = Field(default_factory=dict)
+    action: dict = Field(default_factory=dict)
+    active: bool = True
+    priority: int = 100
+    source_yaml: str | None = None
+    created_at: str
+    created_by: str = "local"
+    updated_at: str
+    version: int = 1
+
+
+class ReclassificationRuleListResponse(BaseModel):
+    rules: list[ReclassificationRuleModel]
+    total: int
+
+
+class ReclassificationRunRequest(BaseModel):
+    period_id: str
+    import_id: str | None = Field(
+        default=None,
+        description="覆盖默认；不传则取该 period 最新一次成功导入",
+    )
+    rule_ids: list[int] | None = Field(
+        default=None,
+        description="不传则跑该 org 所有 active 规则",
+    )
+    triggered_by: str = "local"
+
+
+class ReclassificationRunItemModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    rule_id: int | None = None
+    rule_name: str = ""
+    source_account: str
+    target_account: str
+    amount: str = "0"  # Decimal as str
+    direction: Literal["credit", "debit"] = "credit"
+    reason: str | None = None
+    matched_row_id: str | None = None
+    created_at: str
+
+
+class ReclassificationRunModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    run_id: int
+    org_id: str
+    period_id: str
+    import_id: str | None = None
+    mode: ReclassificationMode
+    rules_count: int = 0
+    items_count: int = 0
+    total_amount: str = "0"  # Decimal as str
+    parse_issue_ids: list[str] = Field(default_factory=list)
+    started_at: str
+    finished_at: str | None = None
+    triggered_by: str = "local"
+    status: Literal["ok", "failed", "partial"] = "ok"
+    notes: str | None = None
+    items: list[ReclassificationRunItemModel] = Field(default_factory=list)
+    version: int = 1
+
+
+# ---------------------------------------------------------------------------
+# M2 Biz Stage 6 — consolidation models (v0.3 Part Biz §2)
+# ---------------------------------------------------------------------------
+
+ConsolidationJoinMethod = Literal["full", "equity", "proportional"]
+EliminationKind = Literal[
+    "inter_ar_ap",
+    "inter_sales",
+    "inter_investment",
+    "inter_profit",
+    "minority_interest",
+    "other",
+]
+ConsolidationReportKind = Literal["balance_sheet", "income_statement", "cash_flow"]
+
+
+class ConsolidationGroupCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    parent_org_id: str
+    description: str | None = None
+    created_by: str = "local"
+
+
+class ConsolidationGroupModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    group_id: int
+    name: str
+    parent_org_id: str
+    description: str | None = None
+    created_at: str
+    created_by: str = "local"
+    updated_at: str
+    version: int = 1
+
+
+class ConsolidationGroupListResponse(BaseModel):
+    groups: list[ConsolidationGroupModel]
+    total: int
+
+
+class ConsolidationMemberCreateRequest(BaseModel):
+    subsidiary_org_id: str
+    ownership_pct: float = Field(default=100.0, ge=0.0, le=100.0)
+    join_method: ConsolidationJoinMethod = "full"
+    is_parent: bool = False
+
+
+class ConsolidationMemberModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    group_id: int
+    subsidiary_org_id: str
+    ownership_pct: float = 100.0
+    join_method: ConsolidationJoinMethod = "full"
+    is_parent: bool = False
+    added_at: str
+    version: int = 1
+
+
+class EliminationEntryCreateRequest(BaseModel):
+    period_id: str
+    kind: EliminationKind = "inter_ar_ap"
+    debit_target: str
+    credit_target: str
+    amount: str = "0"  # Decimal as str
+    rationale: str | None = None
+    rule_key: str = ""
+    is_auto: bool = False
+    review_required: bool = True
+    auto_match_confidence: float | None = None
+    created_by: str = "local"
+
+
+class EliminationEntryModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    group_id: int
+    period_id: str
+    kind: EliminationKind = "inter_ar_ap"
+    rule_key: str = ""
+    debit_target: str
+    credit_target: str
+    amount: str = "0"
+    rationale: str | None = None
+    is_auto: bool = False
+    review_required: bool = True
+    auto_match_confidence: float | None = None
+    created_at: str
+    created_by: str = "local"
+    version: int = 1
+
+
+class EliminationEntryListResponse(BaseModel):
+    entries: list[EliminationEntryModel]
+    total: int
+
+
+class ConsolidationRunRequest(BaseModel):
+    period_id: str
+    kind: ConsolidationReportKind = "balance_sheet"
+    accounting_standard: AccountingStandard | None = None
+    actor_user_id: str = "local"
+
+
+class ConsolidatedReportModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    consolidated_report_id: int
+    group_id: int
+    period_id: str
+    kind: ConsolidationReportKind
+    accounting_standard: str = "small_enterprise"
+    status: Literal["ok", "failed", "partial"] = "ok"
+    cells: list[dict] = Field(default_factory=list)
+    minority_interest: str = "0"
+    consolidation_meta: dict = Field(default_factory=dict)
+    member_orgs_snapshot: list[dict] = Field(default_factory=list)
+    elimination_ids: list[int] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    generated_at: str
+    generated_by: str = "local"
+    version: int = 1
+
+
+class ConsolidatedReportListResponse(BaseModel):
+    reports: list[ConsolidatedReportModel]
+    total: int
