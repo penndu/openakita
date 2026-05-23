@@ -431,6 +431,43 @@ class VatDeclarationListResponse(BaseModel):
     total: int
 
 
+# ---------------------------------------------------------------------------
+# Audit templates (M1 W2 Stage 6)
+# ---------------------------------------------------------------------------
+
+
+class AuditTemplate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    description: str | None
+    file_path: str
+    file_sha256: str | None
+    file_size: int
+    placeholder_count: int
+    unknown_placeholder_count: int
+    placeholder_report: dict
+    uploaded_at: str
+
+    @property
+    def is_strict_clean(self) -> bool:
+        return self.unknown_placeholder_count == 0
+
+
+class AuditTemplateListResponse(BaseModel):
+    templates: list[AuditTemplate]
+    total: int
+
+
+class AuditTemplateRenderRequest(BaseModel):
+    report_id: str = Field(..., description="用于注入 cells 上下文的报表实例 ID")
+    strict: bool = Field(
+        default=True,
+        description="True 时拒绝渲染含 unknown 占位符的模板；False 跳过未知占位符",
+    )
+
+
 class ReportGenerateRequest(BaseModel):
     period_id: str = Field(..., description="生成报表所基于的会计期间")
     accounting_standard: AccountingStandard | None = Field(

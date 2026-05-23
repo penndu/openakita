@@ -22,11 +22,12 @@ DDL statement so it does not appear here.
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 """History:
 * v1 -- M1 W1 baseline (5 tables).
 * v2 -- M1 W2 Stage 4: adds ``reports`` + ``report_cells``.
 * v3 -- M1 W2 Stage 5: adds ``vat_declarations``.
+* v4 -- M1 W2 Stage 6: adds ``audit_templates``.
 """
 
 # ---------------------------------------------------------------------------
@@ -214,6 +215,27 @@ CREATE TABLE IF NOT EXISTS vat_declarations (
 );
 CREATE INDEX IF NOT EXISTS idx_vat_org_period
     ON vat_declarations(org_id, declaration_period);
+
+-- ===========================================================================
+-- M1 W2 Stage 6: audit-template registry.
+-- One row per uploaded ``审计底稿`` .xlsx.  ``placeholder_report_json`` is
+-- the JSON form of services.audit_template.PlaceholderReport.
+-- ===========================================================================
+
+CREATE TABLE IF NOT EXISTS audit_templates (
+    id                       TEXT PRIMARY KEY,
+    name                     TEXT NOT NULL,
+    description              TEXT,
+    file_path                TEXT NOT NULL,
+    file_sha256              TEXT,
+    file_size                INTEGER NOT NULL DEFAULT 0,
+    placeholder_count        INTEGER NOT NULL DEFAULT 0,
+    unknown_placeholder_count INTEGER NOT NULL DEFAULT 0,
+    placeholder_report_json  TEXT NOT NULL DEFAULT '{}',
+    uploaded_at              TEXT NOT NULL,
+    _encrypted_payload       BLOB
+);
+CREATE INDEX IF NOT EXISTS idx_audit_tpl_uploaded ON audit_templates(uploaded_at);
 """
 
 # ---------------------------------------------------------------------------
@@ -227,6 +249,7 @@ CREATE INDEX IF NOT EXISTS idx_vat_org_period
 MIGRATION_STEPS: tuple[tuple[int, str], ...] = (
     (2, SCHEMA_SQL),  # Stage 4: reports + report_cells.
     (3, SCHEMA_SQL),  # Stage 5: vat_declarations.
+    (4, SCHEMA_SQL),  # Stage 6: audit_templates.
 )
 """Each entry: (target_version, idempotent_DDL).  All steps replay the full
 canonical SCHEMA_SQL because every CREATE TABLE in it is IF NOT EXISTS, so
