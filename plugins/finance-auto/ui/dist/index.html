@@ -531,6 +531,14 @@
               <button className={`tab ${tab === "import" ? "active" : ""}`} onClick={() => setTab("import")}>余额表导入</button>
               <button className={`tab ${tab === "report" ? "active" : ""}`} onClick={() => setTab("report")}>报表生成</button>
               <button className={`tab ${tab === "vat" ? "active" : ""}`} onClick={() => setTab("vat")}>增值税申报</button>
+              <button
+                className={`tab ${tab === "issues" ? "active" : ""}`}
+                onClick={() => setTab("issues")}
+                data-testid="tab-issues"
+              >
+                数据分流
+                <PendingIssuesBadge orgId={orgId} />
+              </button>
             </div>
 
             {tab === "import" && (
@@ -542,7 +550,23 @@
             {tab === "vat" && (
               <VatTab orgId={orgId} toast={toast} />
             )}
+            {tab === "issues" && (
+              <ParseIssueQueueView orgId={orgId} period={period} toast={toast} />
+            )}
           </>
+        );
+      }
+
+      // 给 Tab D 标签上加个 "N 项必修复待处理" 红点（极简版）
+      function PendingIssuesBadge({ orgId }) {
+        const { data } = useFetch(`/orgs/${orgId}/parse-issues?status=pending&limit=1`, [orgId]);
+        const must = (data && data.must_fix_pending) || 0;
+        const pending = (data && data.pending) || 0;
+        if (!pending) return null;
+        const cls = must > 0 ? "err" : "warn";
+        const label = must > 0 ? `${must} 项必修复` : `${pending} 项`;
+        return (
+          <span className={`badge ${cls}`} style={{ marginLeft: 6 }} title={label}>{label}</span>
         );
       }
 
@@ -1408,6 +1432,430 @@
                 <div className="text-sm">{cell.notes}</div>
               </div>
             )}
+          </Drawer>
+        );
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      //  M2 STAGE 2 · ParseIssue 数据分流任务列表
+      //
+      //  v0.2 Part 1 §2.3 ASCII 卡片实现 + AI 建议预填 + 学习样本一键转化
+      //
+      //  后端契约（W2 已就绪）：
+      //    GET    /orgs/{org_id}/parse-issues?status=pending|all|decided|auto_applied
+      //    POST   /orgs/{org_id}/parse-issues/{issue_id}/decide
+      //               body { decision, payload, decided_by }
+      //               decision ∈ apply_ai / manual_fix / skip / ignore_as_other
+      //    POST   /orgs/{org_id}/parse-issues/{issue_id}/learn
+      //               body { auto_apply, share_globally, confidence }
+      //    GET    /orgs/{org_id}/learning-samples?include_global=true
+      //
+      //  AI 建议（`ai_suggestion` JSON + `ai_confidence`）由 AI sibling 的
+      //  S2 场景填入 parse_issues 行；UI 这边只读不写。当字段为 null 时显示
+      //  「AI 未建议」+ 引导用户「请求 AI 建议」按钮（v0.2 §9.2 流程）。
+      // ═══════════════════════════════════════════════════════════════════
+
+      const ISSUE_TYPE_META = {
+        unknown_code:           { label: "未知科目编码",   desc: "余额表带的科目编码，未命中任何模板/学习样本" },
+        name_ambiguity:         { label: "科目名歧义",     desc: "科目名同时匹配多个候选，需要人工/AI 判定" },
+        direction_anomaly:      { label: "借贷方向异常",   desc: "余额方向与会计科目预期不一致" },
+        debit_credit_imbalance: { label: "借贷不平衡",     desc: "试算平衡校验未通过" },
+        field_missing:          { label: "字段缺失",       desc: "必要字段（编码 / 余额）为空" },
+        format_corrupt:         { label: "格式异常",       desc: "数字格式 / 日期 / 编码格式损坏" },
+        cross_period_mismatch:  { label: "跨期不一致",     desc: "本期期初与上期期末不衔接" },
+      };
+      const ISSUE_SEVERITY_META = {
+        must_fix:  { label: "必修复",  badge: "err",  color: "var(--danger)"  },
+        suggested: { label: "建议处理", badge: "warn", color: "var(--warning)" },
+        ignorable: { label: "可忽略",  badge: "info", color: "var(--text-muted)" },
+      };
+      const DECISION_LABEL = {
+        apply_ai:        "应用 AI 建议",
+        manual_fix:      "手动指定",
+        skip:            "暂时跳过",
+        ignore_as_other: "忽略并标'其他'",
+      };
+
+      // 主视图：左半边任务卡片列表 + 右半边「学习样本」抽屉按钮 + 进度条
+      function ParseIssueQueueView({ orgId, period, toast }) {
+        const [statusFilter, setStatusFilter] = useState("pending");
+        const [openSamples, setOpenSamples] = useState(false);
+        const path = `/orgs/${orgId}/parse-issues?status=${statusFilter}&limit=200`;
+        const { data, loading, error, reload } = useFetch(path, [orgId, statusFilter]);
+
+        const issues = (data && data.issues) || [];
+        const total = (data && data.total) || 0;
+        const pending = (data && data.pending) || 0;
+        const mustFix = (data && data.must_fix_pending) || 0;
+
+        const allMustFixHaveAI = useMemo(() => {
+          const list = issues.filter((i) => i.severity === "must_fix" && !i.user_decision);
+          if (!list.length) return false;
+          return list.every((i) => i.ai_suggestion);
+        }, [issues]);
+
+        const onDecide = async (issue, decision, payload = {}) => {
+          try {
+            await api(
+              "POST",
+              `/orgs/${orgId}/parse-issues/${issue.id}/decide`,
+              { decision, payload, decided_by: "local" },
+            );
+            toast(`已记录决策：${DECISION_LABEL[decision] || decision}`);
+            reload();
+          } catch (e) {
+            toast(`决策失败：${e.message}`, "err");
+          }
+        };
+
+        const onApplyAllAI = async () => {
+          const list = issues.filter((i) => i.severity === "must_fix" && !i.user_decision && i.ai_suggestion);
+          if (!list.length) return;
+          let ok = 0; let bad = 0;
+          for (const issue of list) {
+            try {
+              await api(
+                "POST",
+                `/orgs/${orgId}/parse-issues/${issue.id}/decide`,
+                { decision: "apply_ai", payload: issue.ai_suggestion, decided_by: "local" },
+              );
+              ok++;
+            } catch (e) { bad++; console.warn("apply_ai failed:", issue.id, e); }
+          }
+          toast(`批处理完成：成功 ${ok} 项${bad ? `，失败 ${bad} 项` : ""}`, bad ? "warn" : "ok");
+          reload();
+        };
+
+        const onLearn = async (issue, opts) => {
+          try {
+            await api(
+              "POST",
+              `/orgs/${orgId}/parse-issues/${issue.id}/learn`,
+              { auto_apply: !!opts.autoApply, share_globally: !!opts.shareGlobal, confidence: opts.confidence ?? 1.0 },
+            );
+            toast(`已转为学习样本${opts.autoApply ? "（开启 auto-apply）" : ""}`);
+            reload();
+          } catch (e) {
+            toast(`保存样本失败：${e.message}`, "err");
+          }
+        };
+
+        return (
+          <>
+            <div className="card">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="card-title">数据分流任务</h3>
+                  <p className="card-sub">余额表导入时检测出的异常数据，按严重度分级。必修复项处理完之前报表生成会被阻塞。</p>
+                </div>
+                <div className="flex gap-2">
+                  <select className="field" style={{ width: 130 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                    <option value="pending">待决策</option>
+                    <option value="auto_applied">已自动处理</option>
+                    <option value="decided">已决策</option>
+                    <option value="all">全部</option>
+                  </select>
+                  <button className="btn sm" onClick={reload} disabled={loading}>
+                    {loading ? <Spinner /> : "刷新"}
+                  </button>
+                  <button className="btn sm" onClick={() => setOpenSamples(true)} data-testid="open-samples">
+                    学习样本
+                  </button>
+                </div>
+              </div>
+
+              {/* 进度条 */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0" }}>
+                <div className="text-sm">
+                  共 <strong>{total}</strong> 项 · 待决策 <strong style={{ color: "var(--warning)" }}>{pending}</strong>
+                  {" · "}必修复未处理 <strong style={{ color: "var(--danger)" }}>{mustFix}</strong>
+                </div>
+                <div className="progress" style={{ flex: 1, maxWidth: 320 }}>
+                  <div
+                    className="bar"
+                    style={{
+                      width: total ? `${Math.round(((total - pending) / total) * 100)}%` : "100%",
+                      background: mustFix > 0 ? "var(--danger)" : "var(--success)",
+                    }}
+                  />
+                </div>
+                <button
+                  className="btn primary sm"
+                  disabled={!allMustFixHaveAI}
+                  onClick={onApplyAllAI}
+                  title={allMustFixHaveAI ? "对所有有 AI 建议的必修复项一键应用" : "需要所有必修复项都有 AI 建议才能批处理"}
+                  data-testid="apply-all-ai"
+                >
+                  全部按 AI 建议处理
+                </button>
+              </div>
+
+              {error && <div className="upload-result err">{error.message}</div>}
+            </div>
+
+            {!loading && issues.length === 0 && (
+              <div className="card">
+                <EmptyState title="没有待处理的解析异常" desc={statusFilter === "pending" ? "所有解析异常都已处理完毕。" : "切换上方筛选器查看其他状态的记录。"} />
+              </div>
+            )}
+
+            {issues.map((issue) => (
+              <ParseIssueCard
+                key={issue.id}
+                issue={issue}
+                onDecide={onDecide}
+                onLearn={onLearn}
+                toast={toast}
+              />
+            ))}
+
+            {loading && Array.from({ length: 2 }).map((_, i) => (
+              <div className="card" key={i}><span className="skeleton" style={{ width: "70%" }} /></div>
+            ))}
+
+            {openSamples && (
+              <LearningSamplesDrawer
+                orgId={orgId}
+                onClose={() => setOpenSamples(false)}
+                toast={toast}
+              />
+            )}
+          </>
+        );
+      }
+
+      // 单条 ParseIssue 卡片（v0.2 Part 1 §2.3 ASCII 框图视觉化）
+      function ParseIssueCard({ issue, onDecide, onLearn, toast }) {
+        const [expandPreview, setExpandPreview] = useState(false);
+        const [manualOpen, setManualOpen] = useState(false);
+        const [busy, setBusy] = useState(false);
+        const sevMeta = ISSUE_SEVERITY_META[issue.severity] || ISSUE_SEVERITY_META.suggested;
+        const typeMeta = ISSUE_TYPE_META[issue.issue_type] || { label: issue.issue_type, desc: "" };
+        const decided = !!issue.user_decision;
+
+        const wrap = (fn) => async (...args) => { setBusy(true); try { await fn(...args); } finally { setBusy(false); } };
+
+        const cardStyle = {
+          borderLeft: `4px solid ${sevMeta.color}`,
+          opacity: decided ? 0.7 : 1,
+        };
+
+        return (
+          <div className="card" style={cardStyle} data-testid={`issue-card-${issue.id}`}>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <span className={`badge ${sevMeta.badge}`}>{sevMeta.label}</span>
+                <span style={{ marginLeft: 8, fontWeight: 600 }}>{typeMeta.label}</span>
+                <span className="text-muted text-xs" style={{ marginLeft: 8 }}>· {typeMeta.desc}</span>
+                {decided && (
+                  <span className="badge info" style={{ marginLeft: 8 }}>
+                    已决策 · {DECISION_LABEL[issue.user_decision] || issue.user_decision}
+                    {issue.auto_applied && " · 自动"}
+                  </span>
+                )}
+              </div>
+              <span className="mono text-xs text-muted">{issue.id.slice(-12)}</span>
+            </div>
+
+            <div className="text-xs text-muted" style={{ marginBottom: 6 }}>
+              来源：<span className="mono">{issue.sheet_name || "—"}</span>
+              {" · "}第 <strong>{issue.row_index}</strong> 行
+              {issue.column_name && <> · 字段 <span className="mono">{issue.column_name}</span></>}
+            </div>
+
+            <div style={{ background: "var(--bg-soft)", padding: 8, borderRadius: 6, fontSize: 12 }}>
+              <div className="text-xs text-muted">现状值（已脱敏）</div>
+              <pre className="mono text-xs" style={{ margin: "4px 0 0", maxHeight: expandPreview ? 200 : 56, overflow: "auto", whiteSpace: "pre-wrap" }}>
+                {JSON.stringify(issue.original_data, null, 2)}
+              </pre>
+              <button className="btn subtle sm" onClick={() => setExpandPreview((x) => !x)} style={{ paddingLeft: 0 }}>
+                {expandPreview ? "▾ 折叠" : "▸ 展开"}
+              </button>
+            </div>
+
+            {/* AI 建议块 */}
+            {issue.ai_suggestion ? (
+              <div style={{
+                marginTop: 10,
+                padding: 10,
+                borderRadius: 6,
+                background: "var(--primary-soft)",
+                border: "1px solid rgba(15,118,110,0.20)",
+              }}>
+                <div className="text-xs text-muted">🤖 AI 建议（置信度
+                  {issue.ai_confidence != null && (
+                    <>
+                      {" "}<strong>{Math.round((issue.ai_confidence || 0) * 100)}%</strong>
+                      <span style={{ display: "inline-block", width: 80, height: 6, marginLeft: 6, borderRadius: 3, background: "var(--bg-soft)" }}>
+                        <div style={{ width: `${Math.round((issue.ai_confidence || 0) * 100)}%`, height: "100%", borderRadius: 3, background: "var(--primary)" }} />
+                      </span>
+                    </>
+                  )}）
+                </div>
+                <pre className="mono text-xs" style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(issue.ai_suggestion, null, 2)}
+                </pre>
+              </div>
+            ) : (
+              <div className="text-xs text-muted" style={{ marginTop: 10 }}>
+                {issue.severity === "must_fix" ? "⚠ AI 暂未给出建议（需要先在「AI 设置」开启 S2 场景或主动触发）" : "AI 暂未介入"}
+              </div>
+            )}
+
+            {/* 操作行 */}
+            {!decided && (
+              <div className="flex gap-2" style={{ marginTop: 12, flexWrap: "wrap" }}>
+                <button
+                  className="btn primary sm"
+                  disabled={busy || !issue.ai_suggestion}
+                  onClick={wrap(() => onDecide(issue, "apply_ai", issue.ai_suggestion || {}))}
+                  data-testid="apply-ai"
+                >
+                  应用 AI 建议
+                </button>
+                <button
+                  className="btn sm"
+                  disabled={busy}
+                  onClick={() => setManualOpen(true)}
+                  data-testid="manual-fix"
+                >
+                  手动指定
+                </button>
+                <button className="btn sm" disabled={busy} onClick={wrap(() => onDecide(issue, "skip"))}>暂时跳过</button>
+                <button className="btn sm" disabled={busy} onClick={wrap(() => onDecide(issue, "ignore_as_other"))}>忽略并标'其他'</button>
+                <span style={{ flex: 1 }} />
+                {issue.applied_to_learning ? (
+                  <span className="badge info">已转样本 · {issue.learning_sample_id?.slice(-8)}</span>
+                ) : (
+                  <button
+                    className="btn subtle sm"
+                    disabled={busy}
+                    onClick={() => toast("决策完成后再点「转为学习样本」", "warn")}
+                    title="决策完成后才能转化"
+                  >
+                    转为学习样本
+                  </button>
+                )}
+              </div>
+            )}
+
+            {decided && (
+              <div className="flex gap-2" style={{ marginTop: 12 }}>
+                <span className="text-xs text-muted">
+                  {issue.user_decided_at && <>决策于 {fmtTs(issue.user_decided_at)}</>}
+                  {issue.user_decided_by && <> · 由 {issue.user_decided_by}</>}
+                </span>
+                <span style={{ flex: 1 }} />
+                {issue.applied_to_learning ? (
+                  <span className="badge info" data-testid="already-learned">已转样本 · {issue.learning_sample_id?.slice(-8)}</span>
+                ) : (
+                  <button
+                    className="btn subtle sm"
+                    disabled={busy}
+                    onClick={wrap(() => onLearn(issue, { autoApply: false, shareGlobal: false, confidence: 1.0 }))}
+                    data-testid="learn-this"
+                  >
+                    转为学习样本
+                  </button>
+                )}
+              </div>
+            )}
+
+            {manualOpen && (
+              <ManualFixDialog
+                issue={issue}
+                onCancel={() => setManualOpen(false)}
+                onConfirm={async (payload) => {
+                  setManualOpen(false);
+                  await onDecide(issue, "manual_fix", payload);
+                }}
+              />
+            )}
+          </div>
+        );
+      }
+
+      function ManualFixDialog({ issue, onConfirm, onCancel }) {
+        // 极简的 JSON 文本框 —— 让用户直接编辑 user_decision_payload。
+        // 大多数 issue 类型只有 1-2 字段，这种最直接。
+        const [text, setText] = useState(JSON.stringify(issue.original_data, null, 2));
+        const [err, setErr] = useState("");
+        const submit = () => {
+          try {
+            const obj = JSON.parse(text);
+            setErr(""); onConfirm(obj);
+          } catch (e) { setErr(`JSON 解析失败：${e.message}`); }
+        };
+        return (
+          <Modal
+            open
+            onClose={onCancel}
+            title="手动指定修复值"
+            sub="编辑下方 JSON，确定后写入 user_decision_payload。"
+            footer={
+              <>
+                <button className="btn" onClick={onCancel}>取消</button>
+                <button className="btn primary" onClick={submit}>确定</button>
+              </>
+            }
+          >
+            <textarea
+              className="field mono"
+              rows={10}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+            {err && <div className="helper" style={{ color: "var(--danger)" }}>{err}</div>}
+          </Modal>
+        );
+      }
+
+      function LearningSamplesDrawer({ orgId, onClose, toast }) {
+        const { data, loading, error, reload } = useFetch(`/orgs/${orgId}/learning-samples?include_global=true`, [orgId]);
+        const samples = (data && data.samples) || [];
+        return (
+          <Drawer open onClose={onClose} title="学习样本（账套私有 + 全局共享）">
+            {error && <div className="upload-result err">{error.message}</div>}
+            <div className="text-xs text-muted mb-2">
+              当 <code className="mono">auto_apply=true</code> 时，下次同类 ParseIssue 会被自动应用。
+              全局样本（<code className="mono">org_id=NULL</code>）跨账套生效。
+            </div>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>签名</th>
+                  <th>置信度</th>
+                  <th>auto</th>
+                  <th>命中</th>
+                  <th>来源</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading && Array.from({ length: 3 }).map((_, i) => (
+                  <tr key={i}><td colSpan={6}><span className="skeleton" /></td></tr>
+                ))}
+                {!loading && samples.length === 0 && (
+                  <tr><td colSpan={6}><EmptyState title="还没有学习样本" /></td></tr>
+                )}
+                {!loading && samples.map((s) => (
+                  <tr key={s.id}>
+                    <td>
+                      {(ISSUE_TYPE_META[s.pattern_type] || {}).label || s.pattern_type}
+                      {s.org_id == null && <span className="badge info" style={{ marginLeft: 6 }}>全局</span>}
+                    </td>
+                    <td className="mono text-xs" style={{ wordBreak: "break-all" }}>{s.pattern_signature}</td>
+                    <td>{Math.round((s.confidence || 0) * 100)}%</td>
+                    <td>{s.auto_apply ? <span className="badge ok">on</span> : <span className="text-muted">off</span>}</td>
+                    <td>{s.hit_count || 0}</td>
+                    <td className="text-xs text-muted">{fmtTs(s.last_used_at) || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex gap-2 mt-3">
+              <button className="btn sm" onClick={reload} disabled={loading}>{loading ? <Spinner /> : "刷新"}</button>
+            </div>
           </Drawer>
         );
       }
