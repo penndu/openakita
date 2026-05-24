@@ -65,6 +65,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -103,39 +104,54 @@ def _run_one(
     cmd = [python_exe, str(SCRIPTS_DIR / script), *extra_argv]
     started = time.perf_counter()
     timed_out = False
+    exit_code: int
+    # IMPORTANT: do NOT use ``capture_output=True`` here.  Several
+    # acceptance scripts print enough output to fill the OS pipe buffer
+    # (typically 64 KB on Windows), at which point the child blocks on
+    # write() and never reaches its os._exit() call -- subprocess.run
+    # then waits forever for a process that is structurally unable to
+    # exit.  We bind stdout/stderr to real temp files so the OS never
+    # back-pressures the child.
+    stdout_path = Path(tempfile.mkstemp(prefix="run_all_stdout_", suffix=".log")[1])
+    stderr_path = Path(tempfile.mkstemp(prefix="run_all_stderr_", suffix=".log")[1])
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            # Force UTF-8 so a child script printing Chinese / emoji does
-            # not blow up the runner on Windows where the default locale
-            # (cp936 / gbk) cannot decode UTF-8 bytes.
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_s,
-            # Run from REPO_ROOT so any relative ``--json`` defaults land
-            # next to the other acceptance JSON artefacts.
-            cwd=str(REPO_ROOT),
-            check=False,
-            # Pass through env; PYTHONIOENCODING tells the child Python
-            # to emit UTF-8 on stdout/stderr (matches our decoder).
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-        )
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
-        exit_code = proc.returncode
-        natural_exit = True
-    except subprocess.TimeoutExpired as exc:
-        stdout = (exc.stdout or b"")
-        stderr = (exc.stderr or b"")
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", errors="replace")
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", errors="replace")
-        exit_code = -1
-        timed_out = True
-        natural_exit = False
+        with stdout_path.open("wb") as out_fp, stderr_path.open("wb") as err_fp:
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    stdout=out_fp,
+                    stderr=err_fp,
+                    timeout=timeout_s,
+                    # Run from REPO_ROOT so any relative ``--json``
+                    # defaults land next to the other acceptance JSON
+                    # artefacts.
+                    cwd=str(REPO_ROOT),
+                    check=False,
+                    # Do NOT force PYTHONIOENCODING: a couple of legacy
+                    # acceptance scripts (m3_infra_acceptance.py) spawn
+                    # their own children with the OS-default decoder
+                    # (cp936 on Windows); flipping the inner child to
+                    # UTF-8 then makes the inner parent's gbk reader
+                    # crash.  Letting the locale stay native keeps the
+                    # existing scripts' subprocess plumbing happy; we
+                    # decode the captured bytes as UTF-8 with replace
+                    # below, which tolerates either encoding.
+                    env=os.environ.copy(),
+                )
+                exit_code = proc.returncode
+                natural_exit = True
+            except subprocess.TimeoutExpired:
+                exit_code = -1
+                timed_out = True
+                natural_exit = False
+        stdout = stdout_path.read_bytes().decode("utf-8", errors="replace")
+        stderr = stderr_path.read_bytes().decode("utf-8", errors="replace")
+    finally:
+        for p in (stdout_path, stderr_path):
+            try:
+                p.unlink()
+            except OSError:
+                pass
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     return {
         "script_name": script,
