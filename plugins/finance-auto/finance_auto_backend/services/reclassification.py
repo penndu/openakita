@@ -267,18 +267,27 @@ class ReclassificationService:
         run_id = cur.lastrowid
         await cur.close()
 
-        # Persist per-item rows.
-        for it in items:
-            await self._conn.execute(
+        # EX-P2-3: per-item rows go through executemany so a 1000-item
+        # batch issues a single round-trip into SQLite instead of N
+        # individual INSERTs.  This both cuts wall-clock for large
+        # reclassification runs and makes the implicit transaction
+        # boundary more obvious — every item lands atomically with
+        # the run header inside the existing autocommit-off transaction.
+        if items:
+            batch_rows = [
+                (
+                    run_id, it["rule_id"], it["rule_name"], it["source_account"],
+                    it["target_account"], it["amount"], it["direction"],
+                    it["reason"], it["matched_row_id"], started,
+                )
+                for it in items
+            ]
+            await self._conn.executemany(
                 "INSERT INTO reclassification_run_items (run_id, rule_id, "
                 "rule_name, source_account, target_account, amount, direction, "
                 "reason, matched_row_id, created_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (
-                    run_id, it["rule_id"], it["rule_name"], it["source_account"],
-                    it["target_account"], it["amount"], it["direction"], it["reason"],
-                    it["matched_row_id"], started,
-                ),
+                batch_rows,
             )
 
         # Apply mode: write ParseIssue rows when amount > threshold.
