@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 
 from .db import FinanceAutoDB
@@ -366,6 +366,240 @@ class FinanceAutoService:
             row, self.key_manager, accept_corrupted=accept_corrupted
         )
 
+    # ----------------------- org delete (EX-P2-10) --------------------------
+
+    # Tables that physically hold data scoped to an org but whose org_id
+    # column has no FK CASCADE constraint (so SQLite's PRAGMA foreign_keys
+    # cascade does not reach them).  Explicit DELETEs needed.
+    _NON_FK_ORG_TABLES: tuple[str, ...] = (
+        "learning_samples",
+        "llm_call_audit",
+        "reclassification_history",
+        "backup_history",
+    )
+
+    # Tables whose org_id column carries an ON DELETE CASCADE constraint —
+    # used by ``_count_org_dependents`` to refuse a non-cascade delete when
+    # any of them carry rows.  Order has no semantic meaning.
+    _FK_ORG_TABLES: tuple[str, ...] = (
+        "accounting_periods",
+        "accounts",
+        "trial_balance_imports",
+        "reports",
+        "vat_declarations",
+        "parse_issues",
+        "cross_period_check_results",
+        "manual_inputs",
+        "assignments",
+        "review_workflows",
+        "comments",
+        "reclassification_rules",
+        "reclassification_runs",
+        "note_documents",
+        "peer_comparison_results",
+    )
+
+    async def _count_org_dependents(self, org_id: str) -> dict[str, int]:
+        """Per-table row count of records linked to ``org_id``.
+
+        Returns a dict keyed by table name; only tables with a non-zero
+        count are included.  Used by the DELETE /orgs handler to refuse
+        ``cascade=false`` deletion when the org still has data.
+        """
+        counts: dict[str, int] = {}
+        for table in self._FK_ORG_TABLES + self._NON_FK_ORG_TABLES:
+            # SQL identifiers can't be parameterised; table names are
+            # whitelisted via the class-level tuples so injection is not
+            # possible.
+            async with self.db.conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE org_id = ?",
+                (org_id,),
+            ) as cur:
+                row = await cur.fetchone()
+            n = int(row[0]) if row else 0
+            if n > 0:
+                counts[table] = n
+        # consolidation_groups uses parent_org_id, not org_id; check it
+        # separately so the diagnostic stays useful.
+        async with self.db.conn.execute(
+            "SELECT COUNT(*) FROM consolidation_groups WHERE parent_org_id = ?",
+            (org_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        n = int(row[0]) if row else 0
+        if n > 0:
+            counts["consolidation_groups"] = n
+        # consolidation_members uses subsidiary_org_id.
+        async with self.db.conn.execute(
+            "SELECT COUNT(*) FROM consolidation_members WHERE subsidiary_org_id = ?",
+            (org_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        n = int(row[0]) if row else 0
+        if n > 0:
+            counts["consolidation_members"] = n
+        return counts
+
+    async def _list_org_backup_paths(self, org_id: str) -> list[str]:
+        """Return on-disk backup file paths registered against ``org_id``."""
+        async with self.db.conn.execute(
+            "SELECT backup_path FROM backup_history "
+            "WHERE org_id = ? AND backup_path IS NOT NULL",
+            (org_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [str(r[0]) for r in rows if r[0]]
+
+    async def delete_org(
+        self,
+        org_id: str,
+        *,
+        cascade: bool = False,
+        actor_id: str = "local",
+    ) -> dict[str, Any]:
+        """Delete an org (with optional cascade across all dependent tables).
+
+        Behaviour:
+
+        * ``cascade=False`` (default, safe): if any dependent row exists in
+          the FK-cascade tables OR the non-FK ``org_id`` tables, raises
+          ``HTTPException(409, {"error": "org_not_empty", "dependents": {...}})``.
+        * ``cascade=True``: explicit DELETEs first against the non-FK
+          tables (``learning_samples`` / ``llm_call_audit`` /
+          ``reclassification_history`` / ``backup_history``), then ``DELETE
+          FROM organizations`` which fires SQLite ON DELETE CASCADE for the
+          remaining 17 FK-linked tables in a single statement.  Backup
+          files referenced by ``backup_history.backup_path`` are unlinked
+          best-effort (errors logged, never re-raised).
+
+        Returns a structured summary so the caller can audit-log the
+        operation: ``{"deleted": True, "cascade": <bool>, "tables_purged":
+        {table: rows}, "backup_files_removed": <int>, "org_id": ...}``.
+
+        EX-P2-10 (v1.0.0-rc1):
+        * Caller-side authorisation is handled by
+          ``Depends(require_permission("org", "delete"))`` at the route
+          layer; the service method trusts ``actor_id``.
+        * Uses an explicit ``BEGIN``/``COMMIT``/``ROLLBACK`` envelope so a
+          mid-cascade failure doesn't leave the org partially purged.
+        """
+        # 0. Verify the org exists (404 if not).
+        await self.get_org(org_id, accept_corrupted=True)
+
+        # 1. If not cascading, refuse when any dependent row exists.
+        if not cascade:
+            counts = await self._count_org_dependents(org_id)
+            if counts:
+                total = sum(counts.values())
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "org_not_empty",
+                        "org_id": org_id,
+                        "total_dependents": total,
+                        "dependents": counts,
+                        "hint": (
+                            "pass ?cascade=true to delete the org and all "
+                            "linked rows; this action is irreversible."
+                        ),
+                    },
+                )
+
+        # 2. Collect on-disk backup file paths *before* the row goes away.
+        backup_paths = await self._list_org_backup_paths(org_id)
+
+        # 3. Cascade-delete inside one transaction.  SQLite's foreign-key
+        # cascade handles the 17 FK-linked tables; we manually purge the
+        # 4 + 2 non-FK ones plus the FK-via-different-column ones.
+        tables_purged: dict[str, int] = {}
+        conn = self.db.conn
+        try:
+            await conn.execute("BEGIN")
+            for table in self._NON_FK_ORG_TABLES:
+                async with conn.execute(
+                    f"DELETE FROM {table} WHERE org_id = ?",
+                    (org_id,),
+                ) as cur:
+                    tables_purged[table] = cur.rowcount or 0
+            # consolidation_groups + consolidation_members use a different
+            # column name; FK CASCADE still fires, but we record the count
+            # for the audit trail so the caller knows what disappeared.
+            async with conn.execute(
+                "SELECT COUNT(*) FROM consolidation_groups WHERE parent_org_id = ?",
+                (org_id,),
+            ) as cur:
+                row = await cur.fetchone()
+                tables_purged["consolidation_groups"] = int(row[0]) if row else 0
+            async with conn.execute(
+                "SELECT COUNT(*) FROM consolidation_members WHERE subsidiary_org_id = ?",
+                (org_id,),
+            ) as cur:
+                row = await cur.fetchone()
+                tables_purged["consolidation_members"] = int(row[0]) if row else 0
+            # Per-FK-table pre-count so the audit summary is complete.
+            for table in self._FK_ORG_TABLES:
+                async with conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE org_id = ?",
+                    (org_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+                    tables_purged[table] = int(row[0]) if row else 0
+            # The final blow: SQLite ON DELETE CASCADE handles the FK fan-out.
+            async with conn.execute(
+                "DELETE FROM organizations WHERE id = ?",
+                (org_id,),
+            ) as cur:
+                org_rows_deleted = cur.rowcount or 0
+            await conn.commit()
+        except Exception as exc:
+            try:
+                await conn.rollback()
+            except Exception:  # noqa: BLE001 — best-effort rollback
+                pass
+            logger.exception(
+                "finance-auto: delete_org failed for org_id=%s actor=%s",
+                org_id, actor_id,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "delete_org_failed",
+                    "message": str(exc),
+                },
+            ) from exc
+
+        # 4. Unlink on-disk backup artefacts (best-effort).
+        removed = 0
+        for raw_path in backup_paths:
+            try:
+                p = Path(raw_path)
+                if p.exists():
+                    p.unlink()
+                    removed += 1
+            except OSError as exc:
+                logger.warning(
+                    "finance-auto: failed to unlink backup file %s for "
+                    "deleted org %s: %s",
+                    raw_path, org_id, exc,
+                )
+
+        logger.info(
+            "finance-auto: deleted org %s by actor=%s cascade=%s "
+            "purged_rows=%d backup_files_removed=%d",
+            org_id, actor_id, cascade,
+            sum(v for v in tables_purged.values() if v),
+            removed,
+        )
+        return {
+            "deleted": True,
+            "org_id": org_id,
+            "cascade": cascade,
+            "actor_id": actor_id,
+            "org_rows_deleted": org_rows_deleted,
+            "tables_purged": {k: v for k, v in tables_purged.items() if v},
+            "backup_files_removed": removed,
+        }
+
     # ----------------------- accounting periods (helper) --------------------
 
     async def ensure_period(self, *, org_id: str, period_id: str) -> AccountingPeriod:
@@ -655,7 +889,7 @@ def build_router(service: FinanceAutoService) -> APIRouter:
     # RBAC dependency factory (``rbac.require_permission``) can find
     # it via ``request.state.finance_auto_service``.  Pure side-
     # effect on Request, no impact on existing handlers.
-    from .rbac import attach_service_for_rbac
+    from .rbac import attach_service_for_rbac, require_permission
     attach_service_for_rbac(router, service)
 
     @router.get("/health", summary="finance-auto 健康检查")
@@ -701,6 +935,31 @@ def build_router(service: FinanceAutoService) -> APIRouter:
                 detail={"error": "decrypt_failed", "message": str(exc)},
             ) from exc
         return OrgListResponse(organizations=rows, total=len(rows))
+
+    @router.delete(
+        "/orgs/{org_id}",
+        status_code=200,
+        summary="删除账套（admin / partner，?cascade=true 才级联）",
+    )
+    async def delete_org(
+        org_id: str,
+        cascade: bool = Query(
+            default=False,
+            description=(
+                "EX-P2-10 v1.0.0-rc1：默认 false，账套若有任何业务数据则 "
+                "返回 409 + 各表残留行数；true 时显式级联删 17 FK 表 + 4 个 "
+                "无 FK 的 org_id 表 + 备份文件，不可恢复。"
+            ),
+        ),
+        actor_id: str = Depends(require_permission("org", "delete")),
+    ) -> dict:
+        # The dependency above raises 403/404 before we get here when the
+        # caller lacks org.delete.  Returning the structured summary lets
+        # the host log the destructive action.
+        result = await service.delete_org(
+            org_id, cascade=cascade, actor_id=actor_id,
+        )
+        return result
 
     @router.post(
         "/orgs/{org_id}/imports",

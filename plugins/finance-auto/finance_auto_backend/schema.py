@@ -30,8 +30,9 @@ from .db.migrations import v10_notes_peer as _v10
 from .db.migrations import v11_key_rotation_backup as _v11
 from .db.migrations import v12_extended_permissions as _v12
 from .db.migrations import v13_reclassification_history as _v13
+from .db.migrations import v14_org_delete_permission as _v14
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 """History:
 * v1 -- M1 W1 baseline (5 tables).
 * v2 -- M1 W2 Stage 4: adds ``reports`` + ``report_cells``.
@@ -482,6 +483,13 @@ MIGRATION_STEPS: tuple[tuple[int, str], ...] = (
                                   # the append above; we replay the same DDL
                                   # here so existing v9-or-later databases pick
                                   # up the new table without a full re-init.
+    (14, _v14.SEED_SQL),          # v1.0.0-rc1 EX-P2-10: ``org.delete``
+                                  # permission seed (2 rows: admin + partner)
+                                  # so the new DELETE /orgs/{org_id} endpoint
+                                  # has a non-empty RBAC table to consult.
+                                  # No DDL — the v9 ``permissions`` table is
+                                  # already in place; the seed is idempotent
+                                  # via ``ux_permissions_role_action``.
 )
 """Each entry: (target_version, idempotent_DDL).  All steps replay the full
 canonical SCHEMA_SQL because every CREATE TABLE in it is IF NOT EXISTS, so

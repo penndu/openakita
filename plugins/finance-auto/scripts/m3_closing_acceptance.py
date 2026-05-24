@@ -839,10 +839,54 @@ def run(args: argparse.Namespace) -> int:
             "22_backup_restore_dry_run", t, rs_dry_ok,
         ))
 
-        # ---- 23+. Regression block -----------------------------
+        # ---- 23. DELETE /orgs/{id} refuses on non-empty (cascade=false) ----
+        # v1.0.0-rc1 EX-P2-10: the new endpoint must refuse to drop the
+        # M3 closing primary org because steps 02..22 left a mountain of
+        # dependent rows (imports / reports / cells / consol / notes / ...).
+        t = time.perf_counter()
+        delete_refuse_ok = False
+        try:
+            r = client.delete(f"{BASE}/orgs/{org_id}")
+            if r.status_code == 409:
+                detail = r.json().get("detail", {})
+                delete_refuse_ok = (
+                    detail.get("error") == "org_not_empty"
+                    and detail.get("total_dependents", 0) > 0
+                )
+        except Exception:  # noqa: BLE001 — diagnostic step, never fatal
+            delete_refuse_ok = False
+        results.append(_checkpoint(
+            "23_delete_org_refuses_non_empty", t, delete_refuse_ok,
+        ))
+
+        # ---- 24. DELETE /orgs/{id} cascade=true purges everything ----------
+        # Same endpoint, ``?cascade=true`` — the closing acceptance gets to
+        # drop the test fixture at the end so each re-run starts clean.
+        t = time.perf_counter()
+        delete_cascade_ok = False
+        try:
+            r = client.delete(f"{BASE}/orgs/{org_id}?cascade=true")
+            if r.status_code == 200:
+                body = r.json()
+                delete_cascade_ok = (
+                    body.get("deleted") is True
+                    and body.get("cascade") is True
+                    and body.get("org_rows_deleted", 0) == 1
+                )
+                # And the org really is gone.
+                r2 = client.get(f"{BASE}/orgs")
+                ids = [o["id"] for o in r2.json().get("organizations", [])]
+                delete_cascade_ok = delete_cascade_ok and org_id not in ids
+        except Exception:  # noqa: BLE001
+            delete_cascade_ok = False
+        results.append(_checkpoint(
+            "24_delete_org_cascade_purges_all", t, delete_cascade_ok,
+        ))
+
+        # ---- 25+. Regression block -----------------------------
         if args.skip_regression:
             results.append(_checkpoint(
-                "23_regression", time.perf_counter(), True, skipped=True,
+                "25_regression", time.perf_counter(), True, skipped=True,
             ))
         else:
             for r in _run_regression():
