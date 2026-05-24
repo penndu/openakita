@@ -4494,8 +4494,266 @@
         );
       }
 
+      // ═══════════════════════════════════════════════════════════════════
+      //  M3 · 密钥管理（Key Management，admin）—— Sibling C 后端：
+      //    GET  /admin/key-versions
+      //    POST /admin/key-rotate           body { org_id }
+      //    GET  /admin/backups
+      //    POST /admin/backups              body { org_id, passphrase }
+      //    POST /admin/backups/{id}/restore body { passphrase }
+      //    GET  /admin/backups/{id}/download
+      //    GET  /admin/system-info
+      //  路由未注册（404）时静默回退本地 mock：finance.km.mock.v1
+      // ═══════════════════════════════════════════════════════════════════
+      const KM_LS_KEY = "finance.km.mock.v1";
+
+      function _loadKmMock() {
+        try {
+          const s = JSON.parse(localStorage.getItem(KM_LS_KEY) || "null");
+          if (s && s.versions) return s;
+        } catch {}
+        const seed = {
+          versions: [
+            { org_id: "(mock-org-001)", version: 1, kdf_salt_short: "a8f3e1c2", last_rotated_at: new Date(Date.now() - 86400000 * 30).toISOString(), status: "active" },
+            { org_id: "(mock-org-002)", version: 3, kdf_salt_short: "d51b9e07", last_rotated_at: new Date(Date.now() - 86400000 * 7).toISOString(),  status: "active" },
+          ],
+          backups: [
+            { id: "bkp_001", org_id: "(mock-org-001)", size_bytes: 1048576, encrypted: true, created_at: new Date(Date.now() - 86400000 * 2).toISOString() },
+          ],
+          system_info: {
+            tauri_version: "2.0.0",
+            os: "Windows 10",
+            openakita_version: "0.3.0-dev",
+            key_store_backend: "OS keychain (mock)",
+          },
+        };
+        localStorage.setItem(KM_LS_KEY, JSON.stringify(seed));
+        return seed;
+      }
+      function _saveKmMock(s) { localStorage.setItem(KM_LS_KEY, JSON.stringify(s)); }
+
+      function KeyManagementView({ toast }) {
+        const [versions, setVersions] = useState([]);
+        const [backups, setBackups] = useState([]);
+        const [sysInfo, setSysInfo] = useState(null);
+        const [backendOk, setBackendOk] = useState(null);
+        const [confirmRotate, setConfirmRotate] = useState(null);
+        const [confirmRestore, setConfirmRestore] = useState(null);
+        const [restorePass, setRestorePass] = useState("");
+        const [createOrgId, setCreateOrgId] = useState("");
+        const [createPass, setCreatePass] = useState("");
+        const [busy, setBusy] = useState(false);
+
+        const reload = useCallback(async () => {
+          try {
+            const v = await api("GET", "/admin/key-versions", null, { timeoutMs: 4000 });
+            setVersions((v && v.versions) || []);
+            setBackendOk(true);
+          } catch (e) {
+            const s = _loadKmMock();
+            setVersions(s.versions || []); setBackendOk(false);
+          }
+          try {
+            const b = await api("GET", "/admin/backups");
+            setBackups((b && b.backups) || []);
+          } catch (e) {
+            const s = _loadKmMock();
+            setBackups(s.backups || []);
+          }
+          try {
+            const i = await api("GET", "/admin/system-info");
+            setSysInfo(i || null);
+          } catch (e) {
+            const s = _loadKmMock();
+            setSysInfo(s.system_info || null);
+          }
+        }, []);
+        useEffect(() => { reload(); }, [reload]);
+
+        const doRotate = async () => {
+          if (!confirmRotate) return;
+          setBusy(true);
+          try {
+            await api("POST", "/admin/key-rotate", { org_id: confirmRotate.org_id });
+            toast(`已轮换 ${confirmRotate.org_id} 的密钥`);
+          } catch (e) {
+            if (e.status === 404) {
+              const s = _loadKmMock();
+              s.versions = (s.versions || []).map((v) => v.org_id === confirmRotate.org_id ? { ...v, version: v.version + 1, kdf_salt_short: Math.random().toString(36).slice(2, 10), last_rotated_at: new Date().toISOString() } : v);
+              _saveKmMock(s);
+              toast("M3 Sibling C 后端尚未上线，已在本地 mock 轮换", "warn");
+            } else { toast(`轮换失败：${e.message}`, "err"); setBusy(false); return; }
+          }
+          setConfirmRotate(null); setBusy(false); reload();
+        };
+
+        const doRestore = async () => {
+          if (!confirmRestore) return;
+          if (!restorePass) { toast("请输入口令", "warn"); return; }
+          setBusy(true);
+          try {
+            await api("POST", `/admin/backups/${confirmRestore.id}/restore`, { passphrase: restorePass });
+            toast("已恢复");
+          } catch (e) {
+            if (e.status === 404) toast("M3 Sibling C 后端尚未上线，恢复操作仅占位", "warn");
+            else { toast(`恢复失败：${e.message}`, "err"); setBusy(false); return; }
+          }
+          setConfirmRestore(null); setRestorePass(""); setBusy(false);
+        };
+
+        const doCreate = async () => {
+          if (!createOrgId.trim() || !createPass.trim()) { toast("请填写账套与口令", "warn"); return; }
+          setBusy(true);
+          try {
+            await api("POST", "/admin/backups", { org_id: createOrgId.trim(), passphrase: createPass });
+            toast("备份已创建");
+            setCreateOrgId(""); setCreatePass("");
+          } catch (e) {
+            if (e.status === 404) {
+              const s = _loadKmMock();
+              s.backups = [{ id: `bkp_${Math.random().toString(36).slice(2, 8)}`, org_id: createOrgId.trim(), size_bytes: 1048576, encrypted: true, created_at: new Date().toISOString() }, ...(s.backups || [])];
+              _saveKmMock(s); setCreateOrgId(""); setCreatePass("");
+              toast("M3 Sibling C 后端尚未上线，已在本地 mock 记录备份", "warn");
+            } else { toast(`备份失败：${e.message}`, "err"); }
+          }
+          setBusy(false); reload();
+        };
+
+        const doDownload = async (b) => {
+          try {
+            const resp = await api("GET", `/admin/backups/${b.id}/download`, null, { raw: true });
+            if (!resp.ok) throw Object.assign(new Error("download failed"), { status: resp.status });
+            const blob = await resp.blob();
+            _triggerDownload(blob, `${b.id}.bak`);
+          } catch (e) {
+            const blob = new Blob([`MOCK BACKUP ${b.id}\norg_id=${b.org_id}\ncreated_at=${b.created_at}\n`], { type: "application/octet-stream" });
+            _triggerDownload(blob, `${b.id}.bak`);
+            toast("后端下载未上线，已生成 mock 占位文件", "warn");
+          }
+        };
+
+        return (
+          <>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="page-title">密钥管理</h2>
+                <p className="page-subtitle">
+                  按账套查看 KDF 密钥版本 / 轮换 / 备份恢复
+                  {backendOk === false && <span className="badge warn" style={{ marginLeft: 8 }}>M3 Sibling C 后端尚未上线（mock）</span>}
+                </p>
+              </div>
+              <button className="btn" onClick={reload}>刷新</button>
+            </div>
+
+            <div className="card mb-3" style={{ padding: 0 }}>
+              <div style={{ padding: 10, borderBottom: "1px solid var(--border, rgba(0,0,0,0.08))" }}>
+                <strong>当前密钥版本</strong>
+              </div>
+              {versions.length === 0 ? <EmptyState title="暂无密钥记录" /> : (
+                <table className="report-table">
+                  <thead><tr><th>账套</th><th>版本</th><th>盐前缀</th><th>最近轮换</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody>
+                    {versions.map((v) => (
+                      <tr key={v.org_id}>
+                        <td className="mono text-xs">{v.org_id}</td>
+                        <td>v{v.version}</td>
+                        <td className="mono text-xs">{v.kdf_salt_short}</td>
+                        <td className="text-xs text-muted">{fmtTs(v.last_rotated_at)}</td>
+                        <td>{v.status === "active" ? <span className="badge ok">生效中</span> : <span className="badge">{v.status}</span>}</td>
+                        <td><button className="btn danger sm" onClick={() => setConfirmRotate(v)} data-testid={`km-rotate-${v.org_id}`}>轮换密钥</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="card mb-3">
+              <h3 className="card-title">备份</h3>
+              <div className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 10 }}>
+                <div>
+                  <label className="lbl">账套 ID</label>
+                  <input className="field" style={{ width: 220 }} value={createOrgId} onChange={(e) => setCreateOrgId(e.target.value)} data-testid="km-backup-org" />
+                </div>
+                <div>
+                  <label className="lbl">备份口令</label>
+                  <input className="field" type="password" style={{ width: 200 }} value={createPass} onChange={(e) => setCreatePass(e.target.value)} data-testid="km-backup-pass" />
+                </div>
+                <button className="btn primary" onClick={doCreate} disabled={busy} data-testid="km-backup-create">创建备份</button>
+              </div>
+              {backups.length === 0 ? <EmptyState title="暂无备份" /> : (
+                <table className="report-table">
+                  <thead><tr><th>ID</th><th>账套</th><th className="num">大小</th><th>加密</th><th>创建时间</th><th>操作</th></tr></thead>
+                  <tbody>
+                    {backups.map((b) => (
+                      <tr key={b.id}>
+                        <td className="mono text-xs">{b.id}</td>
+                        <td className="mono text-xs">{b.org_id}</td>
+                        <td className="num">{(b.size_bytes / 1024).toFixed(1)} KB</td>
+                        <td>{b.encrypted ? <span className="badge ok">已加密</span> : <span className="badge warn">未加密</span>}</td>
+                        <td className="text-xs text-muted">{fmtTs(b.created_at)}</td>
+                        <td>
+                          <button className="btn subtle sm" onClick={() => doDownload(b)} data-testid={`km-download-${b.id}`}>下载</button>
+                          {" "}
+                          <button className="btn warn sm" onClick={() => setConfirmRestore(b)} data-testid={`km-restore-${b.id}`}>恢复</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {sysInfo && (
+              <div className="card">
+                <h3 className="card-title">系统信息</h3>
+                <div className="row cols-2" style={{ gap: 10 }}>
+                  <div><label className="lbl">Tauri 版本</label><div className="mono text-xs">{sysInfo.tauri_version || "—"}</div></div>
+                  <div><label className="lbl">操作系统</label><div className="mono text-xs">{sysInfo.os || "—"}</div></div>
+                  <div><label className="lbl">OpenAkita 版本</label><div className="mono text-xs">{sysInfo.openakita_version || "—"}</div></div>
+                  <div><label className="lbl">密钥存储后端</label><div className="mono text-xs">{sysInfo.key_store_backend || "—"}</div></div>
+                </div>
+              </div>
+            )}
+
+            <Modal
+              open={!!confirmRotate}
+              onClose={() => !busy && setConfirmRotate(null)}
+              title="确认轮换密钥"
+              sub={confirmRotate ? `账套 ${confirmRotate.org_id} · 当前 v${confirmRotate.version}` : ""}
+              footer={
+                <>
+                  <button className="btn" onClick={() => !busy && setConfirmRotate(null)} disabled={busy}>取消</button>
+                  <button className="btn danger" onClick={doRotate} disabled={busy} data-testid="km-rotate-confirm">{busy ? <Spinner /> : "确认轮换"}</button>
+                </>
+              }
+            >
+              <div className="text-sm">
+                此操作会重加密所有敏感字段，可能需几十秒。继续？
+              </div>
+            </Modal>
+
+            <Modal
+              open={!!confirmRestore}
+              onClose={() => !busy && (setConfirmRestore(null), setRestorePass(""))}
+              title="确认恢复备份"
+              sub={confirmRestore ? `备份 ${confirmRestore.id}` : ""}
+              footer={
+                <>
+                  <button className="btn" onClick={() => !busy && (setConfirmRestore(null), setRestorePass(""))} disabled={busy}>取消</button>
+                  <button className="btn warn" onClick={doRestore} disabled={busy} data-testid="km-restore-confirm">{busy ? <Spinner /> : "确认恢复"}</button>
+                </>
+              }
+            >
+              <div className="text-sm mb-3">恢复将覆盖当前账套数据，操作不可撤销。请输入备份口令：</div>
+              <input className="field" type="password" value={restorePass} onChange={(e) => setRestorePass(e.target.value)} placeholder="备份口令" data-testid="km-restore-pass" />
+            </Modal>
+          </>
+        );
+      }
+
       // ─────────────────────────────────────────────────────────────────
-      //  顶部导航：账套 / 合并报表 / 报表附注 / AI 设置
+      //  顶部导航：账套 / 合并报表 / 报表附注 / 同业对比 / 密钥管理 / AI 设置
       // ─────────────────────────────────────────────────────────────────
       function MainNav({ active, navigate }) {
         const items = [
@@ -4503,6 +4761,7 @@
           { key: "consolidation",   label: "合并报表",   hash: "#/consolidation" },
           { key: "notes-editor",    label: "报表附注",   hash: "#/notes-editor" },
           { key: "peer-comparison", label: "同业对比",   hash: "#/peer-comparison" },
+          { key: "key-management",  label: "密钥管理",   hash: "#/key-management" },
           { key: "ai-settings",     label: "AI 设置",    hash: "#/ai-settings" },
         ];
         return (
@@ -4564,6 +4823,7 @@
         const mAI = route.match(/^#\/ai-settings\/?$/);
         const mNotes = route.match(/^#\/notes-editor\/?$/);
         const mPeer = route.match(/^#\/peer-comparison\/?$/);
+        const mKM = route.match(/^#\/key-management\/?$/);
 
         let body, crumbs;
         let activeNav = "orgs";
@@ -4640,6 +4900,12 @@
           crumbs = [{ label: "同业对比" }];
           body = (
             <PeerComparisonView toast={toasts.push} />
+          );
+        } else if (mKM) {
+          activeNav = "key-management";
+          crumbs = [{ label: "密钥管理" }];
+          body = (
+            <KeyManagementView toast={toasts.push} />
           );
         } else {
           activeNav = "orgs";
