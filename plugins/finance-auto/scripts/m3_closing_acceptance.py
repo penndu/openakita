@@ -400,6 +400,7 @@ def run(args: argparse.Namespace) -> int:
         # automatically — the M3 closing contract is "v11 or later
         # with all M3 features present".
         t = time.perf_counter()
+        # additive schema bumps (v11 → v13) — newer M3+ migrations are backward-compatible
         assert SCHEMA_VERSION >= 11, SCHEMA_VERSION
         routes_total = len(router.routes)
         assert routes_total >= 90, routes_total

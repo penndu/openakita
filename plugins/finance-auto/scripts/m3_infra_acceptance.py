@@ -428,6 +428,7 @@ def run(args: argparse.Namespace) -> int:
         # Infra Stage 1 contract (key versioning + rotation + backup
         # ledger).
         t = time.perf_counter()
+        # additive schema bumps (v11 → v13) — newer M3+ migrations are backward-compatible
         assert SCHEMA_VERSION >= 11, SCHEMA_VERSION
         results.append(_checkpoint(
             "01_schema_v11", t, True, schema_version=SCHEMA_VERSION
@@ -642,6 +643,7 @@ def run(args: argparse.Namespace) -> int:
         assert body["ok"] is True and body["verified"] is True, body
         assert body["dry_run"] is True, body
         manifest = body["manifest"]
+        # additive schema bumps (v11 → v13) — manifest written by newer schema decrypts fine
         assert manifest["schema_version"] >= 11, manifest
         results.append(_checkpoint(
             "13_restore_dry_run_ok", t, True,
@@ -669,6 +671,7 @@ def run(args: argparse.Namespace) -> int:
                 "WHERE component='finance_auto'"
             )
             row = cur.fetchone()
+        # additive schema bumps (v11 → v13) — restored DB carries the producer's version
         assert row is not None and int(row[0]) >= 11, row
         results.append(_checkpoint(
             "14_restore_materialise", t, True,
@@ -694,6 +697,7 @@ def run(args: argparse.Namespace) -> int:
         r = client.get(f"{BASE}/admin/system-info")
         assert r.status_code == 200, r.text
         body = r.json()
+        # additive schema bumps (v11 → v13) — system-info echoes live DB schema_version
         assert body["schema_version"] >= 11, body
         assert body["encryption_enabled"] is True, body
         assert body["kdf_iterations"] == PBKDF2_ITERATIONS, body
