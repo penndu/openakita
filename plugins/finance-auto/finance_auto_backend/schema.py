@@ -28,6 +28,7 @@ from .db.migrations import v9_consolidation as _v9_consol
 from .db.migrations import v9_reclassification as _v9_reclass
 from .db.migrations import v10_notes_peer as _v10
 from .db.migrations import v11_key_rotation_backup as _v11
+from .db.migrations import v12_extended_permissions as _v12
 from .db.migrations import v13_reclassification_history as _v13
 
 SCHEMA_VERSION = 13
@@ -471,15 +472,16 @@ MIGRATION_STEPS: tuple[tuple[int, str], ...] = (
                                   # non-empty step to replay.  The real v1
                                   # key_versions row is materialised lazily by
                                   # KeyRotationService on first rotate / preview.
+    (12, _v12.SEED_SQL),          # fix-round-3 EX-P1-2: extended permission
+                                  # seeds for the 9 finance-auto write modules.
+                                  # No DDL — the v9 ``permissions`` table is
+                                  # already in place; the seed is idempotent
+                                  # via ``ux_permissions_role_action``.
     (13, _v13.DDL_SQL),           # fix-round-3 EX-P2-9: reclassification undo
                                   # history.  DDL is already in SCHEMA_SQL via
                                   # the append above; we replay the same DDL
                                   # here so existing v9-or-later databases pick
                                   # up the new table without a full re-init.
-                                  # (No v12 schema migration entry — v12 only
-                                  # extends ``permissions`` seeds, which the
-                                  # collaboration service idempotently inserts
-                                  # on every startup.)
 )
 """Each entry: (target_version, idempotent_DDL).  All steps replay the full
 canonical SCHEMA_SQL because every CREATE TABLE in it is IF NOT EXISTS, so
