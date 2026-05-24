@@ -281,6 +281,12 @@ class BackupRestoreService:
         """Create a tar.gz snapshot + record in ``backup_history``.
 
         Returns the inserted row plus the path / sha256 / manifest.
+
+        EX-P2-7 (half-file cleanup): the tar archive is written to a
+        sibling ``.partial`` path and only renamed to the final name
+        once tarfile.close() returns successfully.  Any exception
+        between open() and rename() removes the partial file so a
+        disk-full / OS-error never leaves orphaned ``.tar.gz`` rubble.
         """
         if not passphrase:
             raise BackupRestoreError("passphrase is required for create_backup")
@@ -292,6 +298,10 @@ class BackupRestoreService:
         ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         suffix = f"org_{org_id}_" if org_id else "all_orgs_"
         backup_path = dest / f"finance_backup_{suffix}{ts}.tar.gz"
+        # Write to a sibling .partial path so a half-flushed archive
+        # never collides with a previously-completed backup of the
+        # same timestamp.  We rename atomically once tarfile closed.
+        partial_path = backup_path.with_suffix(backup_path.suffix + ".partial")
 
         # 1. Snapshot the live DB into a temp file (safe with WAL).
         snap_fd, snap_path_str = tempfile.mkstemp(
@@ -337,17 +347,31 @@ class BackupRestoreService:
                 "key_meta_seed_source": (meta.seed_source if meta else None),
             }
 
-            # 5. Build the tar.gz archive.
-            with tarfile.open(backup_path, mode="w:gz") as tf:
-                _tar_add_file(tf, "database.sqlite", snap_path.read_bytes())
-                _tar_add_file(
-                    tf,
-                    "manifest.json",
-                    json.dumps(manifest, ensure_ascii=False, indent=2).encode(
-                        "utf-8"
-                    ),
-                )
-                _tar_add_file(tf, "keys.bin", keys_bin)
+            # 5. Build the tar.gz archive to .partial then atomic rename.
+            try:
+                with tarfile.open(partial_path, mode="w:gz") as tf:
+                    _tar_add_file(tf, "database.sqlite", snap_path.read_bytes())
+                    _tar_add_file(
+                        tf,
+                        "manifest.json",
+                        json.dumps(manifest, ensure_ascii=False, indent=2).encode(
+                            "utf-8"
+                        ),
+                    )
+                    _tar_add_file(tf, "keys.bin", keys_bin)
+                os.replace(partial_path, backup_path)
+            except Exception:
+                # EX-P2-7: best-effort cleanup of any orphaned .partial.
+                try:
+                    if partial_path.exists():
+                        partial_path.unlink()
+                except OSError as cleanup_exc:
+                    logger.warning(
+                        "finance-auto: failed to remove partial backup %s (%s)",
+                        partial_path,
+                        cleanup_exc,
+                    )
+                raise
 
             size_bytes = backup_path.stat().st_size
             sha256 = _sha256_file(backup_path)

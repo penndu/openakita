@@ -214,3 +214,37 @@ def test_new_600k_backup_round_trips(
     )
     assert decrypted["ok"] is True
     assert decrypted["kdf_iterations"] == 600_000
+
+
+# ---------------------------------------------------------------------------
+# EX-P2-7 — partial archive cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_failed_backup_cleans_up_partial(
+    service_and_sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _service, svc, sandbox, _db = service_and_sandbox
+
+    real_open = tarfile.open
+
+    def explode(path, mode="r:*", *args, **kwargs):
+        # Force the failure AFTER the .partial file has been touched.
+        tf = real_open(path, mode, *args, **kwargs)
+        original_close = tf.close
+
+        def _boom():
+            original_close()
+            raise RuntimeError("simulated disk full")
+
+        tf.close = _boom  # type: ignore[assignment]
+        return tf
+
+    monkeypatch.setattr(tarfile, "open", explode)
+    with pytest.raises(RuntimeError, match="simulated disk full"):
+        asyncio.run(svc.create_backup(passphrase=PASSPHRASE))
+
+    # The .partial sibling must be gone; the final .tar.gz must not
+    # exist either (we never reached the os.replace step).
+    leftovers = list(sandbox.glob("*.partial")) + list(sandbox.glob("*.tar.gz"))
+    assert leftovers == [], leftovers
