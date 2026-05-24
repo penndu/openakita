@@ -416,53 +416,251 @@ async def _ctx_expenses(service: "FinanceAutoService", *, org_id: str, period_id
     }
 
 
+_AP_TOP_N = 5
+"""Number of "top supplier" buckets to surface in the AP concentration
+note before the remainder is rolled into ``其他供应商``."""
+
+_RELATED_PARTY_KEYWORDS: tuple[str, ...] = (
+    "关联方", "母公司", "子公司", "兄弟公司", "兄弟单位",
+    "同一控制", "控股", "受同一", "联营", "合营",
+)
+"""Substring hints that mark an ``aux_text`` row as belonging to a
+related party.  Lifted from 财政部《企业会计准则第 36 号——关联方披露》
+typical wording; the matcher uses ``LIKE`` so case + width-folding
+don't matter for these Chinese terms."""
+
+
+async def _aggregate_account_aux(
+    service: "FinanceAutoService",
+    *,
+    org_id: str,
+    period_id: str,
+    parent_code_pattern: str,
+) -> list[dict[str, Any]]:
+    """Return aux-grouped rollups for accounts whose ``parent_code`` matches
+    ``parent_code_pattern`` (SQL LIKE pattern, e.g. ``'2202%'``).
+
+    Each output dict has::
+
+        {
+          "aux": <aux_text or fallback label>,
+          "net": <closing_credit - closing_debit>,
+          "period_amount": <period_debit + period_credit>,
+          "balance": <closing_credit - closing_debit>,
+        }
+
+    Returned rows are sorted by absolute ``net`` descending so the caller
+    can take the top-N suppliers / counterparties.
+    """
+    rows: list[dict[str, Any]] = []
+    async with service.db.conn.execute(
+        "SELECT COALESCE(NULLIF(TRIM(aux_text), ''), account_name, '(未注明)') AS aux, "
+        "SUM(closing_credit - closing_debit) AS net, "
+        "SUM(period_debit + period_credit) AS period_amount, "
+        "SUM(closing_credit - closing_debit) AS balance "
+        "FROM trial_balance_rows "
+        "WHERE org_id=? AND period_id=? AND parent_code LIKE ? "
+        "GROUP BY COALESCE(NULLIF(TRIM(aux_text), ''), account_name)",
+        (org_id, period_id, parent_code_pattern),
+    ) as cur:
+        async for r in cur:
+            net = float(r["net"] or 0.0)
+            if abs(net) < 0.005 and float(r["period_amount"] or 0.0) == 0:
+                continue
+            rows.append({
+                "aux": r["aux"] or "(未注明)",
+                "net": net,
+                "period_amount": float(r["period_amount"] or 0.0),
+                "balance": float(r["balance"] or 0.0),
+            })
+    rows.sort(key=lambda r: abs(r["net"]), reverse=True)
+    return rows
+
+
 async def _ctx_accounts_payable(
     service: "FinanceAutoService", *, org_id: str, period_id: str
 ) -> dict[str, Any]:
-    cells = await _latest_report_cells(
-        service, org_id=org_id, period_id=period_id, sheet_kind="balance_sheet"
+    """Real accounts-payable concentration from ``trial_balance_rows``.
+
+    Replaces the M3 stub that hard-coded "主要供应商 A 40%, B 25%, 其他 35%".
+    Walks every row whose ``parent_code`` starts with ``2202``
+    (中国会计准则 应付账款 family), groups by aux_text (which the W1
+    parser uses to capture supplier name), takes the top-5 by absolute
+    closing balance and rolls the remainder into ``其他供应商``.  When
+    no AP rows exist for the period the function returns an empty
+    supplier list so the rendered note clearly shows a zero balance
+    instead of fabricated data.
+    """
+    aggregates = await _aggregate_account_aux(
+        service, org_id=org_id, period_id=period_id,
+        parent_code_pattern="2202%",
     )
-    total = float((cells.get("BS_2202") or cells.get("BS_GE_2202") or {}).get("value") or 0.0)
-    distribution = (("主要供应商 A", 0.40), ("主要供应商 B", 0.25), ("其他供应商", 0.35))
-    suppliers = [
-        {"label": label, "end": _money(total * pct), "pct": f"{pct * 100:.2f}"}
-        for label, pct in distribution
-    ]
+    total = sum(r["balance"] for r in aggregates)
+    if not aggregates or abs(total) < 0.005:
+        return {
+            "suppliers": [],
+            "total_end": _money(0.0),
+            "top_n": 0,
+            "top_n_amount": _money(0.0),
+            "top_n_pct": "0.00",
+            "narrative_seed": (
+                "本期未发现应付账款余额；若与账面不符，请检查 2202 系列科目"
+                "的余额表导入是否完整。"
+            ),
+        }
+
+    top = aggregates[: _AP_TOP_N]
+    rest = aggregates[_AP_TOP_N:]
+    suppliers: list[dict[str, str]] = []
+    for r in top:
+        pct = (r["balance"] / total * 100) if total else 0.0
+        suppliers.append({
+            "label": str(r["aux"]),
+            "end": _money(r["balance"]),
+            "pct": f"{pct:.2f}",
+        })
+    if rest:
+        rest_total = sum(r["balance"] for r in rest)
+        pct = (rest_total / total * 100) if total else 0.0
+        suppliers.append({
+            "label": "其他供应商",
+            "end": _money(rest_total),
+            "pct": f"{pct:.2f}",
+        })
+
+    top_n = min(len(top), _AP_TOP_N)
+    top_n_amount = sum(r["balance"] for r in top)
+    top_n_pct = (top_n_amount / total * 100) if total else 0.0
     return {
         "suppliers": suppliers,
         "total_end": _money(total),
-        "top_n": 2,
-        "top_n_amount": _money(total * 0.65),
-        "top_n_pct": "65.00",
-        "narrative_seed": "前两大供应商占比 65%，集中度较高",
+        "top_n": top_n,
+        "top_n_amount": _money(top_n_amount),
+        "top_n_pct": f"{top_n_pct:.2f}",
+        "narrative_seed": (
+            f"前 {top_n} 大供应商应付账款合计 {_money(top_n_amount)} 元，"
+            f"占应付账款总额 {top_n_pct:.2f}%。"
+        ),
     }
 
 
 async def _ctx_related_party(
     service: "FinanceAutoService", *, org_id: str, period_id: str
 ) -> dict[str, Any]:
-    # Pure stub data — Sibling B's S11 will replace this when a real
-    # related-party registry lands.
-    parties = [
-        {
-            "name": "母公司",
-            "relation": "母子关系",
-            "amount": _money(120_000.0),
-            "balance": _money(45_000.0),
-        },
-        {
-            "name": "兄弟公司A",
-            "relation": "同一控制",
-            "amount": _money(60_000.0),
-            "balance": _money(22_000.0),
-        },
-    ]
+    """Real related-party transactions from ``trial_balance_rows``.
+
+    Replaces the M3 stub that returned hard-coded "母公司 12 万 /
+    兄弟公司 6 万" demo data regardless of input.  The detector walks
+    every aux_text in the trial-balance and keeps rows whose aux_text
+    contains a related-party keyword (see ``_RELATED_PARTY_KEYWORDS``;
+    sourced from 《企业会计准则第 36 号——关联方披露》 typical wording).
+    Sub-account-level amounts are aggregated by party name; the ledger
+    code drives the rendered relationship label (1122 → 应收, 2202 → 应付,
+    etc.) so the auditor can quickly see the nature of the exposure.
+
+    When no aux_text rows match the registry the function returns an
+    empty list with a guidance message asking the user to either tag
+    aux entries with a related-party keyword or populate an explicit
+    related_parties table (the latter is roadmapped — see
+    docs/follow-ups/skipped-items-roadmap.md ``related_parties_registry``).
+    """
+    matched: list[dict[str, Any]] = []
+    # Use a single SELECT with OR-chained LIKE clauses so we hit the
+    # idx_rows_code index path once instead of N round-trips.
+    like_clauses = " OR ".join(
+        ["aux_text LIKE ?" for _ in _RELATED_PARTY_KEYWORDS]
+    )
+    like_args = [f"%{kw}%" for kw in _RELATED_PARTY_KEYWORDS]
+    async with service.db.conn.execute(
+        "SELECT COALESCE(NULLIF(TRIM(aux_text), ''), '(未命名)') AS party, "
+        "parent_code, account_name, "
+        "SUM(period_debit + period_credit) AS amount, "
+        "SUM(closing_debit - closing_credit) AS net_debit "
+        "FROM trial_balance_rows "
+        f"WHERE org_id=? AND period_id=? AND ({like_clauses}) "
+        "GROUP BY party, parent_code",
+        (org_id, period_id, *like_args),
+    ) as cur:
+        async for r in cur:
+            amount = float(r["amount"] or 0.0)
+            balance = float(r["net_debit"] or 0.0)
+            if amount == 0 and abs(balance) < 0.005:
+                continue
+            parent = (r["parent_code"] or "").strip()
+            account_name = r["account_name"] or ""
+            # Best-effort relationship inference from the ledger code.
+            if parent.startswith(("1122", "1131", "1221")):
+                relation = f"应收类（{account_name or parent}）"
+            elif parent.startswith(("2202", "2241")):
+                relation = f"应付类（{account_name or parent}）"
+            elif parent.startswith("1123") or parent.startswith("2203"):
+                relation = f"预付/预收（{account_name or parent}）"
+            else:
+                relation = f"其他往来（{account_name or parent}）"
+            matched.append({
+                "party": r["party"],
+                "relation": relation,
+                "amount": amount,
+                "balance": balance,
+            })
+
+    if not matched:
+        return {
+            "related_parties": [],
+            "total_amount": _money(0.0),
+            "total_balance": _money(0.0),
+            "party_count": 0,
+            "narrative_seed": (
+                "本期未检索到带关联方关键字的辅助核算条目；若存在关联方"
+                "交易，请在余额表导入时将关联方名称填入 aux_text 字段，"
+                "或在 related_parties 登记簿（待启用）中补充清单。"
+            ),
+        }
+
+    # Aggregate the per-(party, parent_code) rows up to per-party totals
+    # for the rendered table, but keep relation strings comma-separated
+    # so the user sees which ledgers contributed.
+    by_party: dict[str, dict[str, Any]] = {}
+    for m in matched:
+        key = m["party"]
+        if key not in by_party:
+            by_party[key] = {
+                "name": key,
+                "relations": [m["relation"]],
+                "amount_raw": m["amount"],
+                "balance_raw": m["balance"],
+            }
+        else:
+            if m["relation"] not in by_party[key]["relations"]:
+                by_party[key]["relations"].append(m["relation"])
+            by_party[key]["amount_raw"] += m["amount"]
+            by_party[key]["balance_raw"] += m["balance"]
+
+    rows: list[dict[str, Any]] = []
+    total_amount = 0.0
+    total_balance = 0.0
+    for party in sorted(
+        by_party.values(), key=lambda p: abs(p["amount_raw"]), reverse=True
+    ):
+        rows.append({
+            "name": party["name"],
+            "relation": " / ".join(party["relations"]),
+            "amount": _money(party["amount_raw"]),
+            "balance": _money(party["balance_raw"]),
+        })
+        total_amount += party["amount_raw"]
+        total_balance += party["balance_raw"]
+
     return {
-        "related_parties": parties,
-        "total_amount": _money(180_000.0),
-        "total_balance": _money(67_000.0),
-        "party_count": 2,
-        "narrative_seed": "本期主要关联交易为采购原材料及销售产成品",
+        "related_parties": rows,
+        "total_amount": _money(total_amount),
+        "total_balance": _money(total_balance),
+        "party_count": len(rows),
+        "narrative_seed": (
+            f"本期检索到 {len(rows)} 个关联方，发生额合计 "
+            f"{_money(total_amount)} 元，期末净往来余额 "
+            f"{_money(total_balance)} 元（借为正）。"
+        ),
     }
 
 
