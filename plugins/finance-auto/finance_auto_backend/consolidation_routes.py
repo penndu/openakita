@@ -16,8 +16,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from .rbac import require_permission
 from .models import (
     ConsolidatedReportListResponse,
     ConsolidatedReportModel,
@@ -55,6 +56,7 @@ def register_consolidation_endpoints(
     )
     async def create_group(
         payload: ConsolidationGroupCreateRequest,
+        _user: str = Depends(require_permission("consolidation", "create_group")),
     ) -> ConsolidationGroupModel:
         try:
             return await _svc().create_group(payload=payload)
@@ -87,7 +89,9 @@ def register_consolidation_endpoints(
         response_model=ConsolidationMemberModel,
     )
     async def add_member(
-        group_id: int, payload: ConsolidationMemberCreateRequest
+        group_id: int,
+        payload: ConsolidationMemberCreateRequest,
+        _user: str = Depends(require_permission("consolidation", "add_member")),
     ) -> ConsolidationMemberModel:
         try:
             return await _svc().add_member(group_id=group_id, payload=payload)
@@ -143,7 +147,9 @@ def register_consolidation_endpoints(
         response_model=ConsolidatedReportModel,
     )
     async def run_consolidation(
-        group_id: int, payload: ConsolidationRunRequest
+        group_id: int,
+        payload: ConsolidationRunRequest,
+        _user: str = Depends(require_permission("consolidation", "run")),
     ) -> ConsolidatedReportModel:
         try:
             return await _svc().run(group_id=group_id, payload=payload)

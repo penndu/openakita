@@ -22,8 +22,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from .rbac import require_permission
 from .encryption import (
     DecryptionError,
     pack_payload,
@@ -410,7 +411,10 @@ def register_parse_issue_endpoints(
         summary="对一条解析异常作出决策（apply_ai / manual_fix / skip / ignore_as_other）",
     )
     async def decide_parse_issue(
-        org_id: str, issue_id: str, payload: ParseIssueDecisionRequest
+        org_id: str,
+        issue_id: str,
+        payload: ParseIssueDecisionRequest,
+        _user: str = Depends(require_permission("parse_issue", "decide")),
     ) -> ParseIssue:
         await service.get_org(org_id)
         async with service.db.conn.execute(
@@ -447,7 +451,10 @@ def register_parse_issue_endpoints(
         summary="把决策保存为 learning_sample（可选 auto_apply / 全局共享）",
     )
     async def learn_parse_issue(
-        org_id: str, issue_id: str, payload: ParseIssueLearnRequest
+        org_id: str,
+        issue_id: str,
+        payload: ParseIssueLearnRequest,
+        _user: str = Depends(require_permission("parse_issue", "learn")),
     ) -> LearningSample:
         await service.get_org(org_id)
         async with service.db.conn.execute(

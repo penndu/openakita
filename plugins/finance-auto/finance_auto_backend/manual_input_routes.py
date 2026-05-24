@@ -19,9 +19,10 @@ import secrets
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from .config.manual_inputs_loader import cash_flow_aux_presets
+from .rbac import require_permission
 from .models import (
     ManualInputListResponse,
     ManualInputPreset,
@@ -137,6 +138,7 @@ def register_manual_input_endpoints(
         period_id: str,
         field_key: str,
         payload: ManualInputSubmitRequest,
+        _user: str = Depends(require_permission("manual_inputs", "update")),
     ) -> ManualInputRecord:
         await service.get_org(org_id)
         presets = {p.key: p for p in cash_flow_aux_presets()}

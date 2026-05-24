@@ -651,6 +651,12 @@ class FinanceAutoService:
 
 def build_router(service: FinanceAutoService) -> APIRouter:
     router = APIRouter(tags=["finance-auto"])
+    # EX-P1-2: bind the service onto every incoming request so the
+    # RBAC dependency factory (``rbac.require_permission``) can find
+    # it via ``request.state.finance_auto_service``.  Pure side-
+    # effect on Request, no impact on existing handlers.
+    from .rbac import attach_service_for_rbac
+    attach_service_for_rbac(router, service)
 
     @router.get("/health", summary="finance-auto 健康检查")
     async def health() -> dict:

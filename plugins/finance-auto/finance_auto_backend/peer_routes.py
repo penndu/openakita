@@ -18,9 +18,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from .rbac import require_permission
 from .services.peer_comparison import PeerComparisonError, PeerComparisonService
 
 if TYPE_CHECKING:
@@ -56,7 +57,11 @@ def register_peer_endpoints(router: APIRouter, service: "FinanceAutoService") ->
         status_code=201,
         summary="基于最新报表计算同业对比并持久化",
     )
-    async def run_comparison(org_id: str, payload: _RunRequest) -> dict[str, Any]:
+    async def run_comparison(
+        org_id: str,
+        payload: _RunRequest,
+        _user: str = Depends(require_permission("peer_comparison", "run")),
+    ) -> dict[str, Any]:
         try:
             return await pc.run_comparison(
                 org_id=org_id,

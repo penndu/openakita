@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .models import (
     ReclassificationRuleCreateRequest,
@@ -22,6 +22,7 @@ from .models import (
     ReclassificationRunModel,
     ReclassificationRunRequest,
 )
+from .rbac import require_permission
 from .services.reclassification import (
     ReclassificationError,
     ReclassificationService,
@@ -45,7 +46,9 @@ def register_reclassification_endpoints(
         response_model=ReclassificationRuleModel,
     )
     async def create_rule(
-        org_id: str, payload: ReclassificationRuleCreateRequest
+        org_id: str,
+        payload: ReclassificationRuleCreateRequest,
+        _user: str = Depends(require_permission("reclassification", "apply")),
     ) -> ReclassificationRuleModel:
         try:
             return await _svc().create_rule(org_id=org_id, payload=payload)
@@ -68,7 +71,9 @@ def register_reclassification_endpoints(
         response_model=ReclassificationRunModel,
     )
     async def preview_run(
-        org_id: str, payload: ReclassificationRunRequest
+        org_id: str,
+        payload: ReclassificationRunRequest,
+        _user: str = Depends(require_permission("reclassification", "preview")),
     ) -> ReclassificationRunModel:
         try:
             return await _svc().run(org_id=org_id, payload=payload, mode="preview")
@@ -81,7 +86,9 @@ def register_reclassification_endpoints(
         response_model=ReclassificationRunModel,
     )
     async def apply_run(
-        org_id: str, payload: ReclassificationRunRequest
+        org_id: str,
+        payload: ReclassificationRunRequest,
+        _user: str = Depends(require_permission("reclassification", "apply")),
     ) -> ReclassificationRunModel:
         try:
             return await _svc().run(org_id=org_id, payload=payload, mode="apply")
@@ -109,6 +116,7 @@ def register_reclassification_endpoints(
         org_id: str,
         rule_id: int,
         actor_id: str = Query(default="local"),
+        _user: str = Depends(require_permission("reclassification", "undo")),
     ) -> dict:
         try:
             return await _svc().undo_rule(

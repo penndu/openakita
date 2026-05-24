@@ -21,8 +21,9 @@ from typing import Any
 
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .rbac import require_permission
 from .encryption import (
     PARSE_ISSUE_AMOUNT_KEYS,
     PARSE_ISSUE_PII_KEYS,
@@ -214,7 +215,9 @@ def register_cross_period_endpoints(
         summary="触发跨期校验 (W3 Stage 3)",
     )
     async def trigger_check(
-        org_id: str, payload: CrossPeriodCheckRequest
+        org_id: str,
+        payload: CrossPeriodCheckRequest,
+        _user: str = Depends(require_permission("cross_period", "run")),
     ) -> CrossPeriodCheckResult:
         await service.get_org(org_id)
         prior_id = await _resolve_import_id(

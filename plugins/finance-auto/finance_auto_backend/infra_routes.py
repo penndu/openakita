@@ -36,10 +36,11 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from .key_meta import GLOBAL_COMPONENT, read_key_meta
+from .rbac import require_permission
 from .schema import SCHEMA_VERSION
 from .services.backup_restore import (
     BackupRestoreError,
@@ -115,7 +116,10 @@ def register_infra_endpoints(
         "/admin/key-rotate",
         summary="触发整库密钥轮换 (M3 Infra §2.5)",
     )
-    async def rotate_key(payload: dict = Body(default_factory=dict)) -> dict[str, Any]:
+    async def rotate_key(
+        payload: dict = Body(default_factory=dict),
+        _user: str = Depends(require_permission("admin_key", "rotate")),
+    ) -> dict[str, Any]:
         component = payload.get("component") or GLOBAL_COMPONENT
         reason = payload.get("reason") or ""
         rotated_by = payload.get("rotated_by") or "local"
@@ -137,6 +141,7 @@ def register_infra_endpoints(
     )
     async def create_backup_endpoint(
         payload: dict = Body(...),
+        _user: str = Depends(require_permission("admin_backup", "create")),
     ) -> dict[str, Any]:
         passphrase = payload.get("passphrase")
         if not passphrase:
@@ -189,6 +194,7 @@ def register_infra_endpoints(
                 "EX-P1-1: 显式覆盖已存在的目标 DB 文件；缺省 false 触发 409"
             ),
         ),
+        _user: str = Depends(require_permission("admin_backup", "restore")),
     ) -> dict[str, Any]:
         passphrase = payload.get("passphrase")
         if not passphrase:
@@ -218,7 +224,10 @@ def register_infra_endpoints(
         "/admin/backups/{backup_id}",
         summary="删除备份记录 + 物理文件 (M3 Infra)",
     )
-    async def delete_backup_endpoint(backup_id: int) -> dict[str, Any]:
+    async def delete_backup_endpoint(
+        backup_id: int,
+        _user: str = Depends(require_permission("admin_backup", "create")),
+    ) -> dict[str, Any]:
         try:
             return await backup_service.delete_backup(backup_id)
         except BackupRestoreError as exc:

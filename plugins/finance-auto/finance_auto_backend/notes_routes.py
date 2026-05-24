@@ -20,10 +20,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from .rbac import require_permission
 from .services.notes_generator import NotesGenerator, NotesGeneratorError
 
 if TYPE_CHECKING:
@@ -52,7 +53,11 @@ def register_notes_endpoints(router: APIRouter, service: "FinanceAutoService") -
         status_code=201,
         summary="生成报表附注文档 (8 大类)",
     )
-    async def generate_notes(org_id: str, payload: _GenerateRequest) -> dict[str, Any]:
+    async def generate_notes(
+        org_id: str,
+        payload: _GenerateRequest,
+        _user: str = Depends(require_permission("notes", "generate")),
+    ) -> dict[str, Any]:
         try:
             result = await gen.generate(
                 org_id=org_id,
@@ -111,7 +116,10 @@ def register_notes_endpoints(router: APIRouter, service: "FinanceAutoService") -
         summary="编辑某条附注内容（乐观锁，409 on version 冲突）",
     )
     async def patch_note(
-        org_id: str, note_id: int, payload: _PatchNoteRequest
+        org_id: str,
+        note_id: int,
+        payload: _PatchNoteRequest,
+        _user: str = Depends(require_permission("notes", "edit")),
     ) -> dict[str, Any]:
         await service.get_org(org_id)
         # ``update_note`` already raises 404 / 409 HTTPException itself.
@@ -125,7 +133,11 @@ def register_notes_endpoints(router: APIRouter, service: "FinanceAutoService") -
         "/orgs/{org_id}/notes/documents/{doc_id}/finalize",
         summary="将附注文档置为 finalized（draft → in_review → finalized 的终态）",
     )
-    async def finalize(org_id: str, doc_id: int) -> dict[str, Any]:
+    async def finalize(
+        org_id: str,
+        doc_id: int,
+        _user: str = Depends(require_permission("notes", "edit")),
+    ) -> dict[str, Any]:
         await service.get_org(org_id)
         try:
             return await gen.finalize_document(document_id=doc_id)

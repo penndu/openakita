@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from .models import (
@@ -19,6 +19,7 @@ from .models import (
     AuditTemplateListResponse,
     AuditTemplateRenderRequest,
 )
+from .rbac import require_permission
 from .services.audit_template import (
     build_allowlist,
     deserialise_report,
@@ -79,6 +80,7 @@ def register_audit_endpoints(router: APIRouter, service: FinanceAutoService) -> 
         file: UploadFile = File(..., description="审计底稿模板 .xlsx"),
         name: str = Form(..., description="模板显示名"),
         description: str | None = Form(default=None),
+        _user: str = Depends(require_permission("audit_template", "upload")),
     ) -> AuditTemplate:
         if not file.filename:
             raise HTTPException(status_code=400, detail="missing filename")

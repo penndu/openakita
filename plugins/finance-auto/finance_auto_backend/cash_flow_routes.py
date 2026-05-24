@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from .rbac import require_permission
 from .services.cash_flow import (
     ACCOUNT_BUCKETS,
     CashFlowError,
@@ -95,7 +96,9 @@ def register_cash_flow_endpoints(
         response_model=CashFlowComputeResponse,
     )
     async def compute_cash_flow(
-        org_id: str, payload: CashFlowComputeRequest
+        org_id: str,
+        payload: CashFlowComputeRequest,
+        _user: str = Depends(require_permission("cash_flow", "compute")),
     ) -> CashFlowComputeResponse:
         try:
             result = await _compute(org_id, payload)
@@ -119,7 +122,9 @@ def register_cash_flow_endpoints(
         response_model=CashFlowPersistResponse,
     )
     async def persist_cash_flow(
-        org_id: str, payload: CashFlowComputeRequest
+        org_id: str,
+        payload: CashFlowComputeRequest,
+        _user: str = Depends(require_permission("cash_flow", "manual_input_update")),
     ) -> CashFlowPersistResponse:
         try:
             result = await _compute(org_id, payload)
