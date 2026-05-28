@@ -1587,6 +1587,55 @@ def status():
 
 
 @app.command()
+def stop(
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="后端监听地址（默认 127.0.0.1，与 settings.api_host 一致）",
+    ),
+    port: int = typer.Option(
+        18900, "--port", help="后端监听端口（默认 18900）"
+    ),
+    timeout: float = typer.Option(
+        5.0, "--timeout", help="HTTP 调用超时秒数（默认 5）"
+    ),
+):
+    """向运行中的后端发送 graceful shutdown 信号。
+
+    Sprint 14 / v31 Phase A 配套 CLI：用 ``openakita stop`` 取代手敲
+    ``Invoke-RestMethod -Uri ... -Method Post``。后端 ``/api/shutdown``
+    会先走 graceful 路径，``settings.shutdown_force_exit_grace_s`` 秒后
+    若仍未自退则强制 ``os._exit(0)``。
+
+    退出码：
+        0  shutdown 信号已被后端接受（HTTP 200）
+        1  HTTP 状态码非 200（401/403/5xx 等）
+        2  端口无后端监听（``httpx.ConnectError``）
+    """
+    import httpx
+
+    url = f"http://{host}:{port}/api/shutdown"
+    try:
+        r = httpx.post(url, timeout=timeout)
+    except httpx.ConnectError:
+        typer.echo(f"no backend listening on {host}:{port}", err=True)
+        raise typer.Exit(2) from None
+    except httpx.RequestError as exc:
+        typer.echo(f"shutdown request failed: {exc!r}", err=True)
+        raise typer.Exit(1) from None
+
+    if r.status_code == 200:
+        try:
+            typer.echo(f"shutdown signal accepted: {r.json()}")
+        except Exception:
+            typer.echo(f"shutdown signal accepted (status=200, body={r.text[:200]})")
+        return
+
+    typer.echo(f"unexpected status {r.status_code}: {r.text[:200]}", err=True)
+    raise typer.Exit(1)
+
+
+@app.command()
 def compile(
     force: bool = typer.Option(False, "--force", "-f", help="强制重新编译"),
 ):

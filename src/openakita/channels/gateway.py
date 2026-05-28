@@ -2198,13 +2198,49 @@ class MessageGateway:
                     await task
         self._session_tasks.clear()
 
-        # 停止所有适配器
-        for name, adapter in self._adapters.items():
+        # Sprint 14 / v31 Phase A 治根：把适配器 stop 改为并发 + 单 adapter
+        # bounded timeout。
+        #
+        # 历史上这里是串行 ``for adapter in adapters: await adapter.stop()``，
+        # wework_ws (×3) / qqbot (×2) 的 stop() 内 ``await connection_task``
+        # 和 ``await ws.close()`` 都没有 timeout 兜底，单个适配器卡住就会让整
+        # 个 lifespan shutdown 挂 13~20s（v23/v24/v26/v28/v29/v30 六次复现）。
+        #
+        # 现在改成 ``asyncio.gather`` + per-adapter ``asyncio.wait_for``：
+        # 一个 wedged adapter 顶多吃掉自己 PER 秒的预算，其它 adapter 并行
+        # 收尸；返回前最坏 = settings.channels_gateway_stop_timeout_s（默认
+        # 8s），与"≤10s 干净退"的 SLO 留 2s 余量。
+        per_adapter_timeout_s: float = 8.0
+        try:
+            from openakita.config import settings as _settings
+
+            per_adapter_timeout_s = float(
+                getattr(_settings, "channels_gateway_stop_timeout_s", 8) or 8
+            )
+        except Exception:
+            # config 取不到（早期 import 路径异常）也要能 stop 干净。
+            pass
+
+        async def _stop_one(_name: str, _adapter: ChannelAdapter) -> None:
             try:
-                await adapter.stop()
-                logger.info(f"Stopped adapter: {name}")
+                await asyncio.wait_for(_adapter.stop(), timeout=per_adapter_timeout_s)
+                logger.info(f"Stopped adapter: {_name}")
+            except TimeoutError:
+                # asyncio.TimeoutError on Py3.11+ aliases the built-in;
+                # the adapter is wedged — log and abandon, don't block the rest.
+                logger.warning(
+                    "[Gateway.stop] adapter %s did not stop within %.1fs, abandoning",
+                    _name,
+                    per_adapter_timeout_s,
+                )
             except Exception as e:
-                logger.error(f"Failed to stop adapter {name}: {e}")
+                logger.error(f"Failed to stop adapter {_name}: {e}")
+
+        if self._adapters:
+            await asyncio.gather(
+                *[_stop_one(name, adapter) for name, adapter in self._adapters.items()],
+                return_exceptions=True,
+            )
 
         logger.info("MessageGateway stopped")
 

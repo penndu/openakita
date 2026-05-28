@@ -14,6 +14,7 @@ FastAPI HTTP API server for OpenAkita.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import socket
@@ -96,6 +97,83 @@ def is_port_free(host: str, port: int) -> bool:
             return True
         except OSError:
             return False
+
+
+def _schedule_force_exit_after_grace(app: FastAPI) -> None:
+    """Sprint 14 / v31 Phase A: arm a last-resort ``os._exit(0)`` watchdog.
+
+    Background — Phase A graceful shutdown reproduced 6 / 6 times in
+    v23/v24/v26/v28/v29/v30 (see ``_v31_biz/_phase_a_shutdown_chain.md``):
+    setting ``shutdown_event`` is not enough when an IM adapter wedges
+    cooperative cancellation. The graceful path *should* succeed
+    (Sprint 14 stage 1 made gateway.stop() concurrent + per-adapter
+    bounded), but we still want a hard ceiling so users never need
+    ``Stop-Process`` again.
+
+    Behaviour:
+      * Reads ``settings.shutdown_force_exit_grace_s`` (default 15s).
+      * ``0`` disables the safety net entirely (log only).
+      * Idempotent: only one task is armed per process; subsequent
+        ``/api/shutdown`` calls are a no-op.
+      * Exits via ``os._exit(0)`` so atexit handlers / sys.exit traps
+        cannot block.
+    """
+    try:
+        from openakita.config import settings
+
+        grace_s = int(getattr(settings, "shutdown_force_exit_grace_s", 15) or 0)
+    except Exception:
+        grace_s = 15
+
+    if grace_s <= 0:
+        logger.warning(
+            "[Shutdown] Force-exit safety net disabled (grace_s=%s); "
+            "graceful path must complete on its own.",
+            grace_s,
+        )
+        return
+
+    if getattr(app.state, "_force_exit_task", None) is not None:
+        logger.debug(
+            "[Shutdown] Force-exit safety net already armed; skipping duplicate"
+        )
+        return
+
+    async def _force_exit() -> None:
+        try:
+            await asyncio.sleep(grace_s)
+        except asyncio.CancelledError:
+            return
+        # If we got here, ``shutdown_event.set()`` plus the lifespan path
+        # did not bring the process down within the grace window. Logs
+        # have already been flushed by the running handlers; the audit
+        # writer + reconcile loop have either stopped or exceeded their
+        # own bounded timeouts. Pull the plug.
+        logger.error(
+            "[Shutdown] Graceful shutdown exceeded %ss grace window; "
+            "forcing os._exit(0). See _v31_biz/_phase_a_*.md.",
+            grace_s,
+        )
+        try:
+            for h in logging.getLogger().handlers:
+                with contextlib.suppress(Exception):
+                    h.flush()
+        finally:
+            os._exit(0)
+
+    try:
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(_force_exit(), name="openakita-force-exit-watchdog")
+        app.state._force_exit_task = task
+        logger.info(
+            "[Shutdown] Force-exit safety net armed (grace=%ss); "
+            "graceful path runs first.",
+            grace_s,
+        )
+    except Exception as exc:  # noqa: BLE001 -- never break the shutdown route
+        logger.warning(
+            "[Shutdown] Failed to arm force-exit safety net: %s", exc
+        )
 
 
 def wait_for_port_free(host: str, port: int, timeout: float = 30.0) -> bool:
@@ -909,6 +987,12 @@ def create_app(
         Only allowed from localhost for security.
         Uses the shared shutdown_event to trigger the same graceful cleanup
         path as SIGINT/SIGTERM (sessions saved, IM adapters stopped, etc.).
+
+        Sprint 14 / v31 Phase A safety net: schedule a background
+        ``os._exit(0)`` after ``settings.shutdown_force_exit_grace_s``
+        seconds. The graceful path always runs first; this only fires when
+        something hung the lifespan (v23/v24/v26/v28/v29/v30 all needed
+        ``Stop-Process`` because Phase A never returned within 13~20 s).
         """
         from .auth import get_client_ip
 
@@ -925,6 +1009,7 @@ def create_app(
         logger.info("Shutdown requested via API")
         if app.state.shutdown_event is not None:
             app.state.shutdown_event.set()
+            _schedule_force_exit_after_grace(app)
             return {"status": "shutting_down"}
         logger.warning("No shutdown_event available, shutdown request ignored")
         return {"status": "error", "message": "shutdown not available in this mode"}
@@ -1015,6 +1100,21 @@ def create_app(
         # v22 P1: stop the reconcile loop FIRST so it cannot fire
         # against a half-torn-down runtime. Best-effort; a shutdown
         # failure here only logs.
+        #
+        # Sprint 14 / v31 Phase A hardening: every unbounded ``await``
+        # in this lifespan handler is now wrapped in a per-stage
+        # ``settings.lifespan_stage_timeout_s`` (default 8s) so a hung
+        # checkpointer / runtime.shutdown cannot block subsequent stages
+        # the way Phase A reproduced 6/6 in v23~v30.
+        try:
+            from openakita.config import settings as _settings
+
+            stage_timeout = float(
+                getattr(_settings, "lifespan_stage_timeout_s", 8) or 8
+            )
+        except Exception:
+            stage_timeout = 8.0
+
         svc = getattr(app.state, "org_command_service", None)
         if svc is not None:
             stop_loop = getattr(svc, "stop_reconcile_loop", None)
@@ -1034,14 +1134,29 @@ def create_app(
                 aclose_all_checkpointers,
             )
 
-            await aclose_all_checkpointers()
+            await asyncio.wait_for(
+                aclose_all_checkpointers(), timeout=stage_timeout
+            )
+        except TimeoutError:
+            logger.warning(
+                "[Shutdown] aclose_all_checkpointers exceeded %.1fs, abandoning",
+                stage_timeout,
+            )
         except Exception:
             logger.debug("Supervisor checkpointer aclose error", exc_info=True)
         if hasattr(app.state, "org_runtime") and app.state.org_runtime:
             try:
                 from openakita.core.engine_bridge import to_engine
 
-                await to_engine(app.state.org_runtime.shutdown())
+                await asyncio.wait_for(
+                    to_engine(app.state.org_runtime.shutdown()),
+                    timeout=stage_timeout,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "[Shutdown] OrgRuntime.shutdown exceeded %.1fs, abandoning",
+                    stage_timeout,
+                )
             except Exception as e:
                 logger.warning(f"OrgRuntime shutdown error: {e}")
 
@@ -1112,14 +1227,27 @@ def create_app(
         Bounded by ``stop()``'s internal timeout (split between sentinel
         delivery and worker drain); anything still queued past that
         deadline is logged + dropped rather than blocking shutdown.
+
+        Sprint 14 / v31 Phase A hardening: layer an outer
+        ``settings.lifespan_stage_timeout_s`` (default 8s) wait_for so
+        even an internal-timeout regression cannot pin the lifespan.
         """
         try:
+            from openakita.config import settings as _settings
             from openakita.core.policy_v2.audit_writer import (
                 stop_global_audit_writer,
             )
 
-            await stop_global_audit_writer()
+            stage_timeout = float(
+                getattr(_settings, "lifespan_stage_timeout_s", 8) or 8
+            )
+            await asyncio.wait_for(stop_global_audit_writer(), timeout=stage_timeout)
             logger.info("[Shutdown] AsyncBatchAuditWriter stopped")
+        except TimeoutError:
+            logger.warning(
+                "[Shutdown] AsyncBatchAuditWriter stop exceeded %ss, abandoning",
+                stage_timeout,
+            )
         except Exception as e:
             logger.warning("[Shutdown] AsyncBatchAuditWriter stop error: %s", e)
 

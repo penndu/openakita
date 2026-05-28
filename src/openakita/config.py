@@ -46,6 +46,41 @@ class Settings(BaseSettings):
         ),
     )
 
+    # === Sprint 14 / v31 Phase A 治根：graceful shutdown bounded timeouts ===
+    # 详见 _v31_biz/_phase_a_shutdown_chain.md。
+    # v23/v24/v26/v28/v29/v30 共 6 次稳定复现 13~20s 不退；
+    # 主因是 MessageGateway.stop() 串行 await 各 IM adapter，wework_ws 等
+    # 长链 websocket 没有 timeout 兜底。
+    channels_gateway_stop_timeout_s: int = Field(
+        default=8,
+        ge=1,
+        le=60,
+        description=(
+            "MessageGateway.stop() 单 adapter stop() 的硬超时秒数。"
+            "超时即放弃该 adapter 的清理，logger.warning 后继续。"
+            "默认 8s（足够 wework_ws/qqbot 走完正常 cancel；超过即视为已 hang）。"
+        ),
+    )
+    shutdown_force_exit_grace_s: int = Field(
+        default=15,
+        ge=0,
+        le=120,
+        description=(
+            "POST /api/shutdown 收到后，等待 graceful 路径自退的最长秒数。"
+            "超时即 os._exit(0) 兜底，避免 Phase A 13~20s 不退导致 Stop-Process 软杀。"
+            "0 表示禁用兜底（仅用于诊断；生产不建议）。默认 15s。"
+        ),
+    )
+    lifespan_stage_timeout_s: int = Field(
+        default=8,
+        ge=1,
+        le=60,
+        description=(
+            "FastAPI lifespan shutdown 单阶段（gateway/runtime/reconcile_loop 等）的"
+            "硬超时秒数。超时不阻塞下一阶段，仅 logger.warning。默认 8s。"
+        ),
+    )
+
     grep_timeout_sec: int = Field(
         default=30,
         ge=5,
