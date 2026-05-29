@@ -270,6 +270,7 @@ class OrgCommandService:
         executor_provider: Any | None = None,
         checkpointer_provider: Any | None = None,
         supervisor_factory: Any | None = None,
+        llm_client_provider: Any | None = None,
     ) -> None:
         self._runtime = runtime
         # v1 ``OrgRuntime`` exposes ``get_org`` + the runtime
@@ -324,6 +325,11 @@ class OrgCommandService:
         self._executor_provider = executor_provider
         self._checkpointer_provider = checkpointer_provider
         self._supervisor_factory = supervisor_factory
+        # RC-5 S3: optional override for the org-gated supervisor LLM client.
+        # ``None`` (production) lazily wraps the shared default LLM client in
+        # ``GatewaySupervisorLLMClient``; tests inject a scripted fake so the
+        # gray-launch wiring can be asserted without burning real tokens.
+        self._llm_client_provider = llm_client_provider
         self._event_bus = event_bus
         # v22 P1: background reconcile loop for ``_running_by_root``
         # bookkeeping. Started on-demand by :meth:`start_reconcile_loop`
@@ -1186,7 +1192,131 @@ class OrgCommandService:
         }
         if deliver is not None:
             kwargs["deliver"] = deliver
+
+        # RC-5 S3: org-gated LLM orchestration brain. Only the *real* submit
+        # path (a live executor) opts into the gray-launch; the bare-service
+        # legacy fallback above stays PassThrough. Even when we decide to
+        # engage llm, the factory's ``_resolve_brain`` keeps a safe fallback
+        # to PassThrough if the client/directory construction yields nothing,
+        # so this branch can never crash submit. The default org (not in the
+        # allowlist, global flag still ``passthrough``) injects nothing here
+        # and is therefore byte-for-byte unchanged.
+        if executor is not None and self._should_engage_llm_brain(org_id):
+            llm_client = self._build_supervisor_llm_client(org_id)
+            if llm_client is not None:
+                kwargs["brain_mode"] = "llm"
+                kwargs["llm_client"] = llm_client
+                node_directory = self._build_node_directory(org_id)
+                if node_directory:
+                    kwargs["node_directory"] = node_directory
+
         return factory(**kwargs)
+
+    # ------------------------------------------------------------------
+    # RC-5 S3: org-gated LLM orchestration brain wiring
+    # ------------------------------------------------------------------
+
+    def _should_engage_llm_brain(self, org_id: str) -> bool:
+        """Decide whether ``org_id`` runs the real LLM orchestration brain.
+
+        Gray-launch rule (OR semantics, fail-safe to passthrough):
+
+        * ``org_id`` is in ``settings.orgs_supervisor_llm_org_allowlist`` --
+          the per-org explicit opt-in switch, OR
+        * the global ``settings.orgs_supervisor_brain_mode == "llm"`` -- the
+          full-rollout lever.
+
+        Default (empty allowlist + global flag ``passthrough``) returns
+        ``False`` so the default org is untouched. Any config read failure
+        also returns ``False`` -- config must never break submit.
+        """
+        try:
+            from openakita.config import settings
+
+            if settings.orgs_supervisor_brain_mode == "llm":
+                return True
+            allow = settings.orgs_supervisor_llm_org_allowlist or []
+            return org_id in set(allow)
+        except Exception:  # noqa: BLE001 -- config must never break submit
+            logger.debug(
+                "[OrgCmd] supervisor brain-mode gate read failed (org=%s)",
+                org_id,
+                exc_info=True,
+            )
+            return False
+
+    def _build_supervisor_llm_client(self, org_id: str) -> Any | None:
+        """Construct the gateway-backed ``SupervisorLLMClient`` for ``org_id``.
+
+        Returns ``None`` on any failure so the caller falls back to
+        passthrough (the factory's ``_resolve_brain`` also guards this). A
+        custom ``llm_client_provider`` can be injected for tests; otherwise we
+        wrap the process-shared :func:`openakita.llm.client.get_default_client`
+        in :class:`~openakita.runtime.llm_supervisor_client.GatewaySupervisorLLMClient`,
+        locking the no-thinking endpoint from settings.
+        """
+        try:
+            if self._llm_client_provider is not None:
+                return self._llm_client_provider(org_id)
+            from openakita.config import settings
+            from openakita.llm.client import get_default_client
+            from openakita.runtime.llm_supervisor_client import (
+                GatewaySupervisorLLMClient,
+            )
+
+            return GatewaySupervisorLLMClient(
+                get_default_client(),
+                endpoint=settings.orgs_supervisor_llm_endpoint or None,
+            )
+        except Exception:  # noqa: BLE001 -- never crash submit; fall back passthrough
+            logger.warning(
+                "[OrgCmd] failed to build supervisor LLM client (org=%s); "
+                "falling back to PassThrough",
+                org_id,
+                exc_info=True,
+            )
+            return None
+
+    def _build_node_directory(self, org_id: str) -> list[Any] | None:
+        """Build the real OrgV2 node directory for the brain (gap④).
+
+        Reads the org's nodes from the injected lookup and maps each
+        :class:`~openakita.orgs.org_models.OrgNode` to a
+        :class:`~openakita.runtime.llm_supervisor_brain.NodeDescriptor`
+        (``node_id`` / ``role`` / ``capabilities``) so the orchestration brain
+        knows which concrete nodes it may route to instead of guessing.
+        Returns ``None`` on any failure (the brain then degrades to the
+        root-only team block).
+        """
+        try:
+            from openakita.runtime.llm_supervisor_brain import NodeDescriptor
+
+            org = self._lookup.get_org(org_id)
+            nodes = list(getattr(org, "nodes", None) or [])
+            directory: list[Any] = []
+            for n in nodes:
+                node_id = getattr(n, "id", "") or ""
+                if not node_id:
+                    continue
+                role = getattr(n, "role_title", "") or ""
+                goal = getattr(n, "role_goal", "") or ""
+                dept = getattr(n, "department", "") or ""
+                capabilities = goal or dept
+                directory.append(
+                    NodeDescriptor(
+                        node_id=node_id,
+                        role=role,
+                        capabilities=capabilities,
+                    )
+                )
+            return directory or None
+        except Exception:  # noqa: BLE001 -- directory is best-effort
+            logger.debug(
+                "[OrgCmd] failed to build node directory (org=%s)",
+                org_id,
+                exc_info=True,
+            )
+            return None
 
     # ------------------------------------------------------------------
     # Private helpers (parity with v1; lifted as-is unless ADR-0011 forces

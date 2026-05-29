@@ -929,6 +929,43 @@ class Settings(BaseSettings):
             "Set ORGS_V2_BACKEND=sqlite in .env to opt in (P-RC-3)."
         ),
     )
+    orgs_supervisor_brain_mode: Literal["passthrough", "llm"] = Field(
+        default="passthrough",
+        description=(
+            "RC-5 路线 B 灰度开关：决定 supervisor_factory 给 Supervisor "
+            "注入哪种 SupervisorBrain。"
+            "'passthrough'（默认，零生产影响）使用 "
+            "PassThroughSupervisorBrain —— turn-2 必 DONE 的最小脚手架，"
+            "维持 Sprint-9 既有行为。"
+            "'llm' 使用 runtime.llm_supervisor_brain.LLMSupervisorBrain —— "
+            "真·Magentic-One 式三段编排大脑（facts/plan/逐 turn "
+            "progress_ledger），但仅在 factory 同时拿到可注入的 "
+            "SupervisorLLMClient 时才生效；拿不到 client 时安全回退到 "
+            "PassThrough。RC-5 探路阶段默认关，待 live 验证后再灰度。"
+        ),
+    )
+    orgs_supervisor_llm_org_allowlist: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "RC-5 S3 按 org 灰度名单：列出的 org_id 在 HTTP submit 路径上会被"
+            "注入真 LLMSupervisorBrain（编排大脑），不在名单内的 org 一律走"
+            "PassThrough 老路，确保灰度隔离。这是 per-org 的显式 opt-in 开关，"
+            "与全局 orgs_supervisor_brain_mode 取**或**关系：org 命中名单 或"
+            "全局 flag=='llm' 时才启用 llm 路径。默认空名单 → 默认 org 不受影响。"
+            "在 .env 设 ORGS_SUPERVISOR_LLM_ORG_ALLOWLIST='org_a,org_b' 灰度开启；"
+            "移出名单即刻回退 passthrough（factory 安全兜底再加一层保险）。"
+        ),
+    )
+    orgs_supervisor_llm_endpoint: str = Field(
+        default="dashscope-qwen3.5-plus-nothinking",
+        description=(
+            "RC-5 S3 编排大脑专用 LLM 端点名。灰度路径构造 "
+            "GatewaySupervisorLLMClient 时锁定该端点（no-thinking 档，降噪降本 + "
+            "提升 progress_ledger JSON 首解析率）。该端点不存在时安全回退默认路由 "
+            "+ enable_thinking=False，绝不阻断 submit。复用 DASHSCOPE_API_KEY，"
+            "不引入新 key。"
+        ),
+    )
     # v22 P1: Supervisor hard ceiling + OrgCommandService reconcile loop.
     #
     # Exploratory v10 (audit `_v21_biz/_orgs_business_capability_audit_v10.md`)
@@ -1011,6 +1048,38 @@ class Settings(BaseSettings):
             return {str(item).strip() for item in value if str(item).strip()}
         if isinstance(value, (list, tuple)):
             return {str(item).strip() for item in value if str(item).strip()}
+        return value
+
+    @field_validator("orgs_supervisor_llm_org_allowlist", mode="before")
+    @classmethod
+    def _split_supervisor_llm_allowlist_csv(cls, value: object) -> object:
+        """Accept ``"org_a,org_b"`` from env and produce ``["org_a", "org_b"]``.
+
+        RC-5 S3 per-org gray-launch allowlist. Pydantic-settings reads env as
+        strings; this splits a CSV ``ORGS_SUPERVISOR_LLM_ORG_ALLOWLIST`` into a
+        de-duplicated, order-preserving list. Programmatic list/tuple/set
+        inputs (tests, ``Settings(...)`` overrides) pass through normalised.
+        """
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            seen: set[str] = set()
+            out: list[str] = []
+            for part in value.split(","):
+                p = part.strip()
+                if p and p not in seen:
+                    seen.add(p)
+                    out.append(p)
+            return out
+        if isinstance(value, (list, tuple, set, frozenset)):
+            seen2: set[str] = set()
+            out2: list[str] = []
+            for item in value:
+                s = str(item).strip()
+                if s and s not in seen2:
+                    seen2.add(s)
+                    out2.append(s)
+            return out2
         return value
 
     # === Harness 配置 ===
