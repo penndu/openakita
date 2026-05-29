@@ -154,7 +154,7 @@ export function TemplatePickerDialog({
 
           {templates.length > 0 && (
             <ul
-              className="space-y-2 max-h-[42vh] overflow-y-auto"
+              className="space-y-2 max-h-[42vh] overflow-y-auto px-1 py-1"
               data-testid="v2-template-dialog-list"
             >
               {templates.map((t) => {
