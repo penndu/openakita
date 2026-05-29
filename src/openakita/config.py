@@ -930,7 +930,7 @@ class Settings(BaseSettings):
         ),
     )
     orgs_supervisor_brain_mode: Literal["passthrough", "llm"] = Field(
-        default="passthrough",
+        default="llm",
         description=(
             "RC-5 路线 B 灰度开关：决定 supervisor_factory 给 Supervisor "
             "注入哪种 SupervisorBrain。"
