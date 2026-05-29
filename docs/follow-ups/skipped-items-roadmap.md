@@ -1,4 +1,4 @@
-﻿# OpenAkita — Skipped Items Roadmap
+# OpenAkita — Skipped Items Roadmap
 
 > Single source of truth for intentionally-deferred follow-ups uncovered by
 > exploratory testing v10/v11 and the deep RCA report.
