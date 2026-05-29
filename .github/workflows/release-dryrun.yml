@@ -797,6 +797,43 @@ jobs:
             exit 1
           fi
 
+      # Mirror of the PDB-archival step in release.yml so dryrun runs also
+      # exercise the symbol-collection path. The actions/upload-artifact step
+      # below uploads the entire `_upload/` directory, so anything we drop
+      # here ends up in the dryrun artifact for inspection without needing
+      # a separate upload step. See release.yml for the design rationale.
+      - name: Archive Windows debug symbols (PDB) into _upload/
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $targetBase = "apps/setup-center/src-tauri/target"
+          if ("${{ matrix.rust_target }}") {
+            $releaseDir = "$targetBase/${{ matrix.rust_target }}/release"
+          } else {
+            $releaseDir = "$targetBase/release"
+          }
+          $bundleDir = "$releaseDir/bundle"
+          $outDir = "$bundleDir/_upload"
+          if (-not (Test-Path $outDir)) {
+            New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          }
+          $pdb = Get-ChildItem -Path $releaseDir -Filter "openakita-setup-center.pdb" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $pdb) {
+            Write-Host "::warning::PDB not found in $releaseDir; symbols will not be archived for this dryrun."
+            Write-Host "Listing $releaseDir contents for diagnosis:"
+            Get-ChildItem -Path $releaseDir -File -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+            return
+          }
+          # Dryrun has no `${{ env.RELEASE_TAG }}` (we never tagged a release
+          # for it), so synthesize a placeholder version from the workflow
+          # run number. Real releases land via release.yml which uses the
+          # actual tag.
+          $version = "dryrun-${{ github.run_number }}"
+          $zipPath = "$outDir/OpenAkitaDesktop_${version}_${{ matrix.suffix }}.symbols.zip"
+          Compress-Archive -Path $pdb.FullName -DestinationPath $zipPath -Force
+          $sizeMb = [Math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+          Write-Host "Created symbols archive: $zipPath ($sizeMb MB)"
+
       - name: Upload build artifacts (for inspection)
         uses: actions/upload-artifact@v6
         with:

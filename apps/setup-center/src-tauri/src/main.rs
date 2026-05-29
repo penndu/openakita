@@ -40,6 +40,28 @@ static MANAGED_CHILD: Lazy<Mutex<Option<ManagedProcess>>> = Lazy::new(|| Mutex::
 /// 前端可查询该标记以显示"正在自动启动服务"并禁用启动/重启按钮。
 static AUTO_START_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
+/// Set to true from the Tauri RunEvent::Exit handler so detached background
+/// loops (the 5s heartbeat in particular, but any future long-lived worker
+/// that holds an `AppHandle` clone and calls `emit`) can break out before
+/// touching a partially-dropped Tauri runtime.
+///
+/// The race we're closing: when the user picks "Quit" from the tray, the
+/// menu callback calls `app.exit(0)`, Tauri starts shutting the runtime
+/// down (webview destroy, window close, main event loop quit), and at the
+/// same moment the heartbeat thread is mid-sleep waiting to do its next
+/// `emit("backend:status", ...)`. By the time it wakes, the AppHandle
+/// internals point at half-dropped state and the emit call dereferences
+/// invalidated memory — manifesting as the SEH access-violation minidumps
+/// in feedback issue #591 (no crash.log, no Rust panic, dump address
+/// inside the desktop binary itself, four crashes across ten days
+/// matching every time the user quit and reopened).
+///
+/// Heartbeat now polls this flag on a 1s granularity (vs the original 5s
+/// blocking sleep), so worst-case it observes shutdown ~1s late instead
+/// of ~5s — well within the OS's tolerance for graceful exit and no
+/// longer overlapping the runtime drop window.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
 /// AUTO_START_IN_PROGRESS 置 true 时记录的 wall-clock 毫秒。
 /// 用于 ``is_backend_auto_starting`` 的超时兜底：超过 ``AUTO_START_TIMEOUT_MS``
 /// 视为后台 spawn 线程已经死掉/卡死，强制返回 false 防止前端 toast 永久卡住。
@@ -5365,7 +5387,25 @@ fn main() {
                     let mut last_status_was_healthy: Option<bool> = None;
                     let mut last_starting_log_at: u64 = 0;
                     loop {
-                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        // Sleep 5s in 1s increments and bail at the first
+                        // shutdown signal. Without this, the thread spends
+                        // up to 5s mid-sleep while the Tauri runtime is
+                        // being torn down by `app.exit()`, then wakes and
+                        // calls `app_handle.emit(...)` against half-dropped
+                        // state — the issue #591 SEH access violation.
+                        for _ in 0..5 {
+                            std::thread::sleep(std::time::Duration::from_secs(1));
+                            if SHUTDOWN.load(Ordering::SeqCst) {
+                                log_to_file("[heartbeat] shutdown signaled, exiting loop");
+                                return;
+                            }
+                        }
+                        // Also check before any AppHandle::emit so we cannot
+                        // touch the runtime after RunEvent::Exit fires
+                        // mid-iteration.
+                        if SHUTDOWN.load(Ordering::SeqCst) {
+                            return;
+                        }
                         let state_snap = read_state_file();
                         let ws_id = match state_snap.current_workspace_id {
                             Some(s) => s,
@@ -5609,6 +5649,19 @@ fn main() {
             }
         }
         if let tauri::RunEvent::Exit = event {
+            // Signal shutdown to detached background loops (heartbeat etc.)
+            // BEFORE doing anything else in this handler. The runtime is
+            // about to be dropped; any worker thread that wakes up after
+            // this point and tries to `emit` on its AppHandle clone will
+            // dereference partially-freed state and trigger an SEH access
+            // violation — exactly the pattern observed in issue #591. The
+            // flag is cheap (one AtomicBool::store) and idempotent.
+            SHUTDOWN.store(true, Ordering::SeqCst);
+            // Give heartbeat / other 1s-granularity loops a brief window
+            // to observe the flag and return cleanly before we proceed
+            // with backend cleanup. 1.2s is a 1s heartbeat tick plus a
+            // small margin; longer would just delay user-visible exit.
+            std::thread::sleep(std::time::Duration::from_millis(1200));
             clear_frontend_session_marker();
             // Safety-net: clean up backend processes on ANY exit path
             // (SIGTERM, system shutdown, unexpected termination, etc.)
