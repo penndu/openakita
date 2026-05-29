@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.0] - 2026-05-29
+
+> 组织编排 v3（`revamp/v3-orgs`）收口版本：在 `main` 基础上累计 550 个提交，
+> 核心是把多智能体「组织编排」从演示桩升级为可灰度上线的真编排闭环，并配套
+> 完成优雅关闭治根、IM 通道加固，以及 finance-auto 插件 v1.0 RC 的端到端落地。
+
+### 组织编排 Orchestration v3（orgs_v2 / RC-5，核心）
+
+- **真编排大脑落地**：新增 `LLMSupervisorBrain`，Supervisor 把各节点真实产出
+  （delegation history / actual outputs）回灌给大脑做收敛判断，取代「turn 2 必
+  DONE」的 `PassThroughSupervisorBrain` 演示桩；后者保留为永久安全兜底。
+- **灰度上线机制**：编排大脑默认 `passthrough`，通过 `orgs_supervisor_llm_org_allowlist`
+  按 org 白名单开启 LLM 编排（`ORGS_SUPERVISOR_BRAIN_MODE=llm` 为全量、谨慎选项）；
+  `_resolve_brain` 保证「开关为 llm 但无 client → 自动回退 passthrough」，半成品不崩生产。
+- **HTTP 命令路径接管**：Supervisor 接管 HTTP submit 命令路径，退役 wall-clock
+  watchdog；deliver 层把 role 风格的 `next_speaker` 解析为 `node_id`，节点目录从
+  OrgV2 store 注入。
+- **收敛 prompt 固化**：新增 `=== ACTUAL OUTPUTS ===` 区块与三条收敛 Decision rules，
+  正常产文类任务可多轮收敛优雅 done。
+
+### SSE 实时流 & 取消传播
+
+- **SSE 对齐**：`orgs_v2_stream` 与 supervisor emit 对齐，去掉合成首事件，修复 SSE
+  流查找卡死与 `_running_by_root` 槽位泄漏。
+- **取消端到端可断**：`cancel_event` 贯穿五层下沉，用户取消时通过 `task.cancel` 桥
+  真正中止在途的 provider.chat（httpx 请求），不再空跑。
+
+### 优雅关闭治根 Phase A（Graceful Shutdown）
+
+- **治真凶**：新增 `PluginManager.unload_all_plugins` + lifespan teardown 驱动插件关闭，
+  修复插件 aiosqlite worker 线程泄漏钉住解释器退出 ~13s 的问题（存活非 daemon 线程 17→3）。
+- **关闭提速**：插件 unload 串行改并行（Semaphore cap=8），shutdown_to_exit 从 ~16.7s
+  降到 ~9.3s（≤10s SLO 边缘），`force_exit` watchdog 退役为纯兜底（threading.Timer，永久安全网）。
+- **IM 收口**：lifespan IM drain 各阶段并行 + per-stage `wait_for`；为 wework_ws / qqbot
+  WS adapter 增加 force-close 路径（2s 硬截止）；新增 `openakita stop` CLI（含绕过 dev 代理）。
+
+### finance-auto 插件 v1.0 RC
+
+- **业务能力**：合并报表（抵消分录 + 成员持股加权）、现金流量表（间接法）、跨期对比、
+  重分类（含撤销与逆向 delta 历史）、附注生成（8 模板）、同业对比（12 分位基准）。
+- **安全与可靠性**：组件级密钥轮换、加密备份/恢复（路径沙箱防穿越）、RBAC 端到端、
+  PBKDF2 迭代提升至 OWASP 2023 最低 600k（向后兼容）、跨表服务显式事务回滚、乐观锁。
+- **接口与前端**：`/v1/` URL 前缀（旧路径 308 重定向）、`DELETE /orgs/{id}` 级联 + admin RBAC、
+  多个 setup-center 业务视图与桌面原生命令、Playwright e2e、finance-auto CI workflow。
+
+### 修复 / 测试 / 文档
+
+- 大量 `fix`/`test`/`docs` 提交（修复 v18 回归、规范 `cancelled_by`、补齐节点工具循环、
+  审计工具库 `_audit_lib`（line-ts log grep）等），整体补强组织编排与插件路径的回归覆盖。
+
 ## [Unreleased] - 2026-04-22
 
 ### Chat (Changed) — `[来源:工具]` 反幻觉标签升级为可视化 badge + 工具失败一致性 belt
