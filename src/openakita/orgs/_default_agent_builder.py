@@ -238,24 +238,32 @@ def _available_nodes_block(spec: AgentSpec) -> str:
 
 
 def _language_consistency_rule() -> str:
-    """Force every node reply to match the user's input language.
+    """Force every node reply to match the ORIGINAL user request language.
 
     Exploratory testing v11 (UI issue #10): Chinese tasks were coming
     back with English deliverables because the English system prompt
     biased the model toward English. This single rule -- appended to
     EVERY node prompt regardless of depth/tools -- pins the output
-    language to whatever language the instruction is written in, which
-    is the user's original language since the supervisor now relays
-    instructions in that language too.
+    language to the user's ORIGINAL request rather than the immediate
+    routing instruction. That distinction matters: the supervisor's
+    progress-ledger prompt is a strict JSON contract we cannot safely
+    add a language bullet to, so the orchestrator sometimes relays an
+    English ``instruction_or_question`` even for a Chinese task. The
+    original request (and upstream node outputs) are inlined into every
+    node's context in the user's language, so anchoring on THAT keeps
+    the whole deliverable Chinese even when one routing hop is English.
     """
 
     return (
-        "Language policy (MANDATORY): Always write your ENTIRE reply in the "
-        "same natural language as the instruction you receive. If the "
-        "instruction is in Chinese, respond fully in Chinese; if in English, "
-        "respond in English. This applies to all prose, headings, file "
-        "contents and summaries you produce. Do NOT switch to English just "
-        "because this system prompt is in English."
+        "Language policy (MANDATORY): Detect the natural language of the "
+        "ORIGINAL user request / the task content provided in this "
+        "conversation, and write your ENTIRE reply in THAT language. If the "
+        "original task is in Chinese, respond fully in Chinese -- including "
+        "all prose, headings, file contents and summaries -- EVEN IF a "
+        "routing or coordination instruction you receive happens to be "
+        "phrased in English. Only reply in English when the user's original "
+        "request itself is in English. Never switch to English merely because "
+        "this system prompt or a relayed instruction is in English."
     )
 
 

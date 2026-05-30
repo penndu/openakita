@@ -176,10 +176,6 @@ Decision rules (follow strictly):
   stop, instead of looping until a hard turn cap.
 - Otherwise, route the single most useful next step. (next_speaker must be one
   of: {names})
-- Language: write ``instruction_or_question`` in the SAME natural language as
-  the user request above (if the request is in Chinese, the instruction MUST be
-  in Chinese). Nodes mirror the instruction language, so this keeps the whole
-  deliverable in the user's language.
 
 Answer with brief reasoning, then output PURE JSON matching this exact schema,
 parsable as-is, with NOTHING else after it:
