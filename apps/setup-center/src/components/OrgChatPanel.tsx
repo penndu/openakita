@@ -491,8 +491,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   // The legacy ``onWsEvent`` path below stays intact -- this useEffect
   // is purely additive and is short-circuited when ``runtime !== "v2"``.
   const [v2LedgerEvents, setV2LedgerEvents] = useState<ProgressLedgerEvent[]>([]);
-  const nodeNamesRef = useRef(nodeNames);
-  nodeNamesRef.current = nodeNames;
+  // (``nodeNamesRef`` is declared once above and kept current there.)
   useEffect(() => {
     if (runtime !== "v2" || !orgId) return;
     const stream = createV2Stream(orgId, { apiBase: apiBaseUrl });
