@@ -354,13 +354,19 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
 
   const projectStats = useMemo(() => {
     const total = tasks.length;
-    const done = tasks.filter(tk => tk.status === "accepted").length;
+    const accepted = tasks.filter(tk => tk.status === "accepted").length;
     const inProgress = tasks.filter(tk => tk.status === "in_progress").length;
     const delivered = tasks.filter(tk => tk.status === "delivered").length;
     const todo = tasks.filter(tk => tk.status === "todo").length;
     const blocked = tasks.filter(tk => tk.status === "blocked" || tk.status === "rejected").length;
+    // UI issue #8: the autonomous orchestrator marks tasks ``delivered`` and
+    // never auto-``accepted`` (acceptance is a human gesture). So a fully
+    // delivered project showed "完成 0 / 0%". Treat delivered AND accepted as
+    // completed for progress aggregation; the percentage therefore reaches
+    // 100% once every task has been delivered.
+    const done = accepted + delivered;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    return { total, done, inProgress, delivered, todo, blocked, pct };
+    return { total, done, accepted, inProgress, delivered, todo, blocked, pct };
   }, [tasks]);
 
   if (loading) {
@@ -679,7 +685,20 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
             <div ref={projectTrackRef} className="opb-project-track">
               {projects.map((project) => {
                 const total = project.tasks.length;
-                const done = project.tasks.filter((tk) => tk.status === "accepted").length;
+                // UI issue #8: count delivered + accepted as completed (the
+                // autonomous orchestrator delivers but never auto-accepts), so
+                // a fully delivered project shows 100% instead of 0%.
+                const done = project.tasks.filter(
+                  (tk) => tk.status === "accepted" || tk.status === "delivered",
+                ).length;
+                // Reflect completion in the status badge once every task is
+                // delivered/accepted, even if the backend project record still
+                // says "active" (it is only flipped to completed on human
+                // acceptance). Never downgrade an already-terminal status.
+                const displayStatus =
+                  total > 0 && done === total && project.status !== "archived"
+                    ? "completed"
+                    : project.status;
                 const selected = project.id === selectedProjectId;
                 return (
                   <Card
@@ -719,8 +738,8 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
                       <div className="opb-project-card__body">
                         <div className="opb-project-card__meta">
                           <Badge variant="secondary" className="h-5 gap-1 px-1.5 text-[10px] font-medium">
-                            <span className="opb-status-dot" style={{ background: PROJECT_STATUS_COLOR[project.status] || "#3b82f6" }} />
-                            {t(PROJECT_STATUS_LABEL[project.status]) || project.status}
+                            <span className="opb-status-dot" style={{ background: PROJECT_STATUS_COLOR[displayStatus] || "#3b82f6" }} />
+                            {t(PROJECT_STATUS_LABEL[displayStatus]) || displayStatus}
                           </Badge>
                           <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-medium">
                             {t(PROJECT_TYPE_LABEL[project.project_type]) || project.project_type}
@@ -806,7 +825,7 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
               )}
 
               <div className="opb-progress-track">
-                {projectStats.done > 0 && <div className="opb-progress-fill" style={{ width: `${(projectStats.done / projectStats.total) * 100}%`, background: "#22c55e" }} />}
+                {projectStats.accepted > 0 && <div className="opb-progress-fill" style={{ width: `${(projectStats.accepted / projectStats.total) * 100}%`, background: "#22c55e" }} />}
                 {projectStats.delivered > 0 && <div className="opb-progress-fill" style={{ width: `${(projectStats.delivered / projectStats.total) * 100}%`, background: "#8b5cf6" }} />}
                 {projectStats.inProgress > 0 && <div className="opb-progress-fill" style={{ width: `${(projectStats.inProgress / projectStats.total) * 100}%`, background: "#3b82f6" }} />}
               </div>

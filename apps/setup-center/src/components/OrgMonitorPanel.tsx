@@ -143,6 +143,55 @@ const WRAP_TEXT_STYLE = {
   whiteSpace: "pre-wrap",
 } as const;
 
+// UI issue #5/#6: the ``/events?actor=`` feed returns RAW event-store records
+// whose fields are ``type`` / ``ts`` and top-level payload keys — NOT the
+// ``event_type`` / ``data`` / ``timestamp`` shape this panel renders. Without
+// normalization every row collapsed to a bare colored dot with no label or
+// content. Project the raw record onto the expected shape, remapping payload
+// keys onto the ones that already have Chinese ``DATA_KEY_LABELS``.
+const EVENT_BOOKKEEPING_KEYS = new Set([
+  "org_id", "at", "ts", "timestamp", "type", "event_type", "event_id", "id",
+  "command_id", "node_id", "chain_id", "parent_chain_id", "depth", "superstep",
+  "emitted_at", "seq",
+]);
+const EVENT_DATA_KEY_ALIAS: Record<string, string> = {
+  content_preview: "task",
+  content: "task",
+  result: "result_preview",
+  child_node_id: "to",
+  parent_node_id: "from",
+  exit_reason: "reason",
+};
+// Epoch seconds (``time.time()`` from the backend) vs ms: ``fmtTime`` feeds
+// the value straight into ``new Date(n)`` which expects ms, so a seconds
+// epoch (~1.7e9) renders as 1970. Promote seconds to ms.
+function toMs(v: any): any {
+  if (typeof v === "number") return v < 1e12 ? Math.round(v * 1000) : v;
+  if (typeof v === "string" && v && !Number.isNaN(Number(v))) {
+    const n = Number(v);
+    return n < 1e12 ? Math.round(n * 1000) : n;
+  }
+  return v;
+}
+function normalizeRawEvent(evt: any): { event_type: string; timestamp: any; data: Record<string, any>; event_id: any } {
+  const event_type = evt.event_type || evt.type || "";
+  const timestamp = toMs(evt.timestamp ?? evt.ts ?? evt.at);
+  let data: Record<string, any> = (evt.data && typeof evt.data === "object")
+    ? evt.data
+    : (evt.payload && typeof evt.payload === "object" ? evt.payload : {});
+  if (Object.keys(data).length === 0) {
+    // Derive a readable ``data`` dict from the meaningful top-level fields.
+    const derived: Record<string, any> = {};
+    for (const [k, v] of Object.entries(evt)) {
+      if (EVENT_BOOKKEEPING_KEYS.has(k)) continue;
+      if (v === null || v === undefined || v === "") continue;
+      derived[EVENT_DATA_KEY_ALIAS[k] || k] = v;
+    }
+    data = derived;
+  }
+  return { event_type, timestamp, data, event_id: evt.event_id ?? evt.id };
+}
+
 export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, visible }: OrgMonitorPanelProps) {
   const { t } = useTranslation();
   const mdModules = useMdModules();
@@ -181,7 +230,8 @@ export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, visible }: O
         if (schedulesRes.ok) setNodeSchedules(await schedulesRes.json());
         if (thinkingRes.ok) {
           const data = await thinkingRes.json();
-          setNodeThinking(data.timeline || []);
+          const tl = (data.timeline || data.thinking || []) as any[];
+          setNodeThinking(tl.map((it) => ({ ...it, timestamp: toMs(it.timestamp) })));
         }
       } catch (e) {
         console.error("Failed to fetch node detail:", e);
@@ -308,10 +358,12 @@ export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, visible }: O
             <div style={{ fontSize: 11, color: "var(--muted)" }}>{t("org.monitor.noActivity")}</div>
           ) : (
             <div style={{ maxHeight: 300, overflowY: "auto" }}>
-              {nodeEvents.slice(0, 15).map((evt: any, i: number) => {
+              {nodeEvents.slice(0, 15).map((rawEvt: any, i: number) => {
+                const evt = normalizeRawEvent(rawEvt);
                 const dataEntries = Object.entries(evt.data || {});
                 const isEvtExpanded = expandedIdx === `evt-${i}`;
                 const fullText = dataEntries.map(([k, v]) => `**${t(DATA_KEY_LABELS[k] || k)}**: ${translateDataValue(k, v, nodeNameMap)}`).join("\n\n");
+                const evtFinished = evt.event_type.includes("finish") || evt.event_type.includes("complete") || evt.event_type.includes("done");
                 return (
                   <div key={evt.event_id || i}
                     onClick={() => setExpandedIdx(isEvtExpanded ? null : `evt-${i}`)}
@@ -324,12 +376,12 @@ export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, visible }: O
                     <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
                       <span style={{
                         width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                        background: evt.event_type?.includes("fail") || evt.event_type?.includes("error")
+                        background: evt.event_type.includes("fail") || evt.event_type.includes("error")
                           ? "var(--danger)"
-                          : evt.event_type?.includes("complete") ? "var(--ok)" : "var(--primary)",
+                          : evtFinished ? "var(--ok)" : "var(--primary)",
                       }} />
                       <span style={{ fontWeight: 500, ...WRAP_TEXT_STYLE }}>
-                        {t(EVENT_TYPE_LABELS[evt.event_type] || evt.event_type?.replace(/_/g, " "))}
+                        {t(EVENT_TYPE_LABELS[evt.event_type] || evt.event_type.replace(/_/g, " "))}
                       </span>
                       <span style={{ color: "var(--muted)", fontSize: 10, marginLeft: "auto" }}>
                         {fmtTime(evt.timestamp)}

@@ -350,17 +350,31 @@ function activityItemsToMessages(
     const sourceLbl = activitySourceLabel(first);
     // command_id 在很多事件上是同一个值；以第一条带 user_command 的为锚显示
     const cmdItem = bucket.find(i => normalizeActivity(i).kind === "user_command") || first;
-    const cmdSummary = (cmdItem.content || cmdItem.content_preview || "").trim().replace(/\s+/g, " ").slice(0, 200);
+    // UI issue #1: 把"用户指令"还原成一条 role="user" 的右侧气泡，而不是
+    // 折进系统活动卡里。这样切组织/切节点/重挂载后从 /activity 重新加载
+    // 时，用户自己发出的指令气泡依然在（之前只剩节点回复）。id 用
+    // command_id 做稳定键，保证去重幂等、不会和本地乐观气泡叠加成两条。
+    const cmdSummaryFull = (cmdItem.content || cmdItem.content_preview || "").trim();
+    if (normalizeActivity(cmdItem).kind === "user_command" && cmdSummaryFull) {
+      const cmdKey = cmdItem.command_id ? String(cmdItem.command_id) : (key || `${groupTs}`);
+      msgs.push({
+        id: `user-cmd-${cmdKey}`,
+        role: "user",
+        content: cmdSummaryFull,
+        timestamp: activityTs(cmdItem),
+      });
+    }
     const headerBits: string[] = [`📥 来自 **${sourceLbl}**`];
-    if (normalizeActivity(cmdItem).kind === "user_command" && cmdSummary) {
-      headerBits.push(`· 指令：${cmdSummary}`);
-    } else if (cmdItem.command_id) {
+    if (cmdItem.command_id) {
       headerBits.push(`· command_id=\`${cmdItem.command_id}\``);
     }
     const header = headerBits.join(" ");
     // 时间线内容：每条加上 hh:mm:ss 时间戳。A2 fix: 跳过无可读内容的事件，
     // 并保持 item ↔ line 的对应关系（用于后续折叠时区分门面/细节）。
+    // UI issue #1: user_command 已单独渲染成右侧气泡，这里从活动流里剔除，
+    // 避免"🎯 用户指令"在系统卡里重复一遍。
     const rendered = bucket
+      .filter(it => normalizeActivity(it).kind !== "user_command")
       .map(it => ({ it, line: formatActivityLine(it, { nameFmt }) }))
       .filter(r => r.line.trim().length > 0)
       .map(r => ({ it: r.it, ln: `\`${fmtClock(activityTs(r.it))}\` ${r.line}` }));
@@ -1302,7 +1316,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
 
     const wrapWithProcess = (
       resultText: string,
-      opts?: { stoppedByWatchdog?: boolean; warning?: string }
+      opts?: { stoppedByWatchdog?: boolean; warning?: string; files?: FileAttachment[] }
     ): string => {
       const stopped = !!opts?.stoppedByWatchdog;
       const banner = stopped
@@ -1311,12 +1325,25 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       const warningLine = opts?.warning
         ? `\n\n> ${opts.warning}`
         : "";
-      if (segments.length === 0) return resultText + warningLine + banner;
+      // UI issue #4: present the final result as a prominent "任务完成汇报"
+      // section so the user clearly sees the receipt, not just a wall of text.
+      const reportHeading = stopped ? "" : `### 📋 ${t("org.chat.finalReportHeading", "任务完成汇报")}\n\n`;
+      // UI issue #4/#7: a textual deliverables manifest above the file cards
+      // (the cards themselves render as attachments below the bubble).
+      const files = opts?.files || [];
+      const manifest = files.length > 0
+        ? `\n\n**📎 ${t("org.chat.deliverablesHeading", "交付物清单")}（${files.length}）**\n\n`
+          + files.map(f => `- \`${f.filename || (f.file_path || "").split(/[\\/]/).pop() || "file"}\``).join("\n")
+        : "";
+      const reportBlock = `${reportHeading}${resultText}${manifest}${warningLine}${banner}`;
+      if (segments.length === 0) return reportBlock;
       const allCollapsed = segments.map(seg => {
         const body = seg.lines.join("\n\n");
         return `<details>\n<summary>✓ ${seg.nodeName}</summary>\n\n${body}\n\n</details>`;
       }).join("\n\n");
-      return `${allCollapsed}\n\n---\n\n${resultText}${warningLine}${banner}`;
+      // UI issue #3: keep the per-node execution process visible (collapsed)
+      // above the final report so the user can drill into what each node did.
+      return `<details>\n<summary>🛠 ${t("org.chat.processDetailsHeading", "执行过程")}（${segments.length}）</summary>\n\n${allCollapsed}\n\n</details>\n\n---\n\n${reportBlock}`;
     };
 
     const getCommandResultText = (
@@ -1402,8 +1429,9 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           const cancelled = !!(result && result.cancelled_by_user);
           const warning = result && typeof result.warning === "string" ? result.warning as string : undefined;
           setTimeout(() => {
-            finalContent = wrapWithProcess(resultText, { stoppedByWatchdog: stopped, warning });
-            finalizeResult(finalContent, collectAllFiles());
+            const files = collectAllFiles();
+            finalContent = wrapWithProcess(resultText, { stoppedByWatchdog: stopped, warning, files });
+            finalizeResult(finalContent, files);
             if (stopped || cancelled) setCanContinuePrevious(true);
           }, 500);
         });
@@ -1430,8 +1458,9 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
                 const stopped = !!(pd.result && pd.result.stopped_by_watchdog);
                 const cancelled = !!(pd.result && pd.result.cancelled_by_user);
                 const warning = pd.result && typeof pd.result.warning === "string" ? pd.result.warning : undefined;
-                finalContent = wrapWithProcess(resultText, { stoppedByWatchdog: stopped, warning });
-                finalizeResult(finalContent, collectAllFiles());
+                const files = collectAllFiles();
+                finalContent = wrapWithProcess(resultText, { stoppedByWatchdog: stopped, warning, files });
+                finalizeResult(finalContent, files);
                 if (stopped || cancelled) setCanContinuePrevious(true);
               }
             }
@@ -1869,9 +1898,22 @@ const CHAT_CSS = `
 .ocp-close:hover { background: rgba(239,68,68,0.1); color: #ef4444 !important; -webkit-text-fill-color: #ef4444 !important; }
 .ocp-close:hover svg { stroke: #ef4444 !important; }
 
+/* ─── v2 live-progress strip ─── */
+/* Bounded so a long progress_ledger history can never push the message list
+   off-screen. This was the "无法滚动" root cause: an unbounded sibling above a
+   flex:1 list whose own min-height defaulted to auto never lets it scroll. */
+.ocp-v2-timeline {
+  flex-shrink: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 8px 12px 0 12px;
+}
+.ocp-v2-timeline::-webkit-scrollbar { width: 4px; }
+.ocp-v2-timeline::-webkit-scrollbar-thumb { background: rgba(51,65,85,0.5); border-radius: 2px; }
+
 /* ─── Messages ─── */
 .ocp-messages {
-  flex: 1; overflow-y: auto; padding: 12px;
+  flex: 1; min-height: 0; overflow-y: auto; padding: 12px;
   display: flex; flex-direction: column; gap: 8px;
 }
 .ocp-messages::-webkit-scrollbar { width: 4px; }

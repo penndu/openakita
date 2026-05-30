@@ -935,20 +935,58 @@ export function OrgEditorView({
   // ── WebSocket for real-time org events ──
 
   const triggerEdgeAnimation = useCallback((fromNode: string, toNode: string, color: string) => {
-    const edgeKey = edges.find(
+    if (!fromNode || !toNode) return;
+    let edgeKey = edges.find(
       (e) => (e.source === fromNode && e.target === toNode) || (e.source === toNode && e.target === fromNode),
     )?.id;
+    // UI issue #9: org delegations often happen between nodes that have no
+    // pre-drawn structural edge (the supervisor can dispatch to any node), so
+    // the graph looked "一跳一跳" — a node lit up busy with no connecting line.
+    // When there is no structural edge AND both endpoints differ, draw a
+    // TRANSIENT dashed edge so the委派→交付 hand-off is always visible. It is
+    // tagged ``__transient`` so it is removed after the pulse and never saved.
+    let transientId: string | null = null;
+    if (!edgeKey && fromNode !== toNode) {
+      transientId = `__transient-${fromNode}-${toNode}`;
+      edgeKey = transientId;
+      setEdges((prev) => {
+        if (prev.some((e) => e.id === transientId)) return prev;
+        const hasFrom = prev.some((e) => e.source === fromNode || e.target === fromNode)
+          || nodes.some((n) => n.id === fromNode);
+        const hasTo = prev.some((e) => e.source === toNode || e.target === toNode)
+          || nodes.some((n) => n.id === toNode);
+        if (!hasFrom || !hasTo) return prev;
+        return [
+          ...prev,
+          {
+            id: transientId!,
+            source: fromNode,
+            target: toNode,
+            type: "default",
+            animated: true,
+            style: { stroke: color, strokeWidth: 2, strokeDasharray: "4 4" },
+            markerEnd: { type: MarkerType.ArrowClosed, color },
+            data: { __transient: true, edge_type: "collaborate" },
+          } as Edge,
+        ];
+      });
+    }
     if (!edgeKey) return;
-    setEdgeAnimations((prev) => ({ ...prev, [edgeKey]: { color, ts: Date.now() } }));
-    setEdgeFlowCounts((prev) => ({ ...prev, [edgeKey]: (prev[edgeKey] || 0) + 1 }));
+    const animKey = edgeKey;
+    setEdgeAnimations((prev) => ({ ...prev, [animKey]: { color, ts: Date.now() } }));
+    setEdgeFlowCounts((prev) => ({ ...prev, [animKey]: (prev[animKey] || 0) + 1 }));
     setTimeout(() => {
       setEdgeAnimations((prev) => {
         const copy = { ...prev };
-        if (copy[edgeKey]?.ts && Date.now() - copy[edgeKey].ts >= 4500) delete copy[edgeKey];
+        if (copy[animKey]?.ts && Date.now() - copy[animKey].ts >= 4500) delete copy[animKey];
         return copy;
       });
+      // Remove the transient edge once its pulse fades.
+      if (transientId) {
+        setEdges((prev) => prev.filter((e) => e.id !== transientId));
+      }
     }, 5000);
-  }, [edges]);
+  }, [edges, nodes, setEdges]);
 
   const currentOrgId = currentOrg?.id;
   useEffect(() => {
@@ -1151,7 +1189,7 @@ export function OrgEditorView({
       const { status, _runtime, _liveMode, current_task, ...configData } = n.data as any;
       return { ...configData, position: n.position };
     });
-    const updatedEdges = edges.map((e) => ({
+    const updatedEdges = edges.filter((e) => !(e.data as any)?.__transient).map((e) => ({
       ...(e.data || {}),
       id: e.id,
       source: e.source,

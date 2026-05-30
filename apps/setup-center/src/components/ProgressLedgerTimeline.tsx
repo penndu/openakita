@@ -67,12 +67,26 @@ export function ProgressLedgerTimeline({
 }: ProgressLedgerTimelineProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const reversed = useMemo(() => [...events].reverse(), [events]);
+  // UI issue #2: drop "empty shell" entries that have neither a next-speaker
+  // nor an instruction. Those rendered as large blank "(尚未指定)/(无指令)"
+  // cards and were the bulk of the "大白块" clutter the user reported.
+  const meaningful = useMemo(
+    () =>
+      events.filter(
+        (e) =>
+          (e.next_speaker && e.next_speaker.trim()) ||
+          (e.instruction_or_question && e.instruction_or_question.trim()) ||
+          e.is_request_satisfied,
+      ),
+    [events],
+  );
+
+  const reversed = useMemo(() => [...meaningful].reverse(), [meaningful]);
   const visibleCount = expanded ? reversed.length : initialVisible;
   const visible = reversed.slice(0, visibleCount);
   const hidden = reversed.length - visible.length;
 
-  if (events.length === 0) {
+  if (meaningful.length === 0) {
     return (
       <div
         className="text-sm text-muted-foreground"
