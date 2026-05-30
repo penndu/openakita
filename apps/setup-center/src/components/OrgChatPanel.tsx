@@ -174,6 +174,7 @@ function isSoftOrgExitReason(reason?: string): boolean {
 interface ActivityItem {
   id?: string;
   ts?: string | number;
+  at?: string | number;
   kind?: string;
   source?: { surface?: string; channel?: string; display_name?: string };
   from_node?: string;
@@ -185,6 +186,55 @@ interface ActivityItem {
   msg_type?: string;
   status?: string;
   phase?: string;
+  // A2 fix: the v2 ``/activity`` endpoint is a thin envelope that returns
+  // raw event-store records, whose field names differ from the legacy v1
+  // activity shape above. These are the real fields the supervisor /
+  // executor emit (see ``_runtime_agent_pipeline_executor._emit``).
+  type?: string;
+  node_id?: string;
+  parent_node_id?: string;
+  child_node_id?: string;
+  content_preview?: string;
+  output_len?: number;
+  artifact_path?: string;
+}
+
+// A2 fix: map the raw event-store ``type`` onto the canonical ``kind``
+// vocabulary ``formatActivityLine`` understands. Without this every
+// ``agent_run_*`` / ``subtask_assigned`` record fell through to the
+// default branch and rendered as a contentless "· ?" line (图1).
+const ACTIVITY_TYPE_TO_KIND: Record<string, string> = {
+  subtask_assigned: "delegate",
+  child_dispatch: "delegate",
+  agent_run_started: "node_activated",
+  agent_run_finished: "task_completed",
+  agent_run_failed: "task_failed",
+  agent_run_cancelled: "task_cancelled",
+  node_tool_called: "workbench_started",
+  node_tool_completed: "workbench_succeeded",
+  node_tool_failed: "workbench_failed",
+  command_phase: "command_phase",
+  user_command: "user_command",
+};
+
+/** Resolve the canonical kind + normalized from/to/content for one item. */
+function normalizeActivity(item: ActivityItem): {
+  kind: string;
+  from: string;
+  to: string;
+  content: string;
+  outputLen?: number;
+} {
+  const rawType = item.type || item.event_type || "";
+  const kind = item.kind && ACTIVITY_TYPE_TO_KIND[item.kind]
+    ? ACTIVITY_TYPE_TO_KIND[item.kind]
+    : (ACTIVITY_TYPE_TO_KIND[rawType] || item.kind || rawType || "");
+  // delegate-style events: parent → child. activation/completion: the
+  // acting node sits on ``node_id``.
+  const from = item.from_node || item.parent_node_id || item.node_id || "";
+  const to = item.to_node || item.child_node_id || "";
+  const content = (item.content || item.content_preview || "").trim();
+  return { kind, from, to, content, outputLen: item.output_len };
 }
 
 function activitySourceLabel(item: ActivityItem): string {
@@ -200,11 +250,13 @@ function activitySourceLabel(item: ActivityItem): string {
 }
 
 function activityTs(item: ActivityItem): number {
-  const ts = item?.ts;
-  if (typeof ts === "number") return ts * 1000;
-  if (typeof ts === "string" && ts) {
-    const t = Date.parse(ts);
+  const raw = item?.ts ?? item?.at;
+  if (typeof raw === "number") return raw < 1e12 ? raw * 1000 : raw;
+  if (typeof raw === "string" && raw) {
+    const t = Date.parse(raw);
     if (!Number.isNaN(t)) return t;
+    const n = Number(raw);
+    if (!Number.isNaN(n)) return n < 1e12 ? n * 1000 : n;
   }
   return Date.now();
 }
@@ -220,15 +272,16 @@ function fmtClock(ms: number): string {
 /** 单条活动事件渲染成一行（不含时间戳前缀；时间戳由 group 渲染器统一加）。 */
 function formatActivityLine(item: ActivityItem, opts?: { nameFmt?: (id: string) => string }): string {
   const nameFmt = opts?.nameFmt || ((id: string) => id);
-  const from = item.from_node ? nameFmt(item.from_node) : "";
-  const to = item.to_node ? nameFmt(item.to_node) : "";
-  const flowArrow = to ? `${from || "?"} → ${to}` : (from || "?");
-  // content 已经在 backend 端被 _activity_preview 截到 240 字符
-  const c = (item.content || "").trim();
-  const inlineContent = c ? c.replace(/\s+/g, " ").slice(0, 200) : "";
+  // A2 fix: resolve the canonical kind + from/to/content across BOTH the
+  // legacy v1 activity shape and the raw v2 event-store record shape.
+  const norm = normalizeActivity(item);
+  const fromN = norm.from ? nameFmt(norm.from) : "";
+  const toN = norm.to ? nameFmt(norm.to) : "";
+  const flowArrow = toN ? `${fromN || "?"} → ${toN}` : fromN;
+  const inlineContent = norm.content ? norm.content.replace(/\s+/g, " ").slice(0, 200) : "";
   const summary = inlineContent ? `：${inlineContent}` : "";
-  // tool_name 在 backend 里被合到 content；这里就不再二次解析。
-  switch (item.kind) {
+  const out = norm.outputLen ? `（输出 ${norm.outputLen} 字）` : "";
+  switch (norm.kind) {
     case "user_command":
       return `🎯 **用户指令**${summary}`;
     case "user_command_cancelled":
@@ -236,27 +289,32 @@ function formatActivityLine(item: ActivityItem, opts?: { nameFmt?: (id: string) 
     case "command":
       return `📡 命令登记：${item.status || ""}${item.phase ? `·${item.phase}` : ""}`;
     case "command_phase":
-      return `📡 ${flowArrow} 命令状态变更${summary}`;
+      return `📡 ${flowArrow || "命令"} 状态变更${summary}`;
     case "delegate":
-      return `↪ ${flowArrow} 派单${summary}`;
+      return `↪ ${flowArrow || "派单"} 派单${summary}`;
     case "task_completed":
-      return `✓ ${from || "?"} 任务完成${summary}`;
+      return `✓ ${fromN || "节点"} 任务完成${out}${summary}`;
+    case "task_failed":
+      return `✗ ${fromN || "节点"} 任务失败${summary}`;
     case "task_cancelled":
-      return `⏹ ${from || "?"} 任务取消${summary}`;
+      return `⏹ ${fromN || "节点"} 任务取消${summary}`;
     case "broadcast":
-      return `📢 ${from || "?"} 广播${summary}`;
+      return `📢 ${fromN || "?"} 广播${summary}`;
     case "node_activated":
-      return `🟢 ${from || "?"} 节点激活${summary}`;
+      return `🟢 ${fromN || "节点"} 开始执行${summary}`;
     case "workbench_started":
-      return `▶ ${from || "?"} 启动工具${summary}`;
+      return `▶ ${fromN || "节点"} 调用工具${summary}`;
     case "workbench_succeeded":
-      return `✓ ${from || "?"} 工具完成${summary}`;
+      return `✓ ${fromN || "节点"} 工具完成${summary}`;
     case "workbench_failed":
-      return `✗ ${from || "?"} 工具失败${summary}`;
+      return `✗ ${fromN || "节点"} 工具失败${summary}`;
     case "message":
       return `💬 ${flowArrow}${summary}`;
     default:
-      return `· ${flowArrow}${item.kind ? `（${item.kind}）` : ""}${summary}`;
+      // A2 fix: skip purely-structural events with nothing readable
+      // (no flow + no content) instead of emitting a "· ?" ghost line.
+      if (!inlineContent && !flowArrow) return "";
+      return `· ${flowArrow}${norm.kind ? `（${norm.kind}）` : ""}${summary}`;
   }
 }
 
@@ -291,36 +349,41 @@ function activityItemsToMessages(
     const groupTs = activityTs(first);
     const sourceLbl = activitySourceLabel(first);
     // command_id 在很多事件上是同一个值；以第一条带 user_command 的为锚显示
-    const cmdItem = bucket.find(i => i.kind === "user_command") || first;
-    const cmdSummary = (cmdItem.content || "").trim().replace(/\s+/g, " ").slice(0, 200);
+    const cmdItem = bucket.find(i => normalizeActivity(i).kind === "user_command") || first;
+    const cmdSummary = (cmdItem.content || cmdItem.content_preview || "").trim().replace(/\s+/g, " ").slice(0, 200);
     const headerBits: string[] = [`📥 来自 **${sourceLbl}**`];
-    if (cmdItem.kind === "user_command" && cmdSummary) {
+    if (normalizeActivity(cmdItem).kind === "user_command" && cmdSummary) {
       headerBits.push(`· 指令：${cmdSummary}`);
     } else if (cmdItem.command_id) {
       headerBits.push(`· command_id=\`${cmdItem.command_id}\``);
     }
     const header = headerBits.join(" ");
-    // 时间线内容：每条加上 hh:mm:ss 时间戳
-    const lines = bucket.map(it => {
-      const clock = fmtClock(activityTs(it));
-      const line = formatActivityLine(it, { nameFmt });
-      return `\`${clock}\` ${line}`;
-    });
-    // 折叠：>4 条时把"工具进度细节"折叠，把 user_command/task_completed/task_cancelled
+    // 时间线内容：每条加上 hh:mm:ss 时间戳。A2 fix: 跳过无可读内容的事件，
+    // 并保持 item ↔ line 的对应关系（用于后续折叠时区分门面/细节）。
+    const rendered = bucket
+      .map(it => ({ it, line: formatActivityLine(it, { nameFmt }) }))
+      .filter(r => r.line.trim().length > 0)
+      .map(r => ({ it: r.it, ln: `\`${fmtClock(activityTs(r.it))}\` ${r.line}` }));
+    // A2 fix: 整组都没有可读内容时，不要产出只有 "来自 组织 ?" 的空气泡。
+    if (rendered.length === 0) continue;
+    // 折叠：>5 条时把"工具进度细节"折叠，把 user_command/task_completed/task_cancelled
     // 这些"门面事件"始终可见。
-    const isHeadline = (it: ActivityItem) => (
-      it.kind === "user_command"
-      || it.kind === "user_command_cancelled"
-      || it.kind === "task_completed"
-      || it.kind === "task_cancelled"
-      || it.kind === "command"
-    );
+    const isHeadline = (it: ActivityItem) => {
+      const k = normalizeActivity(it).kind;
+      return (
+        k === "user_command"
+        || k === "user_command_cancelled"
+        || k === "task_completed"
+        || k === "task_failed"
+        || k === "task_cancelled"
+        || k === "command"
+      );
+    };
     let body: string;
-    if (bucket.length > 5) {
+    if (rendered.length > 5) {
       const headlineLines: string[] = [];
       const detailLines: string[] = [];
-      bucket.forEach((it, ix) => {
-        const ln = lines[ix];
+      rendered.forEach(({ it, ln }) => {
         if (isHeadline(it)) headlineLines.push(ln);
         else detailLines.push(ln);
       });
@@ -331,7 +394,7 @@ function activityItemsToMessages(
           : "",
       ].filter(Boolean).join("\n\n");
     } else {
-      body = lines.join("\n\n");
+      body = rendered.map(r => r.ln).join("\n\n");
     }
     msgs.push({
       id: `act-grp-${key}`,
@@ -428,29 +491,76 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   // The legacy ``onWsEvent`` path below stays intact -- this useEffect
   // is purely additive and is short-circuited when ``runtime !== "v2"``.
   const [v2LedgerEvents, setV2LedgerEvents] = useState<ProgressLedgerEvent[]>([]);
+  const nodeNamesRef = useRef(nodeNames);
+  nodeNamesRef.current = nodeNames;
   useEffect(() => {
     if (runtime !== "v2" || !orgId) return;
     const stream = createV2Stream(orgId, { apiBase: apiBaseUrl });
-    const off = stream.onEvent("progress_ledger", (ev: V2StreamEvent) => {
+    const nameOf = (id?: string) => (id ? (nodeNamesRef.current?.[id] || id) : "");
+    const push = (e: ProgressLedgerEvent) =>
+      setV2LedgerEvents((prev) => (prev.length > 200 ? [...prev.slice(-200), e] : [...prev, e]));
+
+    const offLedger = stream.onEvent("progress_ledger", (ev: V2StreamEvent) => {
       const p = ev.payload as Record<string, unknown>;
-      setV2LedgerEvents((prev) => [
-        ...prev,
-        {
-          id: ev.event_id ?? `${ev.command_id}:${ev.superstep}:${ev.ts}`,
-          ts: ev.ts ?? ev.emitted_at ?? new Date().toISOString(),
-          is_request_satisfied: Boolean(p?.is_request_satisfied),
-          is_in_loop: Boolean(p?.is_in_loop),
-          is_progress_being_made: Boolean(p?.is_progress_being_made),
-          next_speaker: typeof p?.next_speaker === "string" ? (p.next_speaker as string) : "",
-          instruction_or_question:
-            typeof p?.instruction_or_question === "string"
-              ? (p.instruction_or_question as string)
-              : "",
-        },
-      ]);
+      push({
+        id: ev.event_id ?? `${ev.command_id}:${ev.superstep}:${ev.ts}`,
+        ts: ev.ts ?? ev.emitted_at ?? new Date().toISOString(),
+        is_request_satisfied: Boolean(p?.is_request_satisfied),
+        is_in_loop: Boolean(p?.is_in_loop),
+        is_progress_being_made: Boolean(p?.is_progress_being_made),
+        next_speaker: typeof p?.next_speaker === "string" ? (p.next_speaker as string) : "",
+        instruction_or_question:
+          typeof p?.instruction_or_question === "string"
+            ? (p.instruction_or_question as string)
+            : "",
+      });
     });
+
+    // A3 fix: the node-driven org command path runs through the agent
+    // pipeline executor, which emits ``agent_run_*`` / ``subtask_assigned``
+    // onto the ``lifecycle`` channel (via the OrgRuntime stream tap) rather
+    // than the group-chat supervisor's ``progress_ledger`` snapshots. Fold
+    // those into the same timeline so the user sees live node activity
+    // immediately instead of a frozen "处理中…" with no reaction (图2).
+    const offLifecycle = stream.onEvent("lifecycle", (ev: V2StreamEvent) => {
+      const p = (ev.payload || {}) as Record<string, unknown>;
+      const etype = ev.type || (p.type as string) || "";
+      const node = (p.node_id as string) || "";
+      const child = (p.child_node_id as string) || "";
+      const parent = (p.parent_node_id as string) || "";
+      const preview = (p.content_preview as string) || "";
+      let speaker = ""; let note = ""; let satisfied = false; let progress = true;
+      switch (etype) {
+        case "agent_run_started":
+          speaker = nameOf(node); note = `开始执行${preview ? `：${preview}` : ""}`; break;
+        case "agent_run_finished":
+          speaker = nameOf(node); note = "完成任务"; break;
+        case "agent_run_failed":
+          speaker = nameOf(node); note = "执行失败"; progress = false; break;
+        case "subtask_assigned":
+        case "child_dispatch":
+          speaker = nameOf(child || node);
+          note = `${nameOf(parent) || "主管"} 派单${preview ? `：${preview}` : ""}`;
+          break;
+        case "command_done":
+          speaker = nameOf(node); note = "指令完成"; satisfied = true; break;
+        default:
+          return; // ignore high-volume / non-progress lifecycle events
+      }
+      push({
+        id: ev.event_id ?? `${etype}:${ev.command_id}:${ev.superstep}:${ev.ts}`,
+        ts: ev.ts ?? ev.emitted_at ?? new Date().toISOString(),
+        is_request_satisfied: satisfied,
+        is_in_loop: false,
+        is_progress_being_made: progress,
+        next_speaker: speaker,
+        instruction_or_question: note,
+      });
+    });
+
     return () => {
-      off();
+      offLedger();
+      offLifecycle();
       stream.close();
     };
   }, [runtime, orgId, apiBaseUrl]);

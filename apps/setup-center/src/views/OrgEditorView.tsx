@@ -2658,9 +2658,11 @@ export function OrgEditorView({
               />
               <div className="org-drawer-slide" style={{ display: chatPanelOpen ? undefined : "none" }}>
                 <OrgChatPanel
+                  key={`org-cmd-${selectedOrgId}`}
                   orgId={selectedOrgId}
                   nodeId={null}
                   apiBaseUrl={apiBaseUrl}
+                  runtime="v2"
                   showHeader
                   title={t("org.editor.orgCommandCenter", { name: currentOrg?.name || t("org.editor.orgDefault") })}
                   onClose={() => setActiveDrawer(null)}
@@ -3348,9 +3350,11 @@ export function OrgEditorView({
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <OrgChatPanel
+              key={`org-node-${selectedOrgId}-${selectedNodeId}`}
               orgId={selectedOrgId}
               nodeId={selectedNodeId}
               apiBaseUrl={apiBaseUrl}
+              runtime="v2"
               compact
               nodeNames={nodeNameMap}
             />
