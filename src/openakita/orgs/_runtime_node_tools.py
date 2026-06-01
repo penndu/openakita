@@ -108,6 +108,86 @@ def _guarded_source_roots() -> tuple[Path, ...]:
         return ()
 
 
+# tool_name -> destination arg keys whose RELATIVE values get redirected into
+# the org's artifacts dir. Deliberately excludes ``src``/``source`` (read
+# sources for move/copy must not be relocated) and ``delete_file`` (relocating a
+# delete target would silently change semantics; the source-tree guard still
+# protects it). Absolute paths are never redirected here — they fall through to
+# :func:`_guarded_write_violation`.
+_WRITE_DEST_KEYS: dict[str, tuple[str, ...]] = {
+    "write_file": ("path", "file_path"),
+    "edit_file": ("path", "file_path"),
+    "append_file": ("path", "file_path"),
+    "create_file": ("path", "file_path"),
+    "move_file": ("dst", "destination", "dest"),
+    "copy_file": ("dst", "destination", "dest"),
+    "rename_file": ("dst", "destination", "dest"),
+    "create_directory": ("path", "dir_path"),
+}
+
+
+def _org_artifacts_dir(org_id: str) -> Path | None:
+    """Resolve ``data/orgs/<org_id>/artifacts`` (the org-scoped output dir).
+
+    Reuses the artifacts module's resolver so this matches exactly where the
+    executor auto-persists node deliverables (download paths stay consistent).
+    """
+    try:
+        from ._runtime_node_artifacts import _resolve_org_dir, safe_path_segment
+
+        org_dir = _resolve_org_dir(None, org_id)
+        if org_dir is None:
+            return None
+        # Anchor under the same per-org tree; ``safe_path_segment`` already
+        # ran inside _resolve_org_dir for the fallback path.
+        _ = safe_path_segment  # imported for parity / future use
+        return org_dir / "artifacts"
+    except Exception:  # noqa: BLE001 -- never let redirect break a run
+        return None
+
+
+def _redirect_relative_writes(
+    tool_name: str, tool_input: dict[str, Any], org_id: str
+) -> list[tuple[str, str]]:
+    """Rewrite RELATIVE write destinations to live under the org artifacts dir.
+
+    Mutates ``tool_input`` in place. Returns a list of ``(original, rewritten)``
+    pairs for logging/transparency. Absolute paths are left untouched (the
+    source-tree guard handles them). Any ``..`` that would escape the artifacts
+    dir is clamped to the artifacts root using just the basename, so a node can
+    never traverse out of its sandbox via a relative path.
+    """
+    keys = _WRITE_DEST_KEYS.get(tool_name)
+    if not keys or not isinstance(tool_input, dict):
+        return []
+    artifacts = _org_artifacts_dir(org_id)
+    if artifacts is None:
+        return []
+    rewrites: list[tuple[str, str]] = []
+    for key in keys:
+        raw = tool_input.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        try:
+            p = Path(raw)
+            if p.is_absolute():
+                continue  # absolute paths handled by the source-tree guard
+            artifacts_root = artifacts.resolve()
+            candidate = (artifacts_root / p).resolve()
+            # Clamp ``..`` traversal: if the joined path escapes the artifacts
+            # root, fall back to <artifacts>/<basename>.
+            if candidate != artifacts_root and not candidate.is_relative_to(
+                artifacts_root
+            ):
+                candidate = (artifacts_root / Path(raw).name).resolve()
+            artifacts_root.mkdir(parents=True, exist_ok=True)
+            tool_input[key] = str(candidate)
+            rewrites.append((raw, str(candidate)))
+        except Exception:  # noqa: BLE001 -- a malformed path can't be redirected
+            continue
+    return rewrites
+
+
 def _guarded_write_violation(tool_name: str, tool_input: Mapping[str, Any]) -> str | None:
     """Return a rejection message if this write escapes into the source tree."""
     keys = _WRITE_PATH_KEYS.get(tool_name)
@@ -433,6 +513,21 @@ async def execute_node_tool(
     cancelled we re-raise :class:`asyncio.CancelledError` so the cancel
     pipeline (Sprint-3 P0-2) keeps working through tool execution.
     """
+
+    # Org-scope sandbox: redirect RELATIVE write destinations into the org's
+    # ``artifacts/`` dir BEFORE preview/exec so a bare filename like
+    # ``jianlai_points.md`` lands in data/orgs/<id>/artifacts/ instead of the
+    # process CWD (repo root). Absolute paths still hit the source-tree guard.
+    redirects = _redirect_relative_writes(tool_name, tool_input, org_id)
+    if redirects:
+        _LOGGER.info(
+            "[node-tool] redirected %s relative write(s) into org artifacts "
+            "(org=%s node=%s): %s",
+            tool_name,
+            org_id,
+            node_id,
+            "; ".join(f"{o} -> {n}" for o, n in redirects),
+        )
 
     args_preview = ""
     if isinstance(tool_input, Mapping):

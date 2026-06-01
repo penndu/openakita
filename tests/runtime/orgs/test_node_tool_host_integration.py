@@ -135,7 +135,9 @@ def _read_events(jsonl: Path) -> list[dict[str, Any]]:
 
 
 @pytest.mark.asyncio
-async def test_node_tool_host_executes_real_filesystem_handler(tmp_path: Path) -> None:
+async def test_node_tool_host_executes_real_filesystem_handler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """case id: p06.host.real_filesystem_handler_writes_to_disk
 
     Production-shape integration: real registry + real handler +
@@ -144,10 +146,23 @@ async def test_node_tool_host_executes_real_filesystem_handler(tmp_path: Path) -
     audit proved it wasn't. This test fails LOUDLY (no completion
     event + empty workspace) if we ever regress to the empty-registry
     state.
+
+    Org-scope sandbox (this round): a node writing a RELATIVE path no
+    longer lands in the FileTool workspace / process CWD -- it is
+    redirected into the org's ``artifacts/`` dir before the handler runs
+    (see ``_redirect_relative_writes``). We point the resolver at a tmp
+    org dir so the redirect is exercised end-to-end without polluting the
+    real ``data/`` tree, and assert the file materialises there.
     """
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    org_dir = tmp_path / "orgs" / "org-int"
+    import openakita.orgs._runtime_node_artifacts as _artifacts
+
+    monkeypatch.setattr(
+        _artifacts, "_resolve_org_dir", lambda _get, _org: org_dir
+    )
     jsonl = tmp_path / "logs" / "events.jsonl"
     store = OrgEventStore(org_id="org-int", jsonl_path=jsonl)
     agent = _FakeAgent(workspace=workspace)
@@ -165,8 +180,9 @@ async def test_node_tool_host_executes_real_filesystem_handler(tmp_path: Path) -
 
     assert is_error is False
     assert "deliverable.txt" in result
-    # The handler really ran -- file exists with the LLM-supplied content.
-    written = (workspace / "deliverable.txt").read_text(encoding="utf-8")
+    # The handler really ran -- file exists with the LLM-supplied content,
+    # redirected into the org artifacts dir (not the bare workspace/CWD).
+    written = (org_dir / "artifacts" / "deliverable.txt").read_text(encoding="utf-8")
     assert written == "v18 audit signal"
     # The events.jsonl actually has the completion line -- the v17
     # smoking gun signal Sprint-6 must produce ≥3 of.
