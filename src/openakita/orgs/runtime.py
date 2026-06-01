@@ -87,6 +87,101 @@ def _pick_event_field(
     return None
 
 
+def _args_preview_brief(raw: Any, *, limit: int = 60) -> str:
+    """Condense a tool ``args_preview`` blob into a short, human line.
+
+    The raw value is usually a JSON object string like
+    ``{"path": "report.md", "content": "..."}``. For the activity feed we
+    only want a glanceable hint, so we surface the most meaningful single
+    argument (path / target / query / command / url) when the blob parses
+    as JSON, otherwise we just clip the raw string. Never raises.
+    """
+
+    if not raw:
+        return ""
+    s = str(raw).strip()
+    try:
+        import json as _json
+
+        obj = _json.loads(s)
+        if isinstance(obj, dict):
+            for key in (
+                "path",
+                "file_path",
+                "dst",
+                "destination",
+                "dir_path",
+                "query",
+                "command",
+                "url",
+                "pattern",
+            ):
+                val = obj.get(key)
+                if isinstance(val, str) and val.strip():
+                    v = val.strip()
+                    return v if len(v) <= limit else v[: limit - 1] + "…"
+    except (ValueError, TypeError):
+        pass
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def _describe_recent_event(
+    etype: str, ev: dict[str, Any], last_assigned: dict[str, str]
+) -> str:
+    """Build a Chinese, content-bearing description for one activity line.
+
+    UI feedback: the canvas activity feed previously showed only an
+    action + node name (``▶执行 主编`` / ``✓完成 视觉设计``) because
+    ``recent_tasks`` set ``task = content_preview`` and the lifecycle
+    events (``agent_run_started`` / ``agent_run_finished``) carry no
+    ``content_preview``. This derives a "做了什么" snippet from fields the
+    events already persist — no fabricated data:
+
+    * ``subtask_assigned``     -> the delegated instruction (content_preview)
+    * ``agent_run_started``    -> the task it just picked up (last assignment)
+    * ``agent_run_finished``   -> 产出字数 + 交付文件名
+    * ``node_tool_called``     -> 工具名 + 入参摘要
+    * ``node_tool_completed``  -> 工具名 + 返回字数
+
+    Returns ``""`` (rendered as an empty cell, never raw English) when no
+    meaningful content is available.
+    """
+
+    if etype == "subtask_assigned":
+        return str(ev.get("content_preview") or "")
+    if etype == "agent_run_started":
+        node = str(ev.get("node_id") or "")
+        assigned = last_assigned.get(node) or ""
+        return f"受理任务：{assigned}" if assigned else ""
+    if etype == "agent_run_finished":
+        bits: list[str] = []
+        try:
+            out = int(ev.get("output_len") or 0)
+        except (TypeError, ValueError):
+            out = 0
+        if out > 0:
+            bits.append(f"产出 {out} 字")
+        art = ev.get("artifact_path") or ""
+        if art:
+            try:
+                bits.append(f"交付 {Path(str(art)).name}")
+            except (ValueError, OSError):
+                pass
+        return "，".join(bits)
+    if etype == "node_tool_called":
+        tool = str(ev.get("tool_name") or "工具")
+        brief = _args_preview_brief(ev.get("args_preview"))
+        return f"{tool}（{brief}）" if brief else f"{tool}"
+    if etype == "node_tool_completed":
+        tool = str(ev.get("tool_name") or "工具")
+        try:
+            rlen = int(ev.get("result_len") or 0)
+        except (TypeError, ValueError):
+            rlen = 0
+        return f"{tool} 完成，返回 {rlen} 字" if rlen > 0 else f"{tool} 完成"
+    return str(ev.get("content_preview") or "")
+
+
 # =====================================================================
 # Three new Protocols (P9.6; each <= 5 methods per ADR-0011)
 # =====================================================================
@@ -910,13 +1005,25 @@ class OrgRuntime:
                     "agent_run_finished": "task_completed",
                     "agent_run_failed": "task_rejected",
                     "agent_run_cancelled": "task_cancelled",
+                    # UI feedback: surface tool steps in the feed so each
+                    # line carries "做了什么" (tool name + args + result).
+                    "node_tool_called": "tool_called",
+                    "node_tool_completed": "tool_completed",
                 }
+                # Track the most recent assignment per node so a bare
+                # ``agent_run_started`` (which carries no content) can be
+                # described with the task that node just picked up.
+                last_assigned: dict[str, str] = {}
                 for ev in evts:
                     if not isinstance(ev, dict):
                         continue
                     etype = ev.get("type") or ev.get("event_type") or ""
                     if etype == "agent_run_finished":
                         completed += 1
+                    if etype == "subtask_assigned":
+                        cid = str(ev.get("child_node_id") or "")
+                        if cid:
+                            last_assigned[cid] = str(ev.get("content_preview") or "")
                     mapped = _type_map.get(etype)
                     if mapped is None:
                         continue
@@ -931,7 +1038,7 @@ class OrgRuntime:
                             "from": ev.get("parent_node_id") or ev.get("node_id") or "",
                             "to": ev.get("child_node_id")
                             or (ev.get("node_id") if ev.get("parent_node_id") else ""),
-                            "task": ev.get("content_preview") or "",
+                            "task": _describe_recent_event(etype, ev, last_assigned),
                             "t": ts_ms,
                         }
                     )

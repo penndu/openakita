@@ -2531,6 +2531,10 @@ export function OrgEditorView({
                 // event type (e.g. "task_cancelled") in an otherwise-Chinese feed.
                 task_cancelled:  { icon: "⏹", label: t("org.dashboard.feedCancel"),   tip: t("org.dashboard.feedCancelTip"),   cls: "feed-rejected" },
                 task_failed:     { icon: "✗", label: t("org.dashboard.feedFailed"),   tip: t("org.dashboard.feedFailedTip"),   cls: "feed-rejected" },
+                // UI feedback: tool steps now flow into recent_tasks so each
+                // feed line carries 做了什么 (工具名 + 入参/产出摘要).
+                tool_called:     { icon: "🛠", label: t("org.dashboard.feedToolCall"), tip: t("org.dashboard.feedToolCallTip"), cls: "feed-activated" },
+                tool_completed:  { icon: "✓", label: t("org.dashboard.feedToolDone"), tip: t("org.dashboard.feedToolDoneTip"), cls: "feed-completed" },
               };
               // Chinese generic fallback so an unmapped type never leaks English.
               const defaultMeta = { icon: "•", label: t("org.dashboard.feedEvent"), tip: "", cls: "" };

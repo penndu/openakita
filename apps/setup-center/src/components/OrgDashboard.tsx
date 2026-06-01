@@ -100,6 +100,8 @@ const DB_TYPE_META: Record<string, { icon: string; label: string; cls: string }>
   node_activated:  { icon: "▶", label: "org.dashboard.feedExecute",  cls: "db-ev-activated" },
   task_cancelled:  { icon: "⏹", label: "org.dashboard.feedCancel",   cls: "db-ev-rejected" },
   task_failed:     { icon: "✗", label: "org.dashboard.feedFailed",   cls: "db-ev-rejected" },
+  tool_called:     { icon: "🛠", label: "org.dashboard.feedToolCall", cls: "db-ev-activated" },
+  tool_completed:  { icon: "✓", label: "org.dashboard.feedToolDone", cls: "db-ev-completed" },
   _default:        { icon: "•", label: "org.dashboard.feedEvent",    cls: "" },
 };
 
