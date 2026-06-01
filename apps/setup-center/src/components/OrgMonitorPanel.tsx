@@ -316,13 +316,18 @@ export function OrgMonitorPanel({ orgId, nodeId, apiBaseUrl, nodes, visible }: O
           if (d.from_node === nodeId || d.to_node === nodeId) kick();
           break;
         case "org:task_complete":
-        case "org:task_cancelled":
-          if (!d.node_id || d.node_id === nodeId) kick();
+        case "org:task_delivered":
+          if (!d.node_id || d.node_id === nodeId
+            || d.from_node === nodeId || d.to_node === nodeId) kick();
           break;
         case "org:blackboard_update":
           if (!d.node_id || d.node_id === nodeId) kick();
           break;
         case "org:command_done":
+        // org:command_cancelled is the real cancel event v2 emits (was
+        // listened to as the non-existent org:task_cancelled before, so the
+        // monitor never refreshed on cancel). Refresh on either terminal.
+        case "org:command_cancelled":
           kick();
           break;
         default:

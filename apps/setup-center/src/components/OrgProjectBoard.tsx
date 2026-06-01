@@ -187,17 +187,16 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false
       }, 250);
     };
 
+    // Only the org:* WS events the v2 OrgRuntime actually emits trigger a
+    // board refresh. v1-era names (task_accepted/rejected/failed/cancelled,
+    // command_phase, command_stopped_no_progress) were dead listeners — v2
+    // never fires them. org:command_cancelled is the real cancel terminal.
     const refreshEvents = new Set([
       "org:task_delegated",
       "org:task_delivered",
-      "org:task_accepted",
-      "org:task_rejected",
-      "org:task_failed",
       "org:task_complete",
-      "org:task_cancelled",
       "org:command_done",
-      "org:command_phase",
-      "org:command_stopped_no_progress",
+      "org:command_cancelled",
     ]);
 
     const unsubscribe = onWsEvent((event, raw) => {

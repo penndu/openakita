@@ -999,6 +999,16 @@ export function OrgEditorView({
       const d = raw as Record<string, unknown> | null;
       if (!d || d.org_id !== orgId) return;
 
+      // NOTE: the v2 OrgRuntime emits exactly these org:* WS events
+      // (see src/openakita/orgs/runtime.py + command_service.py):
+      //   org:node_status, org:task_delegated, org:task_delivered,
+      //   org:task_complete, org:blackboard_update, org:command_done,
+      //   org:command_cancelled.
+      // The v1-era branches (task_accepted/rejected, escalation, message,
+      // status_change, command_phase, command_started/stopped_no_progress,
+      // quota_exhausted, watchdog_recovery, broadcast, meeting_*) were dead
+      // listeners — v2 never fires them — so they were removed to stop
+      // pretending those animations/toasts can happen.
       if (ev === "org:node_status") {
         const { node_id, status, current_task } = d as any;
         setNodes((prev) => {
@@ -1013,51 +1023,16 @@ export function OrgEditorView({
         triggerEdgeAnimation((d as any).from_node, (d as any).to_node, "var(--primary)");
       } else if (ev === "org:task_delivered") {
         triggerEdgeAnimation((d as any).from_node, (d as any).to_node, "var(--ok)");
-      } else if (ev === "org:task_accepted") {
-        triggerEdgeAnimation((d as any).accepted_by, (d as any).from_node, "#22c55e");
-      } else if (ev === "org:task_rejected") {
-        triggerEdgeAnimation((d as any).rejected_by, (d as any).from_node, "var(--danger)");
-      } else if (ev === "org:escalation") {
-        triggerEdgeAnimation((d as any).from_node, (d as any).to_node, "var(--danger)");
-      } else if (ev === "org:message") {
-        triggerEdgeAnimation((d as any).from_node, (d as any).to_node, "#a78bfa");
       } else if (ev === "org:blackboard_update") {
         bbPanelRef.current?.refresh();
-      } else if (ev === "org:status_change") {
-        const newStatus = (d as any).status as string;
-        setCurrentOrg((prev) => prev ? { ...prev, status: newStatus } : prev);
-        setOrgList((prev) => prev.map((o) => o.id === orgId ? { ...o, status: newStatus } : o));
-        if (newStatus === "dormant" || newStatus === "paused") {
-          if (newStatus === "dormant") {
-            setNodes((prev) => prev.map((n) => ({
-              ...n,
-              data: { ...n.data, status: "idle", current_task: null, _runtime: null },
-            })));
-          }
-        }
       } else if (ev === "org:task_complete") {
         triggerEdgeAnimation((d as any).node_id, (d as any).node_id, "#22c55e");
-      } else if (
-        ev === "org:command_done" ||
-        ev === "org:command_stopped_no_progress"
-      ) {
+      } else if (ev === "org:command_done" || ev === "org:command_cancelled") {
+        // org:command_cancelled is the real cancel event v2 emits (was
+        // mistakenly listened to as org:task_cancelled before, so the canvas
+        // never refreshed on cancel). Reload the org + blackboard so a
+        // finished/cancelled command settles the canvas immediately.
         void fetchOrg(orgId);
-        bbPanelRef.current?.refresh();
-      } else if (ev === "org:command_started") {
-        bbPanelRef.current?.refresh();
-      } else if (ev === "org:command_phase") {
-        // command_phase is emitted by polling/diagnostics and can arrive every few seconds.
-        // Avoid reloading the whole canvas here; node_status/task events already update live state.
-        bbPanelRef.current?.refresh();
-      } else if (ev === "org:task_cancelled") {
-        bbPanelRef.current?.refresh();
-      } else if (ev === "org:quota_exhausted") {
-        showToast(t("org.editor.quotaExhausted"), "error");
-      } else if (ev === "org:watchdog_recovery") {
-        showToast(t("org.editor.watchdogRecovery", { name: (d as any).node_id }), "error");
-      } else if (ev === "org:broadcast") {
-        triggerEdgeAnimation((d as any).from_node, (d as any).from_node, "#a78bfa");
-      } else if (ev === "org:meeting_started" || ev === "org:meeting_completed") {
         bbPanelRef.current?.refresh();
       }
     });
