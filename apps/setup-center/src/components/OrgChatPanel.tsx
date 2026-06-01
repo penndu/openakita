@@ -347,7 +347,6 @@ function activityItemsToMessages(
     if (bucket.length === 0) continue;
     const first = bucket[0];
     const groupTs = activityTs(first);
-    const sourceLbl = activitySourceLabel(first);
     // command_id 在很多事件上是同一个值；以第一条带 user_command 的为锚显示
     const cmdItem = bucket.find(i => normalizeActivity(i).kind === "user_command") || first;
     // UI issue #1: 把"用户指令"还原成一条 role="user" 的右侧气泡，而不是
@@ -364,11 +363,12 @@ function activityItemsToMessages(
         timestamp: activityTs(cmdItem),
       });
     }
-    const headerBits: string[] = [`📥 来自 **${sourceLbl}**`];
-    if (cmdItem.command_id) {
-      headerBits.push(`· command_id=\`${cmdItem.command_id}\``);
-    }
-    const header = headerBits.join(" ");
+    // UI feedback (图2): the user complained about a redundant "来自组织" bubble
+    // that duplicates the 编排过程 timeline. We drop the "📥 来自 组织 ·
+    // command_id=…" header entirely and frame this reconstructed group with the
+    // SAME "编排过程" label the live ProgressLedgerTimeline uses, so the live and
+    // reloaded views read as one consistent timeline instead of two formats.
+    const header = `🗂 **编排过程**`;
     // 时间线内容：每条加上 hh:mm:ss 时间戳。A2 fix: 跳过无可读内容的事件，
     // 并保持 item ↔ line 的对应关系（用于后续折叠时区分门面/细节）。
     // UI issue #1: user_command 已单独渲染成右侧气泡，这里从活动流里剔除，
