@@ -167,7 +167,7 @@ def test_persist_node_artifact_writes_file_and_returns_path(
         org_id="o1",
         command_id="cmd_a",
         node_id="producer",
-        output="producer LLM reply\n第二段中文内容",
+        output="# 季度营销方案\n第二段中文内容",
         get_org_dir=lambda _oid: tmp_path,
     )
     assert path_str is not None
@@ -176,21 +176,22 @@ def test_persist_node_artifact_writes_file_and_returns_path(
     assert p.parent.name == "artifacts"
     assert p.parent.parent == tmp_path
     body = p.read_text(encoding="utf-8")
-    assert body == "producer LLM reply\n第二段中文内容"
-    # Filename encodes command + node + timestamp.
-    assert p.name.startswith("cmd_a_producer_")
+    assert body == "# 季度营销方案\n第二段中文内容"
+    # ★ Filename now LEADS with the semantic title derived from the
+    # deliverable's own heading, then node + timestamp for uniqueness.
+    assert p.name.startswith("季度营销方案_producer_")
     assert p.suffix == ".md"
 
 
-def test_persist_node_artifact_encodes_parent_chain_in_filename(
+def test_persist_node_artifact_falls_back_to_idname_without_title(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """case id: p0_2.artifact.child_filename_includes_parent
+    """case id: p0_2.artifact.idname_fallback_no_title
 
-    Sprint-4 P0-1 children are persisted with the parent node id in
-    the filename so a single ``ls`` on the artefacts directory shows
-    the delegation tree. Filename layout:
-    ``<cid>_<parent>_<child>_<ts>.txt``.
+    When no semantic title can be derived (the output sanitises to an
+    empty title), the filename falls back to the legacy id-led layout
+    ``<cid>_<parent>_<child>_<ts>.md`` so the path is always valid and
+    the delegation owner is still legible.
     """
 
     monkeypatch.delenv("OPENAKITA_ORGS_V2_PERSIST_ARTIFACTS", raising=False)
@@ -199,12 +200,37 @@ def test_persist_node_artifact_encodes_parent_chain_in_filename(
         command_id="cmd_b",
         node_id="screenwriter",
         parent_node_id="producer",
-        output="child output",
+        output="///",  # sanitises to empty title -> id-led fallback
         get_org_dir=lambda _oid: tmp_path,
     )
     assert path_str is not None
     p = Path(path_str)
     assert p.name.startswith("cmd_b_producer_screenwriter_")
+
+
+def test_persist_node_artifact_semantic_title_leads_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """case id: p0_2.artifact.semantic_title_leads
+
+    A markdown deliverable with a heading yields a readable filename
+    led by that heading (figure 3/7 feedback), with the node id as a
+    uniqueness suffix.
+    """
+
+    monkeypatch.delenv("OPENAKITA_ORGS_V2_PERSIST_ARTIFACTS", raising=False)
+    path_str = persist_node_artifact(
+        org_id="o1",
+        command_id="cmd_c",
+        node_id="writer-a",
+        parent_node_id="planner",
+        output="## 牧神记线下交流会-策划方案\n\n正文……",
+        get_org_dir=lambda _oid: tmp_path,
+    )
+    assert path_str is not None
+    p = Path(path_str)
+    assert p.name.startswith("牧神记线下交流会-策划方案_writer-a_")
+    assert p.suffix == ".md"
 
 
 def test_persist_node_artifact_skipped_when_disabled(
@@ -500,12 +526,16 @@ def test_executor_persists_child_with_parent_chain_filename(
     )
     assert result["status"] == "ok"
     artifacts = sorted((tmp_path / "artifacts").iterdir(), key=lambda p: p.name)
-    # Two artefact files: producer (entry) + screenwriter (child).
+    # Two artefact files: producer (entry) + screenwriter (child). The
+    # filenames now lead with a semantic title, so we identify each file by
+    # the node-id uniqueness segment embedded in the name rather than by a
+    # rigid id-led prefix (the delegation tree is reconstructed from
+    # chain_id/events, not from the filename string).
     assert len(artifacts) == 2
-    parent_name = next(p.name for p in artifacts if "producer" in p.name and "screenwriter" not in p.name)
-    child_name = next(p.name for p in artifacts if "screenwriter" in p.name)
-    assert parent_name.startswith("cmd_child_producer_")
-    assert child_name.startswith("cmd_child_producer_screenwriter_")
+    names = [p.name for p in artifacts]
+    assert any("_producer_" in n for n in names)
+    assert any("_screenwriter_" in n for n in names)
+    assert all(n.endswith(".md") for n in names)
 
     # Two memory files paired with each artefact.
     memories = list((tmp_path / "memory").iterdir())

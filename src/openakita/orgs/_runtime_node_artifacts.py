@@ -148,6 +148,69 @@ def _resolve_org_dir(
     return Path("data") / "orgs" / safe_id
 
 
+def _derive_semantic_title(output: str, *, limit: int = 48) -> str:
+    """Derive a human-readable, content-describing title from the output.
+
+    UI feedback (图3/图7): node artefacts were named ``cmd<digits>.md`` —
+    opaque. We lead the filename with a SEMANTIC title so a download reads
+    like "牧神记线下交流会-策划方案.md" instead of an id blob. The title is
+    extracted for FREE from the deliverable itself (no extra LLM token):
+
+    1. the first Markdown ATX heading (``# 标题`` / ``## 标题`` ...), else
+    2. the first ``**bold**`` lead line, else
+    3. the first non-empty, non-fence prose line.
+
+    The chosen line is stripped of Markdown decoration, collapsed, clipped
+    to ``limit`` chars (CJK titles are short) and returned RAW — the caller
+    runs :func:`safe_path_segment` to strip filename-unsafe characters. An
+    empty return means "no good title found" so the caller keeps the
+    id-based fallback name.
+    """
+
+    if not isinstance(output, str) or not output.strip():
+        return ""
+    heading = ""
+    bold = ""
+    prose = ""
+    in_fence = False
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("```") or line.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not heading and line.startswith("#"):
+            heading = line.lstrip("#").strip().strip("*_` ")
+            if heading:
+                break
+        if not bold and line.startswith("**") and line.count("**") >= 2:
+            bold = line.strip("*").split("**")[0].strip()
+        if not prose:
+            # Skip obvious non-title lines (front-matter, list bullets,
+            # blockquotes, tables) so we land on a real heading-ish line.
+            if line[0] in "-*>|" or line.startswith("---"):
+                continue
+            # Skip a leaked chain-of-thought preamble ("thinking…" / "思考…")
+            # so the filename describes the deliverable, not the reasoning.
+            low = line.lower()
+            if low.startswith("thinking") or line.startswith(("思考", "我需要", "我先", "我会先", "让我")):
+                continue
+            prose = line.strip("*_`# ")
+    title = heading or bold or prose
+    # Drop a leading "标题：" / "Title:" style label if present.
+    for sep in ("：", ":"):
+        if sep in title and len(title.split(sep, 1)[0]) <= 6:
+            title = title.split(sep, 1)[1].strip()
+            break
+    title = title.strip()
+    if len(title) > limit:
+        title = title[:limit].rstrip()
+    return title
+
+
 def _timestamp_for_filename() -> str:
     """Generate a sortable filename-friendly timestamp.
 
@@ -210,17 +273,29 @@ def persist_node_artifact(
         )
         return None
 
-    cid_seg = safe_path_segment(command_id, fallback="cmd")
     node_seg = safe_path_segment(node_id, fallback="node")
     ts = _timestamp_for_filename()
     # UI feedback (图5/图6): node deliverables are markdown-shaped prose, so we
     # persist them as ``.md`` (was ``.txt``) — the command center / file card
     # then renders them with proper markdown layout and offers a clean download.
-    if parent_node_id:
-        parent_seg = safe_path_segment(parent_node_id, fallback="parent")
-        filename = f"{cid_seg}_{parent_seg}_{node_seg}_{ts}.md"
+    #
+    # UI feedback (图3/图7): LEAD the filename with a SEMANTIC title derived
+    # for free from the deliverable's own heading so a download reads like
+    # "牧神记线下交流会-策划方案_planner_<ts>.md" instead of "cmd<digits>.md".
+    # ``node`` + ``ts`` are kept as a short uniqueness suffix so two nodes (or
+    # two runs) that happen to share a title never collide and the delegation
+    # owner is still legible. When no usable title is found we fall back to the
+    # legacy id-led name so the path is always valid.
+    title_seg = safe_path_segment(_derive_semantic_title(output), fallback="")
+    if title_seg:
+        filename = f"{title_seg}_{node_seg}_{ts}.md"
     else:
-        filename = f"{cid_seg}_{node_seg}_{ts}.md"
+        cid_seg = safe_path_segment(command_id, fallback="cmd")
+        if parent_node_id:
+            parent_seg = safe_path_segment(parent_node_id, fallback="parent")
+            filename = f"{cid_seg}_{parent_seg}_{node_seg}_{ts}.md"
+        else:
+            filename = f"{cid_seg}_{node_seg}_{ts}.md"
     path = target_dir / filename
     try:
         path.write_text(output, encoding="utf-8", newline="")
