@@ -197,6 +197,8 @@ interface ActivityItem {
   content_preview?: string;
   output_len?: number;
   artifact_path?: string;
+  // 核心1/核心2: parent-review verdict reason (退回/上报 原因).
+  reason?: string;
 }
 
 // A2 fix: map the raw event-store ``type`` onto the canonical ``kind``
@@ -215,6 +217,11 @@ const ACTIVITY_TYPE_TO_KIND: Record<string, string> = {
   node_tool_failed: "workbench_failed",
   command_phase: "command_phase",
   user_command: "user_command",
+  // 核心1/核心2: 逐级校验 + 重做闭环 events (parent reviews a report; on
+  // 退回 the report is re-dispatched; on exhaustion it escalates).
+  node_review_passed: "review_passed",
+  node_rework_requested: "rework_requested",
+  node_review_escalated: "review_escalated",
 };
 
 /** Resolve the canonical kind + normalized from/to/content for one item. */
@@ -308,6 +315,18 @@ function formatActivityLine(item: ActivityItem, opts?: { nameFmt?: (id: string) 
       return `✓ ${fromN || "节点"} 工具完成${summary}`;
     case "workbench_failed":
       return `✗ ${fromN || "节点"} 工具失败${summary}`;
+    case "review_passed":
+      return `✅ ${fromN || "上级"} 审阅通过下级 ${toN || ""} 的产出${summary}`;
+    case "rework_requested": {
+      const reason = (item.reason || norm.content || "").toString().replace(/\s+/g, " ").slice(0, 200);
+      const r = reason ? `：${reason}` : "";
+      return `🔁 ${fromN || "上级"} 退回 ${toN || "下级"} 重做${r}`;
+    }
+    case "review_escalated": {
+      const reason = (item.reason || norm.content || "").toString().replace(/\s+/g, " ").slice(0, 200);
+      const r = reason ? `：${reason}` : "";
+      return `⚠ ${toN || "下级"} 多次重做仍未达标，已上报上级决策${r}`;
+    }
     case "message":
       return `💬 ${flowArrow}${summary}`;
     default:
@@ -405,6 +424,10 @@ const ACTIVITY_KIND_TO_PHASE: Record<
   // terminal "done" for that node so it folds into the node's segment instead
   // of spawning a stray "进行中" row (图3).
   final_report_pdf: "done",
+  // NOTE: 核心2 rework reopening is driven by the child's own re-issued
+  // ``agent_run_started`` (node_activated→start), so ``rework_requested`` is a
+  // pure trace line here (no phase) to avoid mis-latching the PARENT segment
+  // (its ``from`` is the parent, not the reworking child).
 };
 
 // Kinds whose ``from`` is genuinely an acting node id we can group by. Command
@@ -735,6 +758,38 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           break;
         case "command_done":
           speaker = nameOf(node); note = "指令完成"; satisfied = true; break;
+        // 核心1/核心2: 逐级校验 + 重做闭环 — surface the review verdict so the
+        // process trace shows the upstream node ACTUALLY reviewing its report.
+        case "node_review_passed":
+          speaker = nameOf(parent || node);
+          note = `✅ 审阅通过下级 ${nameOf(child || node)} 的产出`;
+          break;
+        case "node_rework_requested": {
+          // The report genuinely re-enters 进行中: reopen the child's segment.
+          const reason = (p.reason as string) || "";
+          speaker = nameOf(child || node);
+          note = `🔁 ${nameOf(parent) || "上级"} 退回重做${reason ? `：${reason}` : ""}`;
+          phase = "start";
+          push({
+            id: `node_rework_requested:${ev.command_id}:${child || node}:${ev.ts}`,
+            ts: ev.ts ?? ev.emitted_at ?? new Date().toISOString(),
+            is_request_satisfied: false,
+            is_in_loop: true,
+            is_progress_being_made: true,
+            next_speaker: speaker,
+            instruction_or_question: note,
+            nodeId: (child || node) || undefined,
+            phase,
+          });
+          return;
+        }
+        case "node_review_escalated": {
+          const reason = (p.reason as string) || "";
+          speaker = nameOf(child || node);
+          note = `⚠ 多次重做仍未达标，已上报上级决策${reason ? `：${reason}` : ""}`;
+          progress = false;
+          break;
+        }
         default:
           return; // ignore high-volume / non-progress lifecycle events
       }
