@@ -889,6 +889,12 @@ textarea:not([data-slot]) {
   resize: vertical;
 }
 
+input:not([data-slot]):not([type="checkbox"]):not([type="radio"]):not([type="file"])::placeholder,
+textarea:not([data-slot])::placeholder {
+  color: var(--muted, #94a3b8);
+  opacity: 1;
+}
+
 input:not([data-slot]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
 select:not([data-slot]):focus,
 textarea:not([data-slot]):focus {
