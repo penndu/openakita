@@ -42,6 +42,15 @@ export interface ProgressLedgerEvent {
    * after a terminal opens a fresh round within the same segment.
    */
   phase?: "start" | "active" | "done" | "incomplete" | "failed";
+  /**
+   * Owning command id. When set, the timeline shows only the segments of the
+   * CURRENT command (the latest command id among the events, or an explicitly
+   * pinned ``activeCommandId``) so a single org that has run many commands no
+   * longer cross-renders stale node segments / hanging statuses from older
+   * commands' ``/activity`` history (2026-06 item 3). Command-level / global
+   * entries with no ``commandId`` are always kept.
+   */
+  commandId?: string;
 }
 
 export interface ProgressLedgerTimelineProps {
@@ -53,6 +62,13 @@ export interface ProgressLedgerTimelineProps {
   running?: boolean;
   /** Optional ``data-testid`` for the outer container. */
   "data-testid"?: string;
+  /**
+   * Item 3 (2026-06): only render segments belonging to this command id. When
+   * omitted, the timeline auto-selects the LATEST command id present among the
+   * events. Entries with no ``commandId`` (command-level/global) are always
+   * shown regardless.
+   */
+  activeCommandId?: string;
 }
 
 type SegStatus = "running" | "done" | "loop" | "stall" | "incomplete" | "failed";
@@ -126,15 +142,43 @@ export function ProgressLedgerTimeline({
   events,
   nodeNameOf,
   running = false,
+  activeCommandId,
   ...rest
 }: ProgressLedgerTimelineProps) {
   const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({});
 
   const segments = useMemo<Segment[]>(() => {
     const resolve = (id: string) => (nodeNameOf ? nodeNameOf(id) : id) || id;
+    // Item 3 (2026-06): a single org that has run many commands accumulates
+    // node segments from ALL of them in the rebuilt /activity feed. Show ONLY
+    // the CURRENT command's segments so old commands' stale "进行中"/"失败"
+    // rows never cross-render. The current command = the explicit
+    // ``activeCommandId`` when pinned, else the LATEST command id present
+    // (by event order/timestamp). Entries with no ``commandId`` (command-level
+    // / global / legacy supervisor turns) are always kept.
+    const tnum = (s: string) => (/^\d+$/.test(s) ? Number(s) : Date.parse(s) || 0);
+    let currentCmd = (activeCommandId || "").trim();
+    if (!currentCmd) {
+      let bestTs = -1;
+      for (const e of events) {
+        const cid = (e.commandId || "").trim();
+        if (!cid) continue;
+        const t = tnum(e.ts || "");
+        if (t >= bestTs) {
+          bestTs = t;
+          currentCmd = cid;
+        }
+      }
+    }
+    const scoped = currentCmd
+      ? events.filter((e) => {
+          const cid = (e.commandId || "").trim();
+          return !cid || cid === currentCmd;
+        })
+      : events;
     // Drop empty-shell entries (no speaker AND no instruction AND not a
     // terminal "satisfied" marker) — those were the bulk of the "大白块".
-    const meaningful = events.filter(
+    const meaningful = scoped.filter(
       (e) =>
         (e.nodeId && e.nodeId.trim()) ||
         (e.next_speaker && e.next_speaker.trim()) ||
@@ -241,7 +285,7 @@ export function ProgressLedgerTimeline({
       }
     }
     return built;
-  }, [events, nodeNameOf, running]);
+  }, [events, nodeNameOf, running, activeCommandId]);
 
   if (segments.length === 0) return null;
 

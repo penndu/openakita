@@ -481,6 +481,10 @@ function activityItemsToLedger(
       instruction_or_question: line,
       nodeId,
       phase,
+      // Item 3: stamp the owning command so the timeline can scope the rebuilt
+      // /activity history to the CURRENT command and not cross-render stale
+      // node segments from this org's earlier commands.
+      commandId: it.command_id ? String(it.command_id) : undefined,
     });
   }
   return out;
@@ -640,6 +644,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           typeof p?.instruction_or_question === "string"
             ? (p.instruction_or_question as string)
             : "",
+        commandId: (ev.command_id as string | undefined) || undefined,
       });
     });
 
@@ -697,6 +702,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           instruction_or_question: parts.join("\n\n"),
           nodeId: node || undefined,
           phase: "active",
+          commandId: (ev.command_id as string | undefined) || undefined,
         });
         return;
       }
@@ -787,6 +793,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
             instruction_or_question: note,
             nodeId: (child || node) || undefined,
             phase,
+            commandId: (ev.command_id as string | undefined) || undefined,
           });
           return;
         }
@@ -815,6 +822,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           ? (parent || node || undefined)
           : (node || undefined),
         phase,
+        commandId: (ev.command_id as string | undefined) || undefined,
       });
     });
 
@@ -2012,6 +2020,11 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
               events={v2LedgerEvents}
               nodeNameOf={(id) => nodeNamesRef.current?.[id] || id}
               running={sending || !!pendingCmdId}
+              // Item 3: while a command is in-flight, pin the timeline to it;
+              // when idle, the timeline auto-selects the latest command id so a
+              // multi-run org shows only its CURRENT command, never a mix of
+              // historical commands' stale segments.
+              activeCommandId={pendingCmdId || undefined}
             />
           </div>
         )}

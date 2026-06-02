@@ -55,7 +55,10 @@ describe("ProgressLedgerTimeline", () => {
       ev("c", { next_speaker: "n3", is_progress_being_made: true }),
       ev("d", { next_speaker: "n4" }),
     ];
-    render(<ProgressLedgerTimeline events={events} />);
+    // running=true so the still-"进行中" segment is NOT converged to 已完成 by
+    // the idle-settle pass (which otherwise resolves dangling running rows);
+    // this keeps exactly one segment per status label for the assertions.
+    render(<ProgressLedgerTimeline events={events} running={true} />);
     expect(screen.getByText("已完成")).toBeInTheDocument();
     expect(screen.getByText("检测到循环")).toBeInTheDocument();
     expect(screen.getByText("进行中")).toBeInTheDocument();
@@ -84,5 +87,38 @@ describe("ProgressLedgerTimeline", () => {
     fireEvent.click(head);
     // After expanding, the content line is shown in the lines area.
     expect(screen.getAllByText("线索A").length).toBeGreaterThan(0);
+  });
+
+  // Item 3 (2026-06): a multi-run org's rebuilt /activity mixes node segments
+  // from many commands; the timeline must show only the CURRENT command.
+  it("shows only the latest command's segments when commandId is set", () => {
+    const events: ProgressLedgerEvent[] = [
+      { ...ev("old1", { next_speaker: "oldNode", is_progress_being_made: true }), commandId: "cmd_1", ts: "1000" },
+      { ...ev("new1", { next_speaker: "newNode", is_progress_being_made: true }), commandId: "cmd_2", ts: "2000" },
+    ];
+    // No explicit activeCommandId -> auto-select the latest command (cmd_2).
+    render(<ProgressLedgerTimeline events={events} />);
+    expect(screen.getByText("newNode")).toBeInTheDocument();
+    expect(screen.queryByText("oldNode")).toBeNull();
+  });
+
+  it("honours an explicit activeCommandId over the latest", () => {
+    const events: ProgressLedgerEvent[] = [
+      { ...ev("old1", { next_speaker: "oldNode", is_progress_being_made: true }), commandId: "cmd_1", ts: "1000" },
+      { ...ev("new1", { next_speaker: "newNode", is_progress_being_made: true }), commandId: "cmd_2", ts: "2000" },
+    ];
+    render(<ProgressLedgerTimeline events={events} activeCommandId="cmd_1" />);
+    expect(screen.getByText("oldNode")).toBeInTheDocument();
+    expect(screen.queryByText("newNode")).toBeNull();
+  });
+
+  it("always keeps command-less (global) entries regardless of scoping", () => {
+    const events: ProgressLedgerEvent[] = [
+      { ...ev("g", { next_speaker: "globalNode", is_progress_being_made: true }), ts: "500" },
+      { ...ev("c", { next_speaker: "cmdNode", is_progress_being_made: true }), commandId: "cmd_2", ts: "2000" },
+    ];
+    render(<ProgressLedgerTimeline events={events} />);
+    expect(screen.getByText("globalNode")).toBeInTheDocument();
+    expect(screen.getByText("cmdNode")).toBeInTheDocument();
   });
 });
