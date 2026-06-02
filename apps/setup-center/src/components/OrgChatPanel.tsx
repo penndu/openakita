@@ -458,13 +458,28 @@ function activityItemsToLedger(
     if (norm.kind === "user_command") continue; // shown as right-side bubble
     const line = formatActivityLine(it, { nameFmt });
     if (!line.trim()) continue;
-    const node = norm.from || norm.to || "";
+    // Item 3 (2026-06): review/rework events carry parent_node_id (reviewer) +
+    // node_id/child_node_id (the reviewed CHILD). normalizeActivity puts the
+    // PARENT in ``from`` first, so on reload these were attributed to the
+    // coordinator and — being unscoped — spawned a fresh consecutive segment
+    // each time, i.e. one coordinator that reviewed N children showed up as N
+    // duplicate "主编/策划编辑" rows. The LIVE path attributes them to the child;
+    // mirror that here so they fold into the child's segment as trace lines
+    // (no phase change) instead of multiplying the parent.
+    const isReviewKind =
+      norm.kind === "review_passed" ||
+      norm.kind === "rework_requested" ||
+      norm.kind === "review_escalated";
+    const node = isReviewKind
+      ? norm.to || norm.from || ""
+      : norm.from || norm.to || "";
     const satisfied = norm.kind === "task_completed";
     // 图3: attribute the entry to its acting node + lifecycle phase so the
     // reload/rebuild timeline groups all of a node's rounds into ONE
     // converging segment (matching the live SSE path), instead of leaving the
     // same node split across many "进行中" rows.
-    const nodeId = NODE_SCOPED_KINDS.has(norm.kind) ? (node || undefined) : undefined;
+    const nodeId =
+      NODE_SCOPED_KINDS.has(norm.kind) || isReviewKind ? (node || undefined) : undefined;
     let phase = ACTIVITY_KIND_TO_PHASE[norm.kind];
     // 质量门禁: a finished run flagged incomplete is NOT a delivery — converge
     // it to "未通过校验" on reload, matching the live path.
