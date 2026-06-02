@@ -33,13 +33,13 @@ from ..api.routes.websocket import broadcast_event
 from ..config import settings
 from ..llm.converters.tools import PARSE_ERROR_KEY
 from ..tracing.tracer import get_tracer
+from .abort_scope import current_abort_scope
 from .agent_state import (
     AgentState,
     IllegalReasoningEntry,
     TaskState,
     TaskStatus,
 )
-from .abort_scope import current_abort_scope
 from .cancel_cleanup import synthesize_tool_results_for_orphans
 from .context_manager import ContextManager
 from .context_manager import _CancelledError as _CtxCancelledError
@@ -7447,13 +7447,14 @@ class ReasoningEngine:
                 )
                 extra_parts = [r for r in hook_results if isinstance(r, str) and r.strip()]
                 if extra_parts and messages:
+                    plugin_text = "\n\n[Plugin Context]\n" + "\n".join(extra_parts)
                     for i in range(len(messages) - 1, -1, -1):
                         if messages[i].get("role") == "user":
                             content = messages[i].get("content", "")
                             if isinstance(content, str):
-                                messages[i]["content"] = (
-                                    content + "\n\n[Plugin Context]\n" + "\n".join(extra_parts)
-                                )
+                                messages[i]["content"] = content + plugin_text
+                            elif isinstance(content, list):
+                                content.append({"type": "text", "text": plugin_text})
                             break
             except Exception as _hook_err:
                 logger.debug(f"on_before_llm_call hook error (ignored): {_hook_err}")

@@ -15,9 +15,30 @@ import asyncio
 import ipaddress
 import logging
 import socket
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 logger = logging.getLogger(__name__)
+
+# ──────────────────────── 通用安全解析 ────────────────────────
+#
+# Python 3.11+ 的 urlparse / urlsplit 在遇到格式错误的 IPv6 URL 时
+# 会抛出 ValueError，而之前的版本默默返回空结果。代码库中存在大量
+# urlparse 调用处理不可信的用户输入（消息文本、工具参数、配置等），
+# 需要统一保护，避免散弹枪式地在每个调用点写 try-except。
+
+_EMPTY_PARSE_RESULT = ParseResult(scheme="", netloc="", path="", params="", query="", fragment="")
+
+
+def safe_urlparse(url: str) -> ParseResult:
+    """urlparse wrapper that never raises on malformed input.
+
+    Returns an empty ParseResult instead of raising ValueError for
+    invalid IPv6 URLs (Python 3.11+) or other malformed strings.
+    """
+    try:
+        return urlparse(url)
+    except (ValueError, TypeError):
+        return _EMPTY_PARSE_RESULT
 
 _BLOCKED_HOSTNAMES = frozenset({
     "localhost",

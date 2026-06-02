@@ -12,7 +12,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlunparse
+
+from ..utils.url_safety import safe_urlparse
 
 _URL_RE = re.compile(r"https?://[^\s<>'\"`，。！？、；；）)\]}】]+", re.IGNORECASE)
 _HISTORY_REF_RE = re.compile(
@@ -560,7 +562,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
 
 def _normalize_url(url: str) -> str:
     raw = (url or "").strip().rstrip(".,;:!?'\"`)）】")
-    parsed = urlparse(raw)
+    parsed = safe_urlparse(raw)
     if not parsed.scheme or not parsed.netloc:
         return raw
     path = parsed.path.rstrip("/") or "/"

@@ -93,7 +93,10 @@ def get_tracking_context() -> TokenTrackingContext | None:
 
 
 def reset_tracking_context(token: contextvars.Token) -> None:
-    _tracking_ctx.reset(token)
+    try:
+        _tracking_ctx.reset(token)
+    except (ValueError, LookupError):
+        pass
 
 
 def set_token_budget(state: TokenBudgetState | None) -> contextvars.Token:
@@ -105,7 +108,10 @@ def get_token_budget() -> TokenBudgetState | None:
 
 
 def reset_token_budget(token: contextvars.Token) -> None:
-    _token_budget_ctx.reset(token)
+    try:
+        _token_budget_ctx.reset(token)
+    except (ValueError, LookupError):
+        pass
 
 
 def token_budget_exceeded() -> bool:

@@ -467,9 +467,9 @@ class SkillManager:
             skill_name = name or extracted_name
 
             if not skill_name:
-                from urllib.parse import urlparse
+                from ..utils.url_safety import safe_urlparse
 
-                path = urlparse(url).path
+                path = safe_urlparse(url).path
                 skill_name = path.split("/")[-1].replace(".md", "").replace("skill", "").strip("-_")
 
             skill_name = self._normalize_skill_name(skill_name or "custom-skill")

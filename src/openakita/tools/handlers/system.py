@@ -351,8 +351,8 @@ class SystemHandler:
                 out_path.write_bytes(img_bytes)
             except Exception as e:
                 detail = extract_connection_error(e)
-                from urllib.parse import urlparse
-                host = urlparse(image_url).hostname or image_url[:60]
+                from openakita.utils.url_safety import safe_urlparse
+                host = safe_urlparse(image_url).hostname or image_url[:60]
                 return f"❌ 图片下载失败（网络错误，目标: {host}）: {detail}{_hint}"
 
         except httpx.HTTPError as e:

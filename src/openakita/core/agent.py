@@ -7097,7 +7097,13 @@ class Agent:
                 if messages and isinstance(messages[-1], dict):
                     messages = list(messages)
                     last = dict(messages[-1])
-                    last["content"] = (last.get("content") or "") + soft_hint
+                    existing = last.get("content")
+                    if isinstance(existing, list):
+                        last["content"] = existing + [
+                            {"type": "text", "text": soft_hint}
+                        ]
+                    else:
+                        last["content"] = (existing or "") + soft_hint
                     messages[-1] = last
 
             async for event in self.reasoning_engine.reason_stream(

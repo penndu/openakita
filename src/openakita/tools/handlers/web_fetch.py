@@ -17,9 +17,10 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from ...core.policy_v2 import ApprovalClass
+from ...utils.url_safety import safe_urlparse
 
 if TYPE_CHECKING:
     from ...core.agent import Agent
@@ -51,7 +52,7 @@ class WebFetchMeta:
     @property
     def hostname(self) -> str:
         try:
-            return urlparse(self.final_url or self.requested_url).hostname or ""
+            return safe_urlparse(self.final_url or self.requested_url).hostname or ""
         except Exception:
             return ""
 
@@ -200,7 +201,7 @@ class WebFetchHandler:
             )
             return _build_fetch_error_text(meta)
 
-        parsed = urlparse(url)
+        parsed = safe_urlparse(url)
         if not parsed.scheme or not parsed.netloc:
             meta = WebFetchMeta(
                 requested_url=url,

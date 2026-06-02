@@ -16,9 +16,9 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
 
 from ..tracing.tracer import get_tracer
+from ..utils.url_safety import safe_urlparse
 from .context_utils import DEFAULT_MAX_CONTEXT_TOKENS
 from .context_utils import estimate_tokens as _shared_estimate_tokens
 from .context_utils import get_max_context_tokens as _shared_get_max_context_tokens
@@ -1160,7 +1160,9 @@ class ContextManager:
                 if url in seen:
                     continue
                 seen.add(url)
-                parsed = urlparse(url)
+                parsed = safe_urlparse(url)
+                if not parsed.scheme:
+                    continue
                 facts.append(
                     {
                         "message_index": str(index),
