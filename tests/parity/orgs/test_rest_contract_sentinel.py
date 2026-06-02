@@ -52,6 +52,15 @@ from openakita.api.routes import (
 # Charter inventory anchors -- count any drift here as a sentinel break
 # even if the OpenAPI schema disagrees.
 _MINT_ENDPOINTS = 85  # B1-B85 (B84 = PATCH partial-update [smoke-F5]; B85 = mint-runtime SSE stream [smoke-5-sse])
+# Non-B-marker mint routes that still land in the OpenAPI schema. The
+# Sprint-9 SSE alias ``GET /api/v2/orgs/{id}/events/stream`` (mounted by
+# ``orgs_v2_runtime_dispatch.py`` per commit ``04b00c4f`` to stop the
+# ``/events/stream`` 404s the v17-v20 probes hit) re-mounts the B85 stream
+# body under a second URL. It carries no new B-marker (it is an alias, not a
+# new capability), so it is counted here rather than inflating
+# ``_MINT_ENDPOINTS`` (which the coverage-matrix test maps 1:1 to
+# ``test_b<N>_`` functions).
+_MINT_ALIASES = 1
 _HEALTH_STUBS = 1  # GET /_p97/health
 _SPEC_ENDPOINTS = 9  # Group A relocated (8 CRUD + 1 SSE)
 _SHIM_ROUTES = 9  # 308 legacy redirects
@@ -111,9 +120,10 @@ def _canonical_paths(app: FastAPI) -> dict[str, list[str]]:
 def test_route_counts_match_inventory() -> None:
     """The v2 surface holds exactly the inventory counts -- no drift."""
     counts = _route_counts(_build_app())
-    expected_mint = _MINT_ENDPOINTS + _HEALTH_STUBS
+    expected_mint = _MINT_ENDPOINTS + _HEALTH_STUBS + _MINT_ALIASES
     assert counts["mint"] == expected_mint, (
-        f"Expected {expected_mint} mint method-routes (85 mint + 1 health), "
+        f"Expected {expected_mint} mint method-routes "
+        f"({_MINT_ENDPOINTS} mint + {_HEALTH_STUBS} health + {_MINT_ALIASES} SSE alias), "
         f"got {counts['mint']}; spec={counts['spec']}, shim={counts['shim']}"
     )
     assert counts["spec"] == _SPEC_ENDPOINTS, (

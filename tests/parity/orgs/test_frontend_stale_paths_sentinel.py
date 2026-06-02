@@ -224,24 +224,46 @@ _ORGS_SPEC_HTTP_RE = re.compile(r"/api/v2/orgs-spec")
 # Strict allowlist of legitimate Group A ``/api/v2/orgs-spec/``
 # HTTP literals in the frontend tree. Each entry: (repo-relative
 # path, line, justification).
+# NOTE (2026-06 refresh): commit ``04b00c4f`` migrated the SSE client's
+# DEFAULT path off Group A (``/api/v2/orgs-spec/{id}/stream``) onto the
+# Sprint-9 mint alias ``/api/v2/orgs/{id}/events/stream`` (served by
+# ``api/routes/orgs_v2_runtime_dispatch.py``). The orgs-spec literals that
+# remain are therefore (a) docstrings documenting the still-served legacy
+# route for backward-compat, and (b) the unit test that exercises the
+# ``apiPath`` override targeting that legacy route. Re-pinned to their
+# current line numbers; these are legitimate (the legacy route is still
+# mounted), so they stay on the allowlist rather than being deleted.
 LEGITIMATE_ORGS_SPEC_CALLERS: list[tuple[str, int, str]] = [
     (
         "apps/setup-center/src/api/v2Stream.ts",
-        2,
-        "Module docstring documenting the Group A SSE endpoint "
-        "the client wraps (`GET /api/v2/orgs-spec/{id}/stream`).",
+        7,
+        "Module docstring documenting the still-served legacy Group A SSE "
+        "endpoint (`GET /api/v2/orgs-spec/{id}/stream`) the client can target "
+        "via apiPath override.",
     ),
     (
         "apps/setup-center/src/api/v2Stream.ts",
-        112,
-        "Canonical SSE URL literal -- Group A's stream sub-app "
-        "(`api/routes/orgs_v2_stream.py`) is the actual server.",
+        119,
+        "V2StreamOptions.apiPath doc showing the legacy orgs-spec override "
+        "alternative to the default events/stream alias.",
     ),
     (
         "apps/setup-center/src/api/__tests__/v2Stream.test.ts",
-        68,
-        "Unit-test assertion pinning the SSE URL shape; mirrors "
-        "the canonical literal at v2Stream.ts L112.",
+        77,
+        "Unit-test apiPath override input pinning the legacy orgs-spec SSE "
+        "URL shape (legacy route still served by orgs_v2_stream.py).",
+    ),
+    (
+        "apps/setup-center/src/api/__tests__/v2Stream.test.ts",
+        80,
+        "Unit-test assertion on the resolved legacy orgs-spec SSE URL.",
+    ),
+    (
+        "apps/setup-center/src/api/orgs.ts",
+        2,
+        "Doc-only NOTE comment explaining the orgs-spec namespace is "
+        "intentionally NOT called here (mint runtime is canonical); no "
+        "actual HTTP call — a documentation reference, not a caller.",
     ),
 ]
 
