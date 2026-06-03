@@ -291,6 +291,49 @@ class TestProfileStore:
         with pytest.raises(KeyError):
             store.update("ghost", {"name": "Ghost"})
 
+    def test_update_name_mirrors_to_name_i18n_zh(self, store: ProfileStore):
+        """改 name 时应自动镜像到 name_i18n['zh']，避免 UI 显示双名漂移。
+
+        Regression: UI 通过 PUT /api/agents/profiles/{id} 只传 {name: "中秋"}
+        而不传 name_i18n 时，旧 name_i18n.zh "小秋" 会残留，造成 system prompt
+        显示 "中秋" 但 IM/像素办公室/日志显示 "小秋" 的精神分裂状态。
+        """
+        store.save(
+            _make_profile(name="Old Name", name_i18n={"zh": "旧名", "en": "Old Name"}),
+        )
+        updated = store.update("test-agent", {"name": "新名"})
+        assert updated.name == "新名"
+        assert updated.name_i18n["zh"] == "新名"
+        # 其它语种不应被改名兜底覆盖，保持向后兼容
+        assert updated.name_i18n["en"] == "Old Name"
+
+    def test_update_name_with_explicit_i18n_respects_caller(self, store: ProfileStore):
+        """同时传 name 和 name_i18n 时，调用方显式提供的 i18n 应优先。"""
+        store.save(_make_profile(name_i18n={"zh": "旧", "en": "Old"}))
+        updated = store.update(
+            "test-agent",
+            {"name": "中文名", "name_i18n": {"zh": "显式中文", "en": "Explicit"}},
+        )
+        assert updated.name == "中文名"
+        assert updated.name_i18n["zh"] == "显式中文"
+        assert updated.name_i18n["en"] == "Explicit"
+
+    def test_update_description_mirrors_to_description_i18n_zh(self, store: ProfileStore):
+        """description 字段也应有同样的 i18n 镜像兜底。"""
+        store.save(
+            _make_profile(description_i18n={"zh": "旧描述", "en": "Old desc"}),
+        )
+        updated = store.update("test-agent", {"description": "新描述"})
+        assert updated.description == "新描述"
+        assert updated.description_i18n["zh"] == "新描述"
+        assert updated.description_i18n["en"] == "Old desc"
+
+    def test_update_empty_name_does_not_mirror(self, store: ProfileStore):
+        """空字符串 / 全空白 name 不触发镜像，避免把 name_i18n 写空。"""
+        store.save(_make_profile(name_i18n={"zh": "保留", "en": "Keep"}))
+        updated = store.update("test-agent", {"name": "   "})
+        assert updated.name_i18n["zh"] == "保留"
+
     def test_ephemeral_profile_memory_only(self, store: ProfileStore):
         eph = _make_profile("eph-1", "Ephemeral", ephemeral=True)
         store.save(eph)

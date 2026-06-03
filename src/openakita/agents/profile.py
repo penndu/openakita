@@ -502,6 +502,26 @@ class ProfileStore:
                 if set(updates.keys()) & self._CUSTOMIZATION_FIELDS:
                     updates["user_customized"] = True
 
+            # 当调用方仅改了 name/description 而未显式提供对应的 i18n 字段时，
+            # 镜像新值到 `name_i18n['zh']` / `description_i18n['zh']`，避免出现
+            # `name="中秋"` 而 `name_i18n.zh="小秋"` 的内部不自洽状态。该状态会
+            # 让 system prompt（用 name）和 IM 显示 / 像素办公室 / 日志（用 name_i18n
+            # 经 get_display_name 解析）出现"双名"漂移。
+            # 调用方若需精确控制多语言版本，可同时显式传 name_i18n/description_i18n
+            # 直接覆盖本兜底。仅同步 zh 一键，保留 en 等其它语种的既有值不动。
+            if "name" in updates and "name_i18n" not in updates:
+                new_name = str(updates.get("name") or "").strip()
+                if new_name:
+                    merged_name_i18n = dict(existing.name_i18n or {})
+                    merged_name_i18n["zh"] = new_name
+                    updates["name_i18n"] = merged_name_i18n
+            if "description" in updates and "description_i18n" not in updates:
+                new_desc = str(updates.get("description") or "").strip()
+                if new_desc:
+                    merged_desc_i18n = dict(existing.description_i18n or {})
+                    merged_desc_i18n["zh"] = new_desc
+                    updates["description_i18n"] = merged_desc_i18n
+
             data = existing.to_dict()
             # Phase 2b.2：data（来自 to_dict）同时含 `memory_mode` 和
             # `memory_isolation`；partial updates 只可能改其中一个。如果只改了
