@@ -260,6 +260,30 @@ Var LegacyMigrated
   FileWrite $R9 "            $$_.Path -and $$_.Path.StartsWith($$d, [System.StringComparison]::OrdinalIgnoreCase)$\r$\n"
   FileWrite $R9 "        } | Stop-Process -Force -EA $$EA$\r$\n"
   FileWrite $R9 "    }$\r$\n"
+  ; Kill OpenAkita-owned Python processes (embedded bootstrap interpreter + uv
+  ; runtime venv). These are the actual holders of
+  ; resources\bootstrap\python\DLLs\*.pyd and venv\Scripts\python.exe during an
+  ; overwrite install. The install-path Get-Process pass above misses them when
+  ; .Path is unreadable (access-denied / elevation mismatch) or the interpreter
+  ; lives in a uv cache dir. We read Win32_Process (ExecutablePath + CommandLine
+  ; stay readable via CIM even then) and kill ONLY processes provably owned by
+  ; this install — never an unrelated user / conda / venv python. The broad
+  ; LIKE query returns every python; the ownership gate is what keeps it safe.
+  FileWrite $R9 "    $$ownerDirs = @($$InstDir, $$root, $$customRoot) | Where-Object { $$_ } | ForEach-Object { $$_.TrimEnd([char]92) }$\r$\n"
+  FileWrite $R9 "    try {$\r$\n"
+  FileWrite $R9 "        Get-CimInstance Win32_Process -Filter $\"Name LIKE 'python%.exe'$\" -EA $$EA | ForEach-Object {$\r$\n"
+  FileWrite $R9 "            $$proc = $$_; $$exe = $$proc.ExecutablePath; $$cl = $$proc.CommandLine; $$owned = $$false$\r$\n"
+  FileWrite $R9 "            foreach ($$od in $$ownerDirs) {$\r$\n"
+  FileWrite $R9 "                if ($$exe -and $$exe.StartsWith($$od + [char]92, [System.StringComparison]::OrdinalIgnoreCase)) { $$owned = $$true; break }$\r$\n"
+  FileWrite $R9 "                if ($$cl -and $$cl.IndexOf($$od, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $$owned = $$true; break }$\r$\n"
+  FileWrite $R9 "            }$\r$\n"
+  FileWrite $R9 "            if (-not $$owned -and $$cl -and ($$cl -match 'openakita\.main' -or $$cl -match 'openakita-server' -or $$cl -match 'resources\\bootstrap' -or $$cl -match '\.openakita\\')) { $$owned = $$true }$\r$\n"
+  FileWrite $R9 "            if ($$owned) {$\r$\n"
+  FileWrite $R9 "                Stop-Process -Id $$proc.ProcessId -Force -EA $$EA$\r$\n"
+  FileWrite $R9 "                & cmd /c $\"taskkill /PID $$($$proc.ProcessId) /T /F >nul 2>&1$\"$\r$\n"
+  FileWrite $R9 "            }$\r$\n"
+  FileWrite $R9 "        }$\r$\n"
+  FileWrite $R9 "    } catch {}$\r$\n"
   FileWrite $R9 "}$\r$\n"
   ; ── function: Test file lock ──
   FileWrite $R9 "function Test-Locked([string]$$f) {$\r$\n"
