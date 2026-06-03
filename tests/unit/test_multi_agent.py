@@ -192,6 +192,94 @@ class TestAgentProfile:
         assert derived.runtime_env_mode == "agent"
         assert derived.runtime_env_dependencies == ["requests"]
 
+    # ---- name_i18n invariant: __post_init__ default ----
+
+    def test_post_init_mirrors_name_into_zh_when_missing(self):
+        # Direct construction with no name_i18n - common path for
+        # tools/handlers/agent.py:create_agent and ad-hoc tests.
+        p = AgentProfile(id="x", name="中秋")
+        assert p.name_i18n.get("zh") == "中秋"
+        assert p.get_display_name("zh") == "中秋"
+
+    def test_post_init_respects_explicit_zh_in_name_i18n(self):
+        # Caller wants different Chinese display name than the primary name.
+        p = AgentProfile(id="x", name="Alice", name_i18n={"zh": "艾莉丝"})
+        assert p.name_i18n.get("zh") == "艾莉丝"
+        assert p.get_display_name("zh") == "艾莉丝"
+        # Other langs untouched
+        assert "en" not in p.name_i18n
+
+    def test_post_init_mirrors_description_into_zh_when_missing(self):
+        p = AgentProfile(id="x", name="X", description="一个测试代理")
+        assert p.description_i18n.get("zh") == "一个测试代理"
+
+    def test_post_init_does_not_touch_empty_name(self):
+        # If name is empty, do not write empty string into name_i18n[zh].
+        p = AgentProfile(id="x", name="")
+        assert p.name_i18n.get("zh") in (None, "")
+        # The dict may be empty or absent; the invariant only fires for truthy name.
+        assert not p.name_i18n.get("zh")
+
+    def test_from_dict_applies_name_invariant(self):
+        # JSON missing name_i18n entirely (legacy on-disk profile).
+        p = AgentProfile.from_dict({"id": "x", "name": "小秋"})
+        assert p.name_i18n.get("zh") == "小秋"
+
+    # ---- derive() mirror on name override ----
+
+    def test_derive_mirrors_new_name_into_zh(self):
+        base = _make_profile(
+            "base",
+            "OldName",
+            name_i18n={"zh": "老名", "en": "OldName"},
+        )
+        derived = base.derive(
+            id="d1",
+            name="NewName",
+            created_by="test",
+        )
+        # zh must follow the new name, but other langs stay
+        assert derived.name == "NewName"
+        assert derived.name_i18n["zh"] == "NewName"
+        assert derived.name_i18n["en"] == "OldName"
+
+    def test_derive_respects_overrides_name_i18n(self):
+        # Caller explicitly passes name_i18n - mirror logic must not clobber it.
+        base = _make_profile("base", "Old", name_i18n={"zh": "老", "en": "Old"})
+        derived = base.derive(
+            id="d2",
+            name="NewEn",
+            name_i18n={"zh": "完全自定义", "en": "NewEn"},
+            created_by="test",
+        )
+        assert derived.name_i18n["zh"] == "完全自定义"
+        assert derived.name_i18n["en"] == "NewEn"
+
+    def test_derive_preserves_parent_i18n_when_name_not_overridden(self):
+        base = _make_profile("base", "Old", name_i18n={"zh": "老", "en": "Old"})
+        derived = base.derive(
+            id="d3",
+            created_by="test",
+        )
+        assert derived.name == "Old"
+        assert derived.name_i18n == {"zh": "老", "en": "Old"}
+
+    def test_derive_mirrors_new_description_into_zh(self):
+        base = _make_profile(
+            "base",
+            "Base",
+            description="原描述",
+            description_i18n={"zh": "原描述", "en": "Original"},
+        )
+        derived = base.derive(
+            id="d4",
+            description="新描述",
+            created_by="test",
+        )
+        assert derived.description == "新描述"
+        assert derived.description_i18n["zh"] == "新描述"
+        assert derived.description_i18n["en"] == "Original"
+
 
 # ================================================================
 # ProfileStore Tests

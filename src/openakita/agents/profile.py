@@ -225,6 +225,14 @@ class AgentProfile:
         self.memory_inherit_global = _coerce_bool(self.memory_inherit_global)
         if not self.created_at:
             self.created_at = datetime.now(UTC).isoformat()
+        # Invariant: 默认 name_i18n[zh] 与 name 一致；description 同理。
+        # caller 显式给了 zh 译名时尊重 caller（例如 name="Alice" + name_i18n.zh="艾莉丝"），
+        # 缺省路径（直接 AgentProfile(name=...) / from_dict() 无 i18n 字段）由这里兜底，
+        # 防止 get_display_name("zh") 与 name 在系统提示词、Agents 列表、chat header 之间漂移。
+        if self.name and not self.name_i18n.get("zh"):
+            self.name_i18n = {**self.name_i18n, "zh": self.name}
+        if self.description and not self.description_i18n.get("zh"):
+            self.description_i18n = {**self.description_i18n, "zh": self.description}
 
     @property
     def is_system(self) -> bool:
@@ -333,13 +341,32 @@ class AgentProfile:
         inherit_from: str | None = None,
         **overrides: Any,
     ) -> AgentProfile:
-        """Create a derived profile while preserving runtime and isolation settings."""
+        """Create a derived profile while preserving runtime and isolation settings.
+
+        When ``name`` (resp. ``description``) is explicitly overridden, mirror it
+        into ``name_i18n["zh"]`` (resp. ``description_i18n["zh"]``) so the derived
+        profile does not inherit a stale Chinese display name from the parent. The
+        rule matches ``ProfileStore.update`` and is bypassed if the caller passes
+        an explicit ``name_i18n`` / ``description_i18n`` via ``overrides``.
+        """
         data = self.to_dict()
+        new_name = name if name is not None else self.name
+        new_description = description if description is not None else self.description
+
+        if name is not None and "name_i18n" not in overrides:
+            merged = dict(self.name_i18n or {})
+            merged["zh"] = new_name
+            data["name_i18n"] = merged
+        if description is not None and "description_i18n" not in overrides:
+            merged = dict(self.description_i18n or {})
+            merged["zh"] = new_description
+            data["description_i18n"] = merged
+
         data.update(
             {
                 "id": id,
-                "name": name if name is not None else self.name,
-                "description": description if description is not None else self.description,
+                "name": new_name,
+                "description": new_description,
                 "type": type,
                 "created_by": created_by,
                 "created_at": "",
