@@ -422,6 +422,112 @@ class TestProfileStore:
         updated = store.update("test-agent", {"name": "   "})
         assert updated.name_i18n["zh"] == "保留"
 
+    def test_load_self_heals_system_profile_with_stale_name_i18n_zh(
+        self, tmp_path: Path
+    ):
+        """SYSTEM Profile 加载时若 name 与 name_i18n['zh'] 漂移，应自动镜像并落盘。
+
+        Regression: 老版本 ProfileStore.update 不同步 name 到 name_i18n['zh']，
+        升级到新版本的用户磁盘上仍残留 `name="中秋", name_i18n.zh="小秋"`
+        这种内部不自洽状态。新 __post_init__ 兜底规则只在 name_i18n.zh 为空时
+        才填值，无法修这种已有非空但漂移的情况。
+        ProfileStore._load_all 现在对 SYSTEM 型 profile 做额外自愈，确保
+        Agent._resolve_agent_voice() 读到的中文名跟 UI 显示的 name 一致。
+        """
+        import json as _json
+
+        profiles_dir = tmp_path / "agents" / "profiles"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        stale_path = profiles_dir / "default.json"
+        stale_payload = {
+            "id": "default",
+            "name": "中秋",
+            "description": "新描述",
+            "type": "system",
+            "name_i18n": {"zh": "小秋", "en": "Akita"},
+            "description_i18n": {"zh": "旧描述", "en": "Stale"},
+        }
+        stale_path.write_text(
+            _json.dumps(stale_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        store = ProfileStore(tmp_path / "agents")
+        healed = store.get("default")
+        assert healed is not None
+        # 内存对象按 name 兜底回正
+        assert healed.name == "中秋"
+        assert healed.name_i18n["zh"] == "中秋"
+        # `en` 译名属于合法独立本地化，必须保留
+        assert healed.name_i18n["en"] == "Akita"
+        assert healed.description_i18n["zh"] == "新描述"
+        # 落盘也应回正，避免下次加载时再走一遍 heal
+        on_disk = _json.loads(stale_path.read_text(encoding="utf-8"))
+        assert on_disk["name_i18n"]["zh"] == "中秋"
+        assert on_disk["name_i18n"]["en"] == "Akita"
+        assert on_disk["description_i18n"]["zh"] == "新描述"
+
+    def test_load_does_not_heal_custom_profile_with_diverged_name_i18n_zh(
+        self, tmp_path: Path, caplog
+    ):
+        """CUSTOM Profile 的 name_i18n.zh 漂移可能是 Hub 发布者的合法独立译名，
+        加载时只记 WARNING，绝不写盘覆盖发布者意图。
+        """
+        import json as _json
+        import logging
+
+        profiles_dir = tmp_path / "agents" / "profiles"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        path = profiles_dir / "alice.json"
+        payload = {
+            "id": "alice",
+            "name": "Alice",
+            "description": "Assistant",
+            "type": "custom",
+            "name_i18n": {"zh": "艾莉丝", "en": "Alice"},
+        }
+        path.write_text(_json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="openakita.agents.profile"):
+            store = ProfileStore(tmp_path / "agents")
+
+        profile = store.get("alice")
+        assert profile is not None
+        # CUSTOM 型保留原始独立译名，不被自动覆盖
+        assert profile.name == "Alice"
+        assert profile.name_i18n["zh"] == "艾莉丝"
+        # 磁盘上的 JSON 也未被改写
+        on_disk = _json.loads(path.read_text(encoding="utf-8"))
+        assert on_disk["name_i18n"]["zh"] == "艾莉丝"
+        # 但应在日志里提醒维护者人工对齐
+        assert any(
+            "alice" in record.message and "name_i18n" in record.message
+            for record in caplog.records
+        )
+
+    def test_load_leaves_aligned_system_profile_untouched(self, tmp_path: Path):
+        """SYSTEM Profile 的 name 与 name_i18n.zh 已一致时，加载不应改写文件。"""
+        import json as _json
+
+        profiles_dir = tmp_path / "agents" / "profiles"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        path = profiles_dir / "default.json"
+        payload = {
+            "id": "default",
+            "name": "小秋",
+            "type": "system",
+            "name_i18n": {"zh": "小秋", "en": "Akita"},
+        }
+        raw_before = _json.dumps(payload, ensure_ascii=False)
+        path.write_text(raw_before, encoding="utf-8")
+        mtime_before = path.stat().st_mtime_ns
+
+        # Sleep a tick so a rewrite would actually bump mtime on filesystems
+        # whose resolution is coarse (FAT, some networked FS); then re-stat.
+        time.sleep(0.01)
+        ProfileStore(tmp_path / "agents")
+        mtime_after = path.stat().st_mtime_ns
+        assert mtime_after == mtime_before, "aligned profile must not be rewritten"
+
     def test_ephemeral_profile_memory_only(self, store: ProfileStore):
         eph = _make_profile("eph-1", "Ephemeral", ephemeral=True)
         store.save(eph)

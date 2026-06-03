@@ -433,12 +433,109 @@ class ProfileStore:
             try:
                 data = json.loads(fp.read_text(encoding="utf-8"))
                 profile = AgentProfile.from_dict(data)
+                profile = self._heal_loaded_profile(profile, fp)
                 self._cache[profile.id] = profile
                 loaded += 1
             except Exception as e:
                 logger.warning(f"Failed to load profile {fp.name}: {e}")
         if loaded:
             logger.info(f"ProfileStore loaded {loaded} profile(s) from {self._profiles_dir}")
+
+    def _heal_loaded_profile(
+        self,
+        profile: AgentProfile,
+        source_path: Path,
+    ) -> AgentProfile:
+        """Repair a SYSTEM profile whose ``name_i18n.zh`` drifted off ``name``.
+
+        Older releases of ``ProfileStore.update`` did not mirror ``name`` into
+        ``name_i18n['zh']``. A user who renamed the default Agent through the
+        Agents manager (PUT ``/api/agents/profiles/{id}`` with a single
+        ``name`` field) ended up with a JSON file where ``name`` was their new
+        choice but ``name_i18n['zh']`` still held the original preset value.
+        ``Agent._resolve_agent_voice`` reads ``profile.get_display_name('zh')``
+        first, so the LLM kept introducing itself with the stale name even
+        after the user had renamed the profile.
+
+        The fix in ``ProfileStore.update`` and ``AgentProfile.__post_init__``
+        prevents new divergence, but it does not retroactively heal a file
+        that already diverged on disk: ``__post_init__`` only fills
+        ``name_i18n['zh']`` when it is missing, deliberately keeping
+        legitimate explicit translations (``name='Alice'`` +
+        ``name_i18n['zh']='艾莉丝'``) intact.
+
+        This method narrows the heal to SYSTEM profiles only. The shipped
+        ``SYSTEM_PRESETS`` always declare ``name == name_i18n['zh']`` (the
+        ``en`` slot carries the localized variant), and no UI surface allows
+        a user to author a different Chinese display name for a SYSTEM
+        profile, so divergence on a SYSTEM profile on disk is unambiguously
+        the legacy mirroring bug. CUSTOM / DYNAMIC profiles may legitimately
+        carry an independent ``name_i18n['zh']`` (e.g. profiles installed
+        from the Agent Hub whose publisher provided a Chinese localization
+        distinct from the canonical name); for those we log a warning and
+        leave the file alone so we never clobber a publisher's intent.
+        """
+        try:
+            current_zh = (profile.name_i18n or {}).get("zh") or ""
+            primary = profile.name or ""
+            current_desc_zh = (profile.description_i18n or {}).get("zh") or ""
+            primary_desc = profile.description or ""
+
+            name_diverged = bool(primary) and bool(current_zh) and primary != current_zh
+            desc_diverged = (
+                bool(primary_desc) and bool(current_desc_zh) and primary_desc != current_desc_zh
+            )
+            if not name_diverged and not desc_diverged:
+                return profile
+
+            if not profile.is_system:
+                if name_diverged:
+                    logger.warning(
+                        "Profile %s has name=%r but name_i18n['zh']=%r; the "
+                        "UI/Agents list will show one and the LLM self-reference "
+                        "will use the other. Update name_i18n explicitly via the "
+                        "agents API to align them, or rename the profile.",
+                        profile.id,
+                        primary,
+                        current_zh,
+                    )
+                return profile
+
+            healed_name_i18n = dict(profile.name_i18n or {})
+            healed_desc_i18n = dict(profile.description_i18n or {})
+            if name_diverged:
+                healed_name_i18n["zh"] = primary
+            if desc_diverged:
+                healed_desc_i18n["zh"] = primary_desc
+
+            data = profile.to_dict()
+            data["name_i18n"] = healed_name_i18n
+            data["description_i18n"] = healed_desc_i18n
+            healed = AgentProfile.from_dict(data)
+
+            atomic_json_write(source_path, healed.to_dict())
+            logger.info(
+                "ProfileStore self-healed SYSTEM profile %s on load: "
+                "name_i18n['zh'] %r -> %r, description_i18n['zh'] %r -> %r",
+                profile.id,
+                current_zh if name_diverged else healed_name_i18n.get("zh"),
+                healed.name_i18n.get("zh"),
+                current_desc_zh if desc_diverged else healed_desc_i18n.get("zh"),
+                healed.description_i18n.get("zh"),
+            )
+            return healed
+        except Exception as exc:
+            # Self-heal is best-effort. A failure (e.g. disk full, permission
+            # denied) must not block the rest of profile loading; the
+            # in-memory object remains the pre-heal value so behaviour
+            # degrades to "old release" rather than "no profile at all".
+            logger.warning(
+                "ProfileStore failed to self-heal profile %s at %s: %s",
+                profile.id,
+                source_path,
+                exc,
+            )
+            return profile
 
     def get(self, profile_id: str) -> AgentProfile | None:
         with self._lock:
