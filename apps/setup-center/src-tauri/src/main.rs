@@ -8332,12 +8332,24 @@ async fn pip_install(
             let tx1 = tx.clone();
             let h1 = thread::spawn(move || {
                 let mut buf = [0u8; 4096];
+                // Same UTF-8-boundary carryover as the chat stream: a 4 KiB
+                // read can split a multi-byte char (Chinese pip error text,
+                // progress glyphs) so we hold the incomplete tail back.
+                let mut pending: Vec<u8> = Vec::new();
                 loop {
                     match stdout.read(&mut buf) {
-                        Ok(0) => break,
+                        Ok(0) => {
+                            if !pending.is_empty() {
+                                let _ = tx1.send((false, String::from_utf8_lossy(&pending).to_string()));
+                            }
+                            break;
+                        }
                         Ok(n) => {
-                            let s = String::from_utf8_lossy(&buf[..n]).to_string();
-                            let _ = tx1.send((false, s));
+                            pending.extend_from_slice(&buf[..n]);
+                            let s = take_valid_utf8_prefix(&mut pending);
+                            if !s.is_empty() {
+                                let _ = tx1.send((false, s));
+                            }
                         }
                         Err(_) => break,
                     }
@@ -8346,12 +8358,21 @@ async fn pip_install(
             let tx2 = tx.clone();
             let h2 = thread::spawn(move || {
                 let mut buf = [0u8; 4096];
+                let mut pending: Vec<u8> = Vec::new();
                 loop {
                     match stderr.read(&mut buf) {
-                        Ok(0) => break,
+                        Ok(0) => {
+                            if !pending.is_empty() {
+                                let _ = tx2.send((true, String::from_utf8_lossy(&pending).to_string()));
+                            }
+                            break;
+                        }
                         Ok(n) => {
-                            let s = String::from_utf8_lossy(&buf[..n]).to_string();
-                            let _ = tx2.send((true, s));
+                            pending.extend_from_slice(&buf[..n]);
+                            let s = take_valid_utf8_prefix(&mut pending);
+                            if !s.is_empty() {
+                                let _ = tx2.send((true, s));
+                            }
                         }
                         Err(_) => break,
                     }
@@ -9155,6 +9176,56 @@ enum BackendFetchEvent {
     Error { message: String },
 }
 
+/// Decode and drain the longest valid UTF-8 prefix from `buf`, leaving any
+/// trailing bytes that form an *incomplete* multi-byte sequence in the buffer
+/// so the next network chunk can complete them.
+///
+/// `reqwest`'s `response.chunk()` splits the SSE body at arbitrary byte
+/// offsets dictated by TCP, with no regard for character boundaries. A single
+/// CJK glyph or emoji occupies 3-4 UTF-8 bytes, so a glyph straddling a chunk
+/// boundary used to be decoded as two independent halves via
+/// `String::from_utf8_lossy`, turning e.g. "什" (E4 BB 80) into "\u{FFFD}\u{FFFD}"
+/// — the black-diamond (黑色菱形块) corruption reported in the chat view.
+///
+/// Holding the incomplete tail back until its continuation bytes arrive fixes
+/// that without altering the streamed text in any other way. Genuinely invalid
+/// bytes mid-buffer (which should never occur for a well-formed UTF-8 stream)
+/// are still emitted as a single replacement char so the loop can never wedge.
+fn take_valid_utf8_prefix(buf: &mut Vec<u8>) -> String {
+    let mut out = String::new();
+    loop {
+        match std::str::from_utf8(buf) {
+            Ok(s) => {
+                out.push_str(s);
+                buf.clear();
+                break;
+            }
+            Err(e) => {
+                let valid_up_to = e.valid_up_to();
+                if valid_up_to > 0 {
+                    if let Ok(s) = std::str::from_utf8(&buf[..valid_up_to]) {
+                        out.push_str(s);
+                    }
+                }
+                match e.error_len() {
+                    // Incomplete trailing sequence: keep it for the next chunk.
+                    None => {
+                        buf.drain(..valid_up_to);
+                        break;
+                    }
+                    // Invalid bytes mid-buffer: emit one replacement char,
+                    // skip the offending bytes, keep scanning the remainder.
+                    Some(bad) => {
+                        out.push('\u{FFFD}');
+                        buf.drain(..valid_up_to + bad);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Active streaming fetches keyed by the frontend-supplied `fetch_id`.
 ///
 /// When the JS-side `ReadableStream.cancel()` fires (user closes a chat
@@ -9301,6 +9372,10 @@ async fn backend_fetch(
         // backend session history.
         const CHUNK_INACTIVITY_TIMEOUT: std::time::Duration =
             std::time::Duration::from_secs(90);
+        // Carries the incomplete tail of a multi-byte UTF-8 sequence whose
+        // bytes were split across two `response.chunk()` reads, so it can be
+        // completed by the next chunk instead of being mangled into U+FFFD.
+        let mut pending: Vec<u8> = Vec::new();
         loop {
             if cancel.load(Ordering::SeqCst) {
                 // Drop happens implicitly on loop exit; explicit log here
@@ -9339,12 +9414,23 @@ async fn backend_fetch(
             };
             match chunk_res {
                 Ok(Some(chunk)) => {
-                    let text = String::from_utf8_lossy(&chunk).to_string();
-                    if on_event.send(BackendFetchEvent::Chunk { text }).is_err() {
+                    pending.extend_from_slice(&chunk);
+                    let text = take_valid_utf8_prefix(&mut pending);
+                    if !text.is_empty()
+                        && on_event.send(BackendFetchEvent::Chunk { text }).is_err()
+                    {
                         break;
                     }
                 }
                 Ok(None) => {
+                    // Stream ended. Flush any leftover bytes — a non-empty
+                    // `pending` here means the upstream was genuinely truncated
+                    // mid-character, so lossy-decode the tail rather than drop it.
+                    if !pending.is_empty() {
+                        let text = String::from_utf8_lossy(&pending).to_string();
+                        pending.clear();
+                        let _ = on_event.send(BackendFetchEvent::Chunk { text });
+                    }
                     let _ = on_event.send(BackendFetchEvent::Done);
                     break;
                 }
@@ -10970,5 +11056,58 @@ mod tests {
         };
         assert!(is_safe_openakita_data_root(&dedicated));
         assert!(ensure_safe_openakita_data_root(&dedicated).is_ok());
+    }
+
+    #[test]
+    fn test_utf8_prefix_passes_through_complete_text() {
+        let mut buf = "你好，world！".as_bytes().to_vec();
+        let out = take_valid_utf8_prefix(&mut buf);
+        assert_eq!(out, "你好，world！");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn test_utf8_prefix_holds_back_split_multibyte_char() {
+        // "什" is E4 BB 80. Simulate the network splitting it across two
+        // chunks: first chunk ends after "有" + the first 2 bytes of "什".
+        let full = "有什么".as_bytes().to_vec(); // E6 9C 89 | E4 BB 80 | E4 B9 88
+        let split = 3 + 2; // "有" (3) + first two bytes of "什"
+        let (first, second) = full.split_at(split);
+
+        let mut buf = first.to_vec();
+        let out1 = take_valid_utf8_prefix(&mut buf);
+        // Only "有" is complete; the 2 dangling bytes of "什" are retained.
+        assert_eq!(out1, "有");
+        assert_eq!(buf.len(), 2, "incomplete tail must be carried over");
+
+        buf.extend_from_slice(second);
+        let out2 = take_valid_utf8_prefix(&mut buf);
+        assert_eq!(out2, "什么");
+        assert!(buf.is_empty());
+        // The crux: reassembled text has no U+FFFD black-diamond corruption.
+        assert!(!format!("{out1}{out2}").contains('\u{FFFD}'));
+        assert_eq!(format!("{out1}{out2}"), "有什么");
+    }
+
+    #[test]
+    fn test_utf8_prefix_splits_emoji_four_byte() {
+        // "🎉" is F0 9F 8E 89 (4 bytes). Split after 1 byte.
+        let bytes = "🎉".as_bytes().to_vec();
+        let mut buf = bytes[..1].to_vec();
+        assert_eq!(take_valid_utf8_prefix(&mut buf), "");
+        assert_eq!(buf.len(), 1);
+        buf.extend_from_slice(&bytes[1..]);
+        assert_eq!(take_valid_utf8_prefix(&mut buf), "🎉");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn test_utf8_prefix_skips_genuinely_invalid_bytes() {
+        // A stray 0xFF that can never be valid UTF-8 must not wedge the loop:
+        // it is emitted as one replacement char and scanning continues.
+        let mut buf = vec![b'a', 0xFF, b'b'];
+        let out = take_valid_utf8_prefix(&mut buf);
+        assert_eq!(out, "a\u{FFFD}b");
+        assert!(buf.is_empty());
     }
 }
