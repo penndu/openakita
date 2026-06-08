@@ -15,17 +15,25 @@
 
 from __future__ import annotations
 
-import os
-
 import httpx
 import pytest
 
 from openakita.api.server import create_app
 
+TEST_PASSWORD = "integration-test-pw-42"
+
 
 @pytest.fixture
-def app():
-    return create_app()
+def app(monkeypatch, tmp_path):
+    from openakita.config import settings
+
+    monkeypatch.setattr(settings, "project_root", tmp_path)
+    monkeypatch.delenv("OPENAKITA_WEB_PASSWORD", raising=False)
+    monkeypatch.delenv("TRUST_PROXY", raising=False)
+
+    app = create_app()
+    app.state.web_access_config.change_password(TEST_PASSWORD)
+    return app
 
 
 @pytest.fixture
@@ -154,10 +162,9 @@ class TestWebSocketAuth:
         monkeypatch.setattr(ws_mod, "_is_local_ws", lambda ws: True)
         from starlette.testclient import TestClient
 
-        with TestClient(app) as tc:
-            with tc.websocket_connect("/ws/events") as ws:
-                data = ws.receive_json()
-                assert data["event"] == "connected"
+        with TestClient(app) as tc, tc.websocket_connect("/ws/events") as ws:
+            data = ws.receive_json()
+            assert data["event"] == "connected"
 
     async def test_ws_proxy_without_token_rejected(self, app, monkeypatch):
         monkeypatch.setenv("TRUST_PROXY", "true")
@@ -165,26 +172,28 @@ class TestWebSocketAuth:
 
         monkeypatch.setattr(ws_mod, "_is_local_ws", lambda ws: True)
         from starlette.testclient import TestClient
+        from starlette.websockets import WebSocketDisconnect
 
-        with TestClient(app) as tc:
-            with pytest.raises(Exception):
-                with tc.websocket_connect(
-                    "/ws/events",
-                    headers={"X-Forwarded-For": "203.0.113.50"},
-                ):
-                    pass
+        with (
+            TestClient(app) as tc,
+            pytest.raises(WebSocketDisconnect),
+            tc.websocket_connect(
+                "/ws/events",
+                headers={"X-Forwarded-For": "203.0.113.50"},
+            ),
+        ):
+            pass
 
     async def test_ws_proxy_with_valid_token_connects(self, app, access_token, monkeypatch):
         monkeypatch.setenv("TRUST_PROXY", "true")
         from starlette.testclient import TestClient
 
-        with TestClient(app) as tc:
-            with tc.websocket_connect(
-                f"/ws/events?token={access_token}",
-                headers={"X-Forwarded-For": "203.0.113.50"},
-            ) as ws:
-                data = ws.receive_json()
-                assert data["event"] == "connected"
+        with TestClient(app) as tc, tc.websocket_connect(
+            f"/ws/events?token={access_token}",
+            headers={"X-Forwarded-For": "203.0.113.50"},
+        ) as ws:
+            data = ws.receive_json()
+            assert data["event"] == "connected"
 
 
 # ---------------------------------------------------------------------------
@@ -305,4 +314,3 @@ class TestTokenRefresh:
             },
         )
         assert resp.status_code == 200
-

@@ -74,6 +74,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -119,7 +120,7 @@ class AsyncBatchAuditWriter:
         # the same value regardless of OS separator. Without this the
         # singleton path lookup fails on Windows because ``Path(...)``
         # stringifies with ``\`` while the caller passed ``/``.
-        self._path = str(Path(path))
+        self._path = os.path.normpath(str(path).replace("\\", os.sep))
         self._writer: ChainedJsonlWriter = get_writer(self._path)
         self._max_batch_size = max(1, max_batch_size)
         self._max_batch_delay_s = max_batch_delay_ms / 1000.0

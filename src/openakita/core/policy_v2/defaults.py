@@ -45,7 +45,10 @@ def default_protected_paths() -> list[str]:
 
     v1 ``_default_protected_paths`` 完全等价（C8b-1 audit 验证）。
     """
-    paths: list[str] = []
+    paths: list[str] = [
+        "${CWD}/identity/**",
+        "${CWD}/data/**",
+    ]
     if platform.system() == "Windows":
         paths.extend(
             [
