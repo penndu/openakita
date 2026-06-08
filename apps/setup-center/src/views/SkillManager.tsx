@@ -1319,7 +1319,11 @@ export function SkillManager({
   const [categoryDialogState, setCategoryDialogState] = useState<CategoryDialogState>(null);
   const [categoryDeleteConfirm, setCategoryDeleteConfirm] = useState<string | null>(null);
   const [moveCategoryState, setMoveCategoryState] = useState<MoveCategoryDialogState>(null);
-  const [showSystemCategories, setShowSystemCategories] = useState(false);
+  // 「显示系统技能」开关：默认关闭。语义是 *技能级* 过滤——关闭时系统技能在
+  // 平铺视图、分组视图、混合分类内部以及计数中一律隐藏（修复 #598：搜索时系统
+  // 技能/分类仍然出现）。命名从旧的 showSystemCategories 收敛为 showSystemSkills，
+  // 与 i18n key `skills.category.showSystem`（“显示系统技能”）语义对齐。
+  const [showSystemSkills, setShowSystemSkills] = useState(false);
   // 安装时选择落入的分类（""=不指定，安装到顶层）
   const [installCategory, setInstallCategory] = useState<string>("");
   const [detailSkill, setDetailSkill] = useState<SkillInfo | null>(null);
@@ -1742,6 +1746,14 @@ export function SkillManager({
       return i18nValues.some((v) => v.toLowerCase().includes(q));
     });
   }, [skillsWithConfig, installedSearch]);
+
+  // 单一可见性来源：在搜索过滤之上再叠加「显示系统技能」开关。
+  // 平铺视图 / 分组聚合 / 计数 / 空状态都消费这一个派生量，避免在多处各自
+  // 重复 `s.system` 判断而产生不一致（#598）。
+  const visibleSkills = useMemo(
+    () => (showSystemSkills ? filteredSkills : filteredSkills.filter((s) => !s.system)),
+    [filteredSkills, showSystemSkills],
+  );
 
   // ── 保存技能配置 ──
   const handleSaveConfig = useCallback(async (skill: SkillInfo) => {
@@ -2509,7 +2521,7 @@ export function SkillManager({
             </Card>
           )}
           
-          {installedSearch && filteredSkills.length === 0 && skillsWithConfig.length > 0 && (
+          {installedSearch && visibleSkills.length === 0 && skillsWithConfig.length > 0 && (
             <Card className="border-dashed border-border/80 shadow-sm">
               <CardContent className="flex flex-col items-center justify-center py-14">
                 <IconSearch size={32} className="text-muted-foreground/30 mb-3" />
@@ -2529,16 +2541,14 @@ export function SkillManager({
                 />
                 {t("skills.category.groupView")}
               </label>
-              {groupView && (
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground select-none">
-                  <input
-                    type="checkbox"
-                    checked={showSystemCategories}
-                    onChange={(e) => setShowSystemCategories(e.target.checked)}
-                  />
-                  {t("skills.category.showSystem")}
-                </label>
-              )}
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground select-none">
+                <input
+                  type="checkbox"
+                  checked={showSystemSkills}
+                  onChange={(e) => setShowSystemSkills(e.target.checked)}
+                />
+                {t("skills.category.showSystem")}
+              </label>
               <Button
                 variant="outline"
                 size="sm"
@@ -2553,7 +2563,7 @@ export function SkillManager({
 
           {!groupView && (
             <div className="flex flex-col gap-3">
-              {filteredSkills.map((skill) => (
+              {visibleSkills.map((skill) => (
                 <SkillCard
                   key={skill.skillId}
                   skill={skill}
@@ -2574,19 +2584,35 @@ export function SkillManager({
           )}
 
           {groupView && (() => {
-            const grouped: Record<string, typeof filteredSkills> = Object.fromEntries(categories.map(c => [c.name, [] as typeof filteredSkills]));
-            for (const s of filteredSkills) {
+            // 用 visibleSkills（已按搜索 + 系统过滤）聚合，使分类成员、计数与
+            // 平铺视图保持同源。系统技能在 showSystemSkills 关闭时此处已被剔除，
+            // 因此混合分类内部不会再渲染系统技能（#598 的第二处缺口）。
+            const grouped: Record<string, typeof visibleSkills> = Object.fromEntries(categories.map(c => [c.name, [] as typeof visibleSkills]));
+            for (const s of visibleSkills) {
               const k = s.category || "Uncategorized";
-              (grouped[k] ||= [] as typeof filteredSkills).push(s);
+              (grouped[k] ||= [] as typeof visibleSkills).push(s);
             }
             const sortedNames = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
-            const visibleNames = showSystemCategories
-              ? sortedNames
-              : sortedNames.filter((catName) => {
-                  const items = grouped[catName];
-                  return items.length === 0 || items.some(s => !s.system);
-                });
             const metaByName = new Map(categories.map(c => [c.name, c]));
+            const searching = installedSearch.trim().length > 0;
+            // 分类显隐规则：
+            //   - 有可见成员的分类：始终显示。
+            //   - 空分类 + 搜索态：隐藏（无匹配的空壳分类是噪声，#598 的根因之一
+            //     正是空的系统分类在搜索时被当成“空”而无条件显示）。
+            //   - 空分类 + 非搜索 + 显示系统技能：保留（含空的系统分类）。
+            //   - 空分类 + 非搜索 + 隐藏系统技能：仅保留“非系统”的空分类，以便用户
+            //     管理自建的空分类；空的系统分类隐藏。
+            // 系统分类的判定依赖 systemCategoryNames（由 system=true 的技能反推），
+            // 因为内置分类的 system_readonly 实际恒为 false，不可作为依据。
+            const isSystemCategory = (catName: string) =>
+              (metaByName.get(catName)?.system_readonly ?? false) || systemCategoryNames.has(catName);
+            const visibleNames = sortedNames.filter((catName) => {
+              const items = grouped[catName];
+              if (items.length > 0) return true;
+              if (searching) return false;
+              if (showSystemSkills) return true;
+              return !isSystemCategory(catName);
+            });
             return (
               <div className="flex flex-col gap-4">
                 {visibleNames.map((catName) => {
