@@ -830,12 +830,60 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def _is_dangerous_clean_target(path: Path) -> bool:
+    resolved = path.resolve()
+    anchors = {Path(resolved.anchor).resolve()} if resolved.anchor else set()
+    protected = {
+        ROOT.resolve(),
+        Path.home().resolve(),
+        *anchors,
+    }
+    if resolved in protected:
+        return True
+    # Refuse shallow paths such as /tmp or C:\Users. Legit staging paths have
+    # at least one specific child directory beyond those roots.
+    return len(resolved.parts) < 3
+
+
+def _is_empty_dir(path: Path) -> bool:
+    if not path.exists():
+        return True
+    if not path.is_dir():
+        return False
+    return next(path.iterdir(), None) is None
+
+
+def _has_bootstrap_manifest(path: Path) -> bool:
+    manifest_path = path / "manifest.json"
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        manifest.get("schema_version") == 1
+        and manifest.get("app_name") == "openakita"
+        and isinstance(manifest.get("wheel"), dict)
+        and isinstance(manifest.get("uv"), dict)
+    )
+
+
 def clean_output_dir(output_dir: Path) -> None:
     if output_dir.resolve() == BOOTSTRAP_DIR.resolve():
         return
-    if not _is_within(output_dir, ROOT / "build"):
-        raise RuntimeError(f"Refusing to clean non-build output directory: {output_dir}")
-    shutil.rmtree(output_dir, ignore_errors=True)
+    if _is_within(output_dir, ROOT / "build"):
+        shutil.rmtree(output_dir, ignore_errors=True)
+        return
+    if _is_dangerous_clean_target(output_dir):
+        raise RuntimeError(f"Refusing to clean unsafe output directory: {output_dir}")
+    if _is_empty_dir(output_dir) or _has_bootstrap_manifest(output_dir):
+        shutil.rmtree(output_dir, ignore_errors=True)
+        return
+    raise RuntimeError(
+        "Refusing to clean non-build output directory without an OpenAkita "
+        f"bootstrap manifest: {output_dir}"
+    )
 
 
 def print_output_summary(output_dir: Path, generated: list[Path], *, commit_resources: bool) -> None:

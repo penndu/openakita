@@ -317,6 +317,10 @@ def _mount_web_frontend(app: FastAPI) -> None:
     app.mount("/web", StaticFiles(directory=str(web_dist), html=True), name="web-frontend")
 
 
+def _has_web_frontend_mount(app: FastAPI) -> bool:
+    return any(getattr(route, "name", None) == "web-frontend" for route in app.routes)
+
+
 def create_app(
     agent: Any = None,
     shutdown_event: asyncio.Event | None = None,
@@ -521,7 +525,7 @@ def create_app(
     async def root():
         # If web frontend is available, redirect to it
         web_dist = _find_web_dist()
-        if web_dist:
+        if web_dist or _has_web_frontend_mount(app):
             from fastapi.responses import RedirectResponse
 
             return RedirectResponse(url="/web/")
