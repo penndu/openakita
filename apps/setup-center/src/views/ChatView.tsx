@@ -1591,8 +1591,8 @@ export function ChatView({
   }, []);
 
   // ── 自动滚到底部 ──
-  // Virtuoso 的 followOutput 已自动处理流式追踪；
-  // 此处处理: (1) 切换对话后 hydrate 完成 (2) 从隐藏变可见。
+  // MessageList 内部的 sticky-bottom 状态机负责流式追踪与"上滚即停"；
+  // 此处只处理: (1) 切换对话后 hydrate 完成 (2) 从隐藏变可见。
   const needsScrollOnVisible = useRef(false);
   const convSwitchScrollRef = useRef(false);
 
