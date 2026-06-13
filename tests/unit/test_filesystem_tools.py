@@ -5,13 +5,14 @@ filesystem tools introduced to match Cursor-like capabilities.
 """
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import aiofiles
 import pytest
 
-from openakita.tools.file import DEFAULT_IGNORE_DIRS, FileTool
+from openakita.tools.file import DEFAULT_IGNORE_DIRS, FileTool, GlobScanResult
 from openakita.tools.handlers.filesystem import FilesystemHandler
 
 # ---------------------------------------------------------------------------
@@ -277,6 +278,49 @@ class TestGlob:
         assert "app.js" in result
         assert "node_modules" not in result
 
+    def test_glob_scan_skips_heavy_runtime_dirs(self, file_tool, tmp_path):
+        blocked = tmp_path / ".openakita" / "runtime" / "sessions"
+        blocked.mkdir(parents=True)
+        (blocked / "hidden.py").write_text("x", encoding="utf-8")
+        workspace = tmp_path / ".openakita" / "workspaces" / "default"
+        workspace.mkdir(parents=True)
+        (workspace / "also_hidden.py").write_text("x", encoding="utf-8")
+        site_packages = tmp_path / "venv" / "Lib" / "site-packages" / "pkg"
+        site_packages.mkdir(parents=True)
+        (site_packages / "pkg.py").write_text("x", encoding="utf-8")
+        logs = tmp_path / "logs"
+        logs.mkdir()
+        (logs / "app.py").write_text("x", encoding="utf-8")
+        (tmp_path / "visible.py").write_text("x", encoding="utf-8")
+
+        scan = file_tool.glob_scan("*.py", path=str(tmp_path))
+
+        assert [path for path, _mtime in scan.matches] == ["visible.py"]
+        assert scan.skipped >= 3
+
+    def test_glob_scan_caps_directories_files_and_results(self, file_tool, tmp_path):
+        (tmp_path / "root.py").write_text("x", encoding="utf-8")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "nested.py").write_text("x", encoding="utf-8")
+        scan = file_tool.glob_scan("*.py", path=str(tmp_path), max_dirs=1)
+        assert [path for path, _mtime in scan.matches] == ["root.py"]
+        assert scan.capped_reason == "reached directory cap (1)"
+
+        for i in range(5):
+            (tmp_path / f"file_{i}.txt").write_text("x", encoding="utf-8")
+        scan = file_tool.glob_scan("*.txt", path=str(tmp_path), max_files=2)
+        assert scan.files_scanned == 2
+        assert scan.capped_reason == "reached file cap (2)"
+
+        for i in range(5):
+            time.sleep(0.01)
+            (tmp_path / f"match_{i}.md").write_text("x", encoding="utf-8")
+        scan = file_tool.glob_scan("*.md", path=str(tmp_path), max_results=2)
+        assert scan.total_matches == 5
+        assert len(scan.matches) == 2
+        assert [path for path, _mtime in scan.matches] == ["match_4.md", "match_3.md"]
+
     async def test_glob_skips_directories_that_disappear_mid_scan(
         self,
         handler,
@@ -317,6 +361,42 @@ class TestGlob:
         lines = result.strip().split("\n")
         file_lines = [line for line in lines if line.endswith(".py")]
         assert file_lines[0] == "new.py"
+
+    async def test_handler_glob_timeout_sets_cancel_flag(self, handler, tmp_path, monkeypatch):
+        import asyncio
+
+        seen_cancel_flags = []
+        real_wait_for = asyncio.wait_for
+
+        async def fast_wait_for(awaitable, timeout=None):
+            return await real_wait_for(awaitable, timeout=0.05)
+
+        def slow_scan(*_args, **kwargs):
+            cancel_event = kwargs["cancel_event"]
+            seen_cancel_flags.append(cancel_event)
+            while not cancel_event.is_set():
+                time.sleep(0.01)
+            return GlobScanResult(
+                matches=[],
+                total_matches=0,
+                dirs_scanned=0,
+                files_scanned=0,
+                skipped=0,
+                capped_reason="cancelled by caller",
+            )
+
+        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+        monkeypatch.setattr(handler.agent.file_tool, "glob_scan", slow_scan)
+        monkeypatch.setattr(
+            "openakita.tools.handlers.filesystem.settings.glob_timeout_sec",
+            5,
+            raising=False,
+        )
+        result = await handler.handle("glob", {"pattern": "*.py", "path": str(tmp_path)})
+
+        assert "glob 超时" in result
+        assert seen_cancel_flags
+        assert seen_cancel_flags[0].is_set()
 
 
 # ===========================================================================
@@ -571,4 +651,3 @@ class TestIgnoreDirs:
     def test_common_dirs_present(self):
         for d in [".git", "node_modules", "__pycache__", ".venv"]:
             assert d in DEFAULT_IGNORE_DIRS
-

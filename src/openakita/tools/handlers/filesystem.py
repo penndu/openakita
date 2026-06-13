@@ -860,6 +860,9 @@ class FilesystemHandler:
 
     # grep 最大结果条目数
     GREP_MAX_RESULTS = 200
+    GLOB_MAX_RESULTS = 200
+    GLOB_DEFAULT_MAX_DIRS = 3000
+    GLOB_DEFAULT_MAX_FILES = 20000
 
     async def _grep(self, params: dict) -> str:
         """内容搜索"""
@@ -980,6 +983,9 @@ class FilesystemHandler:
 
     async def _glob(self, params: dict) -> str:
         """文件名模式搜索"""
+        import asyncio
+        import threading
+
         pattern = params.get("pattern", "")
         if not pattern:
             return "❌ glob 缺少必要参数 'pattern'。"
@@ -997,31 +1003,92 @@ class FilesystemHandler:
         if not dir_path.is_dir():
             return f"❌ 目录不存在: {path}"
 
-        results: list[tuple[str, float]] = []
         glob_pattern = pattern[3:] if pattern.startswith("**/") else pattern
-        for p in self.agent.file_tool._iter_matching_paths(
-            dir_path,
-            glob_pattern,
-            recursive=True,
-        ):
-            try:
-                mtime = p.stat().st_mtime
-            except OSError:
-                mtime = 0
-            results.append((str(p.relative_to(dir_path)), mtime))
+        max_show = params.get("max_results", self.GLOB_MAX_RESULTS)
+        try:
+            max_show = max(1, min(int(max_show), self.GLOB_MAX_RESULTS))
+        except (TypeError, ValueError):
+            max_show = self.GLOB_MAX_RESULTS
 
-        # 按修改时间降序排序
-        results.sort(key=lambda x: x[1], reverse=True)
+        max_dirs = params.get("max_dirs", self.GLOB_DEFAULT_MAX_DIRS)
+        try:
+            max_dirs = max(1, int(max_dirs))
+        except (TypeError, ValueError):
+            max_dirs = self.GLOB_DEFAULT_MAX_DIRS
 
-        if not results:
-            return self._append_traversal_note(f"未找到匹配 '{pattern}' 的文件。")
+        max_files = params.get("max_files", self.GLOB_DEFAULT_MAX_FILES)
+        try:
+            max_files = max(1, int(max_files))
+        except (TypeError, ValueError):
+            max_files = self.GLOB_DEFAULT_MAX_FILES
 
-        total = len(results)
-        max_show = self.LIST_DIR_DEFAULT_MAX
-        file_list = [r[0] for r in results[:max_show]]
+        try:
+            from ...config import settings
+
+            glob_timeout = max(
+                5,
+                min(int(getattr(settings, "glob_timeout_sec", 30) or 30), 600),
+            )
+        except Exception:
+            glob_timeout = 30
+
+        cancel_event = threading.Event()
+        try:
+            scan = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.agent.file_tool.glob_scan,
+                    glob_pattern,
+                    str(dir_path),
+                    max_dirs=max_dirs,
+                    max_files=max_files,
+                    max_results=max_show,
+                    max_seconds=glob_timeout,
+                    cancel_event=cancel_event,
+                ),
+                timeout=glob_timeout,
+            )
+        except asyncio.CancelledError:
+            cancel_event.set()
+            raise
+        except FileNotFoundError as e:
+            return f"❌ {e}"
+        except ValueError as e:
+            msg = str(e)
+            if msg.startswith("glob refused"):
+                return (
+                    f"❌ glob 被拒绝执行: {msg}\n"
+                    f"提示: 请缩小 path 到具体的项目子目录（如 src/、docs/），"
+                    f"避免扫描运行时数据目录或整个用户主目录。"
+                )
+            return f"❌ glob 失败: {e}"
+        except TimeoutError:
+            cancel_event.set()
+            return (
+                f"❌ glob 超时（>{glob_timeout}s）。"
+                f"建议：1) 用更精确的 path 缩小范围；2) 用更具体的 pattern；"
+                f"3) 避免扫描运行时、依赖或日志目录。（可配置 glob_timeout_sec）"
+            )
+
+        if not scan.matches:
+            output = f"未找到匹配 '{pattern}' 的文件。"
+            if scan.capped_reason:
+                output += (
+                    f"\n[glob] 扫描提前停止: {scan.capped_reason}。"
+                    f"已扫描 {scan.dirs_scanned} 个目录 / {scan.files_scanned} 个文件。"
+                )
+            return self._append_traversal_note(output)
+
+        total = scan.total_matches
+        file_list = [r[0] for r in scan.matches[:max_show]]
         output = f"找到 {total} 个文件（按修改时间排序）:\n" + "\n".join(file_list)
 
-        if total > max_show:
+        if scan.capped_reason:
+            output += (
+                f"\n\n[OUTPUT_TRUNCATED] glob partial: {scan.capped_reason}。"
+                f"已扫描 {scan.dirs_scanned} 个目录 / {scan.files_scanned} 个文件，"
+                f"显示按修改时间排序的前 {len(file_list)} 个匹配。"
+            )
+        elif total > max_show:
             output += f"\n\n[OUTPUT_TRUNCATED] 共 {total} 个文件，已显示前 {max_show} 个。"
 
         return self._append_traversal_note(output)
@@ -1143,4 +1210,3 @@ def create_handler(agent: "Agent"):
     """
     handler = FilesystemHandler(agent)
     return handler.handle
-

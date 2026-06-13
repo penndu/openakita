@@ -50,6 +50,12 @@ class Settings(BaseSettings):
         le=600,
         description="单次 grep（文件内容搜索）最大耗时（秒），超时返回提示以避免 worker 被大目录卡住。",
     )
+    glob_timeout_sec: int = Field(
+        default=30,
+        ge=5,
+        le=600,
+        description="单次 glob（文件名搜索）最大耗时（秒），超时返回提示以避免 worker 被大目录卡住。",
+    )
 
     # PR-R1: 系统 prompt / catalog header 的语言。
     # 取值 "zh"（中文，默认）/ "en"（英文）。tool_catalog header、AGENTS.md 段
