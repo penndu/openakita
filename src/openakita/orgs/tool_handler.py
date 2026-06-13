@@ -40,13 +40,39 @@ _LIM_TITLE = 200
 # 撕破"50 字以内/不要写代码/只列纲要"等显式约束。
 # 关键词集合保守选取（高召回 + 低误伤）；未命中时不附加边界，对普通任务零影响。
 _BOUNDARY_KEYWORDS = (
-    "字以内", "字以下", "字之内", "字内", "字的",
-    "字简述", "字概述", "字摘要", "字方案",
-    "不要写代码", "不要代码", "禁止写代码", "不要实现", "不要写实现",
-    "只列", "只要", "仅列", "仅要", "只给", "仅给",
-    "纲要", "提纲", "要点", "概要", "摘要",
-    "简短", "简洁", "简述", "概述",
-    "一句话", "几句话", "三两句", "两三句",
+    "字以内",
+    "字以下",
+    "字之内",
+    "字内",
+    "字的",
+    "字简述",
+    "字概述",
+    "字摘要",
+    "字方案",
+    "不要写代码",
+    "不要代码",
+    "禁止写代码",
+    "不要实现",
+    "不要写实现",
+    "只列",
+    "只要",
+    "仅列",
+    "仅要",
+    "只给",
+    "仅给",
+    "纲要",
+    "提纲",
+    "要点",
+    "概要",
+    "摘要",
+    "简短",
+    "简洁",
+    "简述",
+    "概述",
+    "一句话",
+    "几句话",
+    "三两句",
+    "两三句",
 )
 
 
@@ -55,6 +81,7 @@ def _has_explicit_boundary(text: str) -> bool:
     if not text:
         return False
     return any(kw in text for kw in _BOUNDARY_KEYWORDS)
+
 
 # Tools whose ``to_node`` / ``node_id`` / ``target_node_id`` parameters must
 # resolve to a **specific** node before the handler runs. Used by
@@ -126,10 +153,7 @@ class OrgToolHandler:
                 assignee=from_node or None,
                 delegated_by=accepted_by or None,
             )
-            matches = [
-                t for t in tasks
-                if str(t.get("chain_id") or "").startswith(raw)
-            ]
+            matches = [t for t in tasks if str(t.get("chain_id") or "").startswith(raw)]
             if not matches:
                 # 兼容非 ProjectStore 场景（测试夹具、历史组织、外部工具直接
                 # 传入完整 chain_id）：找不到任务记录时保留原值继续验收。
@@ -143,13 +167,14 @@ class OrgToolHandler:
                 logger.info(
                     "[ToolHandler] resolved shortened acceptance chain: "
                     "passed=%s resolved=%s from=%s accepted_by=%s",
-                    raw, resolved, from_node, accepted_by,
+                    raw,
+                    resolved,
+                    from_node,
+                    accepted_by,
                 )
                 return resolved, None
 
-            candidate_ids = [
-                str(t.get("chain_id") or "") for t in candidates[:5]
-            ]
+            candidate_ids = [str(t.get("chain_id") or "") for t in candidates[:5]]
             return raw, (
                 f"任务链前缀 {raw!r} 匹配到多个候选（共 {len(candidates)} 个），无法安全验收。"
                 f"请先调用 org_list_delegated_tasks 查询当前可验收的完整 chain_id，"
@@ -191,15 +216,14 @@ class OrgToolHandler:
                     args[key] = default
         if "tags" in args and isinstance(args["tags"], str):
             import json as _json
+
             try:
                 parsed = _json.loads(args["tags"])
                 if isinstance(parsed, list):
                     args["tags"] = parsed
             except Exception:
                 args["tags"] = [
-                    t.strip()
-                    for t in args["tags"].replace("\u3001", ",").split(",")
-                    if t.strip()
+                    t.strip() for t in args["tags"].replace("\u3001", ",").split(",") if t.strip()
                 ]
         return args
 
@@ -216,9 +240,7 @@ class OrgToolHandler:
         explicit = org.max_delegation_depth
         return max(explicit, org_depth + 3)
 
-    def _resolve_node_refs(
-        self, args: dict, org_id: str, tool_name: str | None = None
-    ) -> None:
+    def _resolve_node_refs(self, args: dict, org_id: str, tool_name: str | None = None) -> None:
         """Resolve node references: LLM may pass role titles or wrong-cased IDs.
 
         Behaviour depends on *tool_name*:
@@ -267,11 +289,7 @@ class OrgToolHandler:
                 continue
             val_lower = val.lower().replace(" ", "_").replace("-", "_")
             for n in org.nodes:
-                if (
-                    n.id == val_lower
-                    or n.role_title == val
-                    or n.role_title.lower() == val.lower()
-                ):
+                if n.id == val_lower or n.role_title == val or n.role_title.lower() == val.lower():
                     args[key] = n.id
                     break
 
@@ -295,10 +313,7 @@ class OrgToolHandler:
                 args["task"] = alias_task
         if "content" not in args:
             args["content"] = (
-                args.pop("message", None)
-                or args.pop("text", None)
-                or args.pop("body", None)
-                or ""
+                args.pop("message", None) or args.pop("text", None) or args.pop("body", None) or ""
             )
         if "need" not in args and "query" in args and "filename" not in args:
             args["need"] = args.get("query", "")
@@ -333,9 +348,7 @@ class OrgToolHandler:
         return (filename, file_path)
 
     @classmethod
-    def _merge_file_attachments(
-        cls, existing: list[dict], incoming: list[dict]
-    ) -> list[dict]:
+    def _merge_file_attachments(cls, existing: list[dict], incoming: list[dict]) -> list[dict]:
         """Merge incoming attachments into existing list, deduping by (filename, file_path).
 
         If a newer attachment shares a key with an older one, the newer
@@ -433,7 +446,8 @@ class OrgToolHandler:
                 st = getattr(task, "status", None)
                 st_value = st.value if hasattr(st, "value") else str(st)
                 if st_value not in (
-                    TaskStatus.DELIVERED.value, TaskStatus.ACCEPTED.value,
+                    TaskStatus.DELIVERED.value,
+                    TaskStatus.ACCEPTED.value,
                 ):
                     continue
                 tid = getattr(task, "id", "") or ""
@@ -455,14 +469,15 @@ class OrgToolHandler:
                 items.append((assignee, summary, asset_ids))
         except Exception:
             logger.debug(
-                "[ToolHandler] asset reuse prefix scan failed", exc_info=True,
+                "[ToolHandler] asset reuse prefix scan failed",
+                exc_info=True,
             )
             return ""
 
         if not items:
             return ""
 
-        items = items[-self._ASSET_REUSE_PREFIX_MAX_ITEMS:]
+        items = items[-self._ASSET_REUSE_PREFIX_MAX_ITEMS :]
         lines = [
             "[已交付资产提示 — 由 OrgRuntime 自动注入，优先复用而非重新生成]",
             (
@@ -476,8 +491,7 @@ class OrgToolHandler:
         for assignee, summary, asset_ids in items:
             asset_part = ", ".join(asset_ids[:6]) if asset_ids else "(无 asset_id 文件)"
             lines.append(
-                f"  • 来源节点 `{assignee or '?'}`｜任务摘要：{summary}"
-                f"｜asset_ids: {asset_part}"
+                f"  • 来源节点 `{assignee or '?'}`｜任务摘要：{summary}｜asset_ids: {asset_part}"
             )
         # 防止超长 prefix 干扰短派单（保守截断到 1500 字符）
         prefix = "\n".join(lines)
@@ -520,6 +534,7 @@ class OrgToolHandler:
         if not body:
             return False
         import re
+
         if re.search(r"(?m)^\s{0,3}#{1,6}\s", body):
             return True
         bullet_lines = re.findall(r"(?m)^\s{0,3}[-*]\s+\S", body)
@@ -631,7 +646,8 @@ class OrgToolHandler:
             return None
         try:
             registered = self._runtime._register_file_output(
-                org_id, node_id,
+                org_id,
+                node_id,
                 chain_id=chain_id or None,
                 filename=persisted_path.name,
                 file_path=str(persisted_path),
@@ -647,12 +663,19 @@ class OrgToolHandler:
             logger.info(
                 "[ToolHandler] auto-persisted node final answer to %s "
                 "(org=%s node=%s chain=%s len=%d)",
-                persisted_path, org_id, node_id, chain_id, len(body_stripped),
+                persisted_path,
+                org_id,
+                node_id,
+                chain_id,
+                len(body_stripped),
             )
         return registered
 
     def _link_project_task(
-        self, org_id: str, chain_id: str, *,
+        self,
+        org_id: str,
+        chain_id: str,
+        *,
         title: str = "",
         assignee: str | None = None,
         delegated_by: str | None = None,
@@ -730,11 +753,13 @@ class OrgToolHandler:
                 return
 
             active_projects = [
-                p for p in store.list_projects()
+                p
+                for p in store.list_projects()
                 if p.status.value == "active" and p.org_id == org_id
             ]
             if not active_projects:
                 from openakita.orgs.models import OrgProject, ProjectStatus
+
                 default_proj = OrgProject(
                     org_id=org_id,
                     name="任务追踪",
@@ -775,9 +800,7 @@ class OrgToolHandler:
         except Exception as exc:
             logger.debug("project-task auto-link failed: %s", exc)
 
-    def _append_execution_log(
-        self, org_id: str, chain_id: str, entry: str, node_id: str
-    ) -> None:
+    def _append_execution_log(self, org_id: str, chain_id: str, entry: str, node_id: str) -> None:
         """Append an entry to a ProjectTask's execution_log."""
         try:
             from openakita.orgs.models import TaskStatus
@@ -812,8 +835,12 @@ class OrgToolHandler:
             logger.debug("recalc_parent_progress failed: %s", exc)
 
     def _bridge_plan_to_task(
-        self, org_id: str, node_id: str,
-        tool_name: str, tool_input: dict, result: str,
+        self,
+        org_id: str,
+        node_id: str,
+        tool_name: str,
+        tool_input: dict,
+        result: str,
         chain_id: str | None = None,
     ) -> None:
         """Intercept plan tool results and sync to ProjectTask (plan_steps, progress_pct, execution_log)."""
@@ -843,15 +870,18 @@ class OrgToolHandler:
                         steps = []
                 plan_steps = []
                 for s in steps:
-                    plan_steps.append({
-                        "id": s.get("id", f"step_{len(plan_steps)}"),
-                        "description": s.get("description", ""),
-                        "status": s.get("status", "pending"),
-                        "result": s.get("result", ""),
-                    })
+                    plan_steps.append(
+                        {
+                            "id": s.get("id", f"step_{len(plan_steps)}"),
+                            "description": s.get("description", ""),
+                            "status": s.get("status", "pending"),
+                            "result": s.get("result", ""),
+                        }
+                    )
                 store.update_task(existing.project_id, existing.id, {"plan_steps": plan_steps})
                 self._append_execution_log(
-                    org_id, chain_id,
+                    org_id,
+                    chain_id,
                     f"计划创建: {tool_input.get('task_summary', '')[:_LIM_EXEC_LOG]}",
                     node_id,
                 )
@@ -870,28 +900,32 @@ class OrgToolHandler:
                 progress_pct = int(100 * completed / len(plan_steps)) if plan_steps else 0
                 store.update_task(existing.project_id, existing.id, {"progress_pct": progress_pct})
                 self._append_execution_log(
-                    org_id, chain_id,
+                    org_id,
+                    chain_id,
                     f"步骤 {step_id}: {status} - {result_text[:_LIM_EXEC_LOG]}",
                     node_id,
                 )
             elif tool_name == "complete_plan":
                 summary = tool_input.get("summary", "")
-                store.update_task(existing.project_id, existing.id, {
-                    "status": TaskStatus.ACCEPTED,
-                    "progress_pct": 100,
-                    "completed_at": _now_iso(),
-                })
+                store.update_task(
+                    existing.project_id,
+                    existing.id,
+                    {
+                        "status": TaskStatus.ACCEPTED,
+                        "progress_pct": 100,
+                        "completed_at": _now_iso(),
+                    },
+                )
                 self._append_execution_log(
-                    org_id, chain_id,
+                    org_id,
+                    chain_id,
                     f"计划完成: {summary[:_LIM_EXEC_LOG]}",
                     node_id,
                 )
         except Exception as exc:
             logger.debug("plan bridge failed: %s", exc)
 
-    async def handle(
-        self, tool_name: str, arguments: dict, org_id: str, node_id: str
-    ) -> str:
+    async def handle(self, tool_name: str, arguments: dict, org_id: str, node_id: str) -> str:
         """Execute an org tool and return the result as a string."""
         handler = getattr(self, f"_handle_{tool_name}", None)
         if handler is None:
@@ -932,14 +966,37 @@ class OrgToolHandler:
     # 触发后拒绝发送，引导改用 org_delegate_task。受
     # ``org_question_task_guard`` flag 控制，可一键关闭。
     _TASK_INTENT_PATTERNS: tuple[str, ...] = (
-        "撰写", "编写", "起草", "草拟", "拟定",
-        "优化", "改写", "重写",
-        "产出", "给出", "生成", "制作", "做一份", "做一版",
-        "完成", "完成一份", "完成一版",
-        "整理一份", "整理出", "提供一份", "提供一版",
-        "出一份", "出一版", "出一稿",
-        "写一篇", "写一份", "写一版", "写一稿",
-        "给我一份", "给我一稿", "给我一版",
+        "撰写",
+        "编写",
+        "起草",
+        "草拟",
+        "拟定",
+        "优化",
+        "改写",
+        "重写",
+        "产出",
+        "给出",
+        "生成",
+        "制作",
+        "做一份",
+        "做一版",
+        "完成",
+        "完成一份",
+        "完成一版",
+        "整理一份",
+        "整理出",
+        "提供一份",
+        "提供一版",
+        "出一份",
+        "出一版",
+        "出一稿",
+        "写一篇",
+        "写一份",
+        "写一版",
+        "写一稿",
+        "给我一份",
+        "给我一稿",
+        "给我一版",
     )
 
     def _looks_like_task_assignment(self, content: str) -> bool:
@@ -947,9 +1004,7 @@ class OrgToolHandler:
             return False
         return any(p in content for p in self._TASK_INTENT_PATTERNS)
 
-    async def _handle_org_send_message(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_send_message(self, args: dict, org_id: str, node_id: str) -> str:
         messenger = self._runtime.get_messenger(org_id)
         if not messenger:
             return self._org_not_running_error(org_id)
@@ -957,9 +1012,14 @@ class OrgToolHandler:
         # 反模式拦截：协调者用 question 派任务（受 flag 控制）
         try:
             from openakita.config import settings as _settings_sm
-            _guard_enabled = bool(getattr(
-                _settings_sm, "org_question_task_guard", True,
-            ))
+
+            _guard_enabled = bool(
+                getattr(
+                    _settings_sm,
+                    "org_question_task_guard",
+                    True,
+                )
+            )
         except Exception:
             _guard_enabled = True
 
@@ -970,9 +1030,7 @@ class OrgToolHandler:
             sender_has_children = False
             if org_for_guard:
                 try:
-                    sender_has_children = bool(
-                        org_for_guard.get_children(node_id)
-                    )
+                    sender_has_children = bool(org_for_guard.get_children(node_id))
                 except Exception:
                     sender_has_children = False
             if (
@@ -982,7 +1040,8 @@ class OrgToolHandler:
             ):
                 logger.info(
                     "[ToolHandler] block question-as-task by=%s to=%s",
-                    node_id, args.get("to_node", ""),
+                    node_id,
+                    args.get("to_node", ""),
                 )
                 return (
                     "[org_send_message 拦截] 检测到你正用 msg_type=question "
@@ -1023,15 +1082,16 @@ class OrgToolHandler:
             msg_type = MsgType(raw_type)
         except ValueError:
             msg_type = MsgType.QUESTION
-            logger.warning(f"[OrgToolHandler] Invalid msg_type '{raw_type}', falling back to 'question'")
+            logger.warning(
+                f"[OrgToolHandler] Invalid msg_type '{raw_type}', falling back to 'question'"
+            )
 
         to_node = args.get("to_node", "")
         org = self._runtime.get_org(org_id)
         if org:
             caller_node = org.get_node(node_id)
             caller_label = (
-                f"`{caller_node.id}`({caller_node.role_title})"
-                if caller_node else f"`{node_id}`"
+                f"`{caller_node.id}`({caller_node.role_title})" if caller_node else f"`{node_id}`"
             )
             # 和 org_delegate_task 用同一套 resolve_reference 协议，确保
             # to_node 必须是反引号包住的精确节点 id 或完全相同的唯一 role_title；
@@ -1039,18 +1099,14 @@ class OrgToolHandler:
             # 错发给同名同事（例如"产品总监"/"产品经理"的 substring 歧义）。
             resolved, candidates, status = org.resolve_reference(to_node)
             if status == "ambiguous_title":
-                cand_list = ", ".join(
-                    f"`{c.id}`({c.role_title})" for c in candidates
-                )
+                cand_list = ", ".join(f"`{c.id}`({c.role_title})" for c in candidates)
                 return (
                     f"[org_send_message 失败] 你是 {caller_label}，to_node='{to_node}' "
                     f"对应多个节点：{cand_list}。请改用上面列出的精确节点 id（反引号包住的那一个）。"
                 )
             if status == "fuzzy":
                 cand = candidates[0] if candidates else None
-                cand_label = (
-                    f"`{cand.id}`({cand.role_title})" if cand else f"'{to_node}'"
-                )
+                cand_label = f"`{cand.id}`({cand.role_title})" if cand else f"'{to_node}'"
                 if cand and cand.id == node_id:
                     return (
                         f"[org_send_message 失败] 你是 {caller_label}，"
@@ -1071,9 +1127,7 @@ class OrgToolHandler:
 
             to_node = resolved.id
             if to_node == node_id:
-                return (
-                    f"[org_send_message 失败] 你是 {caller_label}，不能给自己发消息。"
-                )
+                return f"[org_send_message 失败] 你是 {caller_label}，不能给自己发消息。"
 
         msg = OrgMessage(
             org_id=org_id,
@@ -1094,9 +1148,7 @@ class OrgToolHandler:
             relay_chain_for_lock = (metadata.get("task_chain_id") or "").strip()
         _inflight_key = ""
         if relay_chain_for_lock:
-            _inflight_key = (
-                f"send_relay:{org_id}:{node_id}:{to_node}:{relay_chain_for_lock}"
-            )
+            _inflight_key = f"send_relay:{org_id}:{node_id}:{to_node}:{relay_chain_for_lock}"
             if not self._runtime._try_acquire_tool_inflight(_inflight_key):
                 logger.warning(
                     "[ToolInflight] dedupe drop org_send_message(propagate): %s",
@@ -1117,18 +1169,21 @@ class OrgToolHandler:
         if not ok and _inflight_key:
             self._runtime._release_tool_inflight(_inflight_key)
         if ok:
-            await self._runtime._broadcast_ws("org:message", {
-                "org_id": org_id, "from_node": node_id, "to_node": to_node,
-                "msg_type": args.get("msg_type", "question"),
-                "content": coerce_text(args.get("content"))[:_LIM_WS],
-            })
+            await self._runtime._broadcast_ws(
+                "org:message",
+                {
+                    "org_id": org_id,
+                    "from_node": node_id,
+                    "to_node": to_node,
+                    "msg_type": args.get("msg_type", "question"),
+                    "content": coerce_text(args.get("content"))[:_LIM_WS],
+                },
+            )
             self._runtime._mark_effective_action(org_id, node_id)
             self._runtime._on_inbound_for_node(org_id, to_node)
         return f"消息已发送给 {to_node}" if ok else "发送失败"
 
-    async def _handle_org_reply_message(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_reply_message(self, args: dict, org_id: str, node_id: str) -> str:
         messenger = self._runtime.get_messenger(org_id)
         if not messenger:
             return self._org_not_running_error(org_id)
@@ -1148,16 +1203,20 @@ class OrgToolHandler:
         self._runtime._mark_effective_action(org_id, node_id)
         self._runtime._on_inbound_for_node(org_id, to_node)
         # 让指挥台/活动流能看到回复事件，与 send_message 保持事件对称。
-        await self._runtime._broadcast_ws("org:message", {
-            "org_id": org_id, "from_node": node_id, "to_node": to_node,
-            "msg_type": "answer", "reply_to": args.get("reply_to", ""),
-            "content": coerce_text(args.get("content"))[:_LIM_WS],
-        })
+        await self._runtime._broadcast_ws(
+            "org:message",
+            {
+                "org_id": org_id,
+                "from_node": node_id,
+                "to_node": to_node,
+                "msg_type": "answer",
+                "reply_to": args.get("reply_to", ""),
+                "content": coerce_text(args.get("content"))[:_LIM_WS],
+            },
+        )
         return "已回复"
 
-    async def _handle_org_delegate_task(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_delegate_task(self, args: dict, org_id: str, node_id: str) -> str:
         messenger = self._runtime.get_messenger(org_id)
         if not messenger:
             return self._org_not_running_error(org_id)
@@ -1174,9 +1233,14 @@ class OrgToolHandler:
         # 主动指定 chain）。
         try:
             from openakita.config import settings as _settings_dt
-            _chain_parent_enforced = bool(getattr(
-                _settings_dt, "org_chain_parent_enforced", True,
-            ))
+
+            _chain_parent_enforced = bool(
+                getattr(
+                    _settings_dt,
+                    "org_chain_parent_enforced",
+                    True,
+                )
+            )
         except Exception:
             _chain_parent_enforced = True
 
@@ -1196,11 +1260,15 @@ class OrgToolHandler:
         # 这是防止"任务完成后组织继续自主派活"的核心拦截点之一。
         try:
             from openakita.config import settings as _settings
-            if (getattr(_settings, "org_suppress_closed_chain_reactivation", True)
-                    and self._runtime.is_chain_closed(org_id, chain_id)):
+
+            if getattr(
+                _settings, "org_suppress_closed_chain_reactivation", True
+            ) and self._runtime.is_chain_closed(org_id, chain_id):
                 logger.info(
                     "[ToolHandler] block delegate on closed chain=%s by=%s to=%s",
-                    chain_id, node_id, args.get("to_node", ""),
+                    chain_id,
+                    node_id,
+                    args.get("to_node", ""),
                 )
                 return (
                     f"[已关闭] 任务链 {chain_id} 已结束（验收/打回/取消），"
@@ -1269,8 +1337,7 @@ class OrgToolHandler:
             # 便于错误消息里明确告诉 LLM 它自己是谁，避免 LLM 误以为"再试一次"就行
             caller_node = org.get_node(node_id)
             caller_label = (
-                f"`{caller_node.id}`({caller_node.role_title})"
-                if caller_node else f"`{node_id}`"
+                f"`{caller_node.id}`({caller_node.role_title})" if caller_node else f"`{node_id}`"
             )
 
             # _resolve_node_refs 在 strict 模式下只对 exact_id/exact_title 做了
@@ -1280,17 +1347,13 @@ class OrgToolHandler:
             resolved, candidates, status = org.resolve_reference(to_node)
             children = org.get_children(node_id)
             children_hint = (
-                "你的直属下级：" + ", ".join(
-                    f"{c.role_title}(`{c.id}`)" for c in children
-                )
+                "你的直属下级：" + ", ".join(f"{c.role_title}(`{c.id}`)" for c in children)
                 if children
                 else "你是叶子节点，没有直属下级，无法使用 org_delegate_task。"
             )
 
             if status == "ambiguous_title":
-                cand_list = ", ".join(
-                    f"`{c.id}`({c.role_title})" for c in candidates
-                )
+                cand_list = ", ".join(f"`{c.id}`({c.role_title})" for c in candidates)
                 return (
                     f"[org_delegate_task 失败] 你是 {caller_label}，to_node='{to_node}' "
                     f"对应多个节点：{cand_list}。请改用上面列出的精确节点 id（反引号包住的那一个）再试一次。"
@@ -1298,9 +1361,7 @@ class OrgToolHandler:
                 )
             if status == "fuzzy":
                 cand = candidates[0] if candidates else None
-                cand_label = (
-                    f"`{cand.id}`({cand.role_title})" if cand else f"'{to_node}'"
-                )
+                cand_label = f"`{cand.id}`({cand.role_title})" if cand else f"'{to_node}'"
                 # 对自指（模糊匹配恰好命中调用者自己）单独提示，堵上最常见的
                 # "产品总监把任务派给自己"死循环。
                 if cand and cand.id == node_id:
@@ -1336,12 +1397,9 @@ class OrgToolHandler:
                     # 即可定位真正的注入路径（args 改写者、affinity 路由、
                     # clone 关系、外部 hook 等）。
                     try:
-                        affinity_dump = messenger.get_task_affinity(chain_id) \
-                            if messenger else None
+                        affinity_dump = messenger.get_task_affinity(chain_id) if messenger else None
                         caller_node_obj = org.get_node(node_id) if org else None
-                        clone_src = (
-                            caller_node_obj.clone_source if caller_node_obj else None
-                        )
+                        clone_src = caller_node_obj.clone_source if caller_node_obj else None
                         children_dump = [c.id for c in children] if children else []
                         logger.error(
                             "[delegate-self-misjudge] caller=%s resolved_to_node=%s "
@@ -1349,10 +1407,17 @@ class OrgToolHandler:
                             "chain_id=%s caller_chain=%s explicit_chain=%s "
                             "chain_depth=%s affinity=%s clone_source=%s "
                             "children=%s",
-                            node_id, to_node, args, status,
+                            node_id,
+                            to_node,
+                            args,
+                            status,
                             [c.id for c in candidates],
-                            chain_id, caller_chain, explicit_chain,
-                            chain_depth, affinity_dump, clone_src,
+                            chain_id,
+                            caller_chain,
+                            explicit_chain,
+                            chain_depth,
+                            affinity_dump,
+                            clone_src,
                             children_dump,
                         )
                     except Exception:
@@ -1360,14 +1425,13 @@ class OrgToolHandler:
                             "[delegate-self-misjudge] dump failed",
                             exc_info=True,
                         )
-                    hint = (
-                        f"[org_delegate_task 失败] 你就是 {caller_label}，不能把任务委派给自己。"
-                    )
+                    hint = f"[org_delegate_task 失败] 你就是 {caller_label}，不能把任务委派给自己。"
                 else:
                     target_node = org.get_node(to_node)
                     target_label = (
                         f"`{target_node.id}`({target_node.role_title})"
-                        if target_node else f"`{to_node}`"
+                        if target_node
+                        else f"`{to_node}`"
                     )
                     hint = (
                         f"[org_delegate_task 失败] 你是 {caller_label}，"
@@ -1384,7 +1448,7 @@ class OrgToolHandler:
                             f" 如确认目标节点合法（参考组织结构里反引号包住的精确 id），"
                             f"且 delegate 反复失败，可临时改用 "
                             f"org_send_message(to_node=<下属id>, content=<任务>, "
-                            f"propagate_chain=true, task_chain_id=\"{chain_id}\") "
+                            f'propagate_chain=true, task_chain_id="{chain_id}") '
                             f"把当前 chain 接力下去，下属交付时会沿用同一 task_chain_id。"
                         )
                     return (
@@ -1404,6 +1468,7 @@ class OrgToolHandler:
         # 立刻拒绝并给出可执行替代建议，节省 token 浪费。
         try:
             from openakita.orgs.models import NodeStatus as _NS
+
             target_node = org.get_node(to_node)
             if target_node is not None:
                 _ts = getattr(target_node, "status", None)
@@ -1432,11 +1497,14 @@ class OrgToolHandler:
         try:
             from openakita.orgs.models import TaskStatus as _TS
             from openakita.orgs.project_store import ProjectStore
+
             _store = ProjectStore(self._runtime._manager._org_dir(org_id))
             _existing = _store.find_task_by_chain(chain_id)
-            if (_existing
-                    and _existing.assignee_node_id == to_node
-                    and _existing.status in (_TS.IN_PROGRESS, _TS.DELIVERED)):
+            if (
+                _existing
+                and _existing.assignee_node_id == to_node
+                and _existing.status in (_TS.IN_PROGRESS, _TS.DELIVERED)
+            ):
                 return (
                     f"{to_node} 已在处理此任务链（{chain_id[:12]}），无需重复委派。"
                     f"请用 org_list_delegated_tasks 查看进度。"
@@ -1450,13 +1518,26 @@ class OrgToolHandler:
         # 全身舞蹈视频）。命中关键词时立即拒绝并给出正确路径建议，避免
         # 工作台 LLM 拿到错误工具后又调 hh_photo_speak 死循环。
         _dance_keywords = (
-            "跳舞", "舞蹈", "全身", "运镜", "武打", "动作戏",
-            "dance", "dancing", "full body", "full-body", "choreograph",
+            "跳舞",
+            "舞蹈",
+            "全身",
+            "运镜",
+            "武打",
+            "动作戏",
+            "dance",
+            "dancing",
+            "full body",
+            "full-body",
+            "choreograph",
         )
         if to_node == "wb-hh-human":
             _task_lower = str(args.get("task", "")).lower()
             _hit = next(
-                (kw for kw in _dance_keywords if kw in args.get("task", "") or kw.lower() in _task_lower),
+                (
+                    kw
+                    for kw in _dance_keywords
+                    if kw in args.get("task", "") or kw.lower() in _task_lower
+                ),
                 None,
             )
             if _hit:
@@ -1476,9 +1557,7 @@ class OrgToolHandler:
         # 窗口内紧接的重发会得到友好提示而不是真的二次入队。
         _inflight_key = f"delegate:{org_id}:{node_id}:{to_node}:{chain_id}"
         if not self._runtime._try_acquire_tool_inflight(_inflight_key):
-            logger.warning(
-                "[ToolInflight] dedupe drop org_delegate_task: %s", _inflight_key
-            )
+            logger.warning("[ToolInflight] dedupe drop org_delegate_task: %s", _inflight_key)
             return (
                 f"[去重] 检测到 {self._runtime._tool_inflight_window_secs:.0f}s 内"
                 f"重复对 {to_node} 派发同一任务链（{chain_id[:12]}），已忽略。"
@@ -1501,7 +1580,8 @@ class OrgToolHandler:
             )
         except Exception:
             logger.debug(
-                "[ToolHandler] asset reuse prefix build failed", exc_info=True,
+                "[ToolHandler] asset reuse prefix build failed",
+                exc_info=True,
             )
             _reuse_prefix = ""
 
@@ -1522,8 +1602,7 @@ class OrgToolHandler:
                     f"用户原始指令：{_intent_brief}\n"
                     "你的产出必须严格遵守该指令的范围、字数、格式约束。"
                     "若上级转述时与原始指令冲突，以原始指令为准。\n\n"
-                    "—— 上级派发的子任务如下 ——\n"
-                    + str(args["task"])
+                    "—— 上级派发的子任务如下 ——\n" + str(args["task"])
                 )
         except Exception:
             logger.debug(
@@ -1559,7 +1638,8 @@ class OrgToolHandler:
                 self._runtime._chain_parent.setdefault(chain_id, None)
         except Exception:
             logger.debug(
-                "[ToolHandler] chain_parent register failed", exc_info=True,
+                "[ToolHandler] chain_parent register failed",
+                exc_info=True,
             )
 
         # 注册一个 chain 关闭事件，供 org_wait_for_deliverable 阻塞等待。
@@ -1569,7 +1649,8 @@ class OrgToolHandler:
                 self._runtime._chain_events[chain_id] = asyncio.Event()
         except Exception:
             logger.debug(
-                "[ToolHandler] chain_event create failed", exc_info=True,
+                "[ToolHandler] chain_event create failed",
+                exc_info=True,
             )
 
         # 用户命令生命周期追踪：如果当前 org 上存在进行中的 UserCommandTracker
@@ -1586,13 +1667,20 @@ class OrgToolHandler:
             )
 
         self._runtime.get_event_store(org_id).emit(
-            "task_assigned", node_id,
+            "task_assigned",
+            node_id,
             {"to": to_node, "task": args["task"][:_LIM_EVENT], "chain_id": chain_id},
         )
-        await self._runtime._broadcast_ws("org:task_delegated", {
-            "org_id": org_id, "from_node": node_id, "to_node": to_node,
-            "task": args["task"][:_LIM_WS], "chain_id": chain_id,
-        })
+        await self._runtime._broadcast_ws(
+            "org:task_delegated",
+            {
+                "org_id": org_id,
+                "from_node": node_id,
+                "to_node": to_node,
+                "task": args["task"][:_LIM_WS],
+                "chain_id": chain_id,
+            },
+        )
 
         parent_task_id = None
         depth = 0
@@ -1601,6 +1689,7 @@ class OrgToolHandler:
         )
         if parent_chain:
             from openakita.orgs.project_store import ProjectStore
+
             mgr = self._runtime._manager
             store = ProjectStore(mgr._org_dir(org_id))
             parent_task = store.find_task_by_chain(parent_chain)
@@ -1609,7 +1698,8 @@ class OrgToolHandler:
                 depth = (parent_task.depth or 0) + 1
 
         self._link_project_task(
-            org_id, chain_id,
+            org_id,
+            chain_id,
             title=args["task"][:_LIM_TITLE],
             assignee=to_node,
             delegated_by=node_id,
@@ -1618,7 +1708,8 @@ class OrgToolHandler:
             depth=depth,
         )
         self._append_execution_log(
-            org_id, chain_id,
+            org_id,
+            chain_id,
             f"委派给 {to_node}: {args['task'][:_LIM_EXEC_LOG]}",
             node_id,
         )
@@ -1629,23 +1720,27 @@ class OrgToolHandler:
             f"或等待下级通过 org_submit_deliverable 提交结果后再做最终汇报。"
         )
 
-    async def _handle_org_escalate(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_escalate(self, args: dict, org_id: str, node_id: str) -> str:
         messenger = self._runtime.get_messenger(org_id)
         if not messenger:
             return self._org_not_running_error(org_id)
 
         result = await messenger.escalate(
-            node_id, args["content"], priority=args.get("priority", 1),
+            node_id,
+            args["content"],
+            priority=args.get("priority", 1),
             metadata={},
         )
         if result:
-            await self._runtime._broadcast_ws("org:escalation", {
-                "org_id": org_id, "from_node": node_id,
-                "to_node": result.to_node if hasattr(result, "to_node") else "",
-                "content": coerce_text(args.get("content"))[:_LIM_WS],
-            })
+            await self._runtime._broadcast_ws(
+                "org:escalation",
+                {
+                    "org_id": org_id,
+                    "from_node": node_id,
+                    "to_node": result.to_node if hasattr(result, "to_node") else "",
+                    "content": coerce_text(args.get("content"))[:_LIM_WS],
+                },
+            )
             self._runtime._mark_effective_action(org_id, node_id)
             try:
                 to_node_e = result.to_node if hasattr(result, "to_node") else ""
@@ -1656,9 +1751,7 @@ class OrgToolHandler:
             return "已上报给上级"
         return "无法上报（没有上级节点）"
 
-    async def _handle_org_broadcast(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_broadcast(self, args: dict, org_id: str, node_id: str) -> str:
         messenger = self._runtime.get_messenger(org_id)
         if not messenger:
             return self._org_not_running_error(org_id)
@@ -1678,12 +1771,18 @@ class OrgToolHandler:
         )
         await messenger.send(msg)
         scope_label = "部门" if scope == "department" else "全组织"
-        await self._runtime._broadcast_ws("org:broadcast", {
-            "org_id": org_id, "from_node": node_id, "scope": scope,
-            "content": coerce_text(args.get("content"))[:_LIM_WS],
-        })
+        await self._runtime._broadcast_ws(
+            "org:broadcast",
+            {
+                "org_id": org_id,
+                "from_node": node_id,
+                "scope": scope,
+                "content": coerce_text(args.get("content"))[:_LIM_WS],
+            },
+        )
         self._runtime.get_event_store(org_id).emit(
-            "broadcast", node_id,
+            "broadcast",
+            node_id,
             {"scope": scope, "content": coerce_text(args.get("content"))[:_LIM_EVENT]},
         )
         return f"已{scope_label}广播"
@@ -1692,32 +1791,30 @@ class OrgToolHandler:
     # Organization awareness tools
     # ------------------------------------------------------------------
 
-    async def _handle_org_get_org_chart(
-        self, args: dict, org_id: str, node_id: str
-    ) -> dict:
+    async def _handle_org_get_org_chart(self, args: dict, org_id: str, node_id: str) -> dict:
         org = self._runtime.get_org(org_id)
         if not org:
             return {"error": "组织未找到"}
         departments: dict[str, list] = {}
         for n in org.nodes:
             dept = n.department or "未分配"
-            departments.setdefault(dept, []).append({
-                "id": n.id,
-                "title": n.role_title,
-                "goal": n.role_goal[:_LIM_TOOL_RETURN] if n.role_goal else "",
-                "skills": n.skills[:5],
-                "status": n.status.value,
-                "level": n.level,
-            })
-        edges = [
-            {"from": e.source, "to": e.target, "type": e.edge_type.value}
-            for e in org.edges
-        ]
-        return {"departments": [{"name": k, "members": v} for k, v in departments.items()], "edges": edges}
+            departments.setdefault(dept, []).append(
+                {
+                    "id": n.id,
+                    "title": n.role_title,
+                    "goal": n.role_goal[:_LIM_TOOL_RETURN] if n.role_goal else "",
+                    "skills": n.skills[:5],
+                    "status": n.status.value,
+                    "level": n.level,
+                }
+            )
+        edges = [{"from": e.source, "to": e.target, "type": e.edge_type.value} for e in org.edges]
+        return {
+            "departments": [{"name": k, "members": v} for k, v in departments.items()],
+            "edges": edges,
+        }
 
-    async def _handle_org_find_colleague(
-        self, args: dict, org_id: str, node_id: str
-    ) -> list:
+    async def _handle_org_find_colleague(self, args: dict, org_id: str, node_id: str) -> list:
         org = self._runtime.get_org(org_id)
         if not org:
             return []
@@ -1739,19 +1836,19 @@ class OrgToolHandler:
             if n.status == NodeStatus.IDLE:
                 score += 0.1
             if score > 0:
-                results.append({
-                    "id": n.id,
-                    "title": n.role_title,
-                    "department": n.department,
-                    "relevance": round(min(score, 1.0), 2),
-                    "status": n.status.value,
-                })
+                results.append(
+                    {
+                        "id": n.id,
+                        "title": n.role_title,
+                        "department": n.department,
+                        "relevance": round(min(score, 1.0), 2),
+                        "status": n.status.value,
+                    }
+                )
         results.sort(key=lambda x: x["relevance"], reverse=True)
         return results[:5]
 
-    async def _handle_org_get_node_status(
-        self, args: dict, org_id: str, node_id: str
-    ) -> dict:
+    async def _handle_org_get_node_status(self, args: dict, org_id: str, node_id: str) -> dict:
         org = self._runtime.get_org(org_id)
         if not org:
             return {"error": "组织未找到"}
@@ -1769,9 +1866,7 @@ class OrgToolHandler:
             "pending_messages": pending,
         }
 
-    async def _handle_org_get_org_status(
-        self, args: dict, org_id: str, node_id: str
-    ) -> dict:
+    async def _handle_org_get_org_status(self, args: dict, org_id: str, node_id: str) -> dict:
         org = self._runtime.get_org(org_id)
         if not org:
             return {"error": "组织未找到"}
@@ -1792,9 +1887,7 @@ class OrgToolHandler:
     # Memory tools
     # ------------------------------------------------------------------
 
-    async def _handle_org_read_blackboard(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_read_blackboard(self, args: dict, org_id: str, node_id: str) -> str:
         bb = self._runtime.get_blackboard(org_id)
         if not bb:
             return "黑板不可用"
@@ -1810,9 +1903,7 @@ class OrgToolHandler:
             lines.append(f"[{e.memory_type.value}] {e.content}{tags} (by {e.source_node})")
         return "\n".join(lines)
 
-    async def _handle_org_write_blackboard(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_write_blackboard(self, args: dict, org_id: str, node_id: str) -> str:
         bb = self._runtime.get_blackboard(org_id)
         if not bb:
             return "黑板不可用"
@@ -1821,7 +1912,9 @@ class OrgToolHandler:
             mt = MemoryType(raw_mt)
         except ValueError:
             mt = MemoryType.FACT
-            logger.warning(f"[OrgToolHandler] Invalid memory_type '{raw_mt}', falling back to 'fact'")
+            logger.warning(
+                f"[OrgToolHandler] Invalid memory_type '{raw_mt}', falling back to 'fact'"
+            )
         entry = bb.write_org(
             content=args["content"],
             source_node=node_id,
@@ -1831,16 +1924,19 @@ class OrgToolHandler:
         )
         if entry is None:
             return f"黑板已有相似内容，跳过重复写入: {coerce_text(args.get('content'))[:50]}"
-        await self._runtime._broadcast_ws("org:blackboard_update", {
-            "org_id": org_id, "scope": "org", "node_id": node_id,
-            "memory_type": args.get("memory_type", "fact"),
-            "content": coerce_text(args.get("content"))[:_LIM_WS],
-        })
+        await self._runtime._broadcast_ws(
+            "org:blackboard_update",
+            {
+                "org_id": org_id,
+                "scope": "org",
+                "node_id": node_id,
+                "memory_type": args.get("memory_type", "fact"),
+                "content": coerce_text(args.get("content"))[:_LIM_WS],
+            },
+        )
         return f"已写入组织黑板: {coerce_text(args.get('content'))[:50]}"
 
-    async def _handle_org_read_dept_memory(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_read_dept_memory(self, args: dict, org_id: str, node_id: str) -> str:
         bb = self._runtime.get_blackboard(org_id)
         org = self._runtime.get_org(org_id)
         if not bb or not org:
@@ -1854,9 +1950,7 @@ class OrgToolHandler:
             return f"({dept} 暂无部门记忆)"
         return "\n".join(f"[{e.memory_type.value}] {e.content}" for e in entries)
 
-    async def _handle_org_write_dept_memory(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_write_dept_memory(self, args: dict, org_id: str, node_id: str) -> str:
         bb = self._runtime.get_blackboard(org_id)
         org = self._runtime.get_org(org_id)
         if not bb or not org:
@@ -1871,27 +1965,33 @@ class OrgToolHandler:
         except ValueError:
             mt = MemoryType.FACT
         entry = bb.write_department(
-            dept, args["content"], node_id,
+            dept,
+            args["content"],
+            node_id,
             memory_type=mt,
             tags=args.get("tags", []),
             importance=args.get("importance", 0.5),
         )
         if entry is None:
             return "部门记忆已有相似内容，跳过重复写入"
-        await self._runtime._broadcast_ws("org:blackboard_update", {
-            "org_id": org_id, "scope": "department", "department": dept,
-            "node_id": node_id, "memory_type": args.get("memory_type", "fact"),
-            "content": coerce_text(args.get("content"))[:_LIM_WS],
-        })
+        await self._runtime._broadcast_ws(
+            "org:blackboard_update",
+            {
+                "org_id": org_id,
+                "scope": "department",
+                "department": dept,
+                "node_id": node_id,
+                "memory_type": args.get("memory_type", "fact"),
+                "content": coerce_text(args.get("content"))[:_LIM_WS],
+            },
+        )
         return f"已写入 {dept} 部门记忆"
 
     # ------------------------------------------------------------------
     # Node-level memory tools
     # ------------------------------------------------------------------
 
-    async def _handle_org_read_node_memory(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_read_node_memory(self, args: dict, org_id: str, node_id: str) -> str:
         bb = self._runtime.get_blackboard(org_id)
         if not bb:
             return "黑板不可用"
@@ -1900,9 +2000,7 @@ class OrgToolHandler:
             return "(暂无私有记忆)"
         return "\n".join(f"[{e.memory_type.value}] {e.content}" for e in entries)
 
-    async def _handle_org_write_node_memory(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_write_node_memory(self, args: dict, org_id: str, node_id: str) -> str:
         bb = self._runtime.get_blackboard(org_id)
         if not bb:
             return "黑板不可用"
@@ -1918,20 +2016,23 @@ class OrgToolHandler:
             tags=args.get("tags", []),
             importance=args.get("importance", 0.5),
         )
-        await self._runtime._broadcast_ws("org:blackboard_update", {
-            "org_id": org_id, "scope": "node", "node_id": node_id,
-            "memory_type": raw_mt,
-            "content": coerce_text(args.get("content"))[:_LIM_WS],
-        })
+        await self._runtime._broadcast_ws(
+            "org:blackboard_update",
+            {
+                "org_id": org_id,
+                "scope": "node",
+                "node_id": node_id,
+                "memory_type": raw_mt,
+                "content": coerce_text(args.get("content"))[:_LIM_WS],
+            },
+        )
         return f"已写入私有记忆: {coerce_text(args.get('content'))[:50]}"
 
     # ------------------------------------------------------------------
     # Policy tools
     # ------------------------------------------------------------------
 
-    async def _handle_org_list_policies(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_list_policies(self, args: dict, org_id: str, node_id: str) -> str:
         org_dir = self._runtime._manager._org_dir(org_id)
         policies_dir = org_dir / "policies"
         if not policies_dir.exists():
@@ -1941,9 +2042,7 @@ class OrgToolHandler:
             return "(暂无制度文件)"
         return "\n".join(f"- {f.name}" for f in files)
 
-    async def _handle_org_read_policy(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_read_policy(self, args: dict, org_id: str, node_id: str) -> str:
         org_dir = self._runtime._manager._org_dir(org_id)
         fname = args["filename"]
         if ".." in fname or "/" in fname or "\\" in fname:
@@ -1953,9 +2052,7 @@ class OrgToolHandler:
             return f"制度文件不存在: {fname}"
         return p.read_text(encoding="utf-8")
 
-    async def _handle_org_search_policy(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_search_policy(self, args: dict, org_id: str, node_id: str) -> str:
         org_dir = self._runtime._manager._org_dir(org_id)
         policies_dir = org_dir / "policies"
         query = args["query"].lower()
@@ -1966,7 +2063,9 @@ class OrgToolHandler:
                     content = f.read_text(encoding="utf-8")
                     if query in content.lower() or query in f.name.lower():
                         lines = [ln for ln in content.split("\n") if query in ln.lower()][:3]
-                        results.append(f"📄 {f.name}\n" + "\n".join(f"  > {ln.strip()}" for ln in lines))
+                        results.append(
+                            f"📄 {f.name}\n" + "\n".join(f"  > {ln.strip()}" for ln in lines)
+                        )
                 except Exception:
                     continue
         if not results:
@@ -1977,9 +2076,7 @@ class OrgToolHandler:
     # HR tools
     # ------------------------------------------------------------------
 
-    async def _handle_org_freeze_node(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_freeze_node(self, args: dict, org_id: str, node_id: str) -> str:
         org = self._runtime.get_org(org_id)
         if not org:
             return "组织未找到"
@@ -1999,20 +2096,23 @@ class OrgToolHandler:
         target.frozen_reason = args.get("reason", "")
         target.frozen_at = _now_iso()
         await self._runtime.set_node_status(
-            org, target, NodeStatus.FROZEN, "freeze", current_task="",
+            org,
+            target,
+            NodeStatus.FROZEN,
+            "freeze",
+            current_task="",
         )
         messenger = self._runtime.get_messenger(org_id)
         if messenger:
             messenger.freeze_mailbox(target.id)
         self._runtime.get_event_store(org_id).emit(
-            "node_frozen", node_id,
+            "node_frozen",
+            node_id,
             {"target": target.id, "reason": args.get("reason", "")},
         )
         return f"已冻结 {target.role_title}，原因：{args.get('reason', '')}"
 
-    async def _handle_org_unfreeze_node(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_unfreeze_node(self, args: dict, org_id: str, node_id: str) -> str:
         org = self._runtime.get_org(org_id)
         if not org:
             return "组织未找到"
@@ -2027,19 +2127,23 @@ class OrgToolHandler:
         target.frozen_at = None
         self._runtime._node_consecutive_failures.pop(f"{org_id}:{target_id}", None)
         await self._runtime.set_node_status(
-            org, target, NodeStatus.IDLE, "unfreeze", current_task="",
+            org,
+            target,
+            NodeStatus.IDLE,
+            "unfreeze",
+            current_task="",
         )
         messenger = self._runtime.get_messenger(org_id)
         if messenger:
             messenger.unfreeze_mailbox(target.id)
         self._runtime.get_event_store(org_id).emit(
-            "node_unfrozen", node_id, {"target": target.id},
+            "node_unfrozen",
+            node_id,
+            {"target": target.id},
         )
         return f"已解冻 {target.role_title}"
 
-    async def _handle_org_request_clone(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_request_clone(self, args: dict, org_id: str, node_id: str) -> str:
         scaler = self._runtime.get_scaler()
         try:
             req = await scaler.request_clone(
@@ -2055,9 +2159,7 @@ class OrgToolHandler:
         except ValueError as e:
             return str(e)
 
-    async def _handle_org_request_recruit(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_request_recruit(self, args: dict, org_id: str, node_id: str) -> str:
         scaler = self._runtime.get_scaler()
         try:
             req = scaler.request_recruit(
@@ -2073,9 +2175,7 @@ class OrgToolHandler:
         except ValueError as e:
             return str(e)
 
-    async def _handle_org_dismiss_node(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_dismiss_node(self, args: dict, org_id: str, node_id: str) -> str:
         scaler = self._runtime.get_scaler()
         ok = await scaler.dismiss_node(org_id, args["node_id"], by=node_id)
         if ok:
@@ -2086,9 +2186,7 @@ class OrgToolHandler:
     # Task delivery & acceptance
     # ------------------------------------------------------------------
 
-    async def _handle_org_submit_deliverable(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_submit_deliverable(self, args: dict, org_id: str, node_id: str) -> str:
         messenger = self._runtime.get_messenger(org_id)
         if not messenger:
             return self._org_not_running_error(org_id)
@@ -2106,9 +2204,14 @@ class OrgToolHandler:
         # （保持旧兼容路径，例如 root 节点意外调 submit 的边缘场景）。
         try:
             from openakita.config import settings as _settings_sd
-            _enforce_sd = bool(getattr(
-                _settings_sd, "org_chain_parent_enforced", True,
-            ))
+
+            _enforce_sd = bool(
+                getattr(
+                    _settings_sd,
+                    "org_chain_parent_enforced",
+                    True,
+                )
+            )
         except Exception:
             _enforce_sd = True
 
@@ -2119,7 +2222,9 @@ class OrgToolHandler:
                 logger.warning(
                     "[ToolHandler] submit_deliverable chain_id mismatch: "
                     "node=%s LLM_passed=%s overridden_to=%s",
-                    node_id, explicit_chain_sd, caller_chain_sd,
+                    node_id,
+                    explicit_chain_sd,
+                    caller_chain_sd,
                 )
             chain_id = caller_chain_sd
         else:
@@ -2143,6 +2248,7 @@ class OrgToolHandler:
         # 注意：已 delivered 但未验收不拦截（允许 agent 补交修订版，由下游去重兜底）。
         try:
             from openakita.config import settings as _settings
+
             if getattr(_settings, "org_reject_resubmit_after_accept", True) and chain_id:
                 events = self._runtime.get_event_store(org_id)
                 if events:
@@ -2151,7 +2257,8 @@ class OrgToolHandler:
                         if ev.get("data", {}).get("chain_id") == chain_id:
                             logger.info(
                                 "[ToolHandler] reject resubmit on closed chain=%s by=%s",
-                                chain_id, node_id,
+                                chain_id,
+                                node_id,
                             )
                             return (
                                 f"[已关闭] 任务链 {chain_id} 已被验收通过，不能再次提交交付物。"
@@ -2175,10 +2282,7 @@ class OrgToolHandler:
         if isinstance(raw_file_attachments, list) and raw_file_attachments:
             try:
                 org_for_ws = self._runtime.get_org(org_id)
-                workspace = (
-                    self._runtime._resolve_org_workspace(org_for_ws)
-                    if org_for_ws else None
-                )
+                workspace = self._runtime._resolve_org_workspace(org_for_ws) if org_for_ws else None
             except Exception:
                 workspace = None
             for att in raw_file_attachments:
@@ -2189,7 +2293,8 @@ class OrgToolHandler:
                     continue
                 try:
                     registered = self._runtime._register_file_output(
-                        org_id, node_id,
+                        org_id,
+                        node_id,
                         chain_id=chain_id or None,
                         filename=att.get("filename"),
                         file_path=fp,
@@ -2206,7 +2311,8 @@ class OrgToolHandler:
                 else:
                     logger.info(
                         "[ToolHandler] submit_deliverable skipped unregistrable "
-                        "attachment: %s (file missing?)", fp,
+                        "attachment: %s (file missing?)",
+                        fp,
                     )
 
         # 工作台节点附件自动注入：当 LLM 没有显式声明 file_attachments
@@ -2218,9 +2324,7 @@ class OrgToolHandler:
         # `_register_file_output`，不需要重复登记。
         try:
             plugin_buf = (
-                self._runtime._node_plugin_attachments_in_task.get(
-                    f"{org_id}:{node_id}"
-                ) or []
+                self._runtime._node_plugin_attachments_in_task.get(f"{org_id}:{node_id}") or []
             )
         except Exception:
             plugin_buf = []
@@ -2253,8 +2357,7 @@ class OrgToolHandler:
             try:
                 org_for_auto = self._runtime.get_org(org_id)
                 workspace_auto = (
-                    self._runtime._resolve_org_workspace(org_for_auto)
-                    if org_for_auto else None
+                    self._runtime._resolve_org_workspace(org_for_auto) if org_for_auto else None
                 )
                 if workspace_auto is not None:
                     auto_path = self._auto_persist_deliverable(
@@ -2266,7 +2369,8 @@ class OrgToolHandler:
                     if auto_path is not None:
                         try:
                             registered = self._runtime._register_file_output(
-                                org_id, node_id,
+                                org_id,
+                                node_id,
                                 chain_id=chain_id or None,
                                 filename=auto_path.name,
                                 file_path=str(auto_path),
@@ -2283,7 +2387,9 @@ class OrgToolHandler:
                             logger.info(
                                 "[ToolHandler] auto-persisted deliverable to %s "
                                 "(node=%s chain=%s len=%d)",
-                                auto_path, node_id, chain_id,
+                                auto_path,
+                                node_id,
+                                chain_id,
                                 len(deliverable),
                             )
             except Exception:
@@ -2315,9 +2421,7 @@ class OrgToolHandler:
         # 给 LLM 返回明确的友好文案，让它不会因为得到 False 又紧接重试。
         _inflight_key = f"submit:{org_id}:{node_id}:{to_node}:{chain_id}"
         if not self._runtime._try_acquire_tool_inflight(_inflight_key):
-            logger.warning(
-                "[ToolInflight] dedupe drop org_submit_deliverable: %s", _inflight_key
-            )
+            logger.warning("[ToolInflight] dedupe drop org_submit_deliverable: %s", _inflight_key)
             return (
                 f"[去重] 检测到 {self._runtime._tool_inflight_window_secs:.0f}s 内"
                 f"已向 {to_node} 提交过同一任务链（{chain_id[:12]}）的交付物，已忽略。"
@@ -2335,27 +2439,38 @@ class OrgToolHandler:
             self._runtime._release_tool_inflight(_inflight_key)
 
         self._runtime.get_event_store(org_id).emit(
-            "task_delivered", node_id,
+            "task_delivered",
+            node_id,
             {
-                "to": to_node, "chain_id": chain_id,
+                "to": to_node,
+                "chain_id": chain_id,
                 "deliverable_preview": deliverable[:_LIM_EVENT],
                 "file_count": len(registered_attachments),
             },
         )
 
         if ok:
-            await self._runtime._broadcast_ws("org:task_delivered", {
-                "org_id": org_id, "from_node": node_id, "to_node": to_node,
-                "chain_id": chain_id, "summary": summary[:_LIM_WS],
-            })
+            await self._runtime._broadcast_ws(
+                "org:task_delivered",
+                {
+                    "org_id": org_id,
+                    "from_node": node_id,
+                    "to_node": to_node,
+                    "chain_id": chain_id,
+                    "summary": summary[:_LIM_WS],
+                },
+            )
             self._link_project_task(
-                org_id, chain_id, status="delivered",
+                org_id,
+                chain_id,
+                status="delivered",
                 deliverable_content=deliverable[:2000],
                 delivery_summary=summary[:500],
             )
             self._recalc_parent_progress(org_id, chain_id)
             self._append_execution_log(
-                org_id, chain_id,
+                org_id,
+                chain_id,
                 f"提交交付物给 {to_node}: {summary[:_LIM_EXEC_LOG]}",
                 node_id,
             )
@@ -2363,7 +2478,8 @@ class OrgToolHandler:
             self._runtime._on_inbound_for_node(org_id, to_node)
             tail = (
                 f"（附带 {len(registered_attachments)} 个文件附件）"
-                if registered_attachments else ""
+                if registered_attachments
+                else ""
             )
             receipts = [
                 {
@@ -2386,9 +2502,7 @@ class OrgToolHandler:
             return json.dumps(payload, ensure_ascii=False)
         return "提交失败"
 
-    async def _handle_org_accept_deliverable(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_accept_deliverable(self, args: dict, org_id: str, node_id: str) -> str:
         messenger = self._runtime.get_messenger(org_id)
         if not messenger:
             return self._org_not_running_error(org_id)
@@ -2446,29 +2560,42 @@ class OrgToolHandler:
             self._runtime._chain_delegation_depth.pop(chain_id, None)
             try:
                 self._runtime._cleanup_accepted_chain(
-                    org_id, chain_id, reason="accepted",
+                    org_id,
+                    chain_id,
+                    reason="accepted",
                 )
             except Exception as exc:
                 logger.debug("cleanup_accepted_chain on accept failed: %s", exc)
 
         self._runtime.get_event_store(org_id).emit(
-            "task_accepted", node_id,
+            "task_accepted",
+            node_id,
             {"from": from_node, "chain_id": chain_id},
         )
-        await self._runtime._broadcast_ws("org:task_accepted", {
-            "org_id": org_id, "from_node": from_node, "accepted_by": node_id,
-            "chain_id": chain_id, "feedback": feedback[:_LIM_WS],
-        })
+        await self._runtime._broadcast_ws(
+            "org:task_accepted",
+            {
+                "org_id": org_id,
+                "from_node": from_node,
+                "accepted_by": node_id,
+                "chain_id": chain_id,
+                "feedback": feedback[:_LIM_WS],
+            },
+        )
         relayed_files: list[dict] = []
         if chain_id:
             self._link_project_task(org_id, chain_id, status="accepted")
             self._append_execution_log(
-                org_id, chain_id, f"验收通过: {feedback[:_LIM_EXEC_LOG]}", node_id,
+                org_id,
+                chain_id,
+                f"验收通过: {feedback[:_LIM_EXEC_LOG]}",
+                node_id,
             )
             self._recalc_parent_progress(org_id, chain_id)
 
             try:
                 from openakita.orgs.project_store import ProjectStore as _PS
+
                 _store = _PS(self._runtime._manager._org_dir(org_id))
                 _child = _store.find_task_by_chain(chain_id)
                 if _child:
@@ -2483,7 +2610,8 @@ class OrgToolHandler:
                                 list(_child_files),
                             )
                             _store.update_task(
-                                _parent.project_id, _parent.id,
+                                _parent.project_id,
+                                _parent.id,
                                 {"file_attachments": _merged},
                             )
             except Exception:
@@ -2521,9 +2649,7 @@ class OrgToolHandler:
         }
         return json.dumps(payload, ensure_ascii=False)
 
-    async def _handle_org_reject_deliverable(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_reject_deliverable(self, args: dict, org_id: str, node_id: str) -> str:
         messenger = self._runtime.get_messenger(org_id)
         if not messenger:
             return self._org_not_running_error(org_id)
@@ -2565,17 +2691,25 @@ class OrgToolHandler:
         await messenger.send(msg)
 
         self._runtime.get_event_store(org_id).emit(
-            "task_rejected", node_id,
+            "task_rejected",
+            node_id,
             {"from": from_node, "chain_id": chain_id, "reason": reason[:_LIM_EVENT]},
         )
-        await self._runtime._broadcast_ws("org:task_rejected", {
-            "org_id": org_id, "from_node": from_node, "rejected_by": node_id,
-            "chain_id": chain_id, "reason": reason[:_LIM_WS],
-        })
+        await self._runtime._broadcast_ws(
+            "org:task_rejected",
+            {
+                "org_id": org_id,
+                "from_node": from_node,
+                "rejected_by": node_id,
+                "chain_id": chain_id,
+                "reason": reason[:_LIM_WS],
+            },
+        )
         if chain_id:
             self._link_project_task(org_id, chain_id, status="rejected")
             self._append_execution_log(
-                org_id, chain_id,
+                org_id,
+                chain_id,
                 f"打回: {reason[:_LIM_EXEC_LOG]}",
                 node_id,
             )
@@ -2584,7 +2718,9 @@ class OrgToolHandler:
             # 但不级联 cancel 子任务（rejected 意味着重做，可能仍依赖子任务结果）。
             try:
                 self._runtime._cleanup_accepted_chain(
-                    org_id, chain_id, reason="rejected",
+                    org_id,
+                    chain_id,
+                    reason="rejected",
                     cascade_cancel_children=False,
                 )
             except Exception as exc:
@@ -2592,9 +2728,7 @@ class OrgToolHandler:
 
         return f"已打回 {from_node} 的交付物，原因：{reason[:50]}"
 
-    async def _handle_org_wait_for_deliverable(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_wait_for_deliverable(self, args: dict, org_id: str, node_id: str) -> str:
         """阻塞等待下级任务交付，避免 org_list_delegated_tasks 轮询触发死循环。
 
         多事件 wait 防止死锁：
@@ -2606,10 +2740,10 @@ class OrgToolHandler:
         """
         try:
             from openakita.config import settings as _s_wait
+
             if not getattr(_s_wait, "org_wait_primitive_enabled", True):
                 return (
-                    "[org_wait_for_deliverable 已禁用] "
-                    "请改用 org_list_delegated_tasks 查询进度。"
+                    "[org_wait_for_deliverable 已禁用] 请改用 org_list_delegated_tasks 查询进度。"
                 )
         except Exception:
             pass
@@ -2624,9 +2758,7 @@ class OrgToolHandler:
         my_chain = runtime.get_current_chain_id(org_id, node_id)
         explicit_chains_raw = args.get("chain_ids")
         if isinstance(explicit_chains_raw, list):
-            explicit_chains = [
-                c for c in explicit_chains_raw if isinstance(c, str) and c
-            ]
+            explicit_chains = [c for c in explicit_chains_raw if isinstance(c, str) and c]
         else:
             explicit_chains = []
 
@@ -2634,15 +2766,10 @@ class OrgToolHandler:
             target_chains = explicit_chains
         else:
             # 反查 _chain_parent：所有以 my_chain 为父的子 chain
-            target_chains = [
-                c for c, p in runtime._chain_parent.items() if p == my_chain
-            ]
+            target_chains = [c for c, p in runtime._chain_parent.items() if p == my_chain]
 
         # 过滤掉已关闭的 chain（不再有意义）
-        open_targets = [
-            c for c in target_chains
-            if not runtime.is_chain_closed(org_id, c)
-        ]
+        open_targets = [c for c in target_chains if not runtime.is_chain_closed(org_id, c)]
         if not open_targets:
             return (
                 "没有需要等待的未关闭子链。可能下级已全部交付——"
@@ -2671,16 +2798,13 @@ class OrgToolHandler:
 
         waiters: list[asyncio.Task] = []
         for c, ev in chain_events:
-            waiters.append(
-                asyncio.create_task(ev.wait(), name=f"wait_chain:{c[:24]}")
-            )
-        waiters.append(
-            asyncio.create_task(inbox_event.wait(), name=f"wait_inbox:{node_id}")
-        )
+            waiters.append(asyncio.create_task(ev.wait(), name=f"wait_chain:{c[:24]}"))
+        waiters.append(asyncio.create_task(inbox_event.wait(), name=f"wait_inbox:{node_id}"))
 
         try:
             done, _pending = await asyncio.wait(
-                waiters, timeout=timeout,
+                waiters,
+                timeout=timeout,
                 return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
@@ -2696,10 +2820,7 @@ class OrgToolHandler:
         runtime._touch_trackers_for_org(org_id)
 
         # 复检 chain 状态（asyncio.wait 返回时可能已有多个 chain 同时关闭）
-        closed_chains_now = [
-            c for c, _ in chain_events
-            if runtime.is_chain_closed(org_id, c)
-        ]
+        closed_chains_now = [c for c, _ in chain_events if runtime.is_chain_closed(org_id, c)]
         inbox_triggered = inbox_event.is_set()
 
         if not done:
@@ -2729,9 +2850,7 @@ class OrgToolHandler:
                     else:
                         snapshot_lines.append(f"  - {c[:8]}... [未找到任务记录]")
             except Exception as snap_err:
-                logger.debug(
-                    "[wait_for_deliverable] snapshot build failed: %s", snap_err
-                )
+                logger.debug("[wait_for_deliverable] snapshot build failed: %s", snap_err)
 
             snapshot = "\n".join(snapshot_lines) if snapshot_lines else "  (无法获取任务快照)"
             return (
@@ -2747,9 +2866,7 @@ class OrgToolHandler:
         if closed_chains_now:
             preview = closed_chains_now[:5]
             extra = "..." if len(closed_chains_now) > 5 else ""
-            parts.append(
-                f"以下子链已关闭，请检查相关 deliverable：{preview}{extra}"
-            )
+            parts.append(f"以下子链已关闭，请检查相关 deliverable：{preview}{extra}")
         if inbox_triggered:
             parts.append(
                 "下级有新消息（question/escalate）需要你立即响应——"
@@ -2766,9 +2883,7 @@ class OrgToolHandler:
     # Meeting tools
     # ------------------------------------------------------------------
 
-    async def _handle_org_request_meeting(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_request_meeting(self, args: dict, org_id: str, node_id: str) -> str:
         import asyncio
 
         org = self._runtime.get_org(org_id)
@@ -2790,18 +2905,29 @@ class OrgToolHandler:
         meeting_record.append(f"主持人: {node_id}")
         meeting_record.append(f"参与者: {', '.join(participants)}\n")
 
-        await self._runtime._broadcast_ws("org:meeting_started", {
-            "org_id": org_id, "topic": topic,
-            "host": node_id, "participants": participants, "rounds": max_rounds,
-        })
+        await self._runtime._broadcast_ws(
+            "org:meeting_started",
+            {
+                "org_id": org_id,
+                "topic": topic,
+                "host": node_id,
+                "participants": participants,
+                "rounds": max_rounds,
+            },
+        )
 
         prev_round_summary = ""
         for round_num in range(1, max_rounds + 1):
             meeting_record.append(f"\n### 第 {round_num} 轮\n")
 
-            await self._runtime._broadcast_ws("org:meeting_round", {
-                "org_id": org_id, "round": round_num, "total_rounds": max_rounds,
-            })
+            await self._runtime._broadcast_ws(
+                "org:meeting_round",
+                {
+                    "org_id": org_id,
+                    "round": round_num,
+                    "total_rounds": max_rounds,
+                },
+            )
 
             async def _get_opinion(
                 pid: str,
@@ -2813,7 +2939,12 @@ class OrgToolHandler:
                     return pid, "(缺席)"
                 try:
                     response = await self._lightweight_meeting_speak(
-                        org, node_obj, topic, _round, max_rounds, _prev,
+                        org,
+                        node_obj,
+                        topic,
+                        _round,
+                        max_rounds,
+                        _prev,
                     )
                     return pid, response
                 except Exception as e:
@@ -2828,10 +2959,16 @@ class OrgToolHandler:
                 title = node_obj.role_title if node_obj else pid
                 meeting_record.append(f"- **{title}**: {response}")
                 round_opinions.append(f"{title}: {response}")
-                await self._runtime._broadcast_ws("org:meeting_speak", {
-                    "org_id": org_id, "node_id": pid, "role_title": title,
-                    "round": round_num, "content": response[:_LIM_WS],
-                })
+                await self._runtime._broadcast_ws(
+                    "org:meeting_speak",
+                    {
+                        "org_id": org_id,
+                        "node_id": pid,
+                        "role_title": title,
+                        "round": round_num,
+                        "content": response[:_LIM_WS],
+                    },
+                )
 
             prev_round_summary = "\n".join(round_opinions)
 
@@ -2848,19 +2985,29 @@ class OrgToolHandler:
                 memory_type=MemoryType.DECISION,
                 tags=["meeting"],
             )
-            await self._runtime._broadcast_ws("org:blackboard_update", {
-                "org_id": org_id, "node_id": node_id, "scope": "org",
-            })
+            await self._runtime._broadcast_ws(
+                "org:blackboard_update",
+                {
+                    "org_id": org_id,
+                    "node_id": node_id,
+                    "scope": "org",
+                },
+            )
 
         self._runtime.get_event_store(org_id).emit(
-            "meeting_completed", node_id,
+            "meeting_completed",
+            node_id,
             {"topic": topic, "participants": participants, "rounds": max_rounds},
         )
 
-        await self._runtime._broadcast_ws("org:meeting_completed", {
-            "org_id": org_id, "topic": topic,
-            "conclusion": (conclusion or "")[:300],
-        })
+        await self._runtime._broadcast_ws(
+            "org:meeting_completed",
+            {
+                "org_id": org_id,
+                "topic": topic,
+                "conclusion": (conclusion or "")[:300],
+            },
+        )
 
         return "\n".join(meeting_record)
 
@@ -2906,7 +3053,9 @@ class OrgToolHandler:
 
         try:
             text = await self._llm_simple_call(
-                system_prompt, "\n".join(user_parts), max_tokens=400,
+                system_prompt,
+                "\n".join(user_parts),
+                max_tokens=400,
             )
             return text[:500] if text else "(无内容)"
         except Exception as e:
@@ -2914,7 +3063,10 @@ class OrgToolHandler:
             return f"(发言失败: {e})"
 
     async def _meeting_summarize(
-        self, org_id: str, topic: str, meeting_record: list[str],
+        self,
+        org_id: str,
+        topic: str,
+        meeting_record: list[str],
     ) -> str:
         """用 LLM 生成会议结论。"""
         full_record = "\n".join(meeting_record)
@@ -2928,7 +3080,9 @@ class OrgToolHandler:
         )
         try:
             text = await self._llm_simple_call(
-                "你是一位专业的会议记录员。", user_msg, max_tokens=500,
+                "你是一位专业的会议记录员。",
+                user_msg,
+                max_tokens=500,
             )
             return (text or "")[:600]
         except Exception as e:
@@ -2936,7 +3090,10 @@ class OrgToolHandler:
             return ""
 
     async def _llm_simple_call(
-        self, system: str, user_content: str, max_tokens: int = 400,
+        self,
+        system: str,
+        user_content: str,
+        max_tokens: int = 400,
     ) -> str:
         """统一的轻量 LLM 调用：兼容 Message 类型和 dict 类型 response。"""
         from openakita.llm.client import chat as llm_chat
@@ -2954,9 +3111,7 @@ class OrgToolHandler:
     # Schedule tools
     # ------------------------------------------------------------------
 
-    async def _handle_org_create_schedule(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_create_schedule(self, args: dict, org_id: str, node_id: str) -> str:
         schedule_params = {
             "name": args["name"],
             "schedule_type": args.get("schedule_type", "interval"),
@@ -2970,7 +3125,8 @@ class OrgToolHandler:
 
         inbox = self._runtime.get_inbox(org_id)
         inbox.push_approval_request(
-            org_id, node_id,
+            org_id,
+            node_id,
             title=f"{node_id} 申请创建定时任务「{args['name']}」",
             body=f"任务指令: {args['prompt'][:_LIM_WS]}\n类型: {args.get('schedule_type', 'interval')}",
             metadata={
@@ -2981,14 +3137,13 @@ class OrgToolHandler:
         )
 
         self._runtime.get_event_store(org_id).emit(
-            "schedule_requested", node_id,
+            "schedule_requested",
+            node_id,
             {"name": args["name"]},
         )
         return f"定时任务「{args['name']}」已提交审批，批准后将自动创建。"
 
-    async def _handle_org_list_my_schedules(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_list_my_schedules(self, args: dict, org_id: str, node_id: str) -> str:
         schedules = self._runtime._manager.get_node_schedules(org_id, node_id)
         if not schedules:
             return "你目前没有定时任务"
@@ -3000,9 +3155,7 @@ class OrgToolHandler:
             lines.append(f"- [{status}] {s.name} | 频率: {freq} | 上次: {last}")
         return "\n".join(lines)
 
-    async def _handle_org_assign_schedule(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_assign_schedule(self, args: dict, org_id: str, node_id: str) -> str:
         org = self._runtime.get_org(org_id)
         if not org:
             return "组织未找到"
@@ -3030,7 +3183,8 @@ class OrgToolHandler:
         self._runtime._manager.add_node_schedule(org_id, target_id, sched)
 
         self._runtime.get_event_store(org_id).emit(
-            "schedule_assigned", node_id,
+            "schedule_assigned",
+            node_id,
             {"target": target_id, "schedule_id": sched.id, "name": sched.name},
         )
         return f"已为 {target.role_title} 指定定时任务「{sched.name}」（ID: {sched.id}）"
@@ -3039,12 +3193,11 @@ class OrgToolHandler:
     # Policy proposal tool
     # ------------------------------------------------------------------
 
-    async def _handle_org_propose_policy(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_propose_policy(self, args: dict, org_id: str, node_id: str) -> str:
         inbox = self._runtime.get_inbox(org_id)
         inbox.push_approval_request(
-            org_id, node_id,
+            org_id,
+            node_id,
             title=f"制度提议: {args['title']}",
             body=f"提议者: {node_id}\n原因: {args['reason']}\n文件: {args['filename']}\n\n{args['content'][:500]}",
             options=["approve", "reject"],
@@ -3056,7 +3209,8 @@ class OrgToolHandler:
         )
 
         self._runtime.get_event_store(org_id).emit(
-            "policy_proposed", node_id,
+            "policy_proposed",
+            node_id,
             {"filename": args["filename"], "title": args["title"]},
         )
         return f"制度提议「{args['title']}」已提交审批。"
@@ -3065,9 +3219,7 @@ class OrgToolHandler:
     # Tool request / grant / revoke
     # ------------------------------------------------------------------
 
-    async def _handle_org_request_tools(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_request_tools(self, args: dict, org_id: str, node_id: str) -> str:
         org = self._runtime.get_org(org_id)
         if not org:
             return "组织未找到"
@@ -3085,6 +3237,7 @@ class OrgToolHandler:
             return "消息系统未就绪"
 
         from .tool_categories import TOOL_CATEGORIES
+
         ", ".join(tools)
         cat_details = []
         for t in tools:
@@ -3096,7 +3249,7 @@ class OrgToolHandler:
         content = (
             f"[工具申请] {node_id} 申请增加外部工具：{', '.join(cat_details)}\n"
             f"申请原因：{reason}\n\n"
-            f"如果批准，请使用 org_grant_tools(node_id=\"{node_id}\", tools={tools}) 授权。"
+            f'如果批准，请使用 org_grant_tools(node_id="{node_id}", tools={tools}) 授权。'
         )
 
         msg = OrgMessage(
@@ -3110,14 +3263,13 @@ class OrgToolHandler:
         await messenger.send(msg)
 
         self._runtime.get_event_store(org_id).emit(
-            "tools_requested", node_id,
+            "tools_requested",
+            node_id,
             {"tools": tools, "reason": reason, "superior": parent.id},
         )
         return f"工具申请已发送给 {parent.role_title}（{parent.id}），等待审批。"
 
-    async def _handle_org_grant_tools(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_grant_tools(self, args: dict, org_id: str, node_id: str) -> str:
         org = self._runtime.get_org(org_id)
         if not org:
             return "组织未找到"
@@ -3158,14 +3310,13 @@ class OrgToolHandler:
             await messenger.send(notify)
 
         self._runtime.get_event_store(org_id).emit(
-            "tools_granted", node_id,
+            "tools_granted",
+            node_id,
             {"target": target_id, "tools": tools},
         )
         return f"已授权 {target.role_title}（{target_id}）使用：{', '.join(tools)}"
 
-    async def _handle_org_revoke_tools(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_revoke_tools(self, args: dict, org_id: str, node_id: str) -> str:
         org = self._runtime.get_org(org_id)
         if not org:
             return "组织未找到"
@@ -3209,7 +3360,8 @@ class OrgToolHandler:
             await messenger.send(notify)
 
         self._runtime.get_event_store(org_id).emit(
-            "tools_revoked", node_id,
+            "tools_revoked",
+            node_id,
             {"target": target_id, "tools": removed},
         )
         return f"已收回 {target.role_title}（{target_id}）的工具：{', '.join(removed)}"
@@ -3218,9 +3370,7 @@ class OrgToolHandler:
     # Project task tools
     # ------------------------------------------------------------------
 
-    async def _handle_org_report_progress(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_report_progress(self, args: dict, org_id: str, node_id: str) -> str:
         chain_id = args.get("task_chain_id", "")
         if not chain_id:
             return "缺少 task_chain_id"
@@ -3240,11 +3390,16 @@ class OrgToolHandler:
                 except (ValueError, TypeError):
                     pass
             if args.get("log_entry"):
-                log_entry = {"at": _now_iso(), "by": node_id, "entry": args["log_entry"][:_LIM_EXEC_LOG]}
+                log_entry = {
+                    "at": _now_iso(),
+                    "by": node_id,
+                    "entry": args["log_entry"][:_LIM_EXEC_LOG],
+                }
                 new_log = list(existing.execution_log or []) + [log_entry]
                 updates["execution_log"] = new_log
             if updates.get("progress_pct", 0) >= 100 and str(existing.status) == "in_progress":
                 from openakita.orgs.models import TaskStatus
+
                 updates["status"] = TaskStatus.DELIVERED
             if updates:
                 store.update_task(existing.project_id, existing.id, updates)
@@ -3256,9 +3411,7 @@ class OrgToolHandler:
             logger.debug("org_report_progress failed: %s", e)
             return f"汇报失败: {e}"
 
-    async def _handle_org_get_task_progress(
-        self, args: dict, org_id: str, node_id: str
-    ) -> dict:
+    async def _handle_org_get_task_progress(self, args: dict, org_id: str, node_id: str) -> dict:
         try:
             from openakita.orgs.project_store import ProjectStore
 
@@ -3285,9 +3438,7 @@ class OrgToolHandler:
             logger.debug("org_get_task_progress failed: %s", e)
             return {"error": str(e)}
 
-    async def _handle_org_list_my_tasks(
-        self, args: dict, org_id: str, node_id: str
-    ) -> list:
+    async def _handle_org_list_my_tasks(self, args: dict, org_id: str, node_id: str) -> list:
         try:
             from openakita.orgs.project_store import ProjectStore
 
@@ -3312,6 +3463,7 @@ class OrgToolHandler:
         # 返回上次结果 + 提示语，不再查 ProjectStore，不消耗下游 IO。
         try:
             import time as _time
+
             BACKOFF_SEC = 3.0
             cache = getattr(self, "_list_delegated_cache", None)
             if cache is None:
@@ -3346,6 +3498,7 @@ class OrgToolHandler:
             try:
                 if cache is not None and ck is not None:
                     import time as _time
+
                     cache[ck] = {"ts": _time.monotonic(), "tasks": tasks}
             except Exception:
                 pass
@@ -3354,9 +3507,7 @@ class OrgToolHandler:
             logger.debug("org_list_delegated_tasks failed: %s", e)
             return []
 
-    async def _handle_org_list_project_tasks(
-        self, args: dict, org_id: str, node_id: str
-    ) -> list:
+    async def _handle_org_list_project_tasks(self, args: dict, org_id: str, node_id: str) -> list:
         project_id = args.get("project_id", "")
         if not project_id:
             return []
@@ -3380,9 +3531,7 @@ class OrgToolHandler:
             logger.debug("org_list_project_tasks failed: %s", e)
             return []
 
-    async def _handle_org_update_project_task(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_update_project_task(self, args: dict, org_id: str, node_id: str) -> str:
         task_id = args.get("task_id")
         chain_id = args.get("task_chain_id")
         if not task_id and not chain_id:
@@ -3424,7 +3573,11 @@ class OrgToolHandler:
                 if isinstance(new_entries, list):
                     existing = list(task.execution_log or [])
                     for e in new_entries:
-                        entry = e if isinstance(e, dict) else {"at": _now_iso(), "by": node_id, "entry": str(e)[:_LIM_EXEC_LOG]}
+                        entry = (
+                            e
+                            if isinstance(e, dict)
+                            else {"at": _now_iso(), "by": node_id, "entry": str(e)[:_LIM_EXEC_LOG]}
+                        )
                         existing.append(entry)
                     updates["execution_log"] = existing
             if updates:
@@ -3434,9 +3587,7 @@ class OrgToolHandler:
             logger.debug("org_update_project_task failed: %s", e)
             return f"更新失败: {e}"
 
-    async def _handle_org_create_project_task(
-        self, args: dict, org_id: str, node_id: str
-    ) -> str:
+    async def _handle_org_create_project_task(self, args: dict, org_id: str, node_id: str) -> str:
         project_id = args.get("project_id", "")
         title = args.get("title", "")
         if not project_id or not title:

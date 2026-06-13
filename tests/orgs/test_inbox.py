@@ -24,7 +24,9 @@ class TestPush:
 
     def test_push_with_approval(self, inbox: OrgInbox, persisted_org):
         msg = inbox.push(
-            persisted_org.id, "扩编审批", "请求克隆节点",
+            persisted_org.id,
+            "扩编审批",
+            "请求克隆节点",
             requires_approval=True,
             priority=InboxPriority.APPROVAL,
         )
@@ -43,7 +45,10 @@ class TestPush:
 
     def test_push_approval_request_helper(self, inbox: OrgInbox, persisted_org):
         msg = inbox.push_approval_request(
-            persisted_org.id, "node_ceo", "克隆请求", "需要更多人手",
+            persisted_org.id,
+            "node_ceo",
+            "克隆请求",
+            "需要更多人手",
         )
         assert msg.requires_approval is True
         assert msg.priority == InboxPriority.APPROVAL
@@ -107,7 +112,9 @@ class TestUnreadCount:
 class TestApproval:
     def test_resolve_approval(self, inbox: OrgInbox, persisted_org):
         msg = inbox.push(
-            persisted_org.id, "审批", "请批准",
+            persisted_org.id,
+            "审批",
+            "请批准",
             requires_approval=True,
         )
         result = inbox.resolve_approval(persisted_org.id, msg.id, "approve", by="user")
@@ -118,11 +125,16 @@ class TestApproval:
 
     def test_resolve_by_approval_id(self, inbox: OrgInbox, persisted_org):
         msg = inbox.push(
-            persisted_org.id, "审批", "body",
+            persisted_org.id,
+            "审批",
+            "body",
             requires_approval=True,
         )
         result = inbox.resolve_by_approval_id(
-            persisted_org.id, msg.approval_id, "reject", by="admin",
+            persisted_org.id,
+            msg.approval_id,
+            "reject",
+            by="admin",
         )
         assert result is not None
         assert result.acted_result == "reject"
@@ -160,4 +172,3 @@ class TestSubscription:
             assert msg.title == "新消息"
         finally:
             inbox.unsubscribe(persisted_org.id, q)
-

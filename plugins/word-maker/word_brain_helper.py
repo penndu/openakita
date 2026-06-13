@@ -81,10 +81,14 @@ class WordBrainHelper:
         errors: list[str] = []
         parsed = parse_llm_json_object(str(raw), fallback=None, errors=errors)
         if not isinstance(parsed, dict):
-            return BrainResult(False, fallback, "; ".join(errors) or "Brain did not return JSON", True)
+            return BrainResult(
+                False, fallback, "; ".join(errors) or "Brain did not return JSON", True
+            )
         missing = sorted(key for key in required if key not in parsed)
         if missing:
-            return BrainResult(False, fallback, f"Brain JSON missing keys: {', '.join(missing)}", True)
+            return BrainResult(
+                False, fallback, f"Brain JSON missing keys: {', '.join(missing)}", True
+            )
         return BrainResult(True, parsed, used_brain=True)
 
     async def clarify_requirements(
@@ -142,7 +146,9 @@ class WordBrainHelper:
                 "sources_text": sources_text[:12000],
                 "required_schema": {
                     "title": "document title",
-                    "sections": [{"id": "string", "title": "string", "goal": "string", "bullets": []}],
+                    "sections": [
+                        {"id": "string", "title": "string", "goal": "string", "bullets": []}
+                    ],
                     "missing_inputs": [],
                 },
             },
@@ -192,7 +198,10 @@ class WordBrainHelper:
                 "section_markdown": section_markdown,
                 "instruction": instruction,
                 "tone": tone,
-                "required_schema": {"markdown": "rewritten markdown", "change_summary": "short summary"},
+                "required_schema": {
+                    "markdown": "rewritten markdown",
+                    "change_summary": "short summary",
+                },
             },
             fallback=fallback,
             required={"markdown", "change_summary"},
@@ -223,4 +232,3 @@ class WordBrainHelper:
             fallback=fallback,
             required={"summary_md", "slide_outline", "key_messages"},
         )
-

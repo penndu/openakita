@@ -271,14 +271,14 @@ class TaskScheduler:
         ``PendingApprovalsStore`` 是独立模块；这里 lazy import 避免循环。
         """
         awaiting_ids = [
-            tid for tid, t in self._tasks.items()
-            if t.status == TaskStatus.AWAITING_APPROVAL
+            tid for tid, t in self._tasks.items() if t.status == TaskStatus.AWAITING_APPROVAL
         ]
         if not awaiting_ids:
             return
 
         try:
             from ..core.pending_approvals import get_pending_approvals_store
+
             store = get_pending_approvals_store()
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -296,9 +296,7 @@ class TaskScheduler:
                 continue
             entries: list[Any] = []
             try:
-                entries = [
-                    e for e in store.list_pending() if getattr(e, "task_id", None) == tid
-                ]
+                entries = [e for e in store.list_pending() if getattr(e, "task_id", None) == tid]
             except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "[scheduler] reconcile: list_pending(%s) failed: %s",
@@ -324,9 +322,7 @@ class TaskScheduler:
             if keep:
                 continue
 
-            reason = (
-                "approval_orphaned" if not entries else "approval_expired"
-            )
+            reason = "approval_orphaned" if not entries else "approval_expired"
             try:
                 # mark_failed expects status==RUNNING; force-transition first
                 # so we don't tear up the state machine on the corrupted row.
@@ -361,9 +357,7 @@ class TaskScheduler:
                 reason,
             )
 
-    def _stagger_missed_tasks(
-        self, missed_tasks: list[ScheduledTask], now: datetime
-    ) -> None:
+    def _stagger_missed_tasks(self, missed_tasks: list[ScheduledTask], now: datetime) -> None:
         """Spread missed tasks beyond MAX_MISSED_PER_RESTART out in time.
 
         借鉴 openclaw ``planStartupCatchup``：第 N (N >= MAX) 个 missed 任务
@@ -376,9 +370,7 @@ class TaskScheduler:
             try:
                 task.next_run = now + timedelta(seconds=idx * self.STAGGER_INTERVAL_S)
             except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    "[scheduler] stagger(%s) failed: %s", task.id, exc
-                )
+                logger.debug("[scheduler] stagger(%s) failed: %s", task.id, exc)
         logger.info(
             "[scheduler] staggered %d missed tasks (cap=%d, interval=%ds)",
             len(missed_tasks) - self.MAX_MISSED_PER_RESTART,
@@ -671,9 +663,7 @@ class TaskScheduler:
             logger.warning(f"trigger_in_background: task {task_id} is disabled, skipping")
             return None
         if task_id in self._running_tasks:
-            logger.warning(
-                f"trigger_in_background: task {task_id} is already running, skipping"
-            )
+            logger.warning(f"trigger_in_background: task {task_id} is already running, skipping")
             return None
 
         # 同步占位 _running_tasks，避免快速连按在 create_task 调度到之前
@@ -814,7 +804,9 @@ class TaskScheduler:
                 )
 
         # C17 Phase A.2 §3：cross-process exec lock。
-        expected_runtime = task.metadata.get("timeout_seconds") if isinstance(task.metadata, dict) else None
+        expected_runtime = (
+            task.metadata.get("timeout_seconds") if isinstance(task.metadata, dict) else None
+        )
         if not isinstance(expected_runtime, (int, float)) or expected_runtime <= 0:
             expected_runtime = 300
         exec_lock: ExecLock | None = acquire_exec_lock(
@@ -977,9 +969,7 @@ class TaskScheduler:
             try:
                 release_exec_lock(exec_lock)
             except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    "[scheduler] release_exec_lock(%s) raised %s", task.id, exc
-                )
+                logger.debug("[scheduler] release_exec_lock(%s) raised %s", task.id, exc)
             reset_current_scheduled_task_id(ctx_token)
 
         async with self._lock:

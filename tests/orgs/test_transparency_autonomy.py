@@ -39,10 +39,14 @@ class TestWSBroadcastOnToolExecution:
         await handler.handle(
             "org_delegate_task",
             {"to_node": "node_cto", "task": "设计架构"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
-        calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:task_delegated"]
+        calls = [
+            c
+            for c in mock_runtime._broadcast_ws.call_args_list
+            if c.args[0] == "org:task_delegated"
+        ]
         assert len(calls) >= 1
         data = calls[0].args[1]
         assert data["from_node"] == "node_ceo"
@@ -53,10 +57,10 @@ class TestWSBroadcastOnToolExecution:
         await handler.handle(
             "org_send_message",
             {"to_node": "node_cto", "content": "进展如何", "msg_type": "question"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
-        calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:message"]
+        calls = [c for c in mock_runtime._broadcast_ws.call_args_list if c.args[0] == "org:message"]
         assert len(calls) >= 1
         assert calls[0].args[1]["from_node"] == "node_ceo"
 
@@ -64,30 +68,38 @@ class TestWSBroadcastOnToolExecution:
         await handler.handle(
             "org_escalate",
             {"content": "需要更多资源", "priority": 1},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
-        calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:escalation"]
+        calls = [
+            c for c in mock_runtime._broadcast_ws.call_args_list if c.args[0] == "org:escalation"
+        ]
         assert len(calls) >= 1
 
     async def test_submit_deliverable_broadcasts(self, handler, persisted_org, mock_runtime):
         await handler.handle(
             "org_submit_deliverable",
             {"to_node": "node_ceo", "deliverable": "架构文档完成", "summary": "完成"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
-        calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:task_delivered"]
+        calls = [
+            c
+            for c in mock_runtime._broadcast_ws.call_args_list
+            if c.args[0] == "org:task_delivered"
+        ]
         assert len(calls) >= 1
 
     async def test_accept_deliverable_broadcasts(self, handler, persisted_org, mock_runtime):
         await handler.handle(
             "org_accept_deliverable",
             {"from_node": "node_cto", "task_chain_id": "chain_001", "feedback": "很好"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
-        calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:task_accepted"]
+        calls = [
+            c for c in mock_runtime._broadcast_ws.call_args_list if c.args[0] == "org:task_accepted"
+        ]
         assert len(calls) >= 1
         data = calls[0].args[1]
         assert data["accepted_by"] == "node_ceo"
@@ -97,10 +109,12 @@ class TestWSBroadcastOnToolExecution:
         await handler.handle(
             "org_reject_deliverable",
             {"from_node": "node_cto", "task_chain_id": "chain_002", "reason": "不够完善"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
-        calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:task_rejected"]
+        calls = [
+            c for c in mock_runtime._broadcast_ws.call_args_list if c.args[0] == "org:task_rejected"
+        ]
         assert len(calls) >= 1
         assert "不够完善" in calls[0].args[1]["reason"]
 
@@ -108,10 +122,14 @@ class TestWSBroadcastOnToolExecution:
         await handler.handle(
             "org_write_blackboard",
             {"content": "Q2 目标确定", "memory_type": "decision", "tags": ["目标"]},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
-        calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:blackboard_update"]
+        calls = [
+            c
+            for c in mock_runtime._broadcast_ws.call_args_list
+            if c.args[0] == "org:blackboard_update"
+        ]
         assert len(calls) >= 1
         data = calls[0].args[1]
         assert data["scope"] == "org"
@@ -121,31 +139,42 @@ class TestWSBroadcastOnToolExecution:
         await handler.handle(
             "org_write_dept_memory",
             {"content": "技术栈选型完成", "memory_type": "decision"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
-        calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:blackboard_update"]
+        calls = [
+            c
+            for c in mock_runtime._broadcast_ws.call_args_list
+            if c.args[0] == "org:blackboard_update"
+        ]
         assert len(calls) >= 1
         data = calls[0].args[1]
         assert data["scope"] == "department"
         assert data["department"] == "技术部"
 
-    async def test_duplicate_blackboard_write_no_broadcast(self, handler, persisted_org, mock_runtime):
+    async def test_duplicate_blackboard_write_no_broadcast(
+        self, handler, persisted_org, mock_runtime
+    ):
         """Duplicate writes should not broadcast."""
         await handler.handle(
             "org_write_blackboard",
             {"content": "重复内容测试" * 10},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         mock_runtime._broadcast_ws.reset_mock()
 
         await handler.handle(
             "org_write_blackboard",
             {"content": "重复内容测试" * 10},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
-        bb_calls = [c for c in mock_runtime._broadcast_ws.call_args_list
-                    if c.args[0] == "org:blackboard_update"]
+        bb_calls = [
+            c
+            for c in mock_runtime._broadcast_ws.call_args_list
+            if c.args[0] == "org:blackboard_update"
+        ]
         assert len(bb_calls) == 0
 
 
@@ -193,14 +222,22 @@ class TestMilestoneReview:
         await heartbeat.trigger_heartbeat(persisted_org.id)
         assert heartbeat._tasks_since_review.get(persisted_org.id, 0) == 0
 
-    async def test_heartbeat_broadcasts_start_and_done(self, heartbeat, persisted_org, mock_runtime):
+    async def test_heartbeat_broadcasts_start_and_done(
+        self, heartbeat, persisted_org, mock_runtime
+    ):
         mock_runtime.send_command = AsyncMock(return_value={"result": "OK"})
         await heartbeat.trigger_heartbeat(persisted_org.id)
 
-        starts = [c for c in mock_runtime._broadcast_ws.call_args_list
-                  if c.args[0] == "org:heartbeat_start"]
-        dones = [c for c in mock_runtime._broadcast_ws.call_args_list
-                 if c.args[0] == "org:heartbeat_done"]
+        starts = [
+            c
+            for c in mock_runtime._broadcast_ws.call_args_list
+            if c.args[0] == "org:heartbeat_start"
+        ]
+        dones = [
+            c
+            for c in mock_runtime._broadcast_ws.call_args_list
+            if c.args[0] == "org:heartbeat_done"
+        ]
         assert len(starts) >= 1
         assert len(dones) >= 1
         assert starts[0].args[1]["type"] == "heartbeat"
@@ -218,8 +255,11 @@ class TestStandupBroadcasts:
 
         await heartbeat.trigger_standup(persisted_org.id)
 
-        starts = [c for c in mock_runtime._broadcast_ws.call_args_list
-                  if c.args[0] == "org:heartbeat_start"]
+        starts = [
+            c
+            for c in mock_runtime._broadcast_ws.call_args_list
+            if c.args[0] == "org:heartbeat_start"
+        ]
         assert any(c.args[1].get("type") == "standup" for c in starts)
 
 
@@ -231,13 +271,16 @@ class TestStandupBroadcasts:
 class TestAITimeCalibration:
     def _make_resolved(self, role: str = "负责人"):
         from openakita.orgs.identity import ResolvedIdentity
+
         return ResolvedIdentity(soul="", agent="", role=role, level=0)
 
     def test_identity_prompt_contains_ai_efficiency(self, tmp_path):
         org = make_org(core_business="电商运营")
         identity = OrgIdentity(tmp_path)
         prompt = identity.build_org_context_prompt(
-            node=org.nodes[0], org=org, identity=self._make_resolved("运营负责人"),
+            node=org.nodes[0],
+            org=org,
+            identity=self._make_resolved("运营负责人"),
         )
         assert "AI" in prompt
         assert "分钟" in prompt
@@ -247,7 +290,9 @@ class TestAITimeCalibration:
         org = make_org(core_business="软件开发")
         identity = OrgIdentity(tmp_path)
         prompt = identity.build_org_context_prompt(
-            node=org.nodes[0], org=org, identity=self._make_resolved("技术负责人"),
+            node=org.nodes[0],
+            org=org,
+            identity=self._make_resolved("技术负责人"),
         )
         assert "立即执行" in prompt or "不要等待" in prompt
 
@@ -255,7 +300,9 @@ class TestAITimeCalibration:
         org = make_org(core_business="内容创作")
         identity = OrgIdentity(tmp_path)
         prompt = identity.build_org_context_prompt(
-            node=org.nodes[1], org=org, identity=self._make_resolved("执行者"),
+            node=org.nodes[1],
+            org=org,
+            identity=self._make_resolved("执行者"),
         )
         assert "分钟" in prompt
 
@@ -263,6 +310,7 @@ class TestAITimeCalibration:
 class TestDeadlineCalibration:
     def test_delegate_tool_deadline_description_mentions_minutes(self):
         from openakita.orgs.tools import ORG_NODE_TOOLS
+
         delegate_tool = next(t for t in ORG_NODE_TOOLS if t["name"] == "org_delegate_task")
         schema = delegate_tool.get("parameters") or delegate_tool.get("input_schema", {})
         deadline_desc = schema["properties"]["deadline"]["description"]
@@ -289,28 +337,32 @@ class TestFullFlowWSCoverage:
         await handler.handle(
             "org_delegate_task",
             {"to_node": "node_cto", "task": "实现登录功能"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
 
         # Step 2: CTO submits deliverable
         await handler.handle(
             "org_submit_deliverable",
             {"to_node": "node_ceo", "deliverable": "登录模块已完成", "summary": "完成"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
 
         # Step 3: CEO accepts
         await handler.handle(
             "org_accept_deliverable",
             {"from_node": "node_cto", "task_chain_id": "test_chain", "feedback": "合格"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
 
         # Step 4: CEO writes to blackboard
         await handler.handle(
             "org_write_blackboard",
             {"content": "登录功能开发完毕", "memory_type": "progress"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
 
         event_types = [c.args[0] for c in ws.call_args_list]
@@ -325,17 +377,20 @@ class TestFullFlowWSCoverage:
         await handler.handle(
             "org_delegate_task",
             {"to_node": "node_cto", "task": "设计API"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         await handler.handle(
             "org_submit_deliverable",
             {"to_node": "node_ceo", "deliverable": "初稿", "summary": "草稿"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         await handler.handle(
             "org_reject_deliverable",
             {"from_node": "node_cto", "task_chain_id": "rej_chain", "reason": "需补充错误处理"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
 
         event_types = [c.args[0] for c in ws.call_args_list]
@@ -353,6 +408,7 @@ def _make_test_app(mock_runtime):
     """Helper to create a test FastAPI app with org routes."""
     from openakita.api.routes.orgs import router as org_router
     from fastapi import FastAPI
+
     app = FastAPI()
     app.state.org_manager = mock_runtime._manager
     app.state.org_runtime = mock_runtime
@@ -362,13 +418,17 @@ def _make_test_app(mock_runtime):
 
 def _mock_stats_deps(mock_runtime, persisted_org):
     mock_runtime.get_org = MagicMock(return_value=persisted_org)
-    mock_runtime.get_inbox = MagicMock(return_value=MagicMock(
-        unread_count=MagicMock(return_value=0),
-        pending_approval_count=MagicMock(return_value=0),
-    ))
-    mock_runtime.get_scaler = MagicMock(return_value=MagicMock(
-        get_pending_requests=MagicMock(return_value=[]),
-    ))
+    mock_runtime.get_inbox = MagicMock(
+        return_value=MagicMock(
+            unread_count=MagicMock(return_value=0),
+            pending_approval_count=MagicMock(return_value=0),
+        )
+    )
+    mock_runtime.get_scaler = MagicMock(
+        return_value=MagicMock(
+            get_pending_requests=MagicMock(return_value=[]),
+        )
+    )
     mock_runtime._node_last_activity = {}
     mock_runtime._node_busy_since = {}
     mock_runtime._agent_cache = {}
@@ -467,6 +527,7 @@ class TestThinkingEndpoint:
     async def test_thinking_includes_messages(self, persisted_org, mock_runtime, org_dir):
         """If communication log exists, messages should appear in timeline."""
         import json
+
         try:
             from httpx import ASGITransport, AsyncClient
         except ImportError:
@@ -476,11 +537,16 @@ class TestThinkingEndpoint:
         logs_dir.mkdir(parents=True, exist_ok=True)
         comm_log = logs_dir / "communications.jsonl"
         comm_log.write_text(
-            json.dumps({
-                "from_node": "node_ceo", "to_node": "node_cto",
-                "content": "开始执行任务", "msg_type": "task_assign",
-                "timestamp": "2026-03-08T12:00:00",
-            }) + "\n",
+            json.dumps(
+                {
+                    "from_node": "node_ceo",
+                    "to_node": "node_cto",
+                    "content": "开始执行任务",
+                    "msg_type": "task_assign",
+                    "timestamp": "2026-03-08T12:00:00",
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
 

@@ -116,6 +116,7 @@ async def list_categories(request: Request):
 
     try:
         from openakita.config import settings
+
         base_path = Path(settings.project_root)
     except Exception:
         base_path = Path.cwd()
@@ -294,6 +295,7 @@ async def _scan_external_ids_in_category(
 
     try:
         from openakita.config import settings
+
         base_path = Path(settings.project_root)
     except Exception:
         base_path = Path.cwd()
@@ -319,6 +321,7 @@ def _ensure_skills_cache_invalidated() -> None:
     """显式失效 GET /api/skills 的模块级缓存（安全网）。"""
     try:
         from openakita.api.routes.skills import _invalidate_skills_cache
+
         _invalidate_skills_cache()
     except Exception:
         pass
@@ -336,19 +339,26 @@ async def enable_category(name: str, request: Request):
     target_ids, system_count = await _scan_external_ids_in_category(name)
     logger.info(
         "[category/enable] category=%r  external=%d  system=%d  ids=%s",
-        name, len(target_ids), system_count, sorted(target_ids)[:5],
+        name,
+        len(target_ids),
+        system_count,
+        sorted(target_ids)[:5],
     )
     if not target_ids:
         return {
-            "status": "ok", "name": name, "added": 0,
+            "status": "ok",
+            "name": name,
+            "added": 0,
             "system_count": system_count,
         }
 
     _, declared = read_allowlist()
     if declared is None:
         from openakita.skills.loader import SkillLoader
+
         try:
             from openakita.config import settings
+
             base_path = Path(settings.project_root)
         except Exception:
             base_path = Path.cwd()
@@ -384,19 +394,26 @@ async def disable_category(name: str, request: Request):
     target_ids, system_count = await _scan_external_ids_in_category(name)
     logger.info(
         "[category/disable] category=%r  external=%d  system=%d  ids=%s",
-        name, len(target_ids), system_count, sorted(target_ids)[:5],
+        name,
+        len(target_ids),
+        system_count,
+        sorted(target_ids)[:5],
     )
     if not target_ids:
         return {
-            "status": "ok", "name": name, "removed": 0,
+            "status": "ok",
+            "name": name,
+            "removed": 0,
             "system_count": system_count,
         }
 
     _, declared = read_allowlist()
     if declared is None:
         from openakita.skills.loader import SkillLoader
+
         try:
             from openakita.config import settings
+
             base_path = Path(settings.project_root)
         except Exception:
             base_path = Path.cwd()
@@ -458,7 +475,9 @@ async def move_skill(request: Request):
         if loader is not None:
             try:
                 for s in loader.registry.list_all():
-                    if (s.category or "Uncategorized") == target_category and getattr(s, "system", False):
+                    if (s.category or "Uncategorized") == target_category and getattr(
+                        s, "system", False
+                    ):
                         raise HTTPException(status_code=409, detail="外部技能不可移动到系统分类")
             except HTTPException:
                 raise

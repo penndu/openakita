@@ -191,9 +191,7 @@ def record_usage(
     """将一次 LLM 调用的 token 用量投递到写入队列（非阻塞）。"""
     budget = _token_budget_ctx.get()
     if budget:
-        budget.record(
-            input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens
-        )
+        budget.record(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens)
         if budget.exceeded:
             logger.info(
                 "[TokenBudget] %s reached budget: used=%s max=%s",
@@ -208,9 +206,7 @@ def record_usage(
         # Drop the record silently — but warn once so it shows up in logs.
         if not _drop_warned.is_set():
             _drop_warned.set()
-            logger.warning(
-                "[TokenTracking] dropping new records — writer thread is dead"
-            )
+            logger.warning("[TokenTracking] dropping new records — writer thread is dead")
         return
     ctx = _tracking_ctx.get()
     _write_queue.put(

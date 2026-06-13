@@ -263,4 +263,3 @@ class MediaStorage:
             safe_json_write(self.index_file, self._index)
         except Exception as e:
             logger.error(f"Failed to save media index: {e}")
-

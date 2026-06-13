@@ -18,4 +18,3 @@ class UserCancelledError(Exception):
         self.reason = reason
         self.source = source
         super().__init__(f"User cancelled ({source}): {reason}")
-

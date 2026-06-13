@@ -57,7 +57,10 @@ def _make_org(**overrides: Any) -> Organization:
         OrgEdge(source="cto", target="dev1", edge_type=EdgeType.HIERARCHY),
     ]
     defaults = dict(
-        id="org_test", name="测试公司", nodes=nodes, edges=edges,
+        id="org_test",
+        name="测试公司",
+        nodes=nodes,
+        edges=edges,
         operation_mode="command",
     )
     defaults.update(overrides)
@@ -79,12 +82,14 @@ def org_dir(tmp_path: Path) -> Path:
 @pytest.fixture()
 def project_store(org_dir: Path):
     from openakita.orgs.project_store import ProjectStore
+
     return ProjectStore(org_dir)
 
 
 @pytest.fixture()
 def event_store(org_dir: Path):
     from openakita.orgs.event_store import OrgEventStore
+
     return OrgEventStore(org_dir, "org_test")
 
 
@@ -149,16 +154,22 @@ class TestProjectTaskSubtaskFields:
 
     def test_subtask_creation(self):
         child = ProjectTask(
-            id="task_002", project_id="p1", title="child",
-            parent_task_id="task_001", depth=1,
+            id="task_002",
+            project_id="p1",
+            title="child",
+            parent_task_id="task_001",
+            depth=1,
         )
         assert child.parent_task_id == "task_001"
         assert child.depth == 1
 
     def test_subtask_roundtrip(self):
         t = ProjectTask(
-            id="task_x", project_id="p1", title="with plan",
-            parent_task_id="task_parent", depth=2,
+            id="task_x",
+            project_id="p1",
+            title="with plan",
+            parent_task_id="task_parent",
+            depth=2,
             plan_steps=[
                 {"step": 1, "title": "研究", "status": "done"},
                 {"step": 2, "title": "实现", "status": "pending"},
@@ -200,25 +211,41 @@ class TestProjectStoreEnhancements:
         store.create_project(proj)
 
         root_task = ProjectTask(
-            id="task_root", project_id="p1", title="根任务",
-            parent_task_id=None, depth=0, progress_pct=0,
+            id="task_root",
+            project_id="p1",
+            title="根任务",
+            parent_task_id=None,
+            depth=0,
+            progress_pct=0,
         )
         child1 = ProjectTask(
-            id="task_c1", project_id="p1", title="子任务1",
-            parent_task_id="task_root", depth=1,
-            assignee_node_id="cto", delegated_by="ceo",
+            id="task_c1",
+            project_id="p1",
+            title="子任务1",
+            parent_task_id="task_root",
+            depth=1,
+            assignee_node_id="cto",
+            delegated_by="ceo",
             progress_pct=80,
         )
         child2 = ProjectTask(
-            id="task_c2", project_id="p1", title="子任务2",
-            parent_task_id="task_root", depth=1,
-            assignee_node_id="cmo", delegated_by="ceo",
+            id="task_c2",
+            project_id="p1",
+            title="子任务2",
+            parent_task_id="task_root",
+            depth=1,
+            assignee_node_id="cmo",
+            delegated_by="ceo",
             progress_pct=40,
         )
         grandchild = ProjectTask(
-            id="task_gc1", project_id="p1", title="孙任务",
-            parent_task_id="task_c1", depth=2,
-            assignee_node_id="dev1", delegated_by="cto",
+            id="task_gc1",
+            project_id="p1",
+            title="孙任务",
+            parent_task_id="task_c1",
+            depth=2,
+            assignee_node_id="dev1",
+            delegated_by="cto",
             progress_pct=100,
         )
         for t in [root_task, child1, child2, grandchild]:
@@ -340,15 +367,33 @@ class TestEventStoreFiltering:
         assert results[0]["data"]["task_id"] == "task_001"
 
     def test_combined_filters(self, event_store):
-        event_store.emit("task_progress", "cto", {
-            "chain_id": "c1", "task_id": "t1", "pct": 50,
-        })
-        event_store.emit("task_progress", "cmo", {
-            "chain_id": "c1", "task_id": "t2", "pct": 30,
-        })
-        event_store.emit("task_progress", "dev1", {
-            "chain_id": "c2", "task_id": "t1", "pct": 70,
-        })
+        event_store.emit(
+            "task_progress",
+            "cto",
+            {
+                "chain_id": "c1",
+                "task_id": "t1",
+                "pct": 50,
+            },
+        )
+        event_store.emit(
+            "task_progress",
+            "cmo",
+            {
+                "chain_id": "c1",
+                "task_id": "t2",
+                "pct": 30,
+            },
+        )
+        event_store.emit(
+            "task_progress",
+            "dev1",
+            {
+                "chain_id": "c2",
+                "task_id": "t1",
+                "pct": 70,
+            },
+        )
 
         results = event_store.query(chain_id="c1", task_id="t1")
         assert len(results) == 1
@@ -365,6 +410,7 @@ class TestMessengerFrozenBuffer:
 
     def test_frozen_node_buffers_messages(self, org_dir):
         from openakita.orgs.messenger import OrgMessenger
+
         org = _make_org()
         m = OrgMessenger(org, org_dir)
         m.register_node("cto", AsyncMock())
@@ -372,8 +418,11 @@ class TestMessengerFrozenBuffer:
         m.freeze_mailbox("cto")
 
         msg = OrgMessage(
-            org_id="org_test", from_node="ceo", to_node="cto",
-            msg_type=MsgType.TASK_ASSIGN, content="test task",
+            org_id="org_test",
+            from_node="ceo",
+            to_node="cto",
+            msg_type=MsgType.TASK_ASSIGN,
+            content="test task",
         )
 
         loop = asyncio.new_event_loop()
@@ -390,6 +439,7 @@ class TestMessengerFrozenBuffer:
 
     def test_unfreeze_delivers_buffered(self, org_dir):
         from openakita.orgs.messenger import OrgMessenger
+
         org = _make_org()
         m = OrgMessenger(org, org_dir)
         handler = AsyncMock()
@@ -397,8 +447,11 @@ class TestMessengerFrozenBuffer:
         m.freeze_mailbox("cto")
 
         msg = OrgMessage(
-            org_id="org_test", from_node="ceo", to_node="cto",
-            msg_type=MsgType.TASK_ASSIGN, content="buffered task",
+            org_id="org_test",
+            from_node="ceo",
+            to_node="cto",
+            msg_type=MsgType.TASK_ASSIGN,
+            content="buffered task",
         )
 
         loop = asyncio.new_event_loop()
@@ -423,6 +476,7 @@ class TestSecurityFixes:
 
     def test_policy_path_blocks_backslash(self):
         from openakita.orgs.tool_handler import OrgToolHandler
+
         rt = MagicMock()
         rt._manager = MagicMock()
         handler = OrgToolHandler(rt)
@@ -501,7 +555,8 @@ class TestAcceptRejectIdempotency:
         handler = OrgToolHandler(rt)
         result = await handler._handle_org_accept_deliverable(
             {"from_node": "ceo", "feedback": "ok"},
-            "org_test", "ceo",
+            "org_test",
+            "ceo",
         )
         assert "不能验收自己" in result
 
@@ -519,7 +574,8 @@ class TestAcceptRejectIdempotency:
         handler = OrgToolHandler(rt)
         result = await handler._handle_org_reject_deliverable(
             {"from_node": "cto", "reason": "bad"},
-            "org_test", "cto",
+            "org_test",
+            "cto",
         )
         assert "不能打回自己" in result
 
@@ -582,7 +638,8 @@ class TestBlackboardTTL:
 
         bb = OrgBlackboard(org_dir, "org_test")
         bb.write_org(
-            content="old entry", source_node="ceo",
+            content="old entry",
+            source_node="ceo",
             memory_type=MemoryType.PROGRESS,
         )
 
@@ -599,12 +656,19 @@ class TestBlackboardTTL:
 
         old_ts = (datetime.now(timezone.utc) - timedelta(hours=200)).isoformat()
         expired_entry = {
-            "id": "old_1", "org_id": "org_test",
-            "scope": "org", "scope_owner": "",
-            "memory_type": "progress", "content": "expired stuff",
-            "source_node": "ceo", "created_at": old_ts, "tags": [],
-            "ttl_hours": 1, "importance": 0.5,
-            "last_accessed_at": old_ts, "access_count": 0,
+            "id": "old_1",
+            "org_id": "org_test",
+            "scope": "org",
+            "scope_owner": "",
+            "memory_type": "progress",
+            "content": "expired stuff",
+            "source_node": "ceo",
+            "created_at": old_ts,
+            "tags": [],
+            "ttl_hours": 1,
+            "importance": 0.5,
+            "last_accessed_at": old_ts,
+            "access_count": 0,
         }
         with open(bb_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(expired_entry) + "\n")
@@ -665,6 +729,7 @@ class TestPlanToolsInKeep:
         source_text = ""
         try:
             import inspect
+
             source_text = inspect.getsource(OrgRuntime._create_node_agent)
         except Exception:
             pass
@@ -692,8 +757,11 @@ class TestIdentityInjection:
         proj = OrgProject(id="p1", name="测试项目")
         store.create_project(proj)
         task = ProjectTask(
-            id="task_001", project_id="p1", title="做产品调研",
-            status=TaskStatus.IN_PROGRESS, assignee_node_id="ceo",
+            id="task_001",
+            project_id="p1",
+            title="做产品调研",
+            status=TaskStatus.IN_PROGRESS,
+            assignee_node_id="ceo",
         )
         store.add_task("p1", task)
 
@@ -701,7 +769,9 @@ class TestIdentityInjection:
         node = sample_org.nodes[0]
         resolved = identity.resolve(node, sample_org)
         prompt = identity.build_org_context_prompt(
-            node, sample_org, resolved,
+            node,
+            sample_org,
+            resolved,
             project_tasks_summary="- 做产品调研 (进行中)",
         )
         assert "做产品调研" in prompt
@@ -740,10 +810,12 @@ class TestWatchdogMechanism:
 
     def test_watchdog_notify_delegator_method_exists(self):
         from openakita.orgs.runtime import OrgRuntime
+
         assert hasattr(OrgRuntime, "_watchdog_notify_delegator")
 
     def test_watchdog_loop_method_exists(self):
         from openakita.orgs.runtime import OrgRuntime
+
         assert hasattr(OrgRuntime, "_watchdog_loop")
 
 
@@ -775,10 +847,12 @@ class TestHealthCheckLoop:
 
     def test_health_check_loop_exists(self):
         from openakita.orgs.runtime import OrgRuntime
+
         assert hasattr(OrgRuntime, "_health_check_loop")
 
     def test_idle_probe_loop_exists(self):
         from openakita.orgs.runtime import OrgRuntime
+
         assert hasattr(OrgRuntime, "_idle_probe_loop")
 
 
@@ -793,12 +867,14 @@ class TestCloneDismissMessenger:
     def test_scaler_registers_new_node(self):
         import inspect
         from openakita.orgs.scaler import OrgScaler
+
         source = inspect.getsource(OrgScaler.approve_request)
         assert "register_node" in source or "messenger" in source
 
     def test_scaler_dismiss_cleans_up(self):
         import inspect
         from openakita.orgs.scaler import OrgScaler
+
         source = inspect.getsource(OrgScaler.dismiss_node)
         assert "unregister_node" in source
 
@@ -813,17 +889,20 @@ class TestRecalcParentProgress:
 
     def test_recalc_parent_progress_method_exists(self):
         from openakita.orgs.tool_handler import OrgToolHandler
+
         assert hasattr(OrgToolHandler, "_recalc_parent_progress")
 
     def test_accept_calls_recalc(self):
         import inspect
         from openakita.orgs.tool_handler import OrgToolHandler
+
         source = inspect.getsource(OrgToolHandler._handle_org_accept_deliverable)
         assert "_recalc_parent_progress" in source
 
     def test_reject_calls_recalc(self):
         import inspect
         from openakita.orgs.tool_handler import OrgToolHandler
+
         source = inspect.getsource(OrgToolHandler._handle_org_reject_deliverable)
         assert "_recalc_parent_progress" in source
 
@@ -838,29 +917,34 @@ class TestExecutionLogTracking:
 
     def test_append_execution_log_method(self):
         from openakita.orgs.tool_handler import OrgToolHandler
+
         assert hasattr(OrgToolHandler, "_append_execution_log")
 
     def test_delegation_logs(self):
         import inspect
         from openakita.orgs.tool_handler import OrgToolHandler
+
         source = inspect.getsource(OrgToolHandler._handle_org_delegate_task)
         assert "_append_execution_log" in source
 
     def test_deliver_logs(self):
         import inspect
         from openakita.orgs.tool_handler import OrgToolHandler
+
         source = inspect.getsource(OrgToolHandler._handle_org_submit_deliverable)
         assert "_append_execution_log" in source
 
     def test_accept_logs(self):
         import inspect
         from openakita.orgs.tool_handler import OrgToolHandler
+
         source = inspect.getsource(OrgToolHandler._handle_org_accept_deliverable)
         assert "_append_execution_log" in source
 
     def test_reject_logs(self):
         import inspect
         from openakita.orgs.tool_handler import OrgToolHandler
+
         source = inspect.getsource(OrgToolHandler._handle_org_reject_deliverable)
         assert "_append_execution_log" in source
 
@@ -875,11 +959,13 @@ class TestPlanTaskBridge:
 
     def test_bridge_method_exists(self):
         from openakita.orgs.tool_handler import OrgToolHandler
+
         assert hasattr(OrgToolHandler, "_bridge_plan_to_task")
 
     def test_bridge_in_runtime_patch(self):
         import inspect
         from openakita.orgs.runtime import OrgRuntime
+
         source = inspect.getsource(OrgRuntime._create_node_agent)
         assert "_bridge_plan_to_task" in source or "plan" in source.lower()
 
@@ -895,6 +981,7 @@ class TestAPIEndpoints:
     def test_api_task_detail_routes(self):
         import inspect
         from openakita.api.routes import orgs
+
         source = inspect.getsource(orgs)
         assert "tasks/{task_id}" in source or "tasks/{task_id}/tree" in source
         assert "nodes/{node_id}/tasks" in source or "node_id" in source
@@ -903,6 +990,7 @@ class TestAPIEndpoints:
     def test_dispatch_endpoint(self):
         import inspect
         from openakita.api.routes import orgs
+
         source = inspect.getsource(orgs)
         assert "dispatch" in source
 
@@ -946,6 +1034,7 @@ class TestBroadcastThrottle:
     def test_broadcast_no_trigger(self):
         import inspect
         from openakita.orgs.messenger import OrgMessenger
+
         source = inspect.getsource(OrgMessenger._broadcast)
         assert "trigger_handler" in source
 
@@ -961,6 +1050,7 @@ class TestScheduleApproval:
     def test_schedule_through_approval(self):
         import inspect
         from openakita.orgs.tool_handler import OrgToolHandler
+
         source = inspect.getsource(OrgToolHandler._handle_org_create_schedule)
         assert "push_approval" in source or "approval" in source
 
@@ -975,11 +1065,13 @@ class TestSaveConcurrencyLock:
 
     def test_save_lock_exists(self):
         from openakita.orgs.runtime import OrgRuntime
+
         assert hasattr(OrgRuntime, "_get_save_lock")
 
     def test_save_org_uses_lock(self):
         import inspect
         from openakita.orgs.runtime import OrgRuntime
+
         source = inspect.getsource(OrgRuntime._save_org)
         assert "_get_save_lock" in source or "_save_locks" in source
 
@@ -997,23 +1089,32 @@ class TestSubtaskIntegration:
         project_store.create_project(proj)
 
         root = ProjectTask(
-            id="t_root", project_id="p_int", title="总任务",
-            depth=0, parent_task_id=None,
+            id="t_root",
+            project_id="p_int",
+            title="总任务",
+            depth=0,
+            parent_task_id=None,
         )
         project_store.add_task("p_int", root)
 
         for i in range(3):
             child = ProjectTask(
-                id=f"t_child_{i}", project_id="p_int",
+                id=f"t_child_{i}",
+                project_id="p_int",
                 title=f"子任务{i}",
-                parent_task_id="t_root", depth=1,
+                parent_task_id="t_root",
+                depth=1,
                 progress_pct=(i + 1) * 25,
             )
             project_store.add_task("p_int", child)
 
         gc = ProjectTask(
-            id="t_gc_0", project_id="p_int", title="孙任务",
-            parent_task_id="t_child_0", depth=2, progress_pct=100,
+            id="t_gc_0",
+            project_id="p_int",
+            title="孙任务",
+            parent_task_id="t_child_0",
+            depth=2,
+            progress_pct=100,
         )
         project_store.add_task("p_int", gc)
 

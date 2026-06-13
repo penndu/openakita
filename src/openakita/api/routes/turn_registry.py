@@ -49,9 +49,7 @@ class TurnRegistry:
     def __init__(self, *, ttl_seconds: float | None = None) -> None:
         self._records: dict[str, TurnRecord] = {}
         self._lock = asyncio.Lock()
-        self._ttl_seconds = (
-            ttl_seconds if ttl_seconds is not None else self.DEFAULT_TTL_SECONDS
-        )
+        self._ttl_seconds = ttl_seconds if ttl_seconds is not None else self.DEFAULT_TTL_SECONDS
 
     async def begin(self, turn_id: str) -> tuple[TurnStatus | Literal["new"], TurnRecord | None]:
         """Try to claim ``turn_id``.

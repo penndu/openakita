@@ -148,7 +148,9 @@ class EndpointManager:
 
     def __init__(self, workspace_dir: Path, *, config_path: Path | None = None):
         self._ws_dir = Path(workspace_dir)
-        self._json_path = Path(config_path) if config_path else (self._ws_dir / "data" / "llm_endpoints.json")
+        self._json_path = (
+            Path(config_path) if config_path else (self._ws_dir / "data" / "llm_endpoints.json")
+        )
         self._env_path = self._ws_dir / ".env"
         self._lock = threading.Lock()
 
@@ -232,11 +234,7 @@ class EndpointManager:
                 first = dict(endpoints[0])
                 first_name = str(first.get("name") or "").strip()
                 existing = next(
-                    (
-                        e
-                        for e in config.get(endpoint_type, [])
-                        if e.get("name") == first_name
-                    ),
+                    (e for e in config.get(endpoint_type, []) if e.get("name") == first_name),
                     None,
                 )
                 shared_env_var = self._resolve_env_var(first, existing, config)
@@ -307,7 +305,9 @@ class EndpointManager:
             self._write_env_key(env_var, api_key)
             os.environ[env_var] = api_key
         else:
-            env_var = existing.get("api_key_env", "") if existing else endpoint.get("api_key_env", "")
+            env_var = (
+                existing.get("api_key_env", "") if existing else endpoint.get("api_key_env", "")
+            )
 
         endpoint["api_key_env"] = env_var
 

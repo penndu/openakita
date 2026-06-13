@@ -187,7 +187,7 @@ def _resolve_force_tool_policy(intent: Any) -> tuple[int | None, bool]:
     if force_tool:
         return 2, False  # 允许 2 次 ForceToolCall 重试，但不要求 evidence
     if evidence_required:
-        return 1, True   # 1 次柔性提示，evidence_required 走阶段 0 disclaimer
+        return 1, True  # 1 次柔性提示，evidence_required 走阶段 0 disclaimer
     return 0, False
 
 
@@ -375,15 +375,18 @@ def _looks_like_previous_answer_replay_request(message: str, history_messages: l
     has_replay_marker = any(marker in normalized for marker in _REPLAY_REQUEST_MARKERS)
     has_context_marker = any(marker in normalized for marker in _REPLAY_CONTEXT_MARKERS)
     asks_to_show_again = (
-        ("重新展示" in normalized or "重新显示" in normalized or "再发" in normalized)
-        and has_context_marker
-    )
+        "重新展示" in normalized or "重新显示" in normalized or "再发" in normalized
+    ) and has_context_marker
     asks_to_continue_previous = (
         ("继续" in normalized or "接着" in normalized)
         and ("展示" in normalized or "显示" in normalized or "输出" in normalized)
         and has_context_marker
     )
-    return (has_replay_marker and has_context_marker) or asks_to_show_again or asks_to_continue_previous
+    return (
+        (has_replay_marker and has_context_marker)
+        or asks_to_show_again
+        or asks_to_continue_previous
+    )
 
 
 def _apply_previous_answer_replay_hint(message: str) -> str:
@@ -543,12 +546,14 @@ def _maybe_inline_local_image(att_url: str, att_mime: str) -> str | None:
         if size > _INLINE_IMAGE_MAX_BYTES:
             logger.info(
                 "[InlineImage] skip %s: %.1f MB exceeds limit",
-                filename, size / 1024 / 1024,
+                filename,
+                size / 1024 / 1024,
             )
             return None
         mime = att_mime or ""
         if not mime.startswith("image/"):
             import mimetypes
+
             mime = mimetypes.guess_type(str(filepath))[0] or "image/png"
         data = filepath.read_bytes()
         b64 = base64.b64encode(data).decode("ascii")
@@ -614,8 +619,7 @@ def _save_data_uri_attachment(
             suffix = mimetypes.guess_extension(mime) or ".bin"
 
         filename = (
-            f"{int(time.time())}_{uuid.uuid4().hex[:8]}_"
-            f"{_safe_attachment_stem(att_name)}{suffix}"
+            f"{int(time.time())}_{uuid.uuid4().hex[:8]}_{_safe_attachment_stem(att_name)}{suffix}"
         )
         filepath = get_upload_dir() / filename
         filepath.write_bytes(raw)
@@ -748,6 +752,7 @@ class PromptStrategy:
     catalog_scope: list[str] = field(default_factory=list)
     include_project_guidelines: bool = False
 
+
 def _classify_risk_intent(intent: Any, message: str) -> RiskIntentResult:
     """Single source of truth for the pre-ReAct risk gate."""
     return classify_risk_intent(message, intent)
@@ -785,10 +790,7 @@ def _consume_risk_authorization(session: Any, message: str) -> bool:
             expired = float(stamp.get("expires_at", 0)) < time.time()
         except (TypeError, ValueError):
             expired = True
-        msg_match = (
-            (stamp.get("original_message") or "").strip()
-            == (message or "").strip()
-        )
+        msg_match = (stamp.get("original_message") or "").strip() == (message or "").strip()
         if expired:
             try:
                 session.set_metadata("risk_authorized_replay", None)
@@ -838,7 +840,7 @@ def _consume_risk_authorization(session: Any, message: str) -> bool:
 
 
 # Targets that still require RiskGate confirmation even under trust (yolo) mode.
-#普通用户文件 / 桌面文件 / 未知目标 在信任模式下放行；
+# 普通用户文件 / 桌面文件 / 未知目标 在信任模式下放行；
 # 安全策略 / 死亡开关 / 安全白名单 / shell 命令 / 已知受保护文件 仍要 confirm。
 # 真正的系统/密钥目录与 CRITICAL shell 由 PolicyEngine baseline 兜底拦截。
 _TRUST_MODE_MUST_CONFIRM_TARGETS = frozenset(
@@ -881,9 +883,7 @@ def _check_trust_mode_skip(risk_intent: RiskIntentResult | None) -> str | None:
         from .policy_v2.global_engine import get_config_v2
 
         mode_value = get_config_v2().confirmation.mode
-        is_trust = (
-            mode_value == ConfirmationMode.TRUST or str(mode_value) == "trust"
-        )
+        is_trust = mode_value == ConfirmationMode.TRUST or str(mode_value) == "trust"
     except Exception:
         return None  # v2 不可用 → 当作未启用 trust（保守）
 
@@ -930,7 +930,9 @@ def _check_trusted_path_skip(
     return None
 
 
-def _build_destructive_intent_question(message: str, classification: RiskIntentResult | None = None) -> str:
+def _build_destructive_intent_question(
+    message: str, classification: RiskIntentResult | None = None
+) -> str:
     """生成高危确认提示。
 
     PR-1.1：两步式 summary。先把用户的长描述抽成 ≤30 字的"准备执行 X"
@@ -967,8 +969,17 @@ def _build_destructive_intent_question(message: str, classification: RiskIntentR
 
 
 _DESTRUCTIVE_VERBS = (
-    "删除", "删掉", "清空", "清除", "重置", "覆盖", "禁用", "关闭",
-    "卸载", "销毁", "格式化",
+    "删除",
+    "删掉",
+    "清空",
+    "清除",
+    "重置",
+    "覆盖",
+    "禁用",
+    "关闭",
+    "卸载",
+    "销毁",
+    "格式化",
 )
 
 
@@ -991,6 +1002,7 @@ def _summarize_destructive_action(text: str, classification: Any | None = None) 
             tail = raw[i : i + 28]
             return tail + ("…" if len(raw) > i + 28 else "")
     return raw[:28] + "…"
+
 
 # Prompt Compiler 系统提示词（两段式 Prompt 第一阶段）
 PROMPT_COMPILER_SYSTEM = """【角色】
@@ -1384,9 +1396,7 @@ class Agent:
 
         self._tools.extend(AGENT_TOOLS)
         self._tools.extend(ORG_SETUP_TOOLS)
-        logger.info(
-            f"Multi-agent tools enabled ({len(AGENT_TOOLS) + len(ORG_SETUP_TOOLS)} tools)"
-        )
+        logger.info(f"Multi-agent tools enabled ({len(AGENT_TOOLS) + len(ORG_SETUP_TOOLS)} tools)")
 
         # Platform hub tools (Agent Hub + Skill Store, only when enabled)
         if settings.hub_enabled:
@@ -1553,7 +1563,9 @@ class Agent:
                     deps=self._runtime_env_dependencies,
                 )
             except Exception as exc:
-                logger.warning("Failed to resolve agent runtime env for %s: %s", self._agent_profile_id, exc)
+                logger.warning(
+                    "Failed to resolve agent runtime env for %s: %s", self._agent_profile_id, exc
+                )
 
         if hasattr(self.shell_tool, "execution_env_spec"):
             self.shell_tool.execution_env_spec = self._execution_env_spec
@@ -1973,7 +1985,8 @@ class Agent:
                 # 中继交付都让 TaskVerify 看到真实的交付证据。
                 if (
                     capture_delivery_receipts
-                    and tool_name in (
+                    and tool_name
+                    in (
                         "deliver_artifacts",
                         "org_submit_deliverable",
                         "org_accept_deliverable",
@@ -2097,9 +2110,7 @@ class Agent:
             self._attach_shared_runtime(share_from)
             # 启动记忆会话（sub-agent 独享 session_id，但底层 store 通常
             # 仍是主 Agent 的，除非 factory 后续 apply 了 memory_isolation）。
-            session_id = (
-                datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8]
-            )
+            session_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8]
             self.memory_manager.start_session(session_id)
             self._current_session_id = session_id
             if hasattr(self, "_memory_handler"):
@@ -2153,9 +2164,7 @@ class Agent:
                     else None
                 ),
             )
-            logger.info(
-                "[PolicyV2] global engine rebuilt with skill/mcp/plugin lookups (C10)"
-            )
+            logger.info("[PolicyV2] global engine rebuilt with skill/mcp/plugin lookups (C10)")
         except Exception as exc:
             logger.warning(
                 "[PolicyV2] failed to inject skill/mcp/plugin lookups: %s — "
@@ -2379,7 +2388,9 @@ class Agent:
             pa._plugin_catalog = self.plugin_catalog
 
         if hasattr(self, "tool_executor") and self.tool_executor is not None:
-            self.tool_executor._plugin_hooks = self._plugin_manager.hook_registry if self._plugin_manager else None
+            self.tool_executor._plugin_hooks = (
+                self._plugin_manager.hook_registry if self._plugin_manager else None
+            )
             self.tool_executor._plugin_manager = self._plugin_manager
 
         if hasattr(self, "reasoning_engine") and self.reasoning_engine is not None:
@@ -2388,13 +2399,19 @@ class Agent:
             )
 
         # 让 memory_manager.retrieval_engine 也能走 plugin hook
-        if self.memory_manager and hasattr(self.memory_manager, "retrieval_engine") and self._plugin_manager:
+        if (
+            self.memory_manager
+            and hasattr(self.memory_manager, "retrieval_engine")
+            and self._plugin_manager
+        ):
             self.memory_manager.retrieval_engine._plugin_hooks = self._plugin_manager.hook_registry
 
         logger.info(
             "[share_from] sub-agent '%s' attached to parent '%s': "
             "+%d tool defs, plugins/skills/mcp shared by reference",
-            self.name, parent.name, added,
+            self.name,
+            parent.name,
+            added,
         )
 
     async def _load_plugins(self) -> None:
@@ -3036,9 +3053,7 @@ class Agent:
         if retrieval_sources is None or memory_backends is None:
             return
 
-        existing_sources = {
-            getattr(source, "source_name", "") for source in retrieval_sources
-        }
+        existing_sources = {getattr(source, "source_name", "") for source in retrieval_sources}
 
         for server in self.mcp_catalog.servers:
             provider_cfg = getattr(server, "memory_provider", None) or {}
@@ -3555,7 +3570,9 @@ class Agent:
         profile_id = getattr(self, "_agent_profile_id", "default") or "default"
         spec = getattr(self, "_execution_env_spec", None)
         if spec is None:
-            env_line = "当前 Agent 使用共享 `agent-venv` fallback；不要把长期任务依赖随意安装到共享环境。"
+            env_line = (
+                "当前 Agent 使用共享 `agent-venv` fallback；不要把长期任务依赖随意安装到共享环境。"
+            )
         else:
             env_line = (
                 f"当前 AgentProfile `{profile_id}` 使用独立 Python 环境 "
@@ -3758,7 +3775,9 @@ class Agent:
                     "channel": getattr(session, "channel", "unknown"),
                     "chat_type": getattr(session, "chat_type", "private"),
                     "message_count": len(session.context.messages) if session.context else 0,
-                    "working_facts": getattr(session.context, "working_facts", {}) if session.context else {},
+                    "working_facts": getattr(session.context, "working_facts", {})
+                    if session.context
+                    else {},
                     "effective_model": session.get_metadata("effective_model", {}),
                     "has_sub_agents": bool(sub_records),
                     "sub_agent_count": len(sub_records),
@@ -3844,10 +3863,7 @@ class Agent:
             str(_identity_dir),
         )
 
-        if (
-            not self._system_prompt_cache_dirty
-            and _cache_key in self._system_prompt_cache
-        ):
+        if not self._system_prompt_cache_dirty and _cache_key in self._system_prompt_cache:
             prompt = self._system_prompt_cache[_cache_key]
             logger.debug("[Agent] system prompt cache HIT (key=%s)", _cache_key[:3])
         else:
@@ -3923,11 +3939,19 @@ class Agent:
         profile = self._resolve_prompt_profile(intent, session_type)
         prompt_mode = PromptMode.FULL
         skip_catalogs = False
-        memory_scope = getattr(intent, "memory_scope", MemoryScope.RELEVANT) if intent else MemoryScope.RELEVANT
+        memory_scope = (
+            getattr(intent, "memory_scope", MemoryScope.RELEVANT)
+            if intent
+            else MemoryScope.RELEVANT
+        )
         catalog_scope = list(getattr(intent, "catalog_scope", []) or [])
         include_project_guidelines = bool(getattr(intent, "requires_project_context", False))
 
-        prompt_depth = getattr(intent, "prompt_depth", PromptDepth.STANDARD) if intent else PromptDepth.STANDARD
+        prompt_depth = (
+            getattr(intent, "prompt_depth", PromptDepth.STANDARD)
+            if intent
+            else PromptDepth.STANDARD
+        )
         requires_tools = bool(getattr(intent, "requires_tools", False))
 
         if intent and intent.intent in (IntentType.CHAT, IntentType.QUERY):
@@ -3974,6 +3998,7 @@ class Agent:
             return ""
 
         from ..agents.presets import SYSTEM_PRESETS
+
         if self._is_sub_agent_call:
             return (
                 "\n\n---\n"
@@ -3988,7 +4013,7 @@ class Agent:
                 "（Windows 用 run_powershell，其他环境用 run_shell）执行 python，"
                 "或调用对应工具获得，不得凭经验估算。\n"
                 "- 任何没有工具输出佐证的数字、百分比、均值、标准差、概率一律视为违规。\n"
-                "- 无法获得真实数据时，明确返回：\"无法执行：<具体原因>，建议 <替代方案>\"，"
+                '- 无法获得真实数据时，明确返回："无法执行：<具体原因>，建议 <替代方案>"，'
                 "禁止编造数据占位。\n"
             )
 
@@ -4526,7 +4551,9 @@ class Agent:
 
         _tt = set_tracking_context(
             TokenTrackingContext(
-                session_id=getattr(self, "_current_conversation_id", "") or getattr(self, "_current_session_id", "") or "",
+                session_id=getattr(self, "_current_conversation_id", "")
+                or getattr(self, "_current_session_id", "")
+                or "",
                 operation_type="context_compress",
                 operation_detail=context_type,
             )
@@ -4693,7 +4720,9 @@ class Agent:
 
             _tt2 = set_tracking_context(
                 TokenTrackingContext(
-                    session_id=getattr(self, "_current_conversation_id", "") or getattr(self, "_current_session_id", "") or "",
+                    session_id=getattr(self, "_current_conversation_id", "")
+                    or getattr(self, "_current_session_id", "")
+                    or "",
                     operation_type="context_compress",
                     operation_detail=f"chunk_{i}",
                 )
@@ -5048,7 +5077,8 @@ class Agent:
             memory_workspace_id = self._resolve_memory_workspace_id(session)
             if (
                 getattr(self.memory_manager, "_current_session_id", None) != conversation_safe_id
-                or getattr(self.memory_manager, "_current_workspace_id", None) != memory_workspace_id
+                or getattr(self.memory_manager, "_current_workspace_id", None)
+                != memory_workspace_id
             ):
                 self.memory_manager.start_session(
                     conversation_safe_id,
@@ -5070,7 +5100,11 @@ class Agent:
                         from ..memory.types import Scratchpad as _SpClear
 
                         store.save_scratchpad(
-                            _SpClear(user_id=getattr(session, "user_id", "default") if session else "default")
+                            _SpClear(
+                                user_id=getattr(session, "user_id", "default")
+                                if session
+                                else "default"
+                            )
                         )
                         logger.debug(
                             f"[Session] Cleared scratchpad for new conversation {conversation_id}"
@@ -5466,9 +5500,8 @@ class Agent:
             f"{len(messages)} history msgs, has_history={_has_history}"
         )
 
-        if (
-            isinstance(compiled_message, str)
-            and _looks_like_previous_answer_replay_request(message, messages)
+        if isinstance(compiled_message, str) and _looks_like_previous_answer_replay_request(
+            message, messages
         ):
             compiled_message = _apply_previous_answer_replay_hint(compiled_message)
             logger.info(
@@ -6228,7 +6261,9 @@ class Agent:
             endpoint_policy = (
                 endpoint_policy
                 if explicit_endpoint
-                else self._endpoint_policy if endpoint_override == self._preferred_endpoint else "prefer"
+                else self._endpoint_policy
+                if endpoint_override == self._preferred_endpoint
+                else "prefer"
             )
         else:
             endpoint_policy = "prefer"
@@ -6419,7 +6454,9 @@ class Agent:
                             _trust_mode_reason,
                             session_id,
                             getattr(_risk_intent.target_kind, "value", _risk_intent.target_kind),
-                            getattr(_risk_intent.operation_kind, "value", _risk_intent.operation_kind),
+                            getattr(
+                                _risk_intent.operation_kind, "value", _risk_intent.operation_kind
+                            ),
                             message[:200],
                         )
             if (
@@ -6650,7 +6687,9 @@ class Agent:
             endpoint_policy = (
                 endpoint_policy
                 if explicit_endpoint
-                else self._endpoint_policy if endpoint_override == self._preferred_endpoint else "prefer"
+                else self._endpoint_policy
+                if endpoint_override == self._preferred_endpoint
+                else "prefer"
             )
         else:
             endpoint_policy = "prefer"
@@ -6891,7 +6930,9 @@ class Agent:
                             session_id,
                             conversation_id,
                             getattr(_risk_intent.target_kind, "value", _risk_intent.target_kind),
-                            getattr(_risk_intent.operation_kind, "value", _risk_intent.operation_kind),
+                            getattr(
+                                _risk_intent.operation_kind, "value", _risk_intent.operation_kind
+                            ),
                             message[:200],
                         )
             if (
@@ -7195,9 +7236,7 @@ class Agent:
                     last = dict(messages[-1])
                     existing = last.get("content")
                     if isinstance(existing, list):
-                        last["content"] = existing + [
-                            {"type": "text", "text": soft_hint}
-                        ]
+                        last["content"] = existing + [{"type": "text", "text": soft_hint}]
                     else:
                         last["content"] = (existing or "") + soft_hint
                     messages[-1] = last
@@ -7381,9 +7420,7 @@ class Agent:
         total_out = sum(t.get("tokens", {}).get("output", 0) for t in trace)
         usage_estimated = any(bool(t.get("usage_estimated")) for t in trace)
         usage_sources = {
-            str(t.get("usage_source"))
-            for t in trace
-            if str(t.get("usage_source") or "").strip()
+            str(t.get("usage_source")) for t in trace if str(t.get("usage_source") or "").strip()
         }
         summary = {
             "input_tokens": total_in,
@@ -7397,7 +7434,9 @@ class Agent:
             summary["billable_output_tokens"] = total_out
             summary["billable_total_tokens"] = total_in + total_out
         if usage_sources:
-            summary["usage_source"] = "mixed" if len(usage_sources) > 1 else next(iter(usage_sources))
+            summary["usage_source"] = (
+                "mixed" if len(usage_sources) > 1 else next(iter(usage_sources))
+            )
         try:
             re = self.reasoning_engine
             ctx_mgr = getattr(self, "context_manager", None) or getattr(
@@ -8546,8 +8585,7 @@ class Agent:
         # 旧 task 已死（cancelled 或非活动状态）→ 清理 + proceed，与老逻辑一致
         if _prev_task.cancelled or not _prev_task.is_active:
             logger.info(
-                "[Session:%s] Resetting stale task (cancelled=%s, status=%s, "
-                "reset_key=%r)",
+                "[Session:%s] Resetting stale task (cancelled=%s, status=%s, reset_key=%r)",
                 session_id,
                 _prev_task.cancelled,
                 _prev_task.status.value,
@@ -8612,11 +8650,9 @@ class Agent:
                     # too — keeps logging accurate.
                     block_tools: list[str] = []
                     for n in in_flight:
-                        if (
-                            resolve_in_flight_behavior(n, mcp_client=mcp_client)
-                            == "block"
-                        ):
+                        if resolve_in_flight_behavior(n, mcp_client=mcp_client) == "block":
                             block_tools.append(n)
+
                     # Distinguish "我们标了 block 的工具" vs "未知工具默认
                     # block"——后者表明 _INTERRUPT_BEHAVIOR_MAP 漏标了，
                     # 运维需要在监控里看到这个比例。
@@ -8629,9 +8665,7 @@ class Agent:
                         return is_unknown_tool(n)
 
                     only_unknown = all(_is_drift(n) for n in block_tools)
-                    downgrade_reason = (
-                        "unknown_tool" if only_unknown else "block_in_flight"
-                    )
+                    downgrade_reason = "unknown_tool" if only_unknown else "block_in_flight"
                     logger.info(
                         "[Session:%s] Downgrading INTERRUPT -> QUEUE on task "
                         "%s: %d block-class tool(s) in flight "
@@ -8640,15 +8674,12 @@ class Agent:
                         _prev_task.task_id[:8],
                         len(block_tools),
                         downgrade_reason,
-                        ",".join(block_tools[:5])
-                        + ("…" if len(block_tools) > 5 else ""),
+                        ",".join(block_tools[:5]) + ("…" if len(block_tools) > 5 else ""),
                     )
                     try:
                         from .conversation_metrics import inc_interrupt_downgrade
 
-                        inc_interrupt_downgrade(
-                            channel=channel, reason=downgrade_reason
-                        )
+                        inc_interrupt_downgrade(channel=channel, reason=downgrade_reason)
                     except Exception:
                         pass
                     # Fall through to QUEUE branch below by mutating policy.
@@ -8691,9 +8722,7 @@ class Agent:
             # 在跑，再延长一次等待（不直接 cancel）。覆盖大多数 long-write
             # 场景，避免 write_file/run_shell 超过 queue 等待窗口仍被中断
             # 造成数据损坏。设 extension_ms=0 即关闭该机制。
-            extension_ms = getattr(
-                settings, "preempt_block_tool_extension_ms", 0
-            )
+            extension_ms = getattr(settings, "preempt_block_tool_extension_ms", 0)
             extension_s = max(0.0, extension_ms / 1000.0)
             timed_out = False
             extended_once = False
@@ -8708,9 +8737,7 @@ class Agent:
                 # sync, and CancelledError is only injected at await
                 # points — so the except-handler can always run to
                 # completion before re-raising.
-                await asyncio.wait_for(
-                    _prev_task.wait_until_settled(), timeout=queue_timeout_s
-                )
+                await asyncio.wait_for(_prev_task.wait_until_settled(), timeout=queue_timeout_s)
                 logger.info(
                     "[Session:%s] QUEUE: old task %s settled; proceeding",
                     session_id,
@@ -8730,10 +8757,7 @@ class Agent:
                 # flight.  If yes (and extension is configured), give the
                 # old task one more grace window before forcibly cancelling.
                 in_flight_after_timeout = _prev_task.get_in_flight_tools()
-                if (
-                    extension_s > 0
-                    and in_flight_after_timeout
-                ):
+                if extension_s > 0 and in_flight_after_timeout:
                     from .tool_interrupt_behavior import (
                         has_any_block_in_flight,
                         is_unknown_tool,
@@ -8746,13 +8770,10 @@ class Agent:
                         mcp_client=mcp_client_for_ext,
                     ):
                         only_unknown = all(
-                            parse_mcp_sub_tool(n) is None
-                            and is_unknown_tool(n)
+                            parse_mcp_sub_tool(n) is None and is_unknown_tool(n)
                             for n in in_flight_after_timeout
                         )
-                        ext_reason = (
-                            "unknown_tool" if only_unknown else "block_in_flight"
-                        )
+                        ext_reason = "unknown_tool" if only_unknown else "block_in_flight"
                         logger.info(
                             "[Session:%s] QUEUE wait timed out after %dms but "
                             "block tool(s) still in flight (sample=%s, "
@@ -8760,20 +8781,14 @@ class Agent:
                             session_id,
                             queue_timeout_ms,
                             ",".join(in_flight_after_timeout[:3])
-                            + (
-                                "…"
-                                if len(in_flight_after_timeout) > 3
-                                else ""
-                            ),
+                            + ("…" if len(in_flight_after_timeout) > 3 else ""),
                             ext_reason,
                             extension_ms,
                         )
                         try:
                             from .conversation_metrics import inc_queue_extended
 
-                            inc_queue_extended(
-                                channel=channel, reason=ext_reason
-                            )
+                            inc_queue_extended(channel=channel, reason=ext_reason)
                         except Exception:
                             pass
                         extended_once = True
@@ -8800,10 +8815,7 @@ class Agent:
                     timed_out = True
 
             if timed_out:
-                total_waited_ms = (
-                    queue_timeout_ms
-                    + (extension_ms if extended_once else 0)
-                )
+                total_waited_ms = queue_timeout_ms + (extension_ms if extended_once else 0)
                 logger.warning(
                     "[Session:%s] QUEUE wait timed out after %dms "
                     "(extended=%s); cancelling+abandoning old task %s "
@@ -8821,9 +8833,7 @@ class Agent:
                 # 不调 cancel 的话 QUEUE 超时后老工具（shell / browser）
                 # 会继续跑直到自己返回，跟新 task 的工具产生 cwd / fs
                 # 副作用 race。
-                _prev_task.cancel(
-                    f"QUEUE timeout after {total_waited_ms}ms"
-                )
+                _prev_task.cancel(f"QUEUE timeout after {total_waited_ms}ms")
                 _prev_task.abandoned = True
                 # S1.8 + P0-3: when abandoning, also surface whatever
                 # partial answer the user already saw — otherwise the
@@ -8889,9 +8899,7 @@ class Agent:
             # the outer is cancelled.  The except-handler below is sync
             # except for the final ``raise``, so cleanup still runs to
             # completion before propagation.
-            await asyncio.wait_for(
-                _prev_task.wait_until_settled(), timeout=timeout_s
-            )
+            await asyncio.wait_for(_prev_task.wait_until_settled(), timeout=timeout_s)
         except asyncio.CancelledError:
             # Outer cancel mid-wait — still flip abandoned so the old
             # coroutine knows to bail out at its next iteration check.
@@ -9236,9 +9244,7 @@ class Agent:
                         f"task suspended. pending_approvals={_ids}"
                     ),
                     pending_id=_ids[0],
-                    unattended_strategy=_deferred[0].get(
-                        "_deferred_approval_strategy", ""
-                    ),
+                    unattended_strategy=_deferred[0].get("_deferred_approval_strategy", ""),
                     meta={"all_pending_ids": _ids},
                 )
 
@@ -9815,9 +9821,7 @@ class Agent:
                     # max_tool_iterations inside the helper, so it can never run
                     # away. No-op for scheduler/sub-agent tasks (no inserts).
                     _steered = await self.reasoning_engine._drain_steer_before_finish(
-                        state=(
-                            self.agent_state.current_task if self.agent_state else None
-                        ),
+                        state=(self.agent_state.current_task if self.agent_state else None),
                         working_messages=messages,
                         final_text=final_response or cleaned_text or "",
                         iteration=iteration - 1,  # loop here is 1-based
@@ -9929,9 +9933,7 @@ class Agent:
                             f"task suspended. pending_approvals={_ids}"
                         ),
                         pending_id=_ids[0],
-                        unattended_strategy=_deferred[0].get(
-                            "_deferred_approval_strategy", ""
-                        ),
+                        unattended_strategy=_deferred[0].get("_deferred_approval_strategy", ""),
                         meta={"all_pending_ids": _ids, "task_id": task.id},
                     )
 

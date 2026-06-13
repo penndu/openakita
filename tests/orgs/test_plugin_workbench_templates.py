@@ -65,30 +65,32 @@ def test_build_workbench_templates_skips_plugins_without_tools():
 
 
 def test_build_workbench_templates_emits_suggested_node():
-    pm = _make_pm([
-        _make_plugin(
-            "tongyi-image",
-            display_zh="通义生图",
-            display_en="Tongyi Image",
-            description="AI image generation",
-            description_i18n={"zh": "AI 图片生成"},
-            version="0.3.0",
-            icon="icon.svg",
-            category="creative",
-            tools=[
-                {
-                    "name": "tongyi_image_create",
-                    "description": "Create image",
-                    "input_schema": {"type": "object"},
-                },
-                {
-                    "name": "tongyi_image_status",
-                    "description": "Status",
-                    "input_schema": {"type": "object"},
-                },
-            ],
-        ),
-    ])
+    pm = _make_pm(
+        [
+            _make_plugin(
+                "tongyi-image",
+                display_zh="通义生图",
+                display_en="Tongyi Image",
+                description="AI image generation",
+                description_i18n={"zh": "AI 图片生成"},
+                version="0.3.0",
+                icon="icon.svg",
+                category="creative",
+                tools=[
+                    {
+                        "name": "tongyi_image_create",
+                        "description": "Create image",
+                        "input_schema": {"type": "object"},
+                    },
+                    {
+                        "name": "tongyi_image_status",
+                        "description": "Status",
+                        "input_schema": {"type": "object"},
+                    },
+                ],
+            ),
+        ]
+    )
     out = build_workbench_templates(pm)
     assert len(out) == 1
     tpl = out[0]
@@ -128,35 +130,46 @@ def test_build_workbench_templates_emits_suggested_node():
 
 
 def test_build_workbench_templates_sorts_by_category_then_name():
-    pm = _make_pm([
-        _make_plugin(
-            "p1", display_zh="zNode", category="dev",
-            tools=[{"name": "t1", "description": "", "input_schema": {}}],
-        ),
-        _make_plugin(
-            "p2", display_zh="aNode", category="creative",
-            tools=[{"name": "t2", "description": "", "input_schema": {}}],
-        ),
-        _make_plugin(
-            "p3", display_zh="bNode", category="creative",
-            tools=[{"name": "t3", "description": "", "input_schema": {}}],
-        ),
-    ])
+    pm = _make_pm(
+        [
+            _make_plugin(
+                "p1",
+                display_zh="zNode",
+                category="dev",
+                tools=[{"name": "t1", "description": "", "input_schema": {}}],
+            ),
+            _make_plugin(
+                "p2",
+                display_zh="aNode",
+                category="creative",
+                tools=[{"name": "t2", "description": "", "input_schema": {}}],
+            ),
+            _make_plugin(
+                "p3",
+                display_zh="bNode",
+                category="creative",
+                tools=[{"name": "t3", "description": "", "input_schema": {}}],
+            ),
+        ]
+    )
     out = build_workbench_templates(pm)
     assert [t["plugin_id"] for t in out] == ["p2", "p3", "p1"]
 
 
 def test_deprecated_tools_for_node_flags_removed_tools():
-    pm = _make_pm([
-        _make_plugin(
-            "p1",
-            tools=[{"name": "p1_alpha", "description": "", "input_schema": {}}],
-        ),
-    ])
+    pm = _make_pm(
+        [
+            _make_plugin(
+                "p1",
+                tools=[{"name": "p1_alpha", "description": "", "input_schema": {}}],
+            ),
+        ]
+    )
     # "research" is a category name → not deprecated even if no plugin
     # registers it (built-in category names are part of ALL_CATEGORY_NAMES)
     assert deprecated_tools_for_node(
-        ["research", "p1_alpha", "p1_removed"], pm,
+        ["research", "p1_alpha", "p1_removed"],
+        pm,
     ) == ["p1_removed"]
 
 
@@ -248,5 +261,6 @@ def test_deprecated_tools_for_node_with_string_registered_tools():
     plugin = _make_plugin("p1", tools=["p1_alpha"])
     pm = _make_pm([plugin])
     assert deprecated_tools_for_node(
-        ["research", "p1_alpha", "p1_removed"], pm,
+        ["research", "p1_alpha", "p1_removed"],
+        pm,
     ) == ["p1_removed"]

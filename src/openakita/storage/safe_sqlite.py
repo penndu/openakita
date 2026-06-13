@@ -271,9 +271,7 @@ def safe_open_sync(
 # ---------------------------------------------------------------------------
 
 
-async def quick_check_or_raise_async(
-    conn: aiosqlite.Connection, path: Path | None = None
-) -> None:
+async def quick_check_or_raise_async(conn: aiosqlite.Connection, path: Path | None = None) -> None:
     """Async counterpart to :func:`quick_check_or_raise_sync`."""
     try:
         cursor = await conn.execute("PRAGMA quick_check")

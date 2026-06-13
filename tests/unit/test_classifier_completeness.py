@@ -128,8 +128,7 @@ def _extract_tools_and_classes(
             value_repr = ""
             if isinstance(v, ast.Attribute):
                 value_repr = (
-                    f"{ast.unparse(v.value) if hasattr(ast, 'unparse') else '<obj>'}."
-                    f"{v.attr}"
+                    f"{ast.unparse(v.value) if hasattr(ast, 'unparse') else '<obj>'}.{v.attr}"
                 )
             elif isinstance(v, ast.Constant) and isinstance(v.value, str):
                 value_repr = v.value
@@ -179,8 +178,7 @@ def test_handler_declares_tool_classes_for_every_tool(handler_file: Path):
     tools, classes = parsed
     if not tools:
         pytest.fail(
-            f"{handler_file.name}: 有 TOOL_CLASSES 但无 TOOLS — "
-            f"声明可能漂移; 请按 {DOC_REF} 检查"
+            f"{handler_file.name}: 有 TOOL_CLASSES 但无 TOOLS — 声明可能漂移; 请按 {DOC_REF} 检查"
         )
         return
     missing = [t for t in tools if t not in classes]
@@ -343,16 +341,10 @@ def test_register_warns_when_tool_lacks_explicit_approval_class(caplog):
     registry = SystemHandlerRegistry()
     bare = _BareHandler()
 
-    with caplog.at_level(
-        logging.WARNING, logger="openakita.tools.handlers"
-    ):
+    with caplog.at_level(logging.WARNING, logger="openakita.tools.handlers"):
         registry.register("bare_for_test", bare.__call__)
 
-    policy_warns = [
-        r.getMessage()
-        for r in caplog.records
-        if "[Policy]" in r.getMessage()
-    ]
+    policy_warns = [r.getMessage() for r in caplog.records if "[Policy]" in r.getMessage()]
     assert len(policy_warns) == 2, (
         f"Expected 2 [Policy] WARNs (one per undeclared tool), "
         f"got {len(policy_warns)}: {policy_warns}"
@@ -360,9 +352,7 @@ def test_register_warns_when_tool_lacks_explicit_approval_class(caplog):
     joined = "\n".join(policy_warns)
     assert "my_undeclared_tool" in joined
     assert "another_undeclared" in joined
-    assert "§4.21" in joined, (
-        "WARN message must reference the cookbook path so devs find the fix"
-    )
+    assert "§4.21" in joined, "WARN message must reference the cookbook path so devs find the fix"
 
 
 def test_register_does_not_warn_when_all_tools_have_classes():

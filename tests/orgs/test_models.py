@@ -58,8 +58,11 @@ class TestHelpers:
 class TestEnums:
     def test_org_status_values(self):
         assert set(OrgStatus) == {
-            OrgStatus.DORMANT, OrgStatus.ACTIVE, OrgStatus.RUNNING,
-            OrgStatus.PAUSED, OrgStatus.ARCHIVED,
+            OrgStatus.DORMANT,
+            OrgStatus.ACTIVE,
+            OrgStatus.RUNNING,
+            OrgStatus.PAUSED,
+            OrgStatus.ARCHIVED,
         }
         assert OrgStatus("dormant") == OrgStatus.DORMANT
 
@@ -109,8 +112,11 @@ class TestOrgNode:
 
     def test_to_dict_and_back(self):
         node = OrgNode(
-            id="n1", role_title="测试角色", department="技术部",
-            status=NodeStatus.BUSY, skills=["python", "docker"],
+            id="n1",
+            role_title="测试角色",
+            department="技术部",
+            status=NodeStatus.BUSY,
+            skills=["python", "docker"],
         )
         d = node.to_dict()
         assert d["status"] == "busy"
@@ -129,7 +135,9 @@ class TestOrgNode:
 
     def test_frozen_fields(self):
         node = OrgNode(
-            frozen_by="admin", frozen_reason="违规", frozen_at="2025-01-01",
+            frozen_by="admin",
+            frozen_reason="违规",
+            frozen_at="2025-01-01",
             status=NodeStatus.FROZEN,
         )
         d = node.to_dict()
@@ -178,8 +186,10 @@ class TestNodeSchedule:
 
     def test_roundtrip(self):
         s = NodeSchedule(
-            name="检查服务", schedule_type=ScheduleType.CRON,
-            cron="*/5 * * * *", prompt="检查服务健康状态",
+            name="检查服务",
+            schedule_type=ScheduleType.CRON,
+            cron="*/5 * * * *",
+            prompt="检查服务健康状态",
         )
         d = s.to_dict()
         assert d["schedule_type"] == "cron"
@@ -217,7 +227,8 @@ class TestOrganization:
 
     def test_full_roundtrip(self):
         org = Organization(
-            id="org1", name="公司",
+            id="org1",
+            name="公司",
             nodes=[OrgNode(id="n1", role_title="CEO", level=0, department="管理")],
             edges=[OrgEdge(source="n1", target="n2")],
             heartbeat_enabled=True,
@@ -273,8 +284,10 @@ class TestOrganization:
 class TestOrgMessage:
     def test_roundtrip(self):
         msg = OrgMessage(
-            from_node="a", to_node="b",
-            msg_type=MsgType.TASK_ASSIGN, content="do X",
+            from_node="a",
+            to_node="b",
+            msg_type=MsgType.TASK_ASSIGN,
+            content="do X",
         )
         d = msg.to_dict()
         assert d["msg_type"] == "task_assign"
@@ -312,9 +325,11 @@ class TestOrgMemoryEntry:
 class TestInboxMessage:
     def test_roundtrip(self):
         msg = InboxMessage(
-            org_id="org1", org_name="测试",
+            org_id="org1",
+            org_name="测试",
             priority=InboxPriority.APPROVAL,
-            title="审批请求", body="请批准",
+            title="审批请求",
+            body="请批准",
             requires_approval=True,
             approval_options=["approve", "reject"],
             approval_id="#A1",
@@ -374,7 +389,8 @@ class TestUserPersona:
 
     def test_org_roundtrip_with_persona(self):
         org = Organization(
-            id="org_p", name="含身份组织",
+            id="org_p",
+            name="含身份组织",
             user_persona=UserPersona(title="董事长", display_name="老板", description="最高决策者"),
         )
         d = org.to_dict()
@@ -430,4 +446,3 @@ class TestCoreBusiness:
         restored = Organization.from_dict(d)
         assert restored.core_business == biz
         assert restored.user_persona.title == "产品经理"
-

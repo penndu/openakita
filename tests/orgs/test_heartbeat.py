@@ -47,13 +47,17 @@ class TestTriggerHeartbeat:
         result = await heartbeat.trigger_heartbeat("fake_org")
         assert "error" in result
 
-    async def test_trigger_with_no_root_nodes(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_trigger_with_no_root_nodes(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         persisted_org.nodes = []
         result = await heartbeat.trigger_heartbeat(persisted_org.id)
         assert "error" in result
         assert "root" in result["error"].lower() or "No root" in result["error"]
 
-    async def test_trigger_heartbeat_success(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_trigger_heartbeat_success(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         mock_runtime.send_command = AsyncMock(return_value={"result": "一切正常"})
         result = await heartbeat.trigger_heartbeat(persisted_org.id)
         assert result == {"result": "一切正常"}
@@ -64,7 +68,9 @@ class TestTriggerHeartbeat:
         assert call_args[0][1] == "node_ceo"
         assert "健康检查" in call_args[0][2]
 
-    async def test_heartbeat_prompt_contains_node_status(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_heartbeat_prompt_contains_node_status(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
         await heartbeat.trigger_heartbeat(persisted_org.id)
 
@@ -74,7 +80,9 @@ class TestTriggerHeartbeat:
         assert "状态=" in prompt
         assert "健康检查" in prompt
 
-    async def test_heartbeat_emits_events(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_heartbeat_emits_events(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
         await heartbeat.trigger_heartbeat(persisted_org.id)
 
@@ -88,7 +96,9 @@ class TestTriggerHeartbeat:
 class TestHeartbeatWithCoreBusiness:
     """Tests for heartbeat behavior when core_business is set (v1.3)."""
 
-    async def test_heartbeat_uses_review_mode(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_heartbeat_uses_review_mode(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         persisted_org.operation_mode = "autonomous"
         persisted_org.core_business = "做一个 AI 产品，当前阶段目标：完成 MVP"
         mock_runtime.send_command = AsyncMock(return_value={"result": "复盘完成"})
@@ -100,7 +110,9 @@ class TestHeartbeatWithCoreBusiness:
         assert "核心业务目标" in prompt
         assert "做一个 AI 产品" in prompt
 
-    async def test_heartbeat_review_includes_blackboard_step(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_heartbeat_review_includes_blackboard_step(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         persisted_org.core_business = "电商运营"
         mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
         await heartbeat.trigger_heartbeat(persisted_org.id)
@@ -109,7 +121,9 @@ class TestHeartbeatWithCoreBusiness:
         assert "org_read_blackboard" in prompt
         assert "回顾" in prompt or "查看黑板" in prompt
 
-    async def test_heartbeat_without_core_business_uses_check_mode(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_heartbeat_without_core_business_uses_check_mode(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         persisted_org.operation_mode = "autonomous"
         persisted_org.core_business = ""
         mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
@@ -119,8 +133,11 @@ class TestHeartbeatWithCoreBusiness:
         assert "心跳检查" in prompt
         assert "经营复盘" not in prompt
 
-    async def test_heartbeat_uses_dynamic_persona_label(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_heartbeat_uses_dynamic_persona_label(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         from openakita.orgs.models import UserPersona
+
         persisted_org.core_business = "内容运营"
         persisted_org.user_persona = UserPersona(title="出品人", display_name="出品人")
         mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
@@ -129,7 +146,9 @@ class TestHeartbeatWithCoreBusiness:
         prompt = mock_runtime.send_command.call_args[0][2]
         assert "出品人" in prompt
 
-    async def test_heartbeat_no_hardcoded_ceo(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_heartbeat_no_hardcoded_ceo(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         """Ensure the heartbeat prompt template itself doesn't hardcode 'CEO'."""
         persisted_org.core_business = "研究课题"
         persisted_org.nodes[0].role_title = "课题负责人"
@@ -152,7 +171,9 @@ class TestTriggerStandup:
         result = await heartbeat.trigger_standup("fake_org")
         assert "error" in result
 
-    async def test_trigger_standup_success(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+    async def test_trigger_standup_success(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime
+    ):
         mock_runtime.send_command = AsyncMock(return_value={"result": "晨会完成"})
         result = await heartbeat.trigger_standup(persisted_org.id)
         assert result == {"result": "晨会完成"}
@@ -161,7 +182,9 @@ class TestTriggerStandup:
         assert "晨会" in prompt
         assert "议程" in prompt
 
-    async def test_standup_generates_report_file(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime, org_dir):
+    async def test_standup_generates_report_file(
+        self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime, org_dir
+    ):
         mock_runtime.send_command = AsyncMock(return_value={"result": "今日计划"})
         mock_runtime._manager._org_dir = MagicMock(return_value=org_dir)
         await heartbeat.trigger_standup(persisted_org.id)
@@ -180,4 +203,3 @@ class TestTriggerStandup:
         assert len(started) >= 1
         completed = es.query(event_type="standup_completed")
         assert len(completed) >= 1
-

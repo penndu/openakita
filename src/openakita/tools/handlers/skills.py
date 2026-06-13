@@ -138,7 +138,7 @@ class SkillsHandler:
             f"{len(discoverable_external)} 可发现, "
             f"{len(disabled_external)} 禁用):\n\n"
             "默认返回紧凑目录，避免把所有技能说明塞进对话上下文。"
-            "需要完整描述时再次调用 `list_skills({\"verbose\": true})`；"
+            '需要完整描述时再次调用 `list_skills({"verbose": true})`；'
             "需要准确路径时优先用 `get_skill_info(skill_name)`，或显式传 `include_paths: true`。\n\n"
         )
 
@@ -439,8 +439,14 @@ class SkillsHandler:
         try:
             import time
 
-            deps = list(getattr(skill_entry, "python_dependencies", []) or []) if skill_entry else []
-            py_env = (getattr(skill_entry, "python_env", "") or "").strip().lower() if skill_entry else ""
+            deps = (
+                list(getattr(skill_entry, "python_dependencies", []) or []) if skill_entry else []
+            )
+            py_env = (
+                (getattr(skill_entry, "python_env", "") or "").strip().lower()
+                if skill_entry
+                else ""
+            )
             spec = None
             if skill_entry and (deps or py_env == "skill"):
                 from ...runtime_manager import (

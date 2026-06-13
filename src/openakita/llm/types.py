@@ -779,9 +779,7 @@ class EndpointConfig:
             models_synced_at=data.get("models_synced_at"),
             models_sync_error=data.get("models_sync_error"),
             fallback_endpoint=(
-                str(data["fallback_endpoint"]).strip()
-                if data.get("fallback_endpoint")
-                else None
+                str(data["fallback_endpoint"]).strip() if data.get("fallback_endpoint") else None
             ),
             fallback_enabled=bool(data.get("fallback_enabled", False)),
         )

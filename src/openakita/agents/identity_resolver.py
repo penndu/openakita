@@ -97,4 +97,3 @@ class ProfileIdentityResolver:
             user_path=self.resolve_path("USER.md"),
             memory_path=self.resolve_path("MEMORY.md"),
         )
-

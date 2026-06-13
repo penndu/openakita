@@ -249,7 +249,12 @@ class PythonDepsManager:
                 args.extend(["--trusted-host", index["trusted_host"]])
             return args
         except Exception:
-            return ["-i", "https://mirrors.aliyun.com/pypi/simple/", "--trusted-host", "mirrors.aliyun.com"]
+            return [
+                "-i",
+                "https://mirrors.aliyun.com/pypi/simple/",
+                "--trusted-host",
+                "mirrors.aliyun.com",
+            ]
 
     def _import_status(self, name: str) -> dict[str, Any]:
         ensure_runtime_paths(self._plugin_dir)

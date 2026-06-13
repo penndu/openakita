@@ -100,10 +100,12 @@ class TestOrgNodeExternalTools:
         assert d["external_tools"] == []
 
     def test_from_dict_with_external_tools(self):
-        node = OrgNode.from_dict({
-            "id": "n2",
-            "external_tools": ["filesystem", "memory"],
-        })
+        node = OrgNode.from_dict(
+            {
+                "id": "n2",
+                "external_tools": ["filesystem", "memory"],
+            }
+        )
         assert node.external_tools == ["filesystem", "memory"]
 
     def test_from_dict_without_external_tools(self):
@@ -124,6 +126,7 @@ class TestOrgNodeExternalTools:
 @pytest.fixture()
 def org_with_tools():
     from tests.orgs.conftest import make_edge, make_node
+
     nodes = [
         make_node("ceo", "CEO", 0, "管理层", external_tools=["research", "planning"]),
         make_node("cto", "CTO", 1, "技术部"),
@@ -171,7 +174,8 @@ class TestToolRequestMechanism:
         result = await handler.handle(
             "org_request_tools",
             {"tools": ["filesystem"], "reason": "需要读写文件"},
-            org.id, "cto",
+            org.id,
+            "cto",
         )
         assert "申请已发送" in result or "ceo" in result.lower() or "CEO" in result
 
@@ -180,7 +184,8 @@ class TestToolRequestMechanism:
         result = await handler.handle(
             "org_request_tools",
             {"tools": [], "reason": "测试"},
-            org.id, "cto",
+            org.id,
+            "cto",
         )
         assert "参数不完整" in result or "工具列表" in result
 
@@ -189,7 +194,8 @@ class TestToolRequestMechanism:
         result = await handler.handle(
             "org_request_tools",
             {"tools": ["filesystem"], "reason": "需要"},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         assert "最高级" in result or "无法" in result
 
@@ -198,7 +204,8 @@ class TestToolRequestMechanism:
         result = await handler.handle(
             "org_grant_tools",
             {"node_id": "cto", "tools": ["filesystem", "memory"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         assert "已授权" in result
         cto_node = org.get_node("cto")
@@ -211,12 +218,14 @@ class TestToolRequestMechanism:
         await handler.handle(
             "org_grant_tools",
             {"node_id": "cto", "tools": ["research"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         await handler.handle(
             "org_grant_tools",
             {"node_id": "cto", "tools": ["research"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         cto_node = org.get_node("cto")
         assert cto_node.external_tools.count("research") == 1
@@ -227,7 +236,8 @@ class TestToolRequestMechanism:
         await handler.handle(
             "org_grant_tools",
             {"node_id": "cto", "tools": ["research", "filesystem", "research"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         cto_node = org.get_node("cto")
         assert cto_node.external_tools.count("research") == 1
@@ -238,7 +248,8 @@ class TestToolRequestMechanism:
         result = await handler.handle(
             "org_grant_tools",
             {"node_id": "ceo", "tools": ["filesystem"]},
-            org.id, "cto",
+            org.id,
+            "cto",
         )
         assert "不是你的直属下级" in result
 
@@ -247,14 +258,16 @@ class TestToolRequestMechanism:
         await handler.handle(
             "org_grant_tools",
             {"node_id": "cto", "tools": ["filesystem", "research"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         rt.evict_node_agent.reset_mock()
 
         result = await handler.handle(
             "org_revoke_tools",
             {"node_id": "cto", "tools": ["filesystem"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         assert "已收回" in result
         cto_node = org.get_node("cto")
@@ -267,7 +280,8 @@ class TestToolRequestMechanism:
         result = await handler.handle(
             "org_revoke_tools",
             {"node_id": "cto", "tools": ["browser"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         assert "没有" in result
 
@@ -280,6 +294,7 @@ class TestToolRequestMechanism:
 class TestTemplatesHaveExternalTools:
     def test_startup_template(self):
         from openakita.orgs.templates import STARTUP_COMPANY
+
         for node in STARTUP_COMPANY["nodes"]:
             assert "external_tools" in node, f"Node {node['id']} missing external_tools"
             assert isinstance(node["external_tools"], list)
@@ -287,10 +302,12 @@ class TestTemplatesHaveExternalTools:
 
     def test_software_team_template(self):
         from openakita.orgs.templates import SOFTWARE_TEAM
+
         for node in SOFTWARE_TEAM["nodes"]:
             assert "external_tools" in node, f"Node {node['id']} missing external_tools"
 
     def test_content_ops_template(self):
         from openakita.orgs.templates import CONTENT_OPS
+
         for node in CONTENT_OPS["nodes"]:
             assert "external_tools" in node, f"Node {node['id']} missing external_tools"

@@ -63,9 +63,7 @@ def test_save_fsyncs_parent_dir_on_posix(tmp_path):
     with mock.patch("os.fsync", side_effect=_spy):
         cfg.change_password("hunter22")
 
-    assert len(fsynced_fds) >= 2, (
-        "should fsync at least twice: payload file + parent directory"
-    )
+    assert len(fsynced_fds) >= 2, "should fsync at least twice: payload file + parent directory"
 
 
 def test_load_recovers_from_corrupt_file(tmp_path, caplog):
@@ -79,8 +77,7 @@ def test_load_recovers_from_corrupt_file(tmp_path, caplog):
         cfg2 = WebAccessConfig(tmp_path)
 
     assert any(
-        "corrupted" in rec.message or "corrupt" in rec.message.lower()
-        for rec in caplog.records
+        "corrupted" in rec.message or "corrupt" in rec.message.lower() for rec in caplog.records
     ), "corrupt-file recovery should log at ERROR level"
 
     assert cfg2.jwt_secret, "fresh config should have a new jwt_secret"
@@ -121,9 +118,7 @@ def test_concurrent_saves_do_not_corrupt_file(tmp_path):
         except BaseException as exc:
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=worker, args=(f"pass{i:02d}word",)) for i in range(4)
-    ]
+    threads = [threading.Thread(target=worker, args=(f"pass{i:02d}word",)) for i in range(4)]
     for t in threads:
         t.start()
     for t in threads:

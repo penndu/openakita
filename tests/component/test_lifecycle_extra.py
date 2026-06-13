@@ -35,69 +35,82 @@ def lifecycle(store, extractor, tmp_path):
 class TestAttachmentCleanup:
     def test_cleans_stale_empty_attachments(self, lifecycle, store):
         old_date = (datetime.now() - timedelta(days=120)).isoformat()
-        store.db.save_attachment({
-            "id": "stale-1",
-            "filename": "old.txt",
-            "description": "",
-            "transcription": "",
-            "extracted_text": "",
-            "linked_memory_ids": "[]",
-            "created_at": old_date,
-        })
+        store.db.save_attachment(
+            {
+                "id": "stale-1",
+                "filename": "old.txt",
+                "description": "",
+                "transcription": "",
+                "extracted_text": "",
+                "linked_memory_ids": "[]",
+                "created_at": old_date,
+            }
+        )
         cleaned = lifecycle.cleanup_stale_attachments(max_age_days=90)
         assert cleaned == 1
         assert store.get_attachment("stale-1") is None
 
     def test_keeps_described_attachments(self, lifecycle, store):
         old_date = (datetime.now() - timedelta(days=120)).isoformat()
-        store.db.save_attachment({
-            "id": "described-1",
-            "filename": "cat.jpg",
-            "description": "一只橘猫",
-            "transcription": "",
-            "extracted_text": "",
-            "linked_memory_ids": "[]",
-            "created_at": old_date,
-        })
+        store.db.save_attachment(
+            {
+                "id": "described-1",
+                "filename": "cat.jpg",
+                "description": "一只橘猫",
+                "transcription": "",
+                "extracted_text": "",
+                "linked_memory_ids": "[]",
+                "created_at": old_date,
+            }
+        )
         cleaned = lifecycle.cleanup_stale_attachments(max_age_days=90)
         assert cleaned == 0
         assert store.get_attachment("described-1") is not None
 
     def test_keeps_recent_empty_attachments(self, lifecycle, store):
         recent = datetime.now().isoformat()
-        store.db.save_attachment({
-            "id": "recent-1",
-            "filename": "new.txt",
-            "description": "",
-            "transcription": "",
-            "extracted_text": "",
-            "linked_memory_ids": "[]",
-            "created_at": recent,
-        })
+        store.db.save_attachment(
+            {
+                "id": "recent-1",
+                "filename": "new.txt",
+                "description": "",
+                "transcription": "",
+                "extracted_text": "",
+                "linked_memory_ids": "[]",
+                "created_at": recent,
+            }
+        )
         cleaned = lifecycle.cleanup_stale_attachments(max_age_days=90)
         assert cleaned == 0
 
     def test_keeps_linked_attachments(self, lifecycle, store):
         old_date = (datetime.now() - timedelta(days=120)).isoformat()
         import json
-        store.db.save_attachment({
-            "id": "linked-1",
-            "filename": "old.txt",
-            "description": "",
-            "transcription": "",
-            "extracted_text": "",
-            "linked_memory_ids": json.dumps(["mem-123"]),
-            "created_at": old_date,
-        })
+
+        store.db.save_attachment(
+            {
+                "id": "linked-1",
+                "filename": "old.txt",
+                "description": "",
+                "transcription": "",
+                "extracted_text": "",
+                "linked_memory_ids": json.dumps(["mem-123"]),
+                "created_at": old_date,
+            }
+        )
         cleaned = lifecycle.cleanup_stale_attachments(max_age_days=90)
         assert cleaned == 0
 
 
 class TestConsolidateDaily:
     def test_consolidate_returns_report(self, lifecycle, store):
-        store.save_semantic(SemanticMemory(
-            content="test fact", type=MemoryType.FACT, importance_score=0.9,
-        ))
+        store.save_semantic(
+            SemanticMemory(
+                content="test fact",
+                type=MemoryType.FACT,
+                importance_score=0.9,
+            )
+        )
         report = asyncio.run(lifecycle.consolidate_daily())
         assert "started_at" in report
         assert "finished_at" in report
@@ -139,20 +152,24 @@ class TestDecayEdgeCases:
 
 class TestRefreshUserMd:
     def test_refresh_creates_user_md(self, lifecycle, store, tmp_path):
-        store.save_semantic(SemanticMemory(
-            content="用户的名字叫小明",
-            type=MemoryType.FACT,
-            subject="用户",
-            predicate="称呼",
-            importance_score=0.8,
-        ))
-        store.save_semantic(SemanticMemory(
-            content="用户偏好深色主题",
-            type=MemoryType.PREFERENCE,
-            subject="用户",
-            predicate="偏好",
-            importance_score=0.7,
-        ))
+        store.save_semantic(
+            SemanticMemory(
+                content="用户的名字叫小明",
+                type=MemoryType.FACT,
+                subject="用户",
+                predicate="称呼",
+                importance_score=0.8,
+            )
+        )
+        store.save_semantic(
+            SemanticMemory(
+                content="用户偏好深色主题",
+                type=MemoryType.PREFERENCE,
+                subject="用户",
+                predicate="偏好",
+                importance_score=0.7,
+            )
+        )
         identity_dir = tmp_path / "identity"
         identity_dir.mkdir(exist_ok=True)
         asyncio.run(lifecycle.refresh_user_md(identity_dir))

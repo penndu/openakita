@@ -146,7 +146,9 @@ class TestGetAccessors:
 
 class TestSendCommand:
     async def test_send_command_to_root(
-        self, runtime: OrgRuntime, org_manager: OrgManager,
+        self,
+        runtime: OrgRuntime,
+        org_manager: OrgManager,
     ):
         with patch("openakita.orgs.templates.ensure_builtin_templates"):
             await runtime.start()
@@ -161,7 +163,9 @@ class TestSendCommand:
                 return_value={"calls": 0, "tokens_in": 0, "tokens_out": 0}
             )
 
-            with patch.object(runtime, "_get_or_create_agent", new_callable=AsyncMock, return_value=mock_agent):
+            with patch.object(
+                runtime, "_get_or_create_agent", new_callable=AsyncMock, return_value=mock_agent
+            ):
                 with patch.object(runtime, "_broadcast_ws", new_callable=AsyncMock):
                     result = await runtime.send_command(org.id, None, "做个计划")
 
@@ -174,7 +178,9 @@ class TestAutoKickoff:
     """Tests for auto-kickoff when core_business is set (v1.3)."""
 
     async def test_start_org_with_core_business_triggers_kickoff(
-        self, runtime: OrgRuntime, org_manager: OrgManager,
+        self,
+        runtime: OrgRuntime,
+        org_manager: OrgManager,
     ):
         with patch("openakita.orgs.templates.ensure_builtin_templates"):
             await runtime.start()
@@ -195,7 +201,9 @@ class TestAutoKickoff:
             await runtime.shutdown()
 
     async def test_start_org_without_core_business_no_kickoff(
-        self, runtime: OrgRuntime, org_manager: OrgManager,
+        self,
+        runtime: OrgRuntime,
+        org_manager: OrgManager,
     ):
         with patch("openakita.orgs.templates.ensure_builtin_templates"):
             await runtime.start()
@@ -213,7 +221,9 @@ class TestAutoKickoff:
             await runtime.shutdown()
 
     async def test_auto_kickoff_prompt_uses_dynamic_role_title(
-        self, runtime: OrgRuntime, org_manager: OrgManager,
+        self,
+        runtime: OrgRuntime,
+        org_manager: OrgManager,
     ):
         with patch("openakita.orgs.templates.ensure_builtin_templates"):
             await runtime.start()
@@ -243,7 +253,9 @@ class TestAutoKickoff:
             await runtime.shutdown()
 
     async def test_auto_kickoff_prompt_uses_persona_label(
-        self, runtime: OrgRuntime, org_manager: OrgManager,
+        self,
+        runtime: OrgRuntime,
+        org_manager: OrgManager,
     ):
         with patch("openakita.orgs.templates.ensure_builtin_templates"):
             await runtime.start()
@@ -251,7 +263,11 @@ class TestAutoKickoff:
             org_data = make_org(name="投资项目").to_dict()
             org_data["core_business"] = "AI 研究"
             org_data["operation_mode"] = "autonomous"
-            org_data["user_persona"] = {"title": "投资人", "display_name": "张总", "description": ""}
+            org_data["user_persona"] = {
+                "title": "投资人",
+                "display_name": "张总",
+                "description": "",
+            }
             org = org_manager.create(org_data)
 
             captured_prompt = None
@@ -290,7 +306,9 @@ class TestResetOrg:
             await runtime.shutdown()
 
     async def test_reset_org_clears_blackboard_disk(
-        self, runtime: OrgRuntime, org_manager: OrgManager,
+        self,
+        runtime: OrgRuntime,
+        org_manager: OrgManager,
     ):
         """Blackboard files on disk must be removed after reset."""
         with patch("openakita.orgs.templates.ensure_builtin_templates"):
@@ -314,7 +332,9 @@ class TestResetOrg:
             await runtime.shutdown()
 
     async def test_reset_org_clears_event_store(
-        self, runtime: OrgRuntime, org_manager: OrgManager,
+        self,
+        runtime: OrgRuntime,
+        org_manager: OrgManager,
     ):
         """Event store files on disk must be removed after reset."""
         with patch("openakita.orgs.templates.ensure_builtin_templates"):
@@ -353,5 +373,3 @@ class TestStateTransitions:
             assert loaded.status in (OrgStatus.ACTIVE, OrgStatus.RUNNING)
         finally:
             await runtime.shutdown()
-
-

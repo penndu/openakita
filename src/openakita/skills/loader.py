@@ -306,8 +306,7 @@ class SkillLoader:
             except Exception:
                 builtin_root = None
             is_readonly_root = (
-                builtin_root is not None
-                and skill_dir.resolve() == builtin_root.resolve()
+                builtin_root is not None and skill_dir.resolve() == builtin_root.resolve()
             )
             loaded += self.load_from_directory(
                 skill_dir,
@@ -1052,4 +1051,3 @@ class SkillLoader:
         """获取技能的处理器名称"""
         skill = self._loaded_skills.get(name)
         return skill.metadata.handler if skill else None
-

@@ -90,7 +90,8 @@ class TestLLMInterAgentCommunication:
 
         result = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "node_ceo",
+                org.id,
+                "node_ceo",
                 "请给CTO分配一个简单任务：说出今天的日期。仅使用org_send_message工具。",
             ),
             timeout=90.0,
@@ -104,6 +105,7 @@ class TestLLMOrgTemplate:
     async def test_startup_company_template(self, live_runtime):
         runtime, manager = live_runtime
         from openakita.orgs.templates import ensure_builtin_templates
+
         ensure_builtin_templates(manager._templates_dir)
 
         org = manager.create_from_template("software-team", {"name": "LLM软件团队"})
@@ -172,4 +174,3 @@ class TestLLMFreezeNode:
         result = await runtime.send_command(org.id, "node_dev", "你好")
         assert "error" in result
         assert "冻结" in result["error"]
-

@@ -99,9 +99,7 @@ class TestOrgNameUniqueness:
         assert exc_info.value.name == "内容工作室"
         assert exc_info.value.conflict_org_id
 
-    def test_name_uniqueness_is_case_and_whitespace_insensitive(
-        self, org_manager: OrgManager
-    ):
+    def test_name_uniqueness_is_case_and_whitespace_insensitive(self, org_manager: OrgManager):
         org_manager.create({"name": "Content Studio"})
         with pytest.raises(OrgNameConflictError):
             org_manager.create({"name": "  content studio  "})
@@ -127,26 +125,20 @@ class TestOrgNameUniqueness:
         updated = org_manager.update(org.id, {"name": "myorg"})
         assert updated.name == "myorg"
 
-    def test_duplicate_auto_suffix_when_default_name_taken(
-        self, org_manager: OrgManager
-    ):
+    def test_duplicate_auto_suffix_when_default_name_taken(self, org_manager: OrgManager):
         orig = org_manager.create({"name": "源组织"})
         first = org_manager.duplicate(orig.id)
         assert first.name == "源组织 (副本)"
         second = org_manager.duplicate(orig.id)
         assert second.name == "源组织 (副本) 2"
 
-    def test_duplicate_with_explicit_conflict_name_raises(
-        self, org_manager: OrgManager
-    ):
+    def test_duplicate_with_explicit_conflict_name_raises(self, org_manager: OrgManager):
         org_manager.create({"name": "已存在"})
         orig = org_manager.create({"name": "另一个"})
         with pytest.raises(OrgNameConflictError):
             org_manager.duplicate(orig.id, new_name="已存在")
 
-    def test_create_from_template_auto_suffix_when_no_override(
-        self, org_manager: OrgManager
-    ):
+    def test_create_from_template_auto_suffix_when_no_override(self, org_manager: OrgManager):
         """未在 overrides 里指定 name 时，模板自带名撞了应自动加后缀。"""
         seed = org_manager.create({"name": "模板源 A"})
         org_manager.save_as_template(seed.id, "tpl-a")
@@ -156,9 +148,7 @@ class TestOrgNameUniqueness:
         copy2 = org_manager.create_from_template("tpl-a")
         assert copy2.name == "模板源 A (3)"
 
-    def test_create_from_template_explicit_conflict_name_raises(
-        self, org_manager: OrgManager
-    ):
+    def test_create_from_template_explicit_conflict_name_raises(self, org_manager: OrgManager):
         """在 overrides 里显式指定的 name，撞名时应直接抛错——
         用户的明确意图不能被悄悄改成另一个名字。"""
         seed = org_manager.create({"name": "模板源 B"})
@@ -183,9 +173,7 @@ class TestOrgNameResolution:
         assert org_id == org.id
         assert candidates == []
 
-    def test_resolve_by_name_is_case_and_whitespace_insensitive(
-        self, org_manager: OrgManager
-    ):
+    def test_resolve_by_name_is_case_and_whitespace_insensitive(self, org_manager: OrgManager):
         org = org_manager.create({"name": "Content Studio"})
         org_id, _ = org_manager.resolve_id_by_name_or_id("  content STUDIO  ")
         assert org_id == org.id
@@ -239,7 +227,9 @@ class TestNodeSchedules:
     def test_add_and_get(self, org_manager: OrgManager):
         org = org_manager.create(make_org().to_dict())
         nid = org.nodes[0].id
-        s = NodeSchedule(name="巡检", schedule_type=ScheduleType.INTERVAL, interval_s=600, prompt="检查状态")
+        s = NodeSchedule(
+            name="巡检", schedule_type=ScheduleType.INTERVAL, interval_s=600, prompt="检查状态"
+        )
         org_manager.add_node_schedule(org.id, nid, s)
 
         result = org_manager.get_node_schedules(org.id, nid)
@@ -325,4 +315,3 @@ class TestRuntimeState:
         assert org.id in org_manager._cache
         org_manager.invalidate_cache(org.id)
         assert org.id not in org_manager._cache
-

@@ -357,13 +357,19 @@ class Plugin(PluginBase):
             return api_key, ""
         except SettingsRelayResolutionError as exc:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=400, detail=exc.user_message) from exc
         ref = merged.get("_relay_reference")
-        if ref is not None and hasattr(ref, "supports_model") and not ref.supports_model("qwen-max"):
+        if (
+            ref is not None
+            and hasattr(ref, "supports_model")
+            and not ref.supports_model("qwen-max")
+        ):
             policy = relay_policy or "official"
             msg = f"中转站 {relay_name!r} 不支持 idea-research 默认文本模型: qwen-max"
             if policy == "strict":
                 from fastapi import HTTPException
+
                 raise HTTPException(status_code=400, detail=msg)
             _LOG.warning("[%s] %s; keeping per-plugin DashScope endpoint", PLUGIN_ID, msg)
             return api_key, ""
@@ -443,8 +449,12 @@ class Plugin(PluginBase):
             "data_dir": self._data_dir,
             "tasks_dir": self._data_dir / "tasks",
             "uploads_dir": self._data_dir / "uploads",
-            "exports_dir": Path(settings.get("export_dir") or str(self._data_dir / "exports")).expanduser(),
-            "database": self._tm.db_path if self._tm is not None else self._data_dir / "idea.sqlite",
+            "exports_dir": Path(
+                settings.get("export_dir") or str(self._data_dir / "exports")
+            ).expanduser(),
+            "database": self._tm.db_path
+            if self._tm is not None
+            else self._data_dir / "idea.sqlite",
         }
         if key not in mapping:
             raise HTTPException(status_code=400, detail=f"Unknown storage key: {key}")

@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 try:
     from filelock import FileLock
     from filelock import Timeout as _FileLockTimeout
+
     _HAS_FILELOCK = True
 except Exception:  # pragma: no cover - extremely unlikely
     _HAS_FILELOCK = False
@@ -75,9 +76,7 @@ class OrgEventStore:
         # Cross-process write serialization; resolves to a .lock sibling of
         # the events dir so it stays scoped to one org.
         self._lock_path = self._events_dir / ".write.lock"
-        self._filelock = (
-            FileLock(str(self._lock_path)) if _HAS_FILELOCK else None
-        )
+        self._filelock = FileLock(str(self._lock_path)) if _HAS_FILELOCK else None
 
     def clear(self) -> None:
         """Remove all event files (used during org reset).
@@ -258,7 +257,8 @@ class OrgEventStore:
                         continue
                     evt = json.loads(line)
                     if evt.get("actor") == node_id and evt.get("event_type") in (
-                        "task_started", "node_activated"
+                        "task_started",
+                        "node_activated",
                     ):
                         return evt
             except Exception:
@@ -276,12 +276,22 @@ class OrgEventStore:
     ) -> list[dict]:
         """Get an audit trail of important events."""
         important_types = event_types or [
-            "org_started", "org_stopped", "org_paused", "org_resumed",
-            "user_command", "task_completed", "task_failed",
-            "node_frozen", "node_unfrozen", "node_dismissed",
-            "scaling_requested", "scaling_approved", "scaling_rejected",
+            "org_started",
+            "org_stopped",
+            "org_paused",
+            "org_resumed",
+            "user_command",
+            "task_completed",
+            "task_failed",
+            "node_frozen",
+            "node_unfrozen",
+            "node_dismissed",
+            "scaling_requested",
+            "scaling_approved",
+            "scaling_rejected",
             "approval_resolved",
-            "heartbeat_decision", "standup_completed",
+            "heartbeat_decision",
+            "standup_completed",
         ]
         since = (datetime.now(UTC) - timedelta(days=days)).isoformat()
         all_events = self.query(since=since, limit=1000)
@@ -346,11 +356,13 @@ class OrgEventStore:
                 tasks_completed += 1
             elif etype == "task_failed":
                 tasks_failed += 1
-                errors.append({
-                    "time": evt.get("timestamp", ""),
-                    "node": evt.get("actor", ""),
-                    "error": evt.get("data", {}).get("error", "")[:100],
-                })
+                errors.append(
+                    {
+                        "time": evt.get("timestamp", ""),
+                        "node": evt.get("actor", ""),
+                        "error": evt.get("data", {}).get("error", "")[:100],
+                    }
+                )
             elif etype in ("message_sent", "task_assigned"):
                 messages_sent += 1
 

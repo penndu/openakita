@@ -34,6 +34,7 @@ from tests.orgs.conftest import make_org, make_node, make_edge
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _inject_mock_brain(agent: Any, mock_client: MockLLMClient) -> None:
     """Replace agent.brain with a MockBrain backed by *mock_client*."""
     mb = MockBrain(mock_client)
@@ -61,6 +62,7 @@ def _make_tool_call(name: str, input_: dict) -> MockResponse:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def tmp_data_dir(tmp_path: Path) -> Path:
@@ -94,11 +96,13 @@ class TestToolFilteringE2E:
         # 工具（write_file/read_file/edit_file/list_directory）以便交付物落盘。
         # 本用例的语义是"未授权任何执行类工具"，保留 enable_file_tools=False
         # 来锁定该协议；新增 test_node_default_has_basic_file_tools 覆盖默认行为。
-        org = manager.create(make_org(
-            name="纯协作",
-            nodes=[make_node("boss", "Boss", 0, enable_file_tools=False)],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="纯协作",
+                nodes=[make_node("boss", "Boss", 0, enable_file_tools=False)],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         agent = await runtime._create_node_agent(org, org.get_node("boss"))
@@ -106,64 +110,79 @@ class TestToolFilteringE2E:
         _PLAN_TOOLS = {"create_todo", "update_todo_step", "get_todo_status", "complete_todo"}
         tool_names = {t["name"] for t in agent._tools}
         for name in tool_names:
-            assert name.startswith("org_") or name == "get_tool_info" or name in _PLAN_TOOLS, \
+            assert name.startswith("org_") or name == "get_tool_info" or name in _PLAN_TOOLS, (
                 f"Unexpected tool '{name}' on node without external_tools"
+            )
 
     async def test_node_default_has_basic_file_tools(self, runtime_env):
         """E0-4: 节点默认开启 enable_file_tools=True，应该获得安全的基础文件工具。"""
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="默认文件工具",
-            nodes=[make_node("boss", "Boss", 0)],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="默认文件工具",
+                nodes=[make_node("boss", "Boss", 0)],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         agent = await runtime._create_node_agent(org, org.get_node("boss"))
         tool_names = {t["name"] for t in agent._tools}
         # 安全子集应在
         for expected in ("write_file", "read_file", "edit_file", "list_directory"):
-            assert expected in tool_names, \
+            assert expected in tool_names, (
                 f"enable_file_tools=True 时应注入 {expected}，实际: {sorted(tool_names)}"
+            )
         # 高风险工具不应在（仍由 external_tools=['filesystem'] 控制）
         for forbidden in ("run_shell", "delete_file"):
-            assert forbidden not in tool_names, \
+            assert forbidden not in tool_names, (
                 f"enable_file_tools=True 不应放行高风险工具 {forbidden}"
+            )
 
     async def test_node_with_enable_file_tools_false_has_no_file_tools(self, runtime_env):
         """E0-4: 显式关 enable_file_tools 时不能再注入文件工具。"""
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="禁用文件工具",
-            nodes=[make_node("boss", "Boss", 0, enable_file_tools=False)],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="禁用文件工具",
+                nodes=[make_node("boss", "Boss", 0, enable_file_tools=False)],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         agent = await runtime._create_node_agent(org, org.get_node("boss"))
         tool_names = {t["name"] for t in agent._tools}
         for forbidden in ("write_file", "read_file", "edit_file", "list_directory"):
-            assert forbidden not in tool_names, \
-                f"enable_file_tools=False 时不应注入 {forbidden}"
+            assert forbidden not in tool_names, f"enable_file_tools=False 时不应注入 {forbidden}"
 
     async def test_node_with_research_tools_retains_web_search(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="研究团队",
-            # 用例下面的 for 断言要求"工具集 ⊂ research+plan+org+get_tool_info"，
-            # 所以这里关掉 enable_file_tools，避免基础文件工具混入打挂断言。
-            nodes=[make_node("researcher", "研究员", 0,
-                             external_tools=["research"],
-                             enable_file_tools=False)],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="研究团队",
+                # 用例下面的 for 断言要求"工具集 ⊂ research+plan+org+get_tool_info"，
+                # 所以这里关掉 enable_file_tools，避免基础文件工具混入打挂断言。
+                nodes=[
+                    make_node(
+                        "researcher",
+                        "研究员",
+                        0,
+                        external_tools=["research"],
+                        enable_file_tools=False,
+                    )
+                ],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         agent = await runtime._create_node_agent(org, org.get_node("researcher"))
 
         tool_names = {t["name"] for t in agent._tools}
-        assert "web_search" in tool_names or "news_search" in tool_names, \
+        assert "web_search" in tool_names or "news_search" in tool_names, (
             f"research tools missing, got: {tool_names}"
+        )
         _PLAN_TOOLS = {"create_todo", "update_todo_step", "get_todo_status", "complete_todo"}
         for name in tool_names:
             assert (
@@ -175,12 +194,20 @@ class TestToolFilteringE2E:
 
     async def test_node_with_multiple_categories(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="全栈",
-            nodes=[make_node("dev", "全栈工程师", 0,
-                             external_tools=["research", "filesystem", "planning"])],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="全栈",
+                nodes=[
+                    make_node(
+                        "dev",
+                        "全栈工程师",
+                        0,
+                        external_tools=["research", "filesystem", "planning"],
+                    )
+                ],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         agent = await runtime._create_node_agent(org, org.get_node("dev"))
@@ -196,11 +223,13 @@ class TestToolFilteringE2E:
     async def test_individual_tool_name_retained(self, runtime_env):
         """external_tools can also contain individual tool names (not just categories)."""
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="精确配置",
-            nodes=[make_node("node", "Worker", 0, external_tools=["web_search"])],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="精确配置",
+                nodes=[make_node("node", "Worker", 0, external_tools=["web_search"])],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         agent = await runtime._create_node_agent(org, org.get_node("node"))
@@ -214,11 +243,13 @@ class TestPromptInjectionE2E:
 
     async def test_prompt_has_external_tool_section(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="提示词测试",
-            nodes=[make_node("n", "分析师", 0, external_tools=["research"])],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="提示词测试",
+                nodes=[make_node("n", "分析师", 0, external_tools=["research"])],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         agent = await runtime._create_node_agent(org, org.get_node("n"))
@@ -229,11 +260,13 @@ class TestPromptInjectionE2E:
 
     async def test_prompt_without_external_tools_forbids_execution(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="无外部",
-            nodes=[make_node("n", "秘书", 0)],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="无外部",
+                nodes=[make_node("n", "秘书", 0)],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         agent = await runtime._create_node_agent(org, org.get_node("n"))
@@ -245,16 +278,22 @@ class TestPromptInjectionE2E:
         """Both prompt variants should mention org_request_tools."""
         runtime, manager = runtime_env
 
-        org1 = manager.create(make_org(
-            id="o1", name="有工具",
-            nodes=[make_node("n", "Worker", 0, external_tools=["research"])],
-            edges=[],
-        ).to_dict())
-        org2 = manager.create(make_org(
-            id="o2", name="无工具",
-            nodes=[make_node("m", "Worker", 0)],
-            edges=[],
-        ).to_dict())
+        org1 = manager.create(
+            make_org(
+                id="o1",
+                name="有工具",
+                nodes=[make_node("n", "Worker", 0, external_tools=["research"])],
+                edges=[],
+            ).to_dict()
+        )
+        org2 = manager.create(
+            make_org(
+                id="o2",
+                name="无工具",
+                nodes=[make_node("m", "Worker", 0)],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org1.id)
         await runtime.start_org(org2.id)
 
@@ -273,18 +312,22 @@ class TestExternalToolExecutionE2E:
     async def test_agent_calls_web_search(self, runtime_env):
         """Agent with research tools should be able to call web_search through the pipeline."""
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="搜索测试",
-            nodes=[make_node("r", "研究员", 0, external_tools=["research"])],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="搜索测试",
+                nodes=[make_node("r", "研究员", 0, external_tools=["research"])],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         mock_client = MockLLMClient()
-        mock_client.preset_sequence([
-            _make_tool_call("web_search", {"query": "AI market trends 2026"}),
-            _make_text_response("搜索完成，AI市场预计2026年达到5000亿规模。"),
-        ])
+        mock_client.preset_sequence(
+            [
+                _make_tool_call("web_search", {"query": "AI market trends 2026"}),
+                _make_text_response("搜索完成，AI市场预计2026年达到5000亿规模。"),
+            ]
+        )
 
         original_create = runtime._create_node_agent
 
@@ -310,11 +353,13 @@ class TestExternalToolExecutionE2E:
     async def test_agent_without_tools_cannot_call_web_search(self, runtime_env):
         """Agent without external_tools should NOT have web_search available."""
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="无工具测试",
-            nodes=[make_node("n", "秘书", 0)],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="无工具测试",
+                nodes=[make_node("n", "秘书", 0)],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         mock_client = MockLLMClient()
@@ -342,24 +387,33 @@ class TestExternalToolExecutionE2E:
 class TestOrgToolCallsE2E:
     """Agent uses org_* tools (write_blackboard, send_message) end-to-end."""
 
-    @pytest.mark.skip(reason="MockBrain missing compiler_think; needs mock update for v1.26.x agent pipeline")
+    @pytest.mark.skip(
+        reason="MockBrain missing compiler_think; needs mock update for v1.26.x agent pipeline"
+    )
     async def test_agent_writes_to_blackboard(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="黑板测试",
-            nodes=[make_node("ceo", "CEO", 0, external_tools=["research"])],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="黑板测试",
+                nodes=[make_node("ceo", "CEO", 0, external_tools=["research"])],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         mock_client = MockLLMClient()
-        mock_client.preset_sequence([
-            _make_tool_call("org_write_blackboard", {
-                "content": "Q1目标：推出MVP产品",
-                "scope": "organization",
-            }),
-            _make_text_response("已将Q1目标写入组织黑板。"),
-        ])
+        mock_client.preset_sequence(
+            [
+                _make_tool_call(
+                    "org_write_blackboard",
+                    {
+                        "content": "Q1目标：推出MVP产品",
+                        "scope": "organization",
+                    },
+                ),
+                _make_text_response("已将Q1目标写入组织黑板。"),
+            ]
+        )
 
         original_create = runtime._create_node_agent
 
@@ -377,8 +431,9 @@ class TestOrgToolCallsE2E:
         assert "result" in result
         bb = runtime.get_blackboard(org.id)
         entries = bb.read_org(limit=5)
-        assert any("Q1" in e.content or "MVP" in e.content for e in entries), \
+        assert any("Q1" in e.content or "MVP" in e.content for e in entries), (
             f"Blackboard should contain the entry, got: {[e.content for e in entries]}"
+        )
 
 
 class TestToolRequestGrantE2E:
@@ -386,17 +441,19 @@ class TestToolRequestGrantE2E:
 
     async def test_request_and_grant_lifecycle(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="申请授权",
-            nodes=[
-                make_node("ceo", "CEO", 0, "管理层", external_tools=["research", "planning"]),
-                # 测试场景需要 dev 一开始没有 write_file，等 CEO 授权 filesystem
-                # 才能用。enable_file_tools 默认会把 write_file 注入进来，会让
-                # 这条"申请授权"叙事失效，所以这里显式关掉。
-                make_node("dev", "开发", 1, "技术部", enable_file_tools=False),
-            ],
-            edges=[make_edge("ceo", "dev")],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="申请授权",
+                nodes=[
+                    make_node("ceo", "CEO", 0, "管理层", external_tools=["research", "planning"]),
+                    # 测试场景需要 dev 一开始没有 write_file，等 CEO 授权 filesystem
+                    # 才能用。enable_file_tools 默认会把 write_file 注入进来，会让
+                    # 这条"申请授权"叙事失效，所以这里显式关掉。
+                    make_node("dev", "开发", 1, "技术部", enable_file_tools=False),
+                ],
+                edges=[make_edge("ceo", "dev")],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         dev_node = org.get_node("dev")
@@ -410,7 +467,8 @@ class TestToolRequestGrantE2E:
         result = await runtime.handle_org_tool(
             "org_request_tools",
             {"tools": ["filesystem"], "reason": "需要读写代码文件"},
-            org.id, "dev",
+            org.id,
+            "dev",
         )
         assert "申请已发送" in result
 
@@ -424,7 +482,8 @@ class TestToolRequestGrantE2E:
         result = await runtime.handle_org_tool(
             "org_grant_tools",
             {"node_id": "dev", "tools": ["filesystem"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         assert "已授权" in result
 
@@ -436,30 +495,38 @@ class TestToolRequestGrantE2E:
         dev_agent_after = await runtime._create_node_agent(updated_org, updated_dev)
         dev_tools_after = {t["name"] for t in dev_agent_after._tools}
         fs_tools = expand_tool_categories(["filesystem"])
-        assert fs_tools & dev_tools_after, \
+        assert fs_tools & dev_tools_after, (
             f"After grant, dev should have filesystem tools. Got: {dev_tools_after}"
+        )
 
     async def test_revoke_removes_tools(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="收回测试",
-            nodes=[
-                # 测试目标是"收回 filesystem 后 write_file 应该消失"，因此 worker
-                # 不能再走 enable_file_tools 默认注入路径，否则收回后 write_file
-                # 仍由"基础文件工具"白名单保留，把测试断言打挂。
-                make_node("boss", "Boss", 0, external_tools=["research"]),
-                make_node("worker", "Worker", 1,
-                          external_tools=["research", "filesystem"],
-                          enable_file_tools=False),
-            ],
-            edges=[make_edge("boss", "worker")],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="收回测试",
+                nodes=[
+                    # 测试目标是"收回 filesystem 后 write_file 应该消失"，因此 worker
+                    # 不能再走 enable_file_tools 默认注入路径，否则收回后 write_file
+                    # 仍由"基础文件工具"白名单保留，把测试断言打挂。
+                    make_node("boss", "Boss", 0, external_tools=["research"]),
+                    make_node(
+                        "worker",
+                        "Worker",
+                        1,
+                        external_tools=["research", "filesystem"],
+                        enable_file_tools=False,
+                    ),
+                ],
+                edges=[make_edge("boss", "worker")],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         result = await runtime.handle_org_tool(
             "org_revoke_tools",
             {"node_id": "worker", "tools": ["filesystem"]},
-            org.id, "boss",
+            org.id,
+            "boss",
         )
         assert "已收回" in result
 
@@ -479,11 +546,13 @@ class TestEvictAndHotReloadE2E:
 
     async def test_evict_forces_rebuild(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="缓存测试",
-            nodes=[make_node("n", "Node", 0, external_tools=["research"])],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="缓存测试",
+                nodes=[make_node("n", "Node", 0, external_tools=["research"])],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         mock_client = MockLLMClient()
@@ -516,14 +585,16 @@ class TestCloneInheritsExternalTools:
 
     async def test_scaler_clone_copies_tools(self, runtime_env):
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="克隆测试",
-            nodes=[
-                make_node("boss", "Boss", 0),
-                make_node("dev", "开发A", 1, external_tools=["filesystem", "research"]),
-            ],
-            edges=[make_edge("boss", "dev")],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="克隆测试",
+                nodes=[
+                    make_node("boss", "Boss", 0),
+                    make_node("dev", "开发A", 1, external_tools=["filesystem", "research"]),
+                ],
+                edges=[make_edge("boss", "dev")],
+            ).to_dict()
+        )
 
         from openakita.orgs.scaler import OrgScaler
 
@@ -589,8 +660,9 @@ class TestHeartbeatWithExternalTools:
             return str(c)
 
         all_text = system_prompt + " ".join(_extract_text(m) for m in user_messages)
-        assert "create_plan" in all_text or "web_search" in all_text, \
+        assert "create_plan" in all_text or "web_search" in all_text, (
             "Heartbeat prompt should mention external execution tools"
+        )
 
 
 # ===================================================================
@@ -611,17 +683,27 @@ class TestRealLLMExternalTools:
     async def test_real_agent_with_research_tools(self, runtime_env):
         """Real LLM agent with research tools should answer a market question."""
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="真实LLM研究",
-            nodes=[make_node("analyst", "市场分析师", 0,
-                             role_goal="分析市场趋势并提供洞察",
-                             external_tools=["research"])],
-            edges=[],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="真实LLM研究",
+                nodes=[
+                    make_node(
+                        "analyst",
+                        "市场分析师",
+                        0,
+                        role_goal="分析市场趋势并提供洞察",
+                        external_tools=["research"],
+                    )
+                ],
+                edges=[],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         result = await asyncio.wait_for(
-            runtime.send_command(org.id, "analyst", "简要分析一下当前AI市场的主要趋势，用1-2句话回答。"),
+            runtime.send_command(
+                org.id, "analyst", "简要分析一下当前AI市场的主要趋势，用1-2句话回答。"
+            ),
             timeout=90.0,
         )
         assert "result" in result, f"Expected success, got: {result}"
@@ -630,23 +712,36 @@ class TestRealLLMExternalTools:
     async def test_real_agent_delegates_with_tools(self, runtime_env):
         """CEO with tools delegates research to CTO, both have appropriate tools."""
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="真实LLM委派",
-            nodes=[
-                make_node("ceo", "CEO", 0, "管理层",
-                          role_goal="领导公司战略",
-                          external_tools=["research", "planning"]),
-                make_node("cto", "CTO", 1, "技术部",
-                          role_goal="负责技术方向",
-                          external_tools=["research", "filesystem"]),
-            ],
-            edges=[make_edge("ceo", "cto")],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="真实LLM委派",
+                nodes=[
+                    make_node(
+                        "ceo",
+                        "CEO",
+                        0,
+                        "管理层",
+                        role_goal="领导公司战略",
+                        external_tools=["research", "planning"],
+                    ),
+                    make_node(
+                        "cto",
+                        "CTO",
+                        1,
+                        "技术部",
+                        role_goal="负责技术方向",
+                        external_tools=["research", "filesystem"],
+                    ),
+                ],
+                edges=[make_edge("ceo", "cto")],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         result = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "ceo",
+                org.id,
+                "ceo",
                 "请把调研Python最新版本特性的任务委派给CTO，使用org_send_message。只委派，不要自己做。",
             ),
             timeout=90.0,
@@ -656,22 +751,24 @@ class TestRealLLMExternalTools:
     async def test_real_node_requests_tools(self, runtime_env):
         """Node without tools asks superior for them using org_request_tools."""
         runtime, manager = runtime_env
-        org = manager.create(make_org(
-            name="真实LLM申请",
-            nodes=[
-                make_node("boss", "Boss", 0, external_tools=["research", "planning"]),
-                make_node("worker", "Worker", 1),
-            ],
-            edges=[make_edge("boss", "worker")],
-        ).to_dict())
+        org = manager.create(
+            make_org(
+                name="真实LLM申请",
+                nodes=[
+                    make_node("boss", "Boss", 0, external_tools=["research", "planning"]),
+                    make_node("worker", "Worker", 1),
+                ],
+                edges=[make_edge("boss", "worker")],
+            ).to_dict()
+        )
         await runtime.start_org(org.id)
 
         result = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "worker",
+                org.id,
+                "worker",
                 "你需要搜索功能来完成调研任务，但你目前没有。请使用 org_request_tools 向上级申请 research 类目工具。",
             ),
             timeout=90.0,
         )
         assert "result" in result
-

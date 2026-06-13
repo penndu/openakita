@@ -25,9 +25,13 @@ class TestStartStop:
         await scheduler.start_for_org(persisted_org)
         assert len(scheduler._tasks) == 0
 
-    async def test_start_with_schedules(self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime):
+    async def test_start_with_schedules(
+        self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime
+    ):
         nid = persisted_org.nodes[0].id
-        sched = NodeSchedule(name="巡检", schedule_type=ScheduleType.INTERVAL, interval_s=600, prompt="检查")
+        sched = NodeSchedule(
+            name="巡检", schedule_type=ScheduleType.INTERVAL, interval_s=600, prompt="检查"
+        )
         mock_runtime._manager.add_node_schedule(persisted_org.id, nid, sched)
 
         await scheduler.start_for_org(persisted_org)
@@ -38,7 +42,9 @@ class TestStartStop:
 
     async def test_stop_all(self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime):
         nid = persisted_org.nodes[0].id
-        sched = NodeSchedule(name="X", schedule_type=ScheduleType.INTERVAL, interval_s=600, prompt="x")
+        sched = NodeSchedule(
+            name="X", schedule_type=ScheduleType.INTERVAL, interval_s=600, prompt="x"
+        )
         mock_runtime._manager.add_node_schedule(persisted_org.id, nid, sched)
 
         await scheduler.start_for_org(persisted_org)
@@ -49,9 +55,13 @@ class TestStartStop:
 
 
 class TestReload:
-    async def test_reload_node_schedules(self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime):
+    async def test_reload_node_schedules(
+        self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime
+    ):
         nid = persisted_org.nodes[0].id
-        sched = NodeSchedule(name="Old", schedule_type=ScheduleType.INTERVAL, interval_s=600, prompt="old")
+        sched = NodeSchedule(
+            name="Old", schedule_type=ScheduleType.INTERVAL, interval_s=600, prompt="old"
+        )
         mock_runtime._manager.add_node_schedule(persisted_org.id, nid, sched)
         scheduler._start_schedule(persisted_org.id, nid, sched)
         assert len(scheduler._tasks) == 1
@@ -66,9 +76,13 @@ class TestTriggerOnce:
         result = await scheduler.trigger_once(persisted_org.id, "node_ceo", "fake_sched")
         assert "error" in result
 
-    async def test_trigger_once_success(self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime):
+    async def test_trigger_once_success(
+        self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime
+    ):
         nid = persisted_org.nodes[0].id
-        sched = NodeSchedule(name="手动触发", schedule_type=ScheduleType.INTERVAL, interval_s=3600, prompt="检查状态")
+        sched = NodeSchedule(
+            name="手动触发", schedule_type=ScheduleType.INTERVAL, interval_s=3600, prompt="检查状态"
+        )
         mock_runtime._manager.add_node_schedule(persisted_org.id, nid, sched)
 
         mock_runtime.send_command = AsyncMock(return_value={"result": "检查完成"})
@@ -79,7 +93,9 @@ class TestTriggerOnce:
         prompt = mock_runtime.send_command.call_args[0][2]
         assert "手动触发" in prompt or "检查状态" in prompt
 
-    async def test_trigger_updates_schedule_state(self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime):
+    async def test_trigger_updates_schedule_state(
+        self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime
+    ):
         nid = persisted_org.nodes[0].id
         sched = NodeSchedule(name="追踪", prompt="x")
         mock_runtime._manager.add_node_schedule(persisted_org.id, nid, sched)
@@ -92,7 +108,9 @@ class TestTriggerOnce:
         assert updated[0].last_run_at is not None
         assert updated[0].last_result_summary is not None
 
-    async def test_trigger_emits_events(self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime):
+    async def test_trigger_emits_events(
+        self, scheduler: OrgNodeScheduler, persisted_org, mock_runtime
+    ):
         nid = persisted_org.nodes[0].id
         sched = NodeSchedule(name="事件测试", prompt="x")
         mock_runtime._manager.add_node_schedule(persisted_org.id, nid, sched)
@@ -112,4 +130,3 @@ class TestConstants:
         assert CLEAN_THRESHOLD > 0
         assert FREQUENCY_MULTIPLIER > 1.0
         assert MAX_FREQUENCY_FACTOR > 1.0
-

@@ -46,9 +46,7 @@ class OrgHeartbeat:
         recovered = 0
         for node in org.nodes:
             if node.status == NodeStatus.ERROR:
-                self._runtime._set_node_status(
-                    org, node, NodeStatus.IDLE, "heartbeat_recovery"
-                )
+                self._runtime._set_node_status(org, node, NodeStatus.IDLE, "heartbeat_recovery")
                 self._runtime._agent_cache.pop(f"{org.id}:{node.id}", None)
                 recovered += 1
         if recovered:
@@ -76,7 +74,9 @@ class OrgHeartbeat:
         if org.heartbeat_enabled and org.id not in self._heartbeat_tasks:
             task = asyncio.create_task(self._heartbeat_loop(org))
             self._heartbeat_tasks[org.id] = task
-            logger.info(f"[Heartbeat] Started heartbeat for {org.name} (interval={org.heartbeat_interval_s}s)")
+            logger.info(
+                f"[Heartbeat] Started heartbeat for {org.name} (interval={org.heartbeat_interval_s}s)"
+            )
 
         if org.standup_enabled and org.id not in self._standup_tasks:
             task = asyncio.create_task(self._standup_loop(org))
@@ -154,11 +154,12 @@ class OrgHeartbeat:
 
         running = self._runtime._running_tasks.get(org.id, {})
         root_busy_tasks = {
-            k: t for k, t in running.items()
-            if k.startswith(f"{root.id}:") and not t.done()
+            k: t for k, t in running.items() if k.startswith(f"{root.id}:") and not t.done()
         }
         if root_busy_tasks:
-            logger.debug(f"[Heartbeat] Skipping: root {root.id} has {len(root_busy_tasks)} running task(s)")
+            logger.debug(
+                f"[Heartbeat] Skipping: root {root.id} has {len(root_busy_tasks)} running task(s)"
+            )
             return {"skipped": True, "reason": "root_has_task"}
 
         await self._recover_error_nodes(org)
@@ -251,23 +252,39 @@ class OrgHeartbeat:
             f"重要决策和进展应主动写入黑板，以便{persona_label}在查看组织状态时了解最新情况。"
         )
 
-        es.emit("heartbeat_triggered", "system", {
-            "node_count": len(org.nodes),
-        })
-        await self._runtime._broadcast_ws("org:heartbeat_start", {
-            "org_id": org.id, "type": "heartbeat",
-            "has_core_business": bool(org.core_business),
-        })
+        es.emit(
+            "heartbeat_triggered",
+            "system",
+            {
+                "node_count": len(org.nodes),
+            },
+        )
+        await self._runtime._broadcast_ws(
+            "org:heartbeat_start",
+            {
+                "org_id": org.id,
+                "type": "heartbeat",
+                "has_core_business": bool(org.core_business),
+            },
+        )
 
         result = await self._runtime.send_command(org.id, roots[0].id, prompt)
 
-        es.emit("heartbeat_decision", roots[0].id, {
-            "result_preview": str(result.get("result", ""))[:200],
-        })
-        await self._runtime._broadcast_ws("org:heartbeat_done", {
-            "org_id": org.id, "type": "heartbeat",
-            "result_preview": str(result.get("result", ""))[:120],
-        })
+        es.emit(
+            "heartbeat_decision",
+            roots[0].id,
+            {
+                "result_preview": str(result.get("result", ""))[:200],
+            },
+        )
+        await self._runtime._broadcast_ws(
+            "org:heartbeat_done",
+            {
+                "org_id": org.id,
+                "type": "heartbeat",
+                "result_preview": str(result.get("result", ""))[:120],
+            },
+        )
 
         self._tasks_since_review[org.id] = 0
 
@@ -331,13 +348,10 @@ class OrgHeartbeat:
                     break
 
                 tasks_done = self._tasks_since_review.get(org.id, 0)
-                all_idle = all(
-                    n.status.value == "idle" for n in current.nodes if not n.is_clone
-                )
+                all_idle = all(n.status.value == "idle" for n in current.nodes if not n.is_clone)
 
-                milestone_trigger = (
-                    tasks_done >= milestone_threshold
-                    or (all_idle and tasks_done > 0)
+                milestone_trigger = tasks_done >= milestone_threshold or (
+                    all_idle and tasks_done > 0
                 )
 
                 now_key = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
@@ -429,20 +443,36 @@ class OrgHeartbeat:
         )
 
         es.emit("standup_started", "system")
-        await self._runtime._broadcast_ws("org:heartbeat_start", {
-            "org_id": org.id, "type": "standup",
-        })
+        await self._runtime._broadcast_ws(
+            "org:heartbeat_start",
+            {
+                "org_id": org.id,
+                "type": "standup",
+            },
+        )
         result = await self._runtime.send_command(org.id, roots[0].id, prompt)
-        es.emit("standup_completed", "system", {
-            "result_preview": str(result.get("result", ""))[:200],
-        })
-        await self._runtime._broadcast_ws("org:heartbeat_done", {
-            "org_id": org.id, "type": "standup",
-            "result_preview": str(result.get("result", ""))[:120],
-        })
+        es.emit(
+            "standup_completed",
+            "system",
+            {
+                "result_preview": str(result.get("result", ""))[:200],
+            },
+        )
+        await self._runtime._broadcast_ws(
+            "org:heartbeat_done",
+            {
+                "org_id": org.id,
+                "type": "standup",
+                "result_preview": str(result.get("result", ""))[:120],
+            },
+        )
 
         now = datetime.now(UTC)
-        report_path = self._runtime._manager._org_dir(org.id) / "reports" / f"standup_{now.strftime('%Y-%m-%d')}.md"
+        report_path = (
+            self._runtime._manager._org_dir(org.id)
+            / "reports"
+            / f"standup_{now.strftime('%Y-%m-%d')}.md"
+        )
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_content = (
             f"# 晨会纪要 {now.strftime('%Y-%m-%d %H:%M')}\n\n"

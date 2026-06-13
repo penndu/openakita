@@ -49,9 +49,7 @@ def test_p0_1_user_dirs_default_to_mutating_scoped_class():
     )
     from openakita.core.policy_v2.schema import ConfirmationConfig
 
-    cfg = PolicyConfigV2(
-        confirmation=ConfirmationConfig(mode=ConfirmationMode.DEFAULT)
-    )
+    cfg = PolicyConfigV2(confirmation=ConfirmationConfig(mode=ConfirmationMode.DEFAULT))
     set_engine_v2(build_engine_from_config(cfg), cfg)
     try:
         # 用户桌面是默认 controlled 区——delete_file 必须 CONFIRM
@@ -98,10 +96,7 @@ def test_p0_2_phase0_no_hard_exit_reason():
 
     src = Path("src/openakita/core/reasoning_engine.py").read_text(encoding="utf-8")
     # 移除注释行后再检查赋值
-    code_only_lines = [
-        ln for ln in src.splitlines()
-        if not ln.lstrip().startswith("#")
-    ]
+    code_only_lines = [ln for ln in src.splitlines() if not ln.lstrip().startswith("#")]
     code_only = "\n".join(code_only_lines)
     bad_pattern = re.compile(r"_last_exit_reason\s*=\s*[\"']tool_evidence_missing[\"']")
     assert not bad_pattern.search(code_only), (
@@ -240,9 +235,19 @@ async def test_p1_7_org_list_delegated_tasks_backoff(tmp_path: Path, monkeypatch
     """P1-7：3s 内对相同 (org, node, status) 重复调用必须命中 cache 并返回 hint。"""
     from openakita.orgs.tool_handler import OrgToolHandler
 
-    fake_runtime = type("R", (), {"_manager": type("M", (), {
-        "_org_dir": staticmethod(lambda _oid: tmp_path),
-    })()})()
+    fake_runtime = type(
+        "R",
+        (),
+        {
+            "_manager": type(
+                "M",
+                (),
+                {
+                    "_org_dir": staticmethod(lambda _oid: tmp_path),
+                },
+            )()
+        },
+    )()
 
     h = OrgToolHandler.__new__(OrgToolHandler)
     h._runtime = fake_runtime  # type: ignore[attr-defined]
@@ -258,7 +263,9 @@ async def test_p1_7_org_list_delegated_tasks_backoff(tmp_path: Path, monkeypatch
             return []
 
     monkeypatch.setattr(
-        "openakita.orgs.project_store.ProjectStore", _FakeStore, raising=True,
+        "openakita.orgs.project_store.ProjectStore",
+        _FakeStore,
+        raising=True,
     )
 
     r1 = await h._handle_org_list_delegated_tasks({}, "org1", "node1")

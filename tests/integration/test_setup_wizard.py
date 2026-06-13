@@ -131,10 +131,23 @@ class TestWriteLLMEndpoints:
     def test_preserves_existing_endpoints(self, wizard, tmp_path):
         (tmp_path / "data").mkdir(exist_ok=True)
         ep_file = tmp_path / "data" / "llm_endpoints.json"
-        ep_file.write_text(json.dumps({
-            "endpoints": [{"name": "existing", "provider": "openai", "api_type": "openai",
-                          "base_url": "https://api.openai.com/v1", "model": "gpt-4", "priority": 1}],
-        }), encoding="utf-8")
+        ep_file.write_text(
+            json.dumps(
+                {
+                    "endpoints": [
+                        {
+                            "name": "existing",
+                            "provider": "openai",
+                            "api_type": "openai",
+                            "base_url": "https://api.openai.com/v1",
+                            "model": "gpt-4",
+                            "priority": 1,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
 
         wizard.config = {}
         wizard._write_llm_endpoints()
@@ -229,4 +242,3 @@ class TestLocaleDefaults:
         }
         assert wizard._defaults["MODEL_DOWNLOAD_SOURCE"] == "huggingface"
         assert wizard._defaults["SCHEDULER_TIMEZONE"] == "UTC"
-

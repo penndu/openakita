@@ -45,6 +45,7 @@ async def app_client(tmp_data_dir: Path):
 
 def _create_test_org(manager: OrgManager, **kwargs) -> dict:
     from tests.orgs.conftest import make_org, make_node, make_edge
+
     nodes = kwargs.pop("nodes", None)
     if nodes is None:
         nodes = [
@@ -255,20 +256,27 @@ class TestToolCarryingViaAPI:
         """Even if conflict tools are in external_tools, they're excluded."""
         client, manager, _ = app_client
         from tests.orgs.conftest import make_node, make_edge, make_org
+
         org = make_org(
             nodes=[
-                make_node("boss", "Boss", 0, "HQ", external_tools=[
-                    "research", "delegate_to_agent", "spawn_agent",
-                ]),
+                make_node(
+                    "boss",
+                    "Boss",
+                    0,
+                    "HQ",
+                    external_tools=[
+                        "research",
+                        "delegate_to_agent",
+                        "spawn_agent",
+                    ],
+                ),
                 make_node("worker", "Worker", 1, "Team"),
             ],
             edges=[make_edge("boss", "worker")],
         )
         created = manager.create(org.to_dict())
 
-        resp = await client.get(
-            f"/api/orgs/{created.id}/nodes/boss/prompt-preview"
-        )
+        resp = await client.get(f"/api/orgs/{created.id}/nodes/boss/prompt-preview")
         data = resp.json()
         expanded = data["tool_summary"]["external_tools_expanded"]
         assert "delegate_to_agent" not in expanded
@@ -279,6 +287,7 @@ class TestToolCarryingViaAPI:
         """skills category should expand to skill tools."""
         client, manager, _ = app_client
         from tests.orgs.conftest import make_node, make_org
+
         org = make_org(
             nodes=[
                 make_node("n1", "SkillUser", 0, "Team", external_tools=["skills"]),
@@ -287,9 +296,7 @@ class TestToolCarryingViaAPI:
         )
         created = manager.create(org.to_dict())
 
-        resp = await client.get(
-            f"/api/orgs/{created.id}/nodes/n1/prompt-preview"
-        )
+        resp = await client.get(f"/api/orgs/{created.id}/nodes/n1/prompt-preview")
         data = resp.json()
         expanded = data["tool_summary"]["external_tools_expanded"]
         assert "run_skill_script" in expanded
@@ -316,4 +323,3 @@ class TestToolCarryingViaAPI:
         updated = resp.json()["tool_summary"]["external_tools_expanded"]
         assert "read_file" in updated
         assert "write_file" in updated
-

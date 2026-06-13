@@ -60,7 +60,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "setup_organization": "block",
     "spawn_agent": "block",
     "task_stop": "cancel",  # task_stop is itself an interrupt request
-
     # ── Agent hub / package ──────────────────────────────────────────
     "batch_export_agents": "block",
     "export_agent": "block",
@@ -71,7 +70,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "list_exportable_agents": "cancel",
     "publish_agent": "block",
     "search_hub_agents": "cancel",
-
     # ── Browser ─────────────────────────────────────────────────────
     # Anything that mutates DOM / navigates / interacts with the page
     # is block — a half-completed click is worse than no click.
@@ -88,7 +86,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "browser_switch_tab": "block",
     "browser_type": "block",
     "browser_wait": "cancel",  # purely a sleep
-
     # ── CLI / shell-likes ──────────────────────────────────────────
     # Subprocesses hold fds, file locks, network sockets — interrupt
     # mid-run risks an inconsistent state.
@@ -100,12 +97,10 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "opencli_run": "block",
     "run_powershell": "block",
     "run_shell": "block",
-
     # ── Code quality / search ─────────────────────────────────────
     "read_lints": "cancel",
     "semantic_search": "cancel",
     "tool_search": "cancel",
-
     # ── Config / system ───────────────────────────────────────────
     "ask_user": "cancel",  # already an awaiting-user state; cancel is fine
     "enable_thinking": "cancel",
@@ -116,7 +111,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "get_workspace_map": "cancel",
     "set_task_timeout": "cancel",
     "system_config": "block",
-
     # ── Desktop automation ────────────────────────────────────────
     "desktop_click": "block",
     "desktop_find_element": "cancel",
@@ -127,7 +121,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "desktop_type": "block",
     "desktop_wait": "cancel",
     "desktop_window": "block",
-
     # ── Filesystem ────────────────────────────────────────────────
     # Reads are cancel; any write/mutate is block (half-written file
     # is worse than the user re-running the operation).
@@ -139,7 +132,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "move_file": "block",
     "read_file": "cancel",
     "write_file": "block",
-
     # ── IM channel ────────────────────────────────────────────────
     # Send-side ops are block (a partial send is worse than nothing);
     # read-side is cancel.
@@ -152,14 +144,12 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "get_user_info": "cancel",
     "get_voice_file": "cancel",
     "send_sticker": "block",
-
     # ── LSP / advanced ────────────────────────────────────────────
     "edit_notebook": "block",
     "lsp": "cancel",
     "sleep": "cancel",
     "structured_output": "cancel",
     "view_image": "cancel",
-
     # ── MCP ──────────────────────────────────────────────────────
     # call_mcp_tool is the dispatcher; the actual remote tool's
     # behavior is resolved separately via mcp_annotations.  Server
@@ -172,7 +162,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "list_mcp_servers": "cancel",
     "reload_mcp_servers": "block",
     "remove_mcp_server": "block",
-
     # ── Memory ──────────────────────────────────────────────────
     # Reads cancel; writes/consolidation block (mid-write rolls back
     # in SQLite but DB-level retry semantics still want clean state).
@@ -185,7 +174,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "search_memory": "cancel",
     "search_relational_memory": "cancel",
     "trace_memory": "cancel",
-
     # ── Mode / persona / profile ────────────────────────────────
     "get_persona_profile": "cancel",
     "get_user_profile": "cancel",
@@ -195,7 +183,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "toggle_proactive": "block",
     "update_persona_trait": "block",
     "update_user_profile": "block",
-
     # ── Plan / todo ─────────────────────────────────────────────
     "complete_todo": "block",
     "create_plan_file": "block",
@@ -203,11 +190,9 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "exit_plan_mode": "block",
     "get_todo_status": "cancel",
     "update_todo_step": "block",
-
     # ── Plugins ────────────────────────────────────────────────
     "get_plugin_info": "cancel",
     "list_plugins": "cancel",
-
     # ── Scheduled ──────────────────────────────────────────────
     "cancel_scheduled_task": "block",
     "list_scheduled_tasks": "cancel",
@@ -215,7 +200,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "schedule_task": "block",
     "trigger_scheduled_task": "block",
     "update_scheduled_task": "block",
-
     # ── Skills ────────────────────────────────────────────────
     "execute_skill": "block",
     "find_skills": "cancel",
@@ -228,21 +212,17 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "reload_skill": "cancel",
     "run_skill_script": "block",
     "uninstall_skill": "block",
-
     # ── Skill store ──────────────────────────────────────────
     "get_store_skill_detail": "cancel",
     "install_store_skill": "block",
     "search_store_skills": "cancel",
     "submit_skill_repo": "block",
-
     # ── Stickers ─────────────────────────────────────────────
     # (send_sticker already listed under IM channel.)
-
     # ── Web ─────────────────────────────────────────────────
     "news_search": "cancel",
     "web_fetch": "cancel",
     "web_search": "cancel",
-
     # ── Worktree ────────────────────────────────────────────
     # Worktree ops touch git internals — block for safety.
     "enter_worktree": "block",
@@ -379,7 +359,7 @@ def parse_mcp_sub_tool(name: str) -> tuple[str, str] | None:
     """
     if not name or not name.startswith(MCP_TOOL_PREFIX):
         return None
-    rest = name[len(MCP_TOOL_PREFIX):]
+    rest = name[len(MCP_TOOL_PREFIX) :]
     if ":" not in rest:
         return None
     server, sub_tool_name = rest.split(":", 1)
@@ -414,9 +394,7 @@ def resolve_mcp_tool_behavior(
     annotations = getattr(tool, "annotations", None) if tool else None
     if not isinstance(annotations, dict):
         return DEFAULT_BEHAVIOR
-    return get_tool_interrupt_behavior(
-        sub_tool_name, mcp_annotations=annotations
-    )
+    return get_tool_interrupt_behavior(sub_tool_name, mcp_annotations=annotations)
 
 
 def resolve_in_flight_behavior(
@@ -433,9 +411,7 @@ def resolve_in_flight_behavior(
     parsed = parse_mcp_sub_tool(name)
     if parsed is not None:
         server, sub_tool_name = parsed
-        return resolve_mcp_tool_behavior(
-            server, sub_tool_name, mcp_client=mcp_client
-        )
+        return resolve_mcp_tool_behavior(server, sub_tool_name, mcp_client=mcp_client)
     return get_tool_interrupt_behavior(name)
 
 

@@ -692,14 +692,17 @@ def _parse_glm(text: str) -> tuple[str, list[ToolUseBlock]]:
                     params[key] = json.loads(val)
                 except json.JSONDecodeError:
                     params[key] = val
-            tool_calls.append(ToolUseBlock(
-                id=f"glm_call_{uuid.uuid4().hex[:8]}",
-                name=tool_name,
-                input=params,
-            ))
+            tool_calls.append(
+                ToolUseBlock(
+                    id=f"glm_call_{uuid.uuid4().hex[:8]}",
+                    name=tool_name,
+                    input=params,
+                )
+            )
             logger.info(
                 "[GLM_TOOL_PARSE] Extracted tool call: %s with params: %s",
-                tool_name, list(params.keys()),
+                tool_name,
+                list(params.keys()),
             )
             continue
 
@@ -1380,7 +1383,8 @@ def _parse_fenced_json_tool_calls(text: str) -> tuple[str, list[ToolUseBlock]]:
 
 _DSML_PIPE = r"[｜|]"
 _DSML_DETECT_RE = re.compile(
-    rf"<{_DSML_PIPE}DSML{_DSML_PIPE}function_calls>", re.IGNORECASE,
+    rf"<{_DSML_PIPE}DSML{_DSML_PIPE}function_calls>",
+    re.IGNORECASE,
 )
 _DSML_TAG_RE = re.compile(
     rf"<(/?)(?:{_DSML_PIPE}DSML{_DSML_PIPE})([\w_]+)",
@@ -1406,9 +1410,9 @@ def _parse_dsml(text: str) -> tuple[str, list[ToolUseBlock]]:
     for m_open in open_re.finditer(text):
         m_close = close_re.search(text, m_open.end())
         if m_close:
-            blocks.append(text[m_open.start():m_close.end()])
+            blocks.append(text[m_open.start() : m_close.end()])
         else:
-            blocks.append(text[m_open.start():])
+            blocks.append(text[m_open.start() :])
 
     if not blocks:
         return text, []

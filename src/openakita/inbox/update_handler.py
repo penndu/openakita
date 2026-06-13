@@ -44,7 +44,11 @@ def update_payload_for_message(
         cta.get("manifest_url"),
         cta.get("url"),
     )
-    if target_version and current_version and compare_versions(current_version, target_version) >= 0:
+    if (
+        target_version
+        and current_version
+        and compare_versions(current_version, target_version) >= 0
+    ):
         return None
 
     min_supported_version = _first_text(
@@ -66,7 +70,9 @@ def update_payload_for_message(
         "manifest_url": manifest_url,
         "force_upgrade": force_upgrade,
         "min_supported_version": min_supported_version,
-        "policy": "forced_now" if forced_now else ("forced_after_delay" if force_upgrade else "prompt"),
+        "policy": "forced_now"
+        if forced_now
+        else ("forced_after_delay" if force_upgrade else "prompt"),
     }
 
 

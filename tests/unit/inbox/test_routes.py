@@ -17,7 +17,9 @@ async def test_inbox_routes_list_detail_and_mark(monkeypatch, tmp_path) -> None:
         broadcast_fetcher=None,
         api_client=None,
     )
-    await service.store.upsert_messages([InboxMessage(id="m1", title="Hello", body_markdown="Body")])
+    await service.store.upsert_messages(
+        [InboxMessage(id="m1", title="Hello", body_markdown="Body")]
+    )
     monkeypatch.setattr(inbox_routes, "get_inbox_service", lambda: service)
 
     app = FastAPI()

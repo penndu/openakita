@@ -42,11 +42,17 @@ class TestSessionCreation:
         assert s.session_key == "feishu:writer:chat-1:user-1:topic-1"
 
     def test_from_dict_legacy_session_defaults_bot_instance_to_channel(self):
-        s = Session.from_dict({
-            "id": "s1", "channel": "feishu", "chat_id": "chat-1", "user_id": "user-1",
-            "state": "active", "created_at": "2026-01-01T00:00:00",
-            "last_active": "2026-01-01T00:00:00",
-        })
+        s = Session.from_dict(
+            {
+                "id": "s1",
+                "channel": "feishu",
+                "chat_id": "chat-1",
+                "user_id": "user-1",
+                "state": "active",
+                "created_at": "2026-01-01T00:00:00",
+                "last_active": "2026-01-01T00:00:00",
+            }
+        )
 
         assert s.bot_instance_id == "feishu"
         assert s.session_key == "feishu:chat-1:user-1"
@@ -134,7 +140,10 @@ class TestMetadataTrimming:
 
     def _make_session(self, max_history: int = 2000) -> Session:
         return Session(
-            id="s1", channel="desktop", chat_id="c1", user_id="u1",
+            id="s1",
+            channel="desktop",
+            chat_id="c1",
+            user_id="u1",
             config=SessionConfig(max_history=max_history),
         )
 
@@ -143,21 +152,33 @@ class TestMetadataTrimming:
         assert config.max_history == 2000
 
     def test_from_dict_no_config_defaults_to_2000(self):
-        s = Session.from_dict({
-            "id": "s1", "channel": "desktop", "chat_id": "c1", "user_id": "u1",
-            "state": "active", "created_at": "2026-01-01T00:00:00",
-            "last_active": "2026-01-01T00:00:00",
-        })
+        s = Session.from_dict(
+            {
+                "id": "s1",
+                "channel": "desktop",
+                "chat_id": "c1",
+                "user_id": "u1",
+                "state": "active",
+                "created_at": "2026-01-01T00:00:00",
+                "last_active": "2026-01-01T00:00:00",
+            }
+        )
         assert s.config.max_history == 2000
 
     def test_from_dict_upgrades_old_small_values(self):
         """旧 session 序列化值 100/500 应被迁移至 >= 500."""
-        s = Session.from_dict({
-            "id": "s1", "channel": "desktop", "chat_id": "c1", "user_id": "u1",
-            "state": "active", "created_at": "2026-01-01T00:00:00",
-            "last_active": "2026-01-01T00:00:00",
-            "config": {"max_history": 100},
-        })
+        s = Session.from_dict(
+            {
+                "id": "s1",
+                "channel": "desktop",
+                "chat_id": "c1",
+                "user_id": "u1",
+                "state": "active",
+                "created_at": "2026-01-01T00:00:00",
+                "last_active": "2026-01-01T00:00:00",
+                "config": {"max_history": 100},
+            }
+        )
         assert s.config.max_history >= 500
 
     def test_messages_never_deleted_below_hard_cap(self):
@@ -222,7 +243,10 @@ class TestHardCapTruncation:
 
     def _make_session(self, max_history: int = 100) -> Session:
         return Session(
-            id="s1", channel="desktop", chat_id="c1", user_id="u1",
+            id="s1",
+            channel="desktop",
+            chat_id="c1",
+            user_id="u1",
             config=SessionConfig(max_history=max_history),
         )
 
@@ -308,14 +332,16 @@ class TestTaskCheckpoint:
 
     def test_append_accepts_dict(self):
         ctx = SessionContext()
-        ctx.append_task_checkpoint({
-            "checkpoint_id": "raw",
-            "task_id": "t",
-            "conversation_id": "c",
-            "iteration": 1,
-            "created_at": 1.0,
-            "exit_reason": "completed",
-        })
+        ctx.append_task_checkpoint(
+            {
+                "checkpoint_id": "raw",
+                "task_id": "t",
+                "conversation_id": "c",
+                "iteration": 1,
+                "created_at": 1.0,
+                "exit_reason": "completed",
+            }
+        )
         assert len(ctx.task_checkpoints) == 1
         assert ctx.task_checkpoints[0]["checkpoint_id"] == "raw"
 
@@ -347,4 +373,3 @@ class TestTaskCheckpoint:
         ctx.append_task_checkpoint(self._ckpt())
         restored = SessionContext.from_dict(ctx.to_dict())
         assert restored.task_checkpoints == ctx.task_checkpoints
-

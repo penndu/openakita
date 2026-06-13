@@ -382,9 +382,7 @@ class TestEventHandling:
     async def test_enter_chat_event(self, connected_adapter):
         adapter = connected_adapter
         events = []
-        adapter._event_callback = AsyncMock(
-            side_effect=lambda t, d: events.append((t, d))
-        )
+        adapter._event_callback = AsyncMock(side_effect=lambda t, d: events.append((t, d)))
 
         frame = {
             "cmd": CMD_EVENT_CALLBACK,
@@ -408,9 +406,7 @@ class TestEventHandling:
     async def test_template_card_event(self, connected_adapter):
         adapter = connected_adapter
         events = []
-        adapter._event_callback = AsyncMock(
-            side_effect=lambda t, d: events.append((t, d))
-        )
+        adapter._event_callback = AsyncMock(side_effect=lambda t, d: events.append((t, d)))
 
         frame = {
             "cmd": CMD_EVENT_CALLBACK,
@@ -434,9 +430,7 @@ class TestEventHandling:
     async def test_feedback_event(self, connected_adapter):
         adapter = connected_adapter
         events = []
-        adapter._event_callback = AsyncMock(
-            side_effect=lambda t, d: events.append((t, d))
-        )
+        adapter._event_callback = AsyncMock(side_effect=lambda t, d: events.append((t, d)))
 
         frame = {
             "cmd": CMD_EVENT_CALLBACK,
@@ -569,7 +563,8 @@ class TestThinkingIndicator:
         await ack_task
 
         thinking_frames = [
-            f for f in sent_frames
+            f
+            for f in sent_frames
             if f.get("cmd") == CMD_RESPONSE
             and f.get("body", {}).get("stream", {}).get("finish") is False
             and "<think>" in (f.get("body", {}).get("stream", {}).get("content") or "")
@@ -857,6 +852,7 @@ class TestDownloadMedia:
         )
 
         from openakita.channels.adapters.wework_ws import _import_httpx
+
         _import_httpx()
 
         mock_resp = MagicMock()
@@ -904,6 +900,7 @@ class TestDownloadMedia:
         media.extra = {"aeskey": base64.b64encode(key).decode()}
 
         from openakita.channels.adapters.wework_ws import _import_httpx
+
         _import_httpx()
 
         mock_resp = MagicMock()
@@ -937,6 +934,7 @@ class TestResponseUrlFallback:
         adapter._response_urls["req_fb_1"] = "https://resp.example.com/fb"
 
         from openakita.channels.adapters.wework_ws import _import_httpx
+
         _import_httpx()
 
         mock_resp = MagicMock()
@@ -997,9 +995,7 @@ class TestAdapterProperties:
 
     def test_upload_media_requires_connection(self, adapter):
         with pytest.raises(ConnectionError, match="WebSocket not connected"):
-            asyncio.run(
-                adapter.upload_media(Path("test.jpg"), "image/jpeg")
-            )
+            asyncio.run(adapter.upload_media(Path("test.jpg"), "image/jpeg"))
 
 
 # ==================== Lifecycle ====================

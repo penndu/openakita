@@ -152,10 +152,17 @@ class Plugin(PluginBase):
             return json.dumps(result.to_dict(), ensure_ascii=False)
         if tool_name == "word_confirm_outline":
             project_id = arguments.get("project_id", "")
-            version = await manager.add_draft_version(project_id, outline=arguments.get("outline", {}))
+            version = await manager.add_draft_version(
+                project_id, outline=arguments.get("outline", {})
+            )
             project = await manager.update_project_safe(project_id, status="outline_ready")
             return json.dumps(
-                {"ok": True, "project": project, "version": version, "next_action": "fill_template_or_render"},
+                {
+                    "ok": True,
+                    "project": project,
+                    "version": version,
+                    "next_action": "fill_template_or_render",
+                },
                 ensure_ascii=False,
             )
         if tool_name == "word_fill_template":
@@ -168,14 +175,21 @@ class Plugin(PluginBase):
             )
             return json.dumps(result.to_dict(), ensure_ascii=False)
         if tool_name == "word_audit":
-            output_path = Path(arguments.get("output_path", "")) if arguments.get("output_path") else None
+            output_path = (
+                Path(arguments.get("output_path", "")) if arguments.get("output_path") else None
+            )
             return json.dumps(audit_output(output_path), ensure_ascii=False)
         if tool_name == "word_export":
             project = await manager.get_project(arguments.get("project_id", ""))
             asset_id = None
             versions = await manager.list_versions(project["id"]) if project else []
             latest = versions[0] if versions else {}
-            if project and arguments.get("publish_for_ppt") and self._api and self._api.has_permission("assets.publish"):
+            if (
+                project
+                and arguments.get("publish_for_ppt")
+                and self._api
+                and self._api.has_permission("assets.publish")
+            ):
                 asset_id = await self._api.publish_asset(
                     asset_kind="word_document_brief",
                     source_path=project.get("output_path"),
@@ -198,8 +212,13 @@ class Plugin(PluginBase):
                 ensure_ascii=False,
             )
         if tool_name == "word_cancel":
-            return json.dumps(await self._cancel_project(arguments.get("project_id", "")), ensure_ascii=False)
-        return json.dumps({"ok": False, "error": f"Unknown or not yet implemented tool: {tool_name}"}, ensure_ascii=False)
+            return json.dumps(
+                await self._cancel_project(arguments.get("project_id", "")), ensure_ascii=False
+            )
+        return json.dumps(
+            {"ok": False, "error": f"Unknown or not yet implemented tool: {tool_name}"},
+            ensure_ascii=False,
+        )
 
     async def on_unload(self) -> None:
         for task in list(self._tasks.values()):
@@ -407,7 +426,12 @@ class Plugin(PluginBase):
             content = await file.read()
             target.write_bytes(content)
             rel = target.relative_to(self._require_workspace())
-            return {"ok": True, "rel_path": rel.as_posix(), "url": self._file_url(target), "filename": target.name}
+            return {
+                "ok": True,
+                "rel_path": rel.as_posix(),
+                "url": self._file_url(target),
+                "filename": target.name,
+            }
 
         @router.get("/projects")
         async def list_projects(status: str | None = None) -> dict[str, Any]:
@@ -435,7 +459,9 @@ class Plugin(PluginBase):
 
         @router.post("/projects/{project_id}/sources")
         async def add_source(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
-            result = load_source(self._resolve_workspace_path(body.get("path") or body.get("rel_path", "")))
+            result = load_source(
+                self._resolve_workspace_path(body.get("path") or body.get("rel_path", ""))
+            )
             source = await self._require_manager().add_source(
                 project_id,
                 source_type=result.source_type,
@@ -449,7 +475,9 @@ class Plugin(PluginBase):
 
         @router.post("/projects/{project_id}/template")
         async def add_template(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
-            template_path = self._resolve_workspace_path(body.get("template_path") or body.get("rel_path", ""))
+            template_path = self._resolve_workspace_path(
+                body.get("template_path") or body.get("rel_path", "")
+            )
             inspection = extract_template_vars(template_path, context=body.get("context", {}))
             template = await self._require_manager().add_template(
                 project_id,
@@ -472,7 +500,9 @@ class Plugin(PluginBase):
 
         @router.post("/projects/{project_id}/outline/confirm")
         async def confirm_outline(project_id: str, body: ConfirmOutlineRequest) -> dict[str, Any]:
-            version = await self._require_manager().add_draft_version(project_id, outline=body.outline)
+            version = await self._require_manager().add_draft_version(
+                project_id, outline=body.outline
+            )
             await self._require_manager().update_project_safe(project_id, status="outline_ready")
             return {"version": version}
 
@@ -486,13 +516,21 @@ class Plugin(PluginBase):
                 task_dir=self._require_manager().project_dir(project_id),
                 requirement=project.get("requirements", ""),
                 doc_type=project.get("doc_type", "research_report"),
-                template_path=self._resolve_workspace_path(body.template_path) if body.template_path else None,
+                template_path=self._resolve_workspace_path(body.template_path)
+                if body.template_path
+                else None,
                 source_paths=[self._resolve_workspace_path(item) for item in body.source_paths],
                 fields=body.fields,
                 outline=body.outline,
             )
-            coro = run_pipeline(ctx, manager=self._require_manager(), brain_helper=self._brain_helper)
-            task = self._api.spawn_task(coro, name=f"word-maker:{project_id}") if self._api else asyncio.create_task(coro)
+            coro = run_pipeline(
+                ctx, manager=self._require_manager(), brain_helper=self._brain_helper
+            )
+            task = (
+                self._api.spawn_task(coro, name=f"word-maker:{project_id}")
+                if self._api
+                else asyncio.create_task(coro)
+            )
             self._tasks[project_id] = task
             task.add_done_callback(lambda _task: self._tasks.pop(project_id, None))
             return {"ok": True, "project_id": project_id, "status": "rendering"}
@@ -553,4 +591,3 @@ def _tool_definitions() -> list[dict[str, Any]]:
         }
         for name, desc in names
     ]
-

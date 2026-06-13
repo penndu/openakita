@@ -93,9 +93,7 @@ class TestInstallRoute:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(
-            "openakita.setup_center.bridge.install_skill", fake_install
-        )
+        monkeypatch.setattr("openakita.setup_center.bridge.install_skill", fake_install)
         monkeypatch.setattr(
             "openakita.setup_center.bridge._resolve_skills_dir",
             lambda ws: tmp_path / "workspaces" / "default" / "skills",
@@ -112,18 +110,14 @@ class TestInstallRoute:
         # install 路径默认 rescan=True
         assert call_args.kwargs.get("rescan", True) is True
 
-    async def test_install_missing_url_does_not_propagate(
-        self, app_with_fake_agent, client
-    ):
+    async def test_install_missing_url_does_not_propagate(self, app_with_fake_agent, client):
         _, agent = app_with_fake_agent
         resp = await client.post("/api/skills/install", json={})
         assert resp.status_code == 200
         assert "error" in resp.json()
         agent.propagate_skill_change.assert_not_called()
 
-    async def test_install_error_does_not_propagate(
-        self, app_with_fake_agent, client, monkeypatch
-    ):
+    async def test_install_error_does_not_propagate(self, app_with_fake_agent, client, monkeypatch):
         _, agent = app_with_fake_agent
         monkeypatch.setattr(
             "openakita.setup_center.bridge.install_skill",
@@ -212,23 +206,20 @@ class TestHubSkillInstallRoute:
         assert getattr(call_args.args[0], "value", call_args.args[0]) == "store_install"
         assert call_args.kwargs.get("rescan", True) is True
 
+
 # ---------------------------------------------------------------------------
 # /api/skills/uninstall
 # ---------------------------------------------------------------------------
 
 
 class TestUninstallRoute:
-    async def test_uninstall_triggers_propagate(
-        self, app_with_fake_agent, client, monkeypatch
-    ):
+    async def test_uninstall_triggers_propagate(self, app_with_fake_agent, client, monkeypatch):
         _, agent = app_with_fake_agent
         monkeypatch.setattr(
             "openakita.setup_center.bridge.uninstall_skill",
             MagicMock(return_value=None),
         )
-        resp = await client.post(
-            "/api/skills/uninstall", json={"skill_id": "some-skill"}
-        )
+        resp = await client.post("/api/skills/uninstall", json={"skill_id": "some-skill"})
         assert resp.status_code == 200
         assert resp.json().get("status") == "ok"
 
@@ -283,9 +274,7 @@ class TestReloadRoute:
     async def test_reload_single_uses_rescan_false(self, app_with_fake_agent, client):
         _, agent = app_with_fake_agent
         agent.skill_loader.reload_skill.return_value = True
-        resp = await client.post(
-            "/api/skills/reload", json={"skill_name": "foo"}
-        )
+        resp = await client.post("/api/skills/reload", json={"skill_name": "foo"})
         assert resp.status_code == 200
         data = resp.json()
         assert data.get("reloaded") == ["foo"]
@@ -294,14 +283,10 @@ class TestReloadRoute:
         assert call.args[0] == "reload"
         assert call.kwargs.get("rescan") is False
 
-    async def test_reload_single_not_found_does_not_propagate(
-        self, app_with_fake_agent, client
-    ):
+    async def test_reload_single_not_found_does_not_propagate(self, app_with_fake_agent, client):
         _, agent = app_with_fake_agent
         agent.skill_loader.reload_skill.return_value = None
-        resp = await client.post(
-            "/api/skills/reload", json={"skill_name": "ghost"}
-        )
+        resp = await client.post("/api/skills/reload", json={"skill_name": "ghost"})
         assert "error" in resp.json()
         agent.propagate_skill_change.assert_not_called()
 
@@ -419,4 +404,3 @@ class TestGetSkillsCacheInvalidation:
         skills_route._skills_cache = {"skills": [{"stale": True}]}
         notify_skills_changed("install")
         assert skills_route._skills_cache is None
-

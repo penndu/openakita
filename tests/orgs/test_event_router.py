@@ -16,14 +16,20 @@ from openakita.orgs.models import OrgStatus
 
 
 def test_summarize_internal_events_without_leaking_message_body():
-    assert summarize_org_event(
-        "org:node_status",
-        {"node_id": "writer", "status": "busy", "current_task": "写一版文案"},
-    ) == "writer 开始处理：写一版文案"
-    assert summarize_org_event(
-        "org:node_status",
-        {"node_id": "writer", "status": "idle"},
-    ) is None
+    assert (
+        summarize_org_event(
+            "org:node_status",
+            {"node_id": "writer", "status": "busy", "current_task": "写一版文案"},
+        )
+        == "writer 开始处理：写一版文案"
+    )
+    assert (
+        summarize_org_event(
+            "org:node_status",
+            {"node_id": "writer", "status": "idle"},
+        )
+        is None
+    )
     assert summarize_org_event("org:message", {"content": "内部细节"}) is None
 
 
@@ -44,7 +50,9 @@ async def test_router_publishes_only_for_external_scopes(persisted_org):
                 output_scope=OrgOutputScope.CHAT_SUMMARY,
             )
         )
-        queue = service.subscribe_summary(started["command_id"], surface="desktop_chat", target="conv")
+        queue = service.subscribe_summary(
+            started["command_id"], surface="desktop_chat", target="conv"
+        )
         await route_org_event(
             "org:node_status",
             {

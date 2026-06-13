@@ -328,9 +328,7 @@ class TaskExecutor:
 
 只回复 NO_ACTION 或 NEEDS_ACTION，不要有其他内容。"""
 
-                response = await brain.think(
-                    check_prompt, enable_thinking=False, max_tokens=16
-                )
+                response = await brain.think(check_prompt, enable_thinking=False, max_tokens=16)
                 result = response.content.strip().upper()
 
                 needs_action = "NEEDS_ACTION" in result
@@ -387,7 +385,9 @@ class TaskExecutor:
                     )
                     if not delivered:
                         error_msg = "任务已完成，但结果通知发送失败，请检查 IM 通道连接状态。"
-                        logger.warning(f"TaskExecutor: system task {task.id} result delivery failed")
+                        logger.warning(
+                            f"TaskExecutor: system task {task.id} result delivery failed"
+                        )
                         return False, error_msg
                 return system_success, system_result
 
@@ -397,8 +397,10 @@ class TaskExecutor:
             # 1.5. 防递归：禁止任务内再创建定时任务
             if task.no_schedule_tools:
                 agent._cron_disabled_tools = {
-                    "schedule_task", "update_scheduled_task",
-                    "cancel_scheduled_task", "trigger_scheduled_task",
+                    "schedule_task",
+                    "update_scheduled_task",
+                    "cancel_scheduled_task",
+                    "trigger_scheduled_task",
                 }
 
             # 2. 如果任务有 IM 通道信息，注入 IM 上下文
@@ -451,9 +453,7 @@ class TaskExecutor:
                 raw = task.metadata.get("unattended_strategy")
                 if isinstance(raw, str):
                     _strategy = raw
-                _replay_auths_raw = list(
-                    task.metadata.get("replay_authorizations", []) or []
-                )
+                _replay_auths_raw = list(task.metadata.get("replay_authorizations", []) or [])
 
             # C12 §14.7: only lift NON-expired replay auths into the
             # PolicyContext. Engine step 7 ignores expired entries
@@ -473,9 +473,7 @@ class TaskExecutor:
                     try:
                         _exp = float(ra.get("expires_at", 0))
                     except (TypeError, ValueError):
-                        logger.warning(
-                            "TaskExecutor: skipping malformed replay auth %r", ra
-                        )
+                        logger.warning("TaskExecutor: skipping malformed replay auth %r", ra)
                         continue
                     if _exp <= _now_for_replay:
                         continue
@@ -489,9 +487,7 @@ class TaskExecutor:
                             )
                         )
                     except (TypeError, ValueError):
-                        logger.warning(
-                            "TaskExecutor: skipping malformed replay auth %r", ra
-                        )
+                        logger.warning("TaskExecutor: skipping malformed replay auth %r", ra)
 
             # workspace_roots = security.workspace.paths（用户配置）∪ task cwd。
             # 不再用单一 cwd 覆盖用户配置——计划任务必须遵守安全页定义的工作区

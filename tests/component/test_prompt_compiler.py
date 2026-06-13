@@ -8,22 +8,26 @@ class TestPromptCompileFunctions:
 
     def test_compile_soul(self):
         from openakita.prompt.compiler import compile_soul
+
         result = compile_soul("You are OpenAkita, a loyal AI assistant.")
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_compile_soul_empty(self):
         from openakita.prompt.compiler import compile_soul
+
         result = compile_soul("")
         assert isinstance(result, str)
 
     def test_compile_agent_core(self):
         from openakita.prompt.compiler import compile_agent_core
+
         result = compile_agent_core("## Core Behaviors\n- Never give up\n- Be honest")
         assert isinstance(result, str)
 
     def test_compile_user(self):
         from openakita.prompt.compiler import compile_user
+
         result = compile_user("User prefers Chinese. Name: 小明")
         assert isinstance(result, str)
 
@@ -67,7 +71,9 @@ class TestBuildSystemPrompt:
 
         identity_dir = tmp_path / "identity"
         identity_dir.mkdir()
-        (identity_dir / "SOUL.md").write_text("# Soul\nI am OpenAkita, the loyal dog.", encoding="utf-8")
+        (identity_dir / "SOUL.md").write_text(
+            "# Soul\nI am OpenAkita, the loyal dog.", encoding="utf-8"
+        )
 
         prompt = build_system_prompt(identity_dir=identity_dir, tools_enabled=False)
         assert "OpenAkita" in prompt or "loyal" in prompt or len(prompt) > 50
@@ -239,4 +245,3 @@ class TestAgentResolveVoice:
         agent.name = ""
         # settings.agent_name defaults to "OpenAkita"
         assert agent._resolve_agent_voice() == settings.agent_name
-

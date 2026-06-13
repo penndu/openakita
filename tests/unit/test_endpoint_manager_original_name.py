@@ -59,7 +59,12 @@ def test_save_endpoints_batch_shares_one_api_key_env(tmp_path):
     saved = manager.save_endpoints(
         [
             {"name": "openai-gpt-4o", "provider": "openai", "model": "gpt-4o", "priority": 10},
-            {"name": "openai-gpt-4o-mini", "provider": "openai", "model": "gpt-4o-mini", "priority": 20},
+            {
+                "name": "openai-gpt-4o-mini",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "priority": 20,
+            },
         ],
         api_key="sk-batch",
     )

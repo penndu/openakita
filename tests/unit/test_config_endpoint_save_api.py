@@ -107,7 +107,9 @@ async def test_path_policy_writes_v2_fields_without_legacy_zones(monkeypatch):
     state = {"security": {"zones": {"workspace": ["old"], "default_zone": "controlled"}}}
     written = {}
     monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: json.loads(json.dumps(state)))
-    monkeypatch.setattr(config_routes, "_write_policies_yaml", lambda data: written.update(data) or True)
+    monkeypatch.setattr(
+        config_routes, "_write_policies_yaml", lambda data: written.update(data) or True
+    )
 
     response = await config_routes.write_security_path_policy(
         config_routes.SecurityPathPolicyUpdate(
@@ -141,10 +143,14 @@ async def test_security_profile_off_disables_security_enabled(monkeypatch):
     state = {"security": {"profile": {"current": "protect"}, "enabled": True}}
     written = {}
     monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: json.loads(json.dumps(state)))
-    monkeypatch.setattr(config_routes, "_write_policies_yaml", lambda data: written.update(data) or True)
+    monkeypatch.setattr(
+        config_routes, "_write_policies_yaml", lambda data: written.update(data) or True
+    )
 
     response = await config_routes.write_security_profile(
-        config_routes.SecurityProfileUpdate(profile="off", ack_phrase=config_routes._SECURITY_PROFILE_OFF_ACK)
+        config_routes.SecurityProfileUpdate(
+            profile="off", ack_phrase=config_routes._SECURITY_PROFILE_OFF_ACK
+        )
     )
 
     assert response["status"] == "ok"
@@ -158,7 +164,9 @@ async def test_security_profile_trust_reenables_security_enabled(monkeypatch):
     state = {"security": {"profile": {"current": "off", "base": "protect"}, "enabled": False}}
     written = {}
     monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: json.loads(json.dumps(state)))
-    monkeypatch.setattr(config_routes, "_write_policies_yaml", lambda data: written.update(data) or True)
+    monkeypatch.setattr(
+        config_routes, "_write_policies_yaml", lambda data: written.update(data) or True
+    )
 
     response = await config_routes.write_security_profile(
         config_routes.SecurityProfileUpdate(profile="trust")
@@ -193,7 +201,11 @@ async def test_security_preview_uses_current_yaml_not_stale_global_engine(monkey
     response = await config_routes.preview_security_config({})
 
     assert response["preview_uses_proposed"] is False
-    run_shell = next(item for item in response["decisions"] if item["tool"] == "run_shell" and "ls" in item["params_preview"])
+    run_shell = next(
+        item
+        for item in response["decisions"]
+        if item["tool"] == "run_shell" and "ls" in item["params_preview"]
+    )
     assert run_shell["effective_confirmation_mode"] == "trust"
     assert run_shell["security_profile"] == "trust"
     assert run_shell["decision"] == "allow"
@@ -204,12 +216,17 @@ async def test_commands_api_writes_shell_risk_not_legacy(monkeypatch):
     """write_security_commands 必须写到 security.shell_risk，并彻底清理 legacy command_patterns。"""
     state = {
         "security": {
-            "command_patterns": {"custom_critical": ["legacy-only"], "blocked_commands": ["legacy"]},
+            "command_patterns": {
+                "custom_critical": ["legacy-only"],
+                "blocked_commands": ["legacy"],
+            },
         }
     }
     written = {}
     monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: json.loads(json.dumps(state)))
-    monkeypatch.setattr(config_routes, "_write_policies_yaml", lambda data: written.update(data) or True)
+    monkeypatch.setattr(
+        config_routes, "_write_policies_yaml", lambda data: written.update(data) or True
+    )
 
     response = await config_routes.write_security_commands(
         config_routes.SecurityCommandsUpdate(
@@ -261,7 +278,9 @@ async def test_self_protection_api_writes_v2_blocks(monkeypatch):
     }
     written = {}
     monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: json.loads(json.dumps(state)))
-    monkeypatch.setattr(config_routes, "_write_policies_yaml", lambda data: written.update(data) or True)
+    monkeypatch.setattr(
+        config_routes, "_write_policies_yaml", lambda data: written.update(data) or True
+    )
 
     response = await config_routes.write_self_protection(
         config_routes._SelfProtectionUpdate(
@@ -298,7 +317,9 @@ async def test_granular_write_during_off_leaves_audit_event(monkeypatch):
     written = {}
     audit_calls: list[tuple[str, str | None]] = []
     monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: json.loads(json.dumps(state)))
-    monkeypatch.setattr(config_routes, "_write_policies_yaml", lambda data: written.update(data) or True)
+    monkeypatch.setattr(
+        config_routes, "_write_policies_yaml", lambda data: written.update(data) or True
+    )
     monkeypatch.setattr(
         config_routes,
         "_write_profile_event",
@@ -334,7 +355,9 @@ async def test_permission_mode_escape_from_off_is_audited(monkeypatch):
     written = {}
     audit_calls: list[tuple[str, str | None]] = []
     monkeypatch.setattr(config_routes, "_read_policies_yaml", lambda: json.loads(json.dumps(state)))
-    monkeypatch.setattr(config_routes, "_write_policies_yaml", lambda data: written.update(data) or True)
+    monkeypatch.setattr(
+        config_routes, "_write_policies_yaml", lambda data: written.update(data) or True
+    )
     monkeypatch.setattr(
         config_routes,
         "_write_profile_event",
@@ -347,15 +370,17 @@ async def test_permission_mode_escape_from_off_is_audited(monkeypatch):
         raising=False,
     )
 
-    result = await config_routes.write_permission_mode(config_routes._PermissionModeBody(mode="smart"))
+    result = await config_routes.write_permission_mode(
+        config_routes._PermissionModeBody(mode="smart")
+    )
 
     assert result["status"] == "ok"
     # 状态被强行拉到 protect（=smart 的 v2 等价）
     assert written["security"]["profile"]["current"] == "protect"
     assert written["security"]["enabled"] is True
-    assert any(
-        target == "protect" and prev == "off" for (target, prev) in audit_calls
-    ), f"off → protect 必须有 profile_change 事件, got {audit_calls}"
+    assert any(target == "protect" and prev == "off" for (target, prev) in audit_calls), (
+        f"off → protect 必须有 profile_change 事件, got {audit_calls}"
+    )
 
 
 @pytest.mark.asyncio

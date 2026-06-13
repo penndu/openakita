@@ -172,7 +172,9 @@ def _docs_version_matches_bundled(bundled: Path, version_dir: Path) -> bool:
 
     try:
         bundled_files = {path.relative_to(bundled) for path in bundled.rglob("*") if path.is_file()}
-        deployed_files = {path.relative_to(version_dir) for path in version_dir.rglob("*") if path.is_file()}
+        deployed_files = {
+            path.relative_to(version_dir) for path in version_dir.rglob("*") if path.is_file()
+        }
         if bundled_files != deployed_files:
             return False
 
@@ -589,6 +591,7 @@ def create_app(
         """Import any feedback records staged by Tauri while the backend was down."""
         try:
             from openakita.config import settings
+
             home = settings.openakita_home
         except Exception:
             home = Path.home() / ".openakita"
@@ -597,11 +600,13 @@ def create_app(
             return
         try:
             import json as _json
+
             records = _json.loads(pending.read_text("utf-8"))
             if not isinstance(records, list):
                 pending.unlink(missing_ok=True)
                 return
             from .routes import feedback_store
+
             imported = 0
             for rec in records:
                 try:
@@ -643,9 +648,7 @@ def create_app(
         try:
             from openakita.core.cancel_cleanup import cleanup_expired_working_messages
 
-            removed = await asyncio.to_thread(
-                cleanup_expired_working_messages, base_dir=data_dir
-            )
+            removed = await asyncio.to_thread(cleanup_expired_working_messages, base_dir=data_dir)
             if removed:
                 logger.info("[Startup] Removed %d expired cancel-resume snapshot(s)", removed)
         except Exception as e:
@@ -699,8 +702,7 @@ def create_app(
                 logger.info("[Startup] PolicyHotReloader started")
             else:
                 logger.debug(
-                    "[Startup] PolicyHotReloader not started "
-                    "(disabled or no POLICIES.yaml)"
+                    "[Startup] PolicyHotReloader not started (disabled or no POLICIES.yaml)"
                 )
         except Exception as e:
             logger.warning("[Startup] PolicyHotReloader wire failed: %s", e)
@@ -872,8 +874,7 @@ def create_app(
             logger.info("[Startup] AsyncBatchAuditWriter started for %s", path)
         except Exception as e:
             logger.warning(
-                "[Startup] AsyncBatchAuditWriter not started; sync fallback "
-                "remains active: %s",
+                "[Startup] AsyncBatchAuditWriter not started; sync fallback remains active: %s",
                 e,
             )
 

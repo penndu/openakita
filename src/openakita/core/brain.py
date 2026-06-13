@@ -442,9 +442,7 @@ class Brain:
         messages = [Message(role="user", content=[TextBlock(text=prompt)])]
         sys_prompt = system or ""
 
-        req_id = self._dump_llm_request(
-            sys_prompt, messages, [], caller="think_lightweight_stream"
-        )
+        req_id = self._dump_llm_request(sys_prompt, messages, [], caller="think_lightweight_stream")
 
         async def _stream_via(client: LLMClient, label: str):
             """从 *client* 的 chat_stream 转发 raw 事件，并用 StreamAccumulator 翻译为高层事件。
@@ -1150,7 +1148,11 @@ class Brain:
                 except Exception:
                     tool_payload_tokens = 200
 
-            if not is_deferred and schema_budget > 0 and schema_tokens + tool_payload_tokens > schema_budget:
+            if (
+                not is_deferred
+                and schema_budget > 0
+                and schema_tokens + tool_payload_tokens > schema_budget
+            ):
                 is_deferred = True
 
             if is_deferred:
@@ -1315,11 +1317,11 @@ class Brain:
             ),
         )
         # 透传端点信息供 reasoning_engine 检测 failover / thinking 降级
-        if hasattr(response, 'endpoint_name'):
+        if hasattr(response, "endpoint_name"):
             msg.endpoint_name = response.endpoint_name  # type: ignore[attr-defined]
-        if hasattr(response, '_failover_from'):
+        if hasattr(response, "_failover_from"):
             msg._failover_from = response._failover_from  # type: ignore[attr-defined]
-        if hasattr(response, '_thinking_fallback'):
+        if hasattr(response, "_thinking_fallback"):
             msg._thinking_fallback = response._thinking_fallback  # type: ignore[attr-defined]
         return msg
 
@@ -1689,7 +1691,8 @@ class Brain:
                     "input": input_str,
                 }
                 extra = (
-                    block.get("provider_extra") if isinstance(block, dict)
+                    block.get("provider_extra")
+                    if isinstance(block, dict)
                     else getattr(block, "provider_extra", None)
                 )
                 if extra:

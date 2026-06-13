@@ -78,7 +78,9 @@ def extract_template_vars(
     if not path.exists():
         return TemplateInspection(str(path), [], [], False, "none", "Template not found")
     if path.suffix.lower() != ".docx":
-        return TemplateInspection(str(path), [], [], False, "none", "Only DOCX templates are supported")
+        return TemplateInspection(
+            str(path), [], [], False, "none", "Only DOCX templates are supported"
+        )
     try:
         variables = _extract_with_docxtpl(path)
         engine = "docxtpl" if variables is not None else "regex"
@@ -147,7 +149,9 @@ def render_template(
     output = Path(output_path)
     inspection = extract_template_vars(template, context=context)
     if not inspection.ok and not allow_missing:
-        return RenderResult(str(output), False, inspection.engine, inspection.missing, "Missing template variables")
+        return RenderResult(
+            str(output), False, inspection.engine, inspection.missing, "Missing template variables"
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
     try:
         used_docxtpl = _render_with_docxtpl(template, output, context)
@@ -165,5 +169,6 @@ def render_template(
             _render_with_regex(template, output, context)
     except Exception as exc:
         return RenderResult(str(output), False, inspection.engine, inspection.missing, str(exc))
-    return RenderResult(str(output), True, "docxtpl" if used_docxtpl else "regex", inspection.missing)
-
+    return RenderResult(
+        str(output), True, "docxtpl" if used_docxtpl else "regex", inspection.missing
+    )

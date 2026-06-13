@@ -220,8 +220,7 @@ def test_degraded_registry_thread_safe_concurrent_register():
     r = DegradedRegistry()
     seen_subsystems = ["s1", "s2", "s3", "s1", "s2"]  # duplicates intentional
     threads = [
-        threading.Thread(target=lambda s=s: r.register(s, "corrupted"))
-        for s in seen_subsystems
+        threading.Thread(target=lambda s=s: r.register(s, "corrupted")) for s in seen_subsystems
     ]
     for t in threads:
         t.start()

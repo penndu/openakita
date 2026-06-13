@@ -292,9 +292,7 @@ class TestV113TrustDefaultUpgradeInfo:
         upgrade_msgs = [
             r.message for r in caplog.records if "v1 schema without explicit" in r.message
         ]
-        assert upgrade_msgs == [], (
-            f"已显式写 mode 的 v1 YAML 不该发升级 INFO; got {upgrade_msgs!r}"
-        )
+        assert upgrade_msgs == [], f"已显式写 mode 的 v1 YAML 不该发升级 INFO; got {upgrade_msgs!r}"
 
     def test_v2_yaml_without_mode_does_not_emit_upgrade_info(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -312,9 +310,7 @@ class TestV113TrustDefaultUpgradeInfo:
         upgrade_msgs = [
             r.message for r in caplog.records if "v1 schema without explicit" in r.message
         ]
-        assert upgrade_msgs == [], (
-            f"v2 YAML 不该发 v1 升级 INFO; got {upgrade_msgs!r}"
-        )
+        assert upgrade_msgs == [], f"v2 YAML 不该发 v1 升级 INFO; got {upgrade_msgs!r}"
 
 
 class TestLoaderEndToEnd:

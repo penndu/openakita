@@ -204,9 +204,7 @@ class MultiPostCompatEngine:
         self._broadcaster = broadcaster
         self._waiters: dict[str, _Waiter] = {}
         self._status = MultiPostStatus(
-            min_version=str(
-                self._settings.get("mp_extension_min_version", DEFAULT_MIN_VERSION)
-            ),
+            min_version=str(self._settings.get("mp_extension_min_version", DEFAULT_MIN_VERSION)),
         )
         self._lock = asyncio.Lock()
 
@@ -299,10 +297,7 @@ class MultiPostCompatEngine:
             return AdapterOutcome(
                 success=False,
                 error_kind=ErrorKind.TIMEOUT.value,
-                error_message=(
-                    f"MultiPost extension did not ack within "
-                    f"{self._ack_timeout:.0f}s"
-                ),
+                error_message=(f"MultiPost extension did not ack within {self._ack_timeout:.0f}s"),
             )
         finally:
             async with self._lock:
@@ -358,9 +353,7 @@ class MultiPostCompatEngine:
                     "task_id": tid,
                     "payload": w.dispatch,
                     "auto_submit": w.auto_submit,
-                    "waiting_ms": int(
-                        (asyncio.get_event_loop().time() - w.started_at) * 1000
-                    ),
+                    "waiting_ms": int((asyncio.get_event_loop().time() - w.started_at) * 1000),
                 }
             )
         return out

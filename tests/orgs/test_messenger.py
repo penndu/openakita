@@ -78,8 +78,11 @@ class TestNodeMailbox:
 class TestMessengerSend:
     async def test_send_to_known_node(self, org_with_messenger: OrgMessenger):
         msg = OrgMessage(
-            org_id="org_test", from_node="node_ceo", to_node="node_cto",
-            msg_type=MsgType.TASK_ASSIGN, content="do X",
+            org_id="org_test",
+            from_node="node_ceo",
+            to_node="node_cto",
+            msg_type=MsgType.TASK_ASSIGN,
+            content="do X",
         )
         result = await org_with_messenger.send(msg)
         assert result is True
@@ -89,8 +92,11 @@ class TestMessengerSend:
 
     async def test_send_to_unknown_node(self, org_with_messenger: OrgMessenger):
         msg = OrgMessage(
-            org_id="org_test", from_node="node_ceo", to_node="no_such_node",
-            msg_type=MsgType.TASK_ASSIGN, content="X",
+            org_id="org_test",
+            from_node="node_ceo",
+            to_node="no_such_node",
+            msg_type=MsgType.TASK_ASSIGN,
+            content="X",
         )
         result = await org_with_messenger.send(msg)
         assert result is False
@@ -126,8 +132,11 @@ class TestMessengerSend:
 class TestBroadcast:
     async def test_broadcast(self, org_with_messenger: OrgMessenger):
         msg = OrgMessage(
-            org_id="org_test", from_node="node_ceo",
-            to_node=None, msg_type=MsgType.BROADCAST, content="全员通知",
+            org_id="org_test",
+            from_node="node_ceo",
+            to_node=None,
+            msg_type=MsgType.BROADCAST,
+            content="全员通知",
         )
         result = await org_with_messenger.send(msg)
         assert result is True
@@ -190,15 +199,21 @@ class TestBandwidth:
 
         for i in range(3):
             msg = OrgMessage(
-                org_id=org.id, from_node=edge.source, to_node=edge.target,
-                msg_type=MsgType.TASK_ASSIGN, content=f"task {i}",
+                org_id=org.id,
+                from_node=edge.source,
+                to_node=edge.target,
+                msg_type=MsgType.TASK_ASSIGN,
+                content=f"task {i}",
                 edge_id=edge.id,
             )
             assert await org_with_messenger.send(msg) is True
 
         msg = OrgMessage(
-            org_id=org.id, from_node=edge.source, to_node=edge.target,
-            msg_type=MsgType.TASK_ASSIGN, content="over limit",
+            org_id=org.id,
+            from_node=edge.source,
+            to_node=edge.target,
+            msg_type=MsgType.TASK_ASSIGN,
+            content="over limit",
             edge_id=edge.id,
         )
         assert await org_with_messenger.send(msg) is False
@@ -248,4 +263,3 @@ class TestBackgroundTasks:
         await org_with_messenger.stop_background_tasks()
         assert org_with_messenger._deadlock_task is None
         assert org_with_messenger._ttl_task is None
-

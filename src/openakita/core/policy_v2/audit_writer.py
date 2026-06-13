@@ -204,7 +204,8 @@ class AsyncBatchAuditWriter:
         except asyncio.QueueFull:
             try:
                 await asyncio.wait_for(
-                    queue.put(None), timeout=sentinel_budget  # type: ignore[arg-type]
+                    queue.put(None),
+                    timeout=sentinel_budget,  # type: ignore[arg-type]
                 )
                 sentinel_delivered = True
             except TimeoutError:
@@ -244,8 +245,7 @@ class AsyncBatchAuditWriter:
             self._queue = None
             self._loop = None
             logger.info(
-                "[audit_writer] stopped %s (enqueued=%d, written=%d, "
-                "batches=%d, sync_fallback=%d)",
+                "[audit_writer] stopped %s (enqueued=%d, written=%d, batches=%d, sync_fallback=%d)",
                 self._path,
                 self._stat_enqueued,
                 self._stat_written,
@@ -256,9 +256,7 @@ class AsyncBatchAuditWriter:
     def is_running(self) -> bool:
         with self._state_lock:
             return (
-                self._worker_task is not None
-                and not self._worker_task.done()
-                and not self._stopped
+                self._worker_task is not None and not self._worker_task.done() and not self._stopped
             )
 
     # ------------------------------------------------------------------
@@ -416,9 +414,7 @@ class AsyncBatchAuditWriter:
         with self._state_lock:
             queue = self._queue
             running = (
-                self._worker_task is not None
-                and not self._worker_task.done()
-                and not self._stopped
+                self._worker_task is not None and not self._worker_task.done() and not self._stopped
             )
         if not running or queue is None:
             return

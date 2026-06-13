@@ -142,18 +142,14 @@ class AuditLogger:
                     async_w.enqueue(entry)
                     return
             except Exception as e:
-                logger.debug(
-                    "[Audit] async writer unavailable, using sync chain: %s", e
-                )
+                logger.debug("[Audit] async writer unavailable, using sync chain: %s", e)
             try:
                 from .policy_v2.audit_chain import get_writer
 
                 get_writer(self._path).append(entry)
                 return
             except Exception as e:
-                logger.warning(
-                    "[Audit] Chain write failed, falling back to raw append: %s", e
-                )
+                logger.warning("[Audit] Chain write failed, falling back to raw append: %s", e)
         try:
             with open(self._path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")

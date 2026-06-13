@@ -63,7 +63,10 @@ class OrgIdentity:
         return ResolvedIdentity(soul=soul, agent=agent, role=role, level=level)
 
     def build_org_context_prompt(
-        self, node: OrgNode, org: Organization, identity: ResolvedIdentity,
+        self,
+        node: OrgNode,
+        org: Organization,
+        identity: ResolvedIdentity,
         blackboard_summary: str = "",
         dept_summary: str = "",
         node_summary: str = "",
@@ -82,7 +85,7 @@ class OrgIdentity:
         """
         parent = org.get_parent(node.id)
         children = org.get_children(node.id)
-        is_root = (node.level == 0 or not parent)
+        is_root = node.level == 0 or not parent
 
         connected_peers: list[str] = []
         for e in org.edges:
@@ -109,7 +112,7 @@ class OrgIdentity:
                 _intent_brief = _intent_brief[:400] + "..."
             parts.append(
                 "## 用户当前指令（最高优先级，禁止超出）\n"
-                f"\"{_intent_brief}\"\n"
+                f'"{_intent_brief}"\n'
                 "下达任何子任务、写任何代码、产出任何交付物之前，"
                 "先检查你的输出严格在该指令的范围、字数、格式约束之内。"
                 "若与上级转述冲突，以上述用户原话为准。"
@@ -132,7 +135,9 @@ class OrgIdentity:
 
         # Role description
         dept_label = f"（{node.department}）" if node.department else ""
-        role_section = f"## 你的组织角色\n你在「{org.name}」中担任 **{node.role_title}**{dept_label}。"
+        role_section = (
+            f"## 你的组织角色\n你在「{org.name}」中担任 **{node.role_title}**{dept_label}。"
+        )
         if identity.role:
             role_section += f"\n{identity.role}"
         parts.append(role_section)
@@ -167,8 +172,10 @@ class OrgIdentity:
             "- 一个任务完成后立即开始下一个，保持连续工作节奏"
         )
 
-        parts.append(f"## 组织架构概览\n{org_chart}\n"
-                     f"需要详情时用 org_get_org_chart 查看完整架构，不确定找谁时用 org_find_colleague 搜索。")
+        parts.append(
+            f"## 组织架构概览\n{org_chart}\n"
+            f"需要详情时用 org_get_org_chart 查看完整架构，不确定找谁时用 org_find_colleague 搜索。"
+        )
 
         # Relationships with enhanced delegation guidance
         rel_parts = []
@@ -292,6 +299,7 @@ class OrgIdentity:
         has_basic_file_tools = getattr(node, "enable_file_tools", True)
         if has_external:
             from .tool_categories import TOOL_CATEGORIES, expand_tool_categories
+
             ext_names = expand_tool_categories(node.external_tools)
             cat_labels = [c for c in node.external_tools if c in TOOL_CATEGORIES]
             ext_desc = "、".join(cat_labels) if cat_labels else "、".join(sorted(ext_names)[:5])
@@ -303,8 +311,7 @@ class OrgIdentity:
                 "- 外部工具得到的重要结果，用 org_write_blackboard 写入黑板共享给同事\n"
                 "- 优先通过直接连线关系沟通（上下级、协作伙伴）\n"
                 "- 非必要不跨级沟通\n"
-                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n"
-                + delivery_flow
+                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n" + delivery_flow
             )
         elif has_basic_file_tools:
             parts.append(
@@ -319,8 +326,7 @@ class OrgIdentity:
                 "把文件落盘**，再用 org_submit_deliverable(file_attachments=[…]) "
                 "把附件交给委派人，不要只把全文塞进 deliverable 字段\n"
                 "- 重要决策和方案写入 org_write_blackboard，写之前先 org_read_blackboard 检查避免重复\n"
-                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n"
-                + delivery_flow
+                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n" + delivery_flow
             )
         else:
             parts.append(
@@ -331,8 +337,7 @@ class OrgIdentity:
                 "- 优先通过直接连线关系沟通（上下级、协作伙伴）\n"
                 "- 非必要不跨级沟通\n"
                 "- 重要决策和方案写入 org_write_blackboard，写之前先 org_read_blackboard 检查避免重复\n"
-                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n"
-                + delivery_flow
+                "- 回复要简洁，1-3 句话概括行动和结果即可\n\n" + delivery_flow
             )
 
         if getattr(org, "operation_mode", "") == "command" and not project_tasks_summary:
@@ -390,9 +395,7 @@ class OrgIdentity:
             dept_members = [m for m in members if m.id not in root_ids]
             if not dept_members:
                 continue
-            member_str = ", ".join(
-                f"{m.role_title}(`{m.id}`)" for m in dept_members[:6]
-            )
+            member_str = ", ".join(f"{m.role_title}(`{m.id}`)" for m in dept_members[:6])
             if len(dept_members) > 6:
                 member_str += f" 等{len(dept_members)}人"
             lines.append(f"  - {dept_name}: {member_str}")
@@ -415,6 +418,7 @@ class OrgIdentity:
     def _get_profile_prompt(self, profile_id: str) -> str | None:
         try:
             from openakita.main import _orchestrator
+
             if _orchestrator and hasattr(_orchestrator, "_profile_store"):
                 profile = _orchestrator._profile_store.get(profile_id)
                 return profile.custom_prompt if profile else None
@@ -422,6 +426,7 @@ class OrgIdentity:
             pass
         try:
             from openakita.agents.profile import get_profile_store
+
             store = get_profile_store()
             profile = store.get(profile_id)
             return profile.custom_prompt if profile else None
@@ -472,4 +477,3 @@ class OrgIdentity:
             except Exception:
                 return None
         return None
-

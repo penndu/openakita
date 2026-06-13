@@ -1253,7 +1253,9 @@ class MCPClient:
                         success=False,
                         error=f"Invalid connection for server: {server_name}",
                     )
-                result = await self._await_operation(client.get_prompt(prompt_name, arguments or {}))
+                result = await self._await_operation(
+                    client.get_prompt(prompt_name, arguments or {})
+                )
 
                 messages = []
                 for msg in result.messages:
@@ -1396,9 +1398,7 @@ class MCPClient:
         """
         return f"mcp_{server_name}_{tool_name}".replace("-", "_")
 
-    def get_tool_class(
-        self, tool_name: str
-    ) -> tuple[Any, Any] | None:
+    def get_tool_class(self, tool_name: str) -> tuple[Any, Any] | None:
         """C10：MCP 工具 → ApprovalClass 查表（PolicyEngineV2 ``mcp_lookup``）。
 
         识别策略（按 MCP 协议 2024-11+ ``tool.annotations``）：
@@ -1468,9 +1468,7 @@ class MCPClient:
                     # would never trip a heuristic prefix.
                     server_cfg = self._servers.get(server_name)
                     server_trust = getattr(server_cfg, "trust_level", None)
-                    mcp_trust = infer_mcp_declared_trust(
-                        server_trust_level=server_trust
-                    )
+                    mcp_trust = infer_mcp_declared_trust(server_trust_level=server_trust)
                     try:
                         effective, src = compute_effective_class(
                             tool.name,
@@ -1487,17 +1485,11 @@ class MCPClient:
             read_only = ann.get("readOnlyHint")
             open_world = ann.get("openWorldHint")
             if destructive is True:
-                candidates.append(
-                    (ApprovalClass.DESTRUCTIVE, DecisionSource.MCP_ANNOTATION)
-                )
+                candidates.append((ApprovalClass.DESTRUCTIVE, DecisionSource.MCP_ANNOTATION))
             elif open_world is True and read_only is not True:
-                candidates.append(
-                    (ApprovalClass.MUTATING_GLOBAL, DecisionSource.MCP_ANNOTATION)
-                )
+                candidates.append((ApprovalClass.MUTATING_GLOBAL, DecisionSource.MCP_ANNOTATION))
             elif read_only is True:
-                candidates.append(
-                    (ApprovalClass.READONLY_SCOPED, DecisionSource.MCP_ANNOTATION)
-                )
+                candidates.append((ApprovalClass.READONLY_SCOPED, DecisionSource.MCP_ANNOTATION))
 
         if not candidates:
             return None

@@ -97,7 +97,9 @@ def _log_task_exception(task: asyncio.Task) -> None:  # type: ignore[type-arg]
     if exc is not None:
         logger.error(
             "[OrgRuntime] fire-and-forget task %s raised: %s",
-            task.get_name(), exc, exc_info=exc,
+            task.get_name(),
+            exc,
+            exc_info=exc,
         )
 
 
@@ -108,6 +110,7 @@ def get_runtime() -> OrgRuntime | None:
 
 class _CachedAgent:
     """Wrapper for a cached Agent instance with TTL tracking."""
+
     __slots__ = ("agent", "last_used", "session_id")
 
     def __init__(self, agent: Any, session_id: str):
@@ -148,6 +151,7 @@ class OrgRuntime:
         self._notifier = OrgNotifier(self)
 
         from .reporter import OrgReporter
+
         self._reporter = OrgReporter(self)
 
         self._agent_cache: OrderedDict[str, _CachedAgent] = OrderedDict()
@@ -221,7 +225,7 @@ class OrgRuntime:
         self._idle_base_threshold: float = 120.0
         self._idle_max_threshold: float = 600.0
         self._idle_max_ineffective: int = 2
-        self._idle_org_quiet_grace: float = 300.0   # 5 min 后熔断
+        self._idle_org_quiet_grace: float = 300.0  # 5 min 后熔断
         self._idle_org_silent_interval: float = 1800.0  # 熔断后 30 min 心跳
 
         # 组织级并发控制：限制每个组织同时激活的节点数
@@ -303,15 +307,14 @@ class OrgRuntime:
             self._org_semaphores[org_id] = sem
         return sem
 
-    def _should_skip_diagnosis_emit(
-        self, org_id: str, node_id: str, root_cause: str
-    ) -> bool:
+    def _should_skip_diagnosis_emit(self, org_id: str, node_id: str, root_cause: str) -> bool:
         """判定 (org, node, root_cause) 在去重窗口内是否已 emit 过失败卡片。
 
         命中（应跳过）时仅刷新时间戳并返回 True；未命中（应 emit）时记录
         时间戳并返回 False。窗口外的旧条目顺手清理，避免长时间运行内存累积。
         """
         import time as _t
+
         now = _t.time()
         key = (org_id, node_id, root_cause or "unknown")
         last = self._recent_diagnosis_emit.get(key)
@@ -333,6 +336,7 @@ class OrgRuntime:
         必须调用 :py:meth:`_release_tool_inflight` 释放（或不释放等待自然过期）。
         """
         import time as _t
+
         now = _t.time()
         last = self._tool_inflight_keys.get(key)
         if last is not None and now - last < self._tool_inflight_window_secs:
@@ -500,7 +504,12 @@ class OrgRuntime:
 
     _VALID_TRANSITIONS: dict[OrgStatus, set[OrgStatus]] = {
         OrgStatus.DORMANT: {OrgStatus.ACTIVE},
-        OrgStatus.ACTIVE: {OrgStatus.RUNNING, OrgStatus.PAUSED, OrgStatus.DORMANT, OrgStatus.ARCHIVED},
+        OrgStatus.ACTIVE: {
+            OrgStatus.RUNNING,
+            OrgStatus.PAUSED,
+            OrgStatus.DORMANT,
+            OrgStatus.ARCHIVED,
+        },
         OrgStatus.RUNNING: {OrgStatus.ACTIVE, OrgStatus.PAUSED, OrgStatus.DORMANT},
         OrgStatus.PAUSED: {OrgStatus.ACTIVE, OrgStatus.DORMANT, OrgStatus.ARCHIVED},
         OrgStatus.ARCHIVED: set(),
@@ -564,9 +573,7 @@ class OrgRuntime:
                 policies.install_default_policies("default")
 
         self.get_event_store(org_id).emit("org_started", "system")
-        await self._broadcast_ws("org:status_change", {
-            "org_id": org_id, "status": "active"
-        })
+        await self._broadcast_ws("org:status_change", {"org_id": org_id, "status": "active"})
 
         mode = getattr(org, "operation_mode", "command") or "command"
         if mode == "autonomous":
@@ -657,9 +664,7 @@ class OrgRuntime:
                 try:
                     await self.cancel_node_task(org.id, node.id, reason=reason)
                 except Exception as e:
-                    logger.debug(
-                        f"[OrgRuntime] cancel_node_task failed for {node.id}: {e}"
-                    )
+                    logger.debug(f"[OrgRuntime] cancel_node_task failed for {node.id}: {e}")
             elif node.status in (NodeStatus.WAITING, NodeStatus.ERROR):
                 # cancel_node_task 对非 BUSY 节点直接早返回，这里手动收尾，
                 # 否则 stop 之后这些节点还会留着 WAITING/ERROR 状态。
@@ -667,21 +672,22 @@ class OrgRuntime:
                     if messenger is not None:
                         messenger.clear_node_pending(node.id)
                 except Exception as e:
-                    logger.debug(
-                        f"[OrgRuntime] clear_node_pending failed for {node.id}: {e}"
-                    )
+                    logger.debug(f"[OrgRuntime] clear_node_pending failed for {node.id}: {e}")
                 try:
                     self._set_node_status(org, node, NodeStatus.IDLE, reason)
                     self._node_current_chain.pop(f"{org.id}:{node.id}", None)
                 except Exception as e:
-                    logger.debug(
-                        f"[OrgRuntime] _set_node_status failed for {node.id}: {e}"
-                    )
+                    logger.debug(f"[OrgRuntime] _set_node_status failed for {node.id}: {e}")
                 try:
-                    await self._broadcast_ws("org:node_status", {
-                        "org_id": org.id, "node_id": node.id,
-                        "status": "idle", "current_task": "",
-                    })
+                    await self._broadcast_ws(
+                        "org:node_status",
+                        {
+                            "org_id": org.id,
+                            "node_id": node.id,
+                            "status": "idle",
+                            "current_task": "",
+                        },
+                    )
                 except Exception:
                     pass
 
@@ -708,9 +714,7 @@ class OrgRuntime:
                 await self._cancel_org_tasks(org_id)
             except Exception as e:
                 logger.debug(f"[OrgRuntime] idempotent stop _cancel_org_tasks: {e}")
-            await self._broadcast_ws("org:status_change", {
-                "org_id": org_id, "status": "dormant"
-            })
+            await self._broadcast_ws("org:status_change", {"org_id": org_id, "status": "dormant"})
             return org
 
         self._check_transition(org, OrgStatus.DORMANT)
@@ -731,10 +735,15 @@ class OrgRuntime:
                 reset_nodes.append(node)
 
         for node in reset_nodes:
-            await self._broadcast_ws("org:node_status", {
-                "org_id": org_id, "node_id": node.id,
-                "status": "idle", "current_task": None,
-            })
+            await self._broadcast_ws(
+                "org:node_status",
+                {
+                    "org_id": org_id,
+                    "node_id": node.id,
+                    "status": "idle",
+                    "current_task": None,
+                },
+            )
 
         org.status = OrgStatus.DORMANT
         org.updated_at = _now_iso()
@@ -744,9 +753,7 @@ class OrgRuntime:
         self.get_event_store(org_id).emit("org_stopped", "system")
         await self._deactivate_org(org_id)
 
-        await self._broadcast_ws("org:status_change", {
-            "org_id": org_id, "status": "dormant"
-        })
+        await self._broadcast_ws("org:status_change", {"org_id": org_id, "status": "dormant"})
 
         return org
 
@@ -804,9 +811,7 @@ class OrgRuntime:
         # 4. Delete disk data
         self._manager.delete(org_id)
 
-        await self._broadcast_ws("org:status_change", {
-            "org_id": org_id, "status": "deleted"
-        })
+        await self._broadcast_ws("org:status_change", {"org_id": org_id, "status": "deleted"})
         logger.info(f"[OrgRuntime] Deleted org: {org_id} ({org.name})")
 
     async def reset_org(self, org_id: str) -> Organization:
@@ -860,9 +865,13 @@ class OrgRuntime:
 
         logger.info(f"[OrgRuntime] Reset org {org.name} ({org_id})")
 
-        await self._broadcast_ws("org:status_change", {
-            "org_id": org_id, "status": "dormant",
-        })
+        await self._broadcast_ws(
+            "org:status_change",
+            {
+                "org_id": org_id,
+                "status": "dormant",
+            },
+        )
 
         return org
 
@@ -878,9 +887,7 @@ class OrgRuntime:
         org.updated_at = _now_iso()
         self._manager.update(org_id, {"status": org.status.value})
         self.get_event_store(org_id).emit("org_paused", "system")
-        await self._broadcast_ws("org:status_change", {
-            "org_id": org_id, "status": "paused"
-        })
+        await self._broadcast_ws("org:status_change", {"org_id": org_id, "status": "paused"})
         return org
 
     async def resume_org(self, org_id: str) -> Organization:
@@ -899,9 +906,7 @@ class OrgRuntime:
         if org_id not in self._active_orgs:
             self._activate_org(org)
         self.get_event_store(org_id).emit("org_resumed", "system")
-        await self._broadcast_ws("org:status_change", {
-            "org_id": org_id, "status": "active"
-        })
+        await self._broadcast_ws("org:status_change", {"org_id": org_id, "status": "active"})
         return org
 
     # ------------------------------------------------------------------
@@ -941,7 +946,8 @@ class OrgRuntime:
             raise ValueError(f"Node not found: {target_node_id}")
 
         self.get_event_store(org_id).emit(
-            "user_command", "user",
+            "user_command",
+            "user",
             {"target": target_node_id, "content": content[:_LIM_EVENT]},
         )
 
@@ -956,8 +962,11 @@ class OrgRuntime:
         if self._is_stop_intent(content):
             await self._soft_stop_org(org_id)
             result = await self._activate_and_run(
-                org, target, tagged_content,
-                chain_id=chain_id, activation_origin="user_command",
+                org,
+                target,
+                tagged_content,
+                chain_id=chain_id,
+                activation_origin="user_command",
             )
             if chain_id and isinstance(result, dict):
                 result["chain_id"] = chain_id
@@ -977,7 +986,8 @@ class OrgRuntime:
             prior.completed.set()
 
         tracker = UserCommandTracker(
-            org_id, target.id,
+            org_id,
+            target.id,
             command_id=command_id,
             user_command_content=content,
         )
@@ -987,8 +997,11 @@ class OrgRuntime:
 
         try:
             result = await self._activate_and_run(
-                org, target, tagged_content,
-                chain_id=chain_id, activation_origin="user_command",
+                org,
+                target,
+                tagged_content,
+                chain_id=chain_id,
+                activation_origin="user_command",
             )
             # root 首轮 ReAct 结束后立刻检查一次完成条件（无派工任务时直接命中）
             self._maybe_finalize_tracker(tracker)
@@ -1030,9 +1043,7 @@ class OrgRuntime:
                 final_result["status"] = "cancelled_by_user"
                 final_result["cancelled_by_user"] = True
                 # 覆盖 warning（即使被前置流程 setdefault 过也要换成"用户主动"文案）
-                final_result["warning"] = (
-                    "已按用户请求强制终止当前任务，可立即发送新指令。"
-                )
+                final_result["warning"] = "已按用户请求强制终止当前任务，可立即发送新指令。"
             elif tracker.deadlock_stopped:
                 final_result["status"] = "stopped_deadlock"
                 final_result["deadlock_stopped"] = True
@@ -1075,7 +1086,10 @@ class OrgRuntime:
             return {"ok": False, "error": f"Node not found: {node_id}"}
 
         if node.status != NodeStatus.BUSY:
-            return {"ok": False, "error": f"Node {node_id} is not busy (status={node.status.value})"}
+            return {
+                "ok": False,
+                "error": f"Node {node_id} is not busy (status={node.status.value})",
+            }
 
         cache_key = f"{org_id}:{node_id}"
         session_id = f"org:{org_id}:node:{node_id}"
@@ -1130,17 +1144,31 @@ class OrgRuntime:
 
         # (d) Broadcast events
         self.get_event_store(org_id).emit(
-            "task_cancelled", node_id, {"reason": reason[:_LIM_EVENT]},
+            "task_cancelled",
+            node_id,
+            {"reason": reason[:_LIM_EVENT]},
         )
-        await self._broadcast_ws("org:node_status", {
-            "org_id": org_id, "node_id": node_id, "status": "idle",
-            "current_task": "",
-        })
-        await self._broadcast_ws("org:task_cancelled", {
-            "org_id": org_id, "node_id": node_id, "reason": reason[:_LIM_WS],
-        })
+        await self._broadcast_ws(
+            "org:node_status",
+            {
+                "org_id": org_id,
+                "node_id": node_id,
+                "status": "idle",
+                "current_task": "",
+            },
+        )
+        await self._broadcast_ws(
+            "org:task_cancelled",
+            {
+                "org_id": org_id,
+                "node_id": node_id,
+                "reason": reason[:_LIM_WS],
+            },
+        )
 
-        logger.info(f"[OrgRuntime] cancel_node_task completed: org={org_id}, node={node_id}, cancelled={cancelled}")
+        logger.info(
+            f"[OrgRuntime] cancel_node_task completed: org={org_id}, node={node_id}, cancelled={cancelled}"
+        )
         return {"ok": True, "node_id": node_id, "cancelled": cancelled}
 
     async def _auto_kickoff(self, org: Organization) -> None:
@@ -1172,12 +1200,16 @@ class OrgRuntime:
             )
 
             self.get_event_store(org.id).emit(
-                "auto_kickoff", "system",
+                "auto_kickoff",
+                "system",
                 {"root_node": root.id, "core_business_len": len(org.core_business)},
             )
 
             await self._activate_and_run(
-                org, root, prompt, activation_origin="auto_kickoff",
+                org,
+                root,
+                prompt,
+                activation_origin="auto_kickoff",
             )
         except Exception as e:
             logger.error(f"[OrgRuntime] Auto-kickoff failed for {org.id}: {e}")
@@ -1241,7 +1273,8 @@ class OrgRuntime:
                 self._chain_events.popitem(last=False)
         except Exception:
             logger.debug(
-                "[OrgRuntime] chain_event set failed", exc_info=True,
+                "[OrgRuntime] chain_event set failed",
+                exc_info=True,
             )
 
     def _mark_chain_processed_by_root(self, org_id: str, chain_id: str) -> None:
@@ -1267,7 +1300,9 @@ class OrgRuntime:
                 bucket.popitem(last=False)
 
     def _is_chain_processed_by_root(
-        self, org_id: str, chain_id: str | None,
+        self,
+        org_id: str,
+        chain_id: str | None,
     ) -> bool:
         """查询 chain_id 是否已被 root 节点本次主任务处理过。"""
         if not org_id or not chain_id:
@@ -1304,7 +1339,8 @@ class OrgRuntime:
         try:
             prefix = f"{org_id}:"
             to_remove = [
-                k for k, v in list(self._node_current_chain.items())
+                k
+                for k, v in list(self._node_current_chain.items())
                 if k.startswith(prefix) and v == chain_id
             ]
             for k in to_remove:
@@ -1330,11 +1366,16 @@ class OrgRuntime:
                 logger.debug("cancel_chain_children_in_store failed: %s", exc)
 
         logger.info(
-            "[OrgRuntime] chain %s closed (%s) cleaned up", chain_id, reason,
+            "[OrgRuntime] chain %s closed (%s) cleaned up",
+            chain_id,
+            reason,
         )
 
     def _cancel_chain_children_in_store(
-        self, org_id: str, chain_id: str, reason: str,
+        self,
+        org_id: str,
+        chain_id: str,
+        reason: str,
     ) -> None:
         """把 ProjectStore 中以该 chain 为根的未完成子任务标记为 CANCELLED。
 
@@ -1378,7 +1419,8 @@ class OrgRuntime:
             if t.id in to_cancel_ids:
                 try:
                     store.update_task(
-                        t.project_id, t.id,
+                        t.project_id,
+                        t.id,
                         {"status": TaskStatus.CANCELLED},
                     )
                     if t.chain_id:
@@ -1389,22 +1431,27 @@ class OrgRuntime:
 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self._broadcast_ws(
-                "org:task_cancelled_cascade",
-                {
-                    "org_id": org_id,
-                    "root_chain_id": chain_id,
-                    "cancelled_chain_ids": cancelled_chain_ids,
-                    "reason": reason,
-                },
-            ))
+            loop.create_task(
+                self._broadcast_ws(
+                    "org:task_cancelled_cascade",
+                    {
+                        "org_id": org_id,
+                        "root_chain_id": chain_id,
+                        "cancelled_chain_ids": cancelled_chain_ids,
+                        "reason": reason,
+                    },
+                )
+            )
         except RuntimeError:
             pass
         except Exception:
             pass
 
     async def _activate_and_run(
-        self, org: Organization, node: OrgNode, prompt: str,
+        self,
+        org: Organization,
+        node: OrgNode,
+        prompt: str,
         chain_id: str | None = None,
         *,
         activation_origin: str | None = None,
@@ -1424,12 +1471,18 @@ class OrgRuntime:
         sem = self._get_org_semaphore(org.id)
         async with sem:
             return await self._activate_and_run_inner(
-                org, node, prompt, chain_id,
+                org,
+                node,
+                prompt,
+                chain_id,
                 activation_origin=activation_origin,
             )
 
     async def _activate_and_run_inner(
-        self, org: Organization, node: OrgNode, prompt: str,
+        self,
+        org: Organization,
+        node: OrgNode,
+        prompt: str,
         chain_id: str | None = None,
         *,
         activation_origin: str | None = None,
@@ -1465,12 +1518,19 @@ class OrgRuntime:
             return {"node_id": node.id, "error": "org deleted during activation"}
 
         self.get_event_store(org.id).emit(
-            "node_activated", node.id, {"prompt": prompt[:_LIM_EVENT]},
+            "node_activated",
+            node.id,
+            {"prompt": prompt[:_LIM_EVENT]},
         )
-        await self._broadcast_ws("org:node_status", {
-            "org_id": org.id, "node_id": node.id, "status": "busy",
-            "current_task": prompt[:_LIM_WS],
-        })
+        await self._broadcast_ws(
+            "org:node_status",
+            {
+                "org_id": org.id,
+                "node_id": node.id,
+                "status": "busy",
+                "current_task": prompt[:_LIM_WS],
+            },
+        )
 
         try:
             session_id = f"org:{org.id}:node:{node.id}"
@@ -1490,7 +1550,11 @@ class OrgRuntime:
             self._node_plugin_failures_in_task.pop(cache_key, None)
 
             result_text = await self._run_agent_task(
-                agent, prompt, session_id, org, node,
+                agent,
+                prompt,
+                session_id,
+                org,
+                node,
             )
 
             if org.id not in self._active_orgs:
@@ -1542,9 +1606,7 @@ class OrgRuntime:
                 )
             except Exception:
                 expects_artifact = False
-            auto_persist_enabled = bool(
-                getattr(org, "auto_persist_final_answer", True)
-            )
+            auto_persist_enabled = bool(getattr(org, "auto_persist_final_answer", True))
             if (
                 auto_persist_enabled
                 and expects_artifact
@@ -1593,13 +1655,12 @@ class OrgRuntime:
             #     状态错误推进到 delivered，污染验收流程。
             if persisted_attachment is not None:
                 try:
-                    is_root_for_delivery = (
-                        node.level == 0 or not org.get_parent(node.id)
-                    )
+                    is_root_for_delivery = node.level == 0 or not org.get_parent(node.id)
                     submit_called = self._react_trace_has_tool(
-                        react_trace, "org_submit_deliverable",
+                        react_trace,
+                        "org_submit_deliverable",
                     )
-                    is_task_assign_origin = (activation_origin == "task_assign")
+                    is_task_assign_origin = activation_origin == "task_assign"
                     if (
                         not is_root_for_delivery
                         and not submit_called
@@ -1618,7 +1679,10 @@ class OrgRuntime:
                             "[OrgRuntime] synth-TASK_DELIVERED skipped: "
                             "activation_origin=%s is not task_assign (org=%s node=%s "
                             "chain=%s)",
-                            activation_origin, org.id, node.id, chain_id,
+                            activation_origin,
+                            org.id,
+                            node.id,
+                            chain_id,
                         )
                 except Exception:
                     logger.warning(
@@ -1644,7 +1708,8 @@ class OrgRuntime:
                 logger.info(
                     "[OrgRuntime] root node %s downgrade-to-soft denied; "
                     "keep verify_incomplete strict so root will not silently exit "
-                    "without final summary.", node.id,
+                    "without final summary.",
+                    node.id,
                 )
                 is_soft_verify = False
 
@@ -1655,13 +1720,10 @@ class OrgRuntime:
             # 的情况——其它路径（包括 user_command 让 root 直接调插件、
             # delivery_followup 重活路径）都应让 task 视为失败而非 success。
             submit_called_for_failure = self._react_trace_has_tool(
-                react_trace, "org_submit_deliverable",
+                react_trace,
+                "org_submit_deliverable",
             )
-            if (
-                is_normal
-                and plugin_failure
-                and not submit_called_for_failure
-            ):
+            if is_normal and plugin_failure and not submit_called_for_failure:
                 exit_reason = "plugin_tool_failed"
                 is_normal = False
                 is_terminated = False
@@ -1673,8 +1735,10 @@ class OrgRuntime:
                 if msg and msg not in (result_text or ""):
                     result_text = ((result_text or "").rstrip() + "\n\n" + str(msg)).strip()
 
-            status_reason = "task_completed" if is_normal else (
-                "task_terminated" if is_terminated else "task_failed"
+            status_reason = (
+                "task_completed"
+                if is_normal
+                else ("task_terminated" if is_terminated else "task_failed")
             )
             self._set_node_status(org, node, NodeStatus.IDLE, status_reason)
             if is_normal:
@@ -1702,7 +1766,8 @@ class OrgRuntime:
                         logger.info(
                             "[OrgRuntime] root node %s task_completed: "
                             "registered %d processed chain(s) for dedup: %s",
-                            node.id, len(accepted_chains),
+                            node.id,
+                            len(accepted_chains),
                             [c[:8] for c in accepted_chains],
                         )
             except Exception:
@@ -1751,14 +1816,15 @@ class OrgRuntime:
                 # 真硬失败（loop_terminated / max_iterations / org_delegate_loop 等）
                 # 不受影响，保留「为什么失败」卡片。
                 rc_for_silence = (diagnosis or {}).get("root_cause") if diagnosis else None
-                if diagnosis and rc_for_silence and rc_for_silence.startswith(
-                    "verify_incomplete"
-                ):
+                if diagnosis and rc_for_silence and rc_for_silence.startswith("verify_incomplete"):
                     logger.info(
                         "[OrgRuntime] silencing verify_incomplete* diagnosis card "
                         "for org=%s node=%s (rc=%s, soft_verify=%s; "
                         "review-hint suppressed from UI + event payload)",
-                        org.id, node.id, rc_for_silence, is_soft_verify,
+                        org.id,
+                        node.id,
+                        rc_for_silence,
+                        is_soft_verify,
                     )
                     diagnosis = None
 
@@ -1798,13 +1864,19 @@ class OrgRuntime:
             event_payload.update(tool_stats)
             self.get_event_store(org.id).emit(event_name, node.id, event_payload)
 
-            await self._broadcast_ws("org:node_status", {
-                "org_id": org.id, "node_id": node.id, "status": "idle",
-                "current_task": "",
-                "exit_reason": exit_reason,
-            })
+            await self._broadcast_ws(
+                "org:node_status",
+                {
+                    "org_id": org.id,
+                    "node_id": node.id,
+                    "status": "idle",
+                    "current_task": "",
+                    "exit_reason": exit_reason,
+                },
+            )
             ws_payload: dict = {
-                "org_id": org.id, "node_id": node.id,
+                "org_id": org.id,
+                "node_id": node.id,
                 "result_preview": result_text[:_LIM_WS] if result_text else "",
                 "exit_reason": exit_reason,
             }
@@ -1841,7 +1913,9 @@ class OrgRuntime:
                         logger.info(
                             "[OrgRuntime] auto-closed chain on failure: "
                             "org=%s chain=%s exit_reason=%s",
-                            org.id, chain_id, exit_reason,
+                            org.id,
+                            chain_id,
+                            exit_reason,
                         )
                     except Exception as close_err:
                         logger.debug(
@@ -1850,7 +1924,8 @@ class OrgRuntime:
                         )
             elif is_soft_verify:
                 root_cause_tag = (diagnosis or {}).get(
-                    "root_cause", "verify_incomplete_with_children",
+                    "root_cause",
+                    "verify_incomplete_with_children",
                 )
                 logger.info(
                     f"[OrgRuntime] Node {node.id} soft-completed: "
@@ -1858,13 +1933,12 @@ class OrgRuntime:
                     f"treated as task_completed so post_task_hook can drain parent"
                 )
 
-            is_root = (node.level == 0 or not org.get_parent(node.id))
+            is_root = node.level == 0 or not org.get_parent(node.id)
             if is_root:
                 visible_attachments = self._node_file_attachments_in_task.get(cache_key, [])
                 if persisted_attachment is not None and not any(
-                    str(a.get("file_path") or "").lower() == str(
-                        persisted_attachment.get("file_path") or ""
-                    ).lower()
+                    str(a.get("file_path") or "").lower()
+                    == str(persisted_attachment.get("file_path") or "").lower()
                     for a in visible_attachments
                     if isinstance(a, dict)
                 ):
@@ -1880,7 +1954,9 @@ class OrgRuntime:
                 # 则回退读 _root_activation_origin。默认保守按 "user_command"
                 # 处理，保证历史调用点（无命令跟踪）的行为不变。
                 origin = activation_origin or self._pop_root_origin(
-                    org.id, node.id, "user_command",
+                    org.id,
+                    node.id,
+                    "user_command",
                 )
                 self._capture_root_visible_result(
                     org.id,
@@ -1959,11 +2035,15 @@ class OrgRuntime:
             except Exception:
                 pass
             try:
-                await self._broadcast_ws("org:node_status", {
-                    "org_id": org.id, "node_id": node.id,
-                    "status": "frozen" if node.status == NodeStatus.FROZEN else "error",
-                    "current_task": "",
-                })
+                await self._broadcast_ws(
+                    "org:node_status",
+                    {
+                        "org_id": org.id,
+                        "node_id": node.id,
+                        "status": "frozen" if node.status == NodeStatus.FROZEN else "error",
+                        "current_task": "",
+                    },
+                )
             except Exception:
                 pass
             # P0-3：异常路径同样关闭 chain，避免 org_wait_for_deliverable 无限挂起。
@@ -1972,9 +2052,10 @@ class OrgRuntime:
                 try:
                     self._mark_chain_closed(org.id, chain_id)
                     logger.info(
-                        "[OrgRuntime] auto-closed chain on exception: "
-                        "org=%s chain=%s err=%s",
-                        org.id, chain_id, str(e)[:80],
+                        "[OrgRuntime] auto-closed chain on exception: org=%s chain=%s err=%s",
+                        org.id,
+                        chain_id,
+                        str(e)[:80],
                     )
                 except Exception as close_err:
                     logger.debug(
@@ -1996,13 +2077,25 @@ class OrgRuntime:
             if cats:
                 return bool(cats & {"quota", "auth"})
         err_lower = str(error).lower()
-        return any(kw in err_lower for kw in [
-            "insufficient balance", "insufficient_balance", "quota",
-            "billing", "(402)", "payment required",
-            "(401)", "unauthorized", "authorization required", "authentication",
-            "(403)", "forbidden",
-            "invalid api key", "invalid_api_key",
-        ])
+        return any(
+            kw in err_lower
+            for kw in [
+                "insufficient balance",
+                "insufficient_balance",
+                "quota",
+                "billing",
+                "(402)",
+                "payment required",
+                "(401)",
+                "unauthorized",
+                "authorization required",
+                "authentication",
+                "(403)",
+                "forbidden",
+                "invalid api key",
+                "invalid_api_key",
+            ]
+        )
 
     async def _pause_org_for_quota(self, org: Organization, error: Exception) -> bool:
         """Pause organization due to API quota/auth exhaustion across all endpoints.
@@ -2047,13 +2140,15 @@ class OrgRuntime:
             self._org_quota_failures.pop(org.id, None)
 
             self.get_event_store(org.id).emit(
-                "org_paused", "system",
+                "org_paused",
+                "system",
                 {"reason": "quota_exhausted", "error": str(error)[:_LIM_EVENT]},
             )
 
             inbox = self.get_inbox(org.id)
             inbox.push_warning(
-                org.id, "system",
+                org.id,
+                "system",
                 title="API 余额不足，组织已自动暂停",
                 body=(
                     "所有已配置的 AI 模型端点均因余额不足或认证失败而无法使用。"
@@ -2064,28 +2159,44 @@ class OrgRuntime:
 
             for nid in nodes_reset:
                 try:
-                    await self._broadcast_ws("org:node_status", {
-                        "org_id": org.id, "node_id": nid, "status": "idle",
-                        "current_task": "",
-                    })
+                    await self._broadcast_ws(
+                        "org:node_status",
+                        {
+                            "org_id": org.id,
+                            "node_id": nid,
+                            "status": "idle",
+                            "current_task": "",
+                        },
+                    )
                 except Exception:
                     pass
 
-            await self._broadcast_ws("org:status_change", {
-                "org_id": org.id, "status": "paused",
-            })
-            await self._broadcast_ws("org:quota_exhausted", {
-                "org_id": org.id,
-                "message": "API 余额不足，组织已自动暂停。请充值后恢复。",
-            })
+            await self._broadcast_ws(
+                "org:status_change",
+                {
+                    "org_id": org.id,
+                    "status": "paused",
+                },
+            )
+            await self._broadcast_ws(
+                "org:quota_exhausted",
+                {
+                    "org_id": org.id,
+                    "message": "API 余额不足，组织已自动暂停。请充值后恢复。",
+                },
+            )
             return True
         except Exception as pause_err:
             logger.error(f"[OrgRuntime] Failed to pause org for quota: {pause_err}")
             return False
 
     async def _run_agent_task(
-        self, agent: Any, prompt: str, session_id: str,
-        org: Organization, node: OrgNode,
+        self,
+        agent: Any,
+        prompt: str,
+        session_id: str,
+        org: Organization,
+        node: OrgNode,
     ) -> str:
         """Run a single agent task with per-node runtime overrides.
 
@@ -2107,16 +2218,15 @@ class OrgRuntime:
             max_iter_int = int(max_iter) if max_iter is not None else None
         except (TypeError, ValueError):
             max_iter_int = None
-        if (
-            max_iter_int and max_iter_int > 0
-            and hasattr(agent, "reasoning_engine")
-        ):
+        if max_iter_int and max_iter_int > 0 and hasattr(agent, "reasoning_engine"):
             try:
                 agent.reasoning_engine._max_iterations_override = max_iter_int
             except Exception:
                 logger.debug(
-                    "[OrgRuntime] failed to apply max_iterations override "
-                    "for %s:%s", org.id, node.id, exc_info=True,
+                    "[OrgRuntime] failed to apply max_iterations override for %s:%s",
+                    org.id,
+                    node.id,
+                    exc_info=True,
                 )
 
         try:
@@ -2129,12 +2239,17 @@ class OrgRuntime:
                 try:
                     from openakita.orgs.models import TaskStatus
                     from openakita.orgs.project_store import ProjectStore
+
                     store = ProjectStore(self._manager._org_dir(org.id))
                     task = store.find_task_by_chain(chain_id)
                     if task and task.status == TaskStatus.IN_PROGRESS:
-                        store.update_task(task.project_id, task.id, {
-                            "status": TaskStatus.CANCELLED,
-                        })
+                        store.update_task(
+                            task.project_id,
+                            task.id,
+                            {
+                                "status": TaskStatus.CANCELLED,
+                            },
+                        )
                         logger.info(f"[OrgRuntime] Marked project task {task.id} as cancelled")
                 except Exception as e:
                     logger.debug(f"[OrgRuntime] Failed to update task status on cancel: {e}")
@@ -2151,7 +2266,11 @@ class OrgRuntime:
             stats = agent.brain.drain_usage_accumulator()
             if stats["calls"] == 0:
                 return
-            ep_info = agent.brain.get_current_endpoint_info() if hasattr(agent.brain, "get_current_endpoint_info") else {}
+            ep_info = (
+                agent.brain.get_current_endpoint_info()
+                if hasattr(agent.brain, "get_current_endpoint_info")
+                else {}
+            )
             data = {
                 "node_id": node.id,
                 "calls": stats["calls"],
@@ -2207,7 +2326,9 @@ class OrgRuntime:
         node_summary = bb.get_node_summary(memory_owner) if bb else ""
 
         org_context_prompt = identity.build_org_context_prompt(
-            node, org, resolved,
+            node,
+            org,
+            resolved,
             blackboard_summary=blackboard_summary,
             dept_summary=dept_summary,
             node_summary=node_summary,
@@ -2220,21 +2341,27 @@ class OrgRuntime:
 
         from .tool_categories import expand_tool_categories
 
-        _KEEP = frozenset({
-            "get_tool_info",
-            "create_plan",
-            "update_plan_step",
-            "get_plan_status",
-            "complete_plan",
-        })
+        _KEEP = frozenset(
+            {
+                "get_tool_info",
+                "create_plan",
+                "update_plan_step",
+                "get_plan_status",
+                "complete_plan",
+            }
+        )
 
         # Free-form delegation tools conflict with org_delegate_task
-        _ORG_CONFLICT_TOOLS = frozenset({
-            "delegate_to_agent", "spawn_agent",
-            "delegate_parallel", "create_agent",
-        })
+        _ORG_CONFLICT_TOOLS = frozenset(
+            {
+                "delegate_to_agent",
+                "spawn_agent",
+                "delegate_parallel",
+                "create_agent",
+            }
+        )
 
-        is_root = (node.level == 0 or not org.get_parent(node.id))
+        is_root = node.level == 0 or not org.get_parent(node.id)
         is_coordinator = bool(org.get_children(node.id))
 
         # 工作台节点（plugin_origin 非空）必须是叶子节点：coordinator 路径会
@@ -2248,7 +2375,8 @@ class OrgRuntime:
                 "[OrgRuntime] workbench node %s in org %s has children — "
                 "plugin_origin will be ignored at runtime. "
                 "Please make workbench nodes leaves.",
-                node.id, org.id,
+                node.id,
+                org.id,
             )
             active_plugin_origin = None
 
@@ -2266,7 +2394,10 @@ class OrgRuntime:
         # 授权。文件路径在 agent.file_tool.base_path 处被隔离到 org workspace。
         if getattr(node, "enable_file_tools", True) and not is_coordinator:
             allowed_external = allowed_external | {
-                "write_file", "read_file", "edit_file", "list_directory",
+                "write_file",
+                "read_file",
+                "edit_file",
+                "list_directory",
             }
 
         # P7.4: per-node ``runtime_overrides.allowed_tools / denied_tools``.
@@ -2287,17 +2418,14 @@ class OrgRuntime:
         _ro_allow = _ro.get("allowed_tools")
         if isinstance(_ro_allow, list) and _ro_allow:
             allow_set = {
-                t for t in _ro_allow
-                if isinstance(t, str) and t
-                and not t.startswith("org_")
-                and t not in _KEEP
+                t
+                for t in _ro_allow
+                if isinstance(t, str) and t and not t.startswith("org_") and t not in _KEEP
             }
             allowed_external = allow_set
         _ro_deny = _ro.get("denied_tools")
         if isinstance(_ro_deny, list) and _ro_deny:
-            allowed_external = allowed_external - {
-                t for t in _ro_deny if isinstance(t, str) and t
-            }
+            allowed_external = allowed_external - {t for t in _ro_deny if isinstance(t, str) and t}
 
         per_node_tools = build_org_node_tools(org, node)
         per_node_by_name: dict[str, dict] = {t["name"]: t for t in per_node_tools}
@@ -2308,9 +2436,9 @@ class OrgRuntime:
             if "org_delegate_task" not in per_node_by_name:
                 agent.tool_catalog.remove_tool("org_delegate_task")
             non_org = [
-                n for n in agent.tool_catalog.list_tools()
-                if not n.startswith("org_") and n not in _KEEP
-                and n not in allowed_external
+                n
+                for n in agent.tool_catalog.list_tools()
+                if not n.startswith("org_") and n not in _KEEP and n not in allowed_external
             ]
             for n in non_org:
                 agent.tool_catalog.remove_tool(n)
@@ -2355,12 +2483,11 @@ class OrgRuntime:
         if active_plugin_origin:
             try:
                 workbench_section = self._build_workbench_prompt_section(
-                    agent, active_plugin_origin,
+                    agent,
+                    active_plugin_origin,
                 )
                 if workbench_section:
-                    org_context_prompt = (
-                        f"{org_context_prompt}\n\n{workbench_section}"
-                    )
+                    org_context_prompt = f"{org_context_prompt}\n\n{workbench_section}"
             except Exception:
                 logger.debug(
                     "[OrgRuntime] failed to build workbench prompt section",
@@ -2376,7 +2503,9 @@ class OrgRuntime:
         # ``Agent._prepare_session_context`` to keep the editor-in-chief /
         # CEO / tech-lead style nodes from "doing the work themselves"
         # instead of delegating.
-        self._override_system_prompt_for_org(agent, org_context_prompt, org_workspace, is_root=is_root)
+        self._override_system_prompt_for_org(
+            agent, org_context_prompt, org_workspace, is_root=is_root
+        )
 
         agent._org_context = {
             "org_id": org.id,
@@ -2391,16 +2520,19 @@ class OrgRuntime:
         agent._workbench_plugin_origin = active_plugin_origin
 
         if hasattr(agent, "brain") and hasattr(agent.brain, "set_trace_context"):
-            agent.brain.set_trace_context({
-                "org_id": org.id,
-                "org_name": org.name,
-                "node_id": node.id,
-                "node_title": node.role_title,
-                "session_id": f"org:{org.id}:node:{node.id}",
-            })
+            agent.brain.set_trace_context(
+                {
+                    "org_id": org.id,
+                    "org_name": org.name,
+                    "node_id": node.id,
+                    "node_title": node.role_title,
+                    "session_id": f"org:{org.id}:node:{node.id}",
+                }
+            )
 
         if hasattr(agent, "reasoning_engine"):
             from ..config import settings as _settings
+
             agent.reasoning_engine._force_tool_override = max(
                 0, int(getattr(_settings, "force_tool_call_max_retries", 0))
             )
@@ -2417,9 +2549,7 @@ class OrgRuntime:
         return agent
 
     @staticmethod
-    def _prepare_unattended_session(
-        agent: Any, org: Organization, node: OrgNode
-    ) -> None:
+    def _prepare_unattended_session(agent: Any, org: Organization, node: OrgNode) -> None:
         """Pre-create the agent's CLI session marked as unattended.
 
         Organization nodes are autonomous AI agents — no human is waiting to
@@ -2453,14 +2583,16 @@ class OrgRuntime:
             agent._cli_session = sess
         except Exception:
             logger.debug(
-                "[OrgRuntime] failed to pre-create unattended session "
-                "for node %s in org %s",
-                node.id, org.id, exc_info=True,
+                "[OrgRuntime] failed to pre-create unattended session for node %s in org %s",
+                node.id,
+                org.id,
+                exc_info=True,
             )
 
     @staticmethod
     def _build_workbench_prompt_section(
-        agent: Any, plugin_origin: dict,
+        agent: Any,
+        plugin_origin: dict,
     ) -> str:
         """Compose a "你是【X】工作台节点" section for the system prompt.
 
@@ -2564,7 +2696,8 @@ class OrgRuntime:
                 "不要用同一段总主题 prompt 重复生成多个视频；\n"
                 "- Seedance 2.0 支持并发额度，但组织工作台为了稳定交付，会等待"
                 "每个 `seedance_create` 完成后再继续下一个镜头。"
-                if plugin_id == "seedance-video" else ""
+                if plugin_id == "seedance-video"
+                else ""
             )
         )
 
@@ -2580,7 +2713,8 @@ class OrgRuntime:
                 p.mkdir(parents=True, exist_ok=True)
                 return p
             logger.warning(
-                "[OrgRuntime] workspace_dir %r invalid, falling back to default", custom,
+                "[OrgRuntime] workspace_dir %r invalid, falling back to default",
+                custom,
             )
         default = self._manager._org_dir(org.id) / "workspace"
         default.mkdir(parents=True, exist_ok=True)
@@ -2588,8 +2722,11 @@ class OrgRuntime:
 
     @staticmethod
     def _override_system_prompt_for_org(
-        agent: Any, org_context: str, workspace: Path | None = None,
-        *, is_root: bool = False,
+        agent: Any,
+        org_context: str,
+        workspace: Path | None = None,
+        *,
+        is_root: bool = False,
     ) -> None:
         """Replace the agent's system prompt with an org-focused lean prompt.
 
@@ -2609,10 +2746,7 @@ class OrgRuntime:
             schema = t.get("input_schema", {})
             required = schema.get("required", [])
             props = schema.get("properties", {})
-            params = ", ".join(
-                f"{p}" + (" *" if p in required else "")
-                for p in props
-            )
+            params = ", ".join(f"{p}" + (" *" if p in required else "") for p in props)
             line = f"- **{name}**({params}): {desc}"
             if name.startswith("org_") or name == "get_tool_info":
                 org_tool_lines.append(line)
@@ -2627,12 +2761,14 @@ class OrgRuntime:
         # Runtime environment (compact)
         try:
             from ..config import settings
+
             tz_name = settings.scheduler_timezone
         except Exception:
             tz_name = "Asia/Shanghai"
         try:
             from datetime import timedelta, timezone
             from zoneinfo import ZoneInfo
+
             try:
                 tz = ZoneInfo(tz_name)
             except Exception:
@@ -2662,14 +2798,12 @@ class OrgRuntime:
             ext_section = "\n".join(ext_tool_lines)
             parts.append(f"## 外部执行工具\n\n{ext_section}")
 
-        parts.append(
-            "参数带 * 为必填。用 get_tool_info(tool_name) 可查看工具完整参数。"
-        )
+        parts.append("参数带 * 为必填。用 get_tool_info(tool_name) 可查看工具完整参数。")
 
         rule_delivery = (
             "6. **任务完成直接回复**。你是最高负责人，完成工作后在回复中总结成果即可，不要使用 org_submit_deliverable。\n"
-            if is_root else
-            "6. **任务交付流程**。收到任务后完成工作，用 org_submit_deliverable 提交给委派人验收。被打回时修改后重新提交。\n"
+            if is_root
+            else "6. **任务交付流程**。收到任务后完成工作，用 org_submit_deliverable 提交给委派人验收。被打回时修改后重新提交。\n"
         )
 
         if has_external:
@@ -2681,8 +2815,8 @@ class OrgRuntime:
                 "3. **简洁回复**。完成工具调用后，用 1-2 句话总结结果即可。\n"
                 "4. **先查再做**。不确定找谁时用 org_find_colleague；不确定流程时用 org_search_policy。\n"
                 "5. **不要重复写入**。写黑板前先用 org_read_blackboard 检查是否已有相似内容。\n"
-                + rule_delivery +
-                "7. **缺少工具时申请**。如果任务需要你没有的工具，用 org_request_tools 向上级申请。"
+                + rule_delivery
+                + "7. **缺少工具时申请**。如果任务需要你没有的工具，用 org_request_tools 向上级申请。"
             )
         else:
             parts.append(
@@ -2692,8 +2826,8 @@ class OrgRuntime:
                 "3. **先查再做**。不确定找谁时用 org_find_colleague；不确定流程时用 org_search_policy。\n"
                 "4. **重要信息写黑板**。决策、方案、进度等用 org_write_blackboard 记录，方便同事查阅。\n"
                 "5. **不要重复写入**。写黑板前先用 org_read_blackboard 检查是否已有相似内容。\n"
-                + rule_delivery +
-                "7. **缺少工具时申请**。如果任务需要你没有的工具，用 org_request_tools 向上级申请。"
+                + rule_delivery
+                + "7. **缺少工具时申请**。如果任务需要你没有的工具，用 org_request_tools 向上级申请。"
             )
 
         parts.append(
@@ -2727,14 +2861,18 @@ class OrgRuntime:
                 base = self._get_shared_profile(node.agent_profile_id)
                 if base:
                     preferred_endpoint = node.preferred_endpoint or base.preferred_endpoint
-                    endpoint_policy = node.endpoint_policy if node.preferred_endpoint else base.endpoint_policy
+                    endpoint_policy = (
+                        node.endpoint_policy if node.preferred_endpoint else base.endpoint_policy
+                    )
                     profile = base.derive(
                         id=f"org_node_{node.id}",
                         name=node.role_title,
                         type=AgentType.DYNAMIC,
                         custom_prompt=org_prompt,
                         skills=node.skills if node.skills else base.skills,
-                        skills_mode=SkillsMode(node.skills_mode) if node.skills_mode != "all" else base.skills_mode,
+                        skills_mode=SkillsMode(node.skills_mode)
+                        if node.skills_mode != "all"
+                        else base.skills_mode,
                         preferred_endpoint=preferred_endpoint,
                         endpoint_policy=endpoint_policy,
                         created_by="org_runtime",
@@ -2765,7 +2903,9 @@ class OrgRuntime:
             name=node.role_title,
             custom_prompt=org_prompt,
             skills=node.skills,
-            skills_mode=SkillsMode(node.skills_mode) if node.skills_mode != "all" else SkillsMode.ALL,
+            skills_mode=SkillsMode(node.skills_mode)
+            if node.skills_mode != "all"
+            else SkillsMode.ALL,
             preferred_endpoint=node.preferred_endpoint,
             endpoint_policy=node.endpoint_policy,
         )
@@ -2774,12 +2914,14 @@ class OrgRuntime:
         """Get an AgentProfile from the shared ProfileStore via orchestrator."""
         try:
             from openakita.main import _orchestrator
+
             if _orchestrator and hasattr(_orchestrator, "_profile_store"):
                 return _orchestrator._profile_store.get(profile_id)
         except (ImportError, AttributeError):
             pass
         try:
             from openakita.agents.profile import get_profile_store
+
             store = get_profile_store()
             return store.get(profile_id)
         except Exception:
@@ -2792,7 +2934,7 @@ class OrgRuntime:
 
     async def _on_node_message(self, org_id: str, node_id: str, msg: OrgMessage) -> None:
         """Handle an incoming message for a node — activate and process."""
-        if hasattr(msg, 'status') and msg.status == "expired":
+        if hasattr(msg, "status") and msg.status == "expired":
             logger.debug(f"Skipping expired message {msg.id}")
             return
 
@@ -2812,7 +2954,9 @@ class OrgRuntime:
         # task_delivered 由 chain_event 通道触发，避免重复信号。
         try:
             if msg.msg_type in (
-                MsgType.QUESTION, MsgType.ESCALATE, MsgType.FEEDBACK,
+                MsgType.QUESTION,
+                MsgType.ESCALATE,
+                MsgType.FEEDBACK,
             ):
                 inbox_key = f"{org_id}:{node_id}"
                 ev = self._node_inbox_events.get(inbox_key)
@@ -2831,18 +2975,16 @@ class OrgRuntime:
         # FEEDBACK/NOTIFICATION…）只广播 WebSocket 让 UI 可见，不重启 ReAct。
         try:
             from openakita.config import settings as _settings
-            suppress_on = getattr(
-                _settings, "org_suppress_closed_chain_reactivation", True
-            )
+
+            suppress_on = getattr(_settings, "org_suppress_closed_chain_reactivation", True)
         except Exception:
             suppress_on = True
 
         if suppress_on:
             chain_id_peek = msg.metadata.get("task_chain_id") if msg.metadata else None
-            closed = (
-                bool(msg.metadata and msg.metadata.get("chain_closed"))
-                or self.is_chain_closed(org_id, chain_id_peek)
-            )
+            closed = bool(
+                msg.metadata and msg.metadata.get("chain_closed")
+            ) or self.is_chain_closed(org_id, chain_id_peek)
             # P0-1：根节点收到 TASK_DELIVERED 必须放行——这是根节点完成"汇总性
             # 终态回复"的唯一触发点。如果继续静默，就出现用户反馈的"最后由
             # 子节点（策划编辑）说话、根节点没有总结"问题：子任务交付后链路
@@ -2856,8 +2998,7 @@ class OrgRuntime:
             # 150K tokens 浪费，详见 _134209 现象）。首次到达仍正常激活。
             try:
                 _is_root_for_gate = bool(
-                    self.get_org(org_id) and
-                    self.get_org(org_id).get_parent(node_id) is None
+                    self.get_org(org_id) and self.get_org(org_id).get_parent(node_id) is None
                 )
             except Exception:
                 _is_root_for_gate = False
@@ -2866,28 +3007,39 @@ class OrgRuntime:
                 and msg.msg_type == MsgType.TASK_DELIVERED
                 and not self._is_chain_processed_by_root(org_id, chain_id_peek)
             )
-            if closed and msg.msg_type not in (
-                MsgType.TASK_ASSIGN,
-                MsgType.TASK_REJECTED,
-            ) and not _root_delivery_bypass:
+            if (
+                closed
+                and msg.msg_type
+                not in (
+                    MsgType.TASK_ASSIGN,
+                    MsgType.TASK_REJECTED,
+                )
+                and not _root_delivery_bypass
+            ):
                 logger.info(
                     "[OrgRuntime] gate: skip ReAct activation for closed chain=%s "
                     "msg_type=%s from=%s to=%s",
-                    chain_id_peek, msg.msg_type.value if hasattr(msg.msg_type, "value") else msg.msg_type,
-                    msg.from_node, msg.to_node,
+                    chain_id_peek,
+                    msg.msg_type.value if hasattr(msg.msg_type, "value") else msg.msg_type,
+                    msg.from_node,
+                    msg.to_node,
                 )
                 try:
-                    await self._broadcast_ws("org:chain_closed_msg", {
-                        "org_id": org_id,
-                        "chain_id": chain_id_peek,
-                        "from_node": msg.from_node,
-                        "to_node": msg.to_node,
-                        "msg_type": (
-                            msg.msg_type.value if hasattr(msg.msg_type, "value")
-                            else str(msg.msg_type)
-                        ),
-                        "content_preview": (msg.content or "")[:_LIM_WS],
-                    })
+                    await self._broadcast_ws(
+                        "org:chain_closed_msg",
+                        {
+                            "org_id": org_id,
+                            "chain_id": chain_id_peek,
+                            "from_node": msg.from_node,
+                            "to_node": msg.to_node,
+                            "msg_type": (
+                                msg.msg_type.value
+                                if hasattr(msg.msg_type, "value")
+                                else str(msg.msg_type)
+                            ),
+                            "content_preview": (msg.content or "")[:_LIM_WS],
+                        },
+                    )
                 except Exception:
                     pass
                 messenger = self.get_messenger(org_id)
@@ -2928,8 +3080,11 @@ class OrgRuntime:
                 task_prompt = self._format_incoming_message(msg)
                 chain_id = msg.metadata.get("task_chain_id") or None
                 await self._activate_and_run(
-                    org, target_clone, task_prompt,
-                    chain_id=chain_id, activation_origin=msg_origin,
+                    org,
+                    target_clone,
+                    task_prompt,
+                    chain_id=chain_id,
+                    activation_origin=msg_origin,
                 )
                 if messenger:
                     messenger.mark_processed(msg.id)
@@ -2943,8 +3098,11 @@ class OrgRuntime:
                     task_prompt = self._format_incoming_message(msg)
                     chain_id = msg.metadata.get("task_chain_id") or None
                     await self._activate_and_run(
-                        org, new_clone, task_prompt,
-                        chain_id=chain_id, activation_origin=msg_origin,
+                        org,
+                        new_clone,
+                        task_prompt,
+                        chain_id=chain_id,
+                        activation_origin=msg_origin,
                     )
                     if messenger:
                         messenger.mark_processed(msg.id)
@@ -2960,8 +3118,11 @@ class OrgRuntime:
         task_prompt = self._format_incoming_message(msg)
         chain_id = msg.metadata.get("task_chain_id") or ""
         await self._activate_and_run(
-            org, node, task_prompt,
-            chain_id=chain_id or None, activation_origin=msg_origin,
+            org,
+            node,
+            task_prompt,
+            chain_id=chain_id or None,
+            activation_origin=msg_origin,
         )
         if messenger:
             messenger.mark_processed(msg.id)
@@ -2970,8 +3131,11 @@ class OrgRuntime:
         self, org: Organization, node: OrgNode, msg: OrgMessage, pending: int
     ) -> OrgNode | None:
         """Try to find an available clone for this task."""
-        clones = [n for n in org.nodes if n.clone_source == node.id
-                   and n.status not in (NodeStatus.FROZEN, NodeStatus.OFFLINE)]
+        clones = [
+            n
+            for n in org.nodes
+            if n.clone_source == node.id and n.status not in (NodeStatus.FROZEN, NodeStatus.OFFLINE)
+        ]
         if not clones:
             return None
 
@@ -3000,6 +3164,7 @@ class OrgRuntime:
             task.add_done_callback(
                 lambda _t, _o=_oid, _k=task_key: self._running_tasks.get(_o, {}).pop(_k, None)
             )
+
         return _handler
 
     def _register_clone_in_messenger(self, org_id: str, clone: OrgNode) -> None:
@@ -3076,15 +3241,14 @@ class OrgRuntime:
                 if lines:
                     extra += f"\n附件清单（共 {len(attachments)} 个）:\n" + "\n".join(lines)
             if chain_id:
-                extra += (
-                    "\n验收时请使用完整任务链 ID："
-                    f'task_chain_id="{chain_id}"'
-                )
+                extra += f'\n验收时请使用完整任务链 ID：task_chain_id="{chain_id}"'
             extra += "\n请用 org_accept_deliverable 或 org_reject_deliverable 进行验收。"
         elif msg.msg_type == MsgType.TASK_REJECTED:
             reason = msg.metadata.get("rejection_reason", "")
             if reason:
-                extra = f"\n打回原因: {reason}\n请根据反馈修改后重新用 org_submit_deliverable 提交。"
+                extra = (
+                    f"\n打回原因: {reason}\n请根据反馈修改后重新用 org_submit_deliverable 提交。"
+                )
         elif msg.msg_type == MsgType.TASK_ASSIGN:
             if chain_id:
                 extra = f"\n完成后请用 org_submit_deliverable 提交交付物，task_chain_id={chain_id}"
@@ -3095,15 +3259,11 @@ class OrgRuntime:
         # 显式提示接收方在交付时复用该 task_chain_id，避免接收方自己造一个
         # 新链导致整棵任务树断裂（这是修复 delegate 误判 → send_message 兜底
         # → 链路丢失这条工程上常见的失败模式的最后一环）。
-        if (
-            msg.metadata.get("propagate_chain")
-            and chain_id
-            and msg.msg_type != MsgType.TASK_ASSIGN
-        ):
+        if msg.metadata.get("propagate_chain") and chain_id and msg.msg_type != MsgType.TASK_ASSIGN:
             relay_from = msg.metadata.get("relay_from_node") or msg.from_node
             extra += (
                 f"\n[任务链接力] 上级 {relay_from} 把 task_chain_id={chain_id} 接力给你，"
-                f"完成后请用 org_submit_deliverable(task_chain_id=\"{chain_id}\") 提交，"
+                f'完成后请用 org_submit_deliverable(task_chain_id="{chain_id}") 提交，'
                 "不要自己生成新的 task_chain_id。"
             )
 
@@ -3146,6 +3306,7 @@ class OrgRuntime:
         外部代码不需要再去戳 ``self._manager._org_dir`` 私访。
         """
         from openakita.orgs.project_store import ProjectStore
+
         return ProjectStore(self._manager.get_org_dir(org_id))
 
     # ------------------------------------------------------------------
@@ -3170,13 +3331,13 @@ class OrgRuntime:
             if not task:
                 return 0
             children = store.get_subtasks(task.id)
-            return sum(
-                1 for c in children if c.status == TaskStatus.ACCEPTED
-            )
+            return sum(1 for c in children if c.status == TaskStatus.ACCEPTED)
         except Exception as exc:  # pragma: no cover — 防御性
             logger.debug(
                 "[Verify] get_accepted_child_count(%s, %s) failed: %s",
-                org_id, chain_id, exc,
+                org_id,
+                chain_id,
+                exc,
             )
             return 0
 
@@ -3213,7 +3374,9 @@ class OrgRuntime:
         except Exception as exc:  # pragma: no cover — 防御性
             logger.debug(
                 "[Verify] has_recent_accepted_signal(%s, %s) failed: %s",
-                org_id, node_id, exc,
+                org_id,
+                node_id,
+                exc,
             )
             return False
 
@@ -3238,6 +3401,7 @@ class OrgRuntime:
     def get_policies(self, org_id: str) -> OrgPolicies:
         if org_id not in self._policies:
             from .policies import OrgPolicies as _P
+
             org_dir = self._manager._org_dir(org_id)
             self._policies[org_id] = _P(org_dir)
         return self._policies[org_id]
@@ -3248,6 +3412,7 @@ class OrgRuntime:
             global_identity = None
             try:
                 from openakita.config import settings
+
                 global_identity = Path(settings.project_root) / "identity"
             except Exception:
                 pass
@@ -3259,8 +3424,11 @@ class OrgRuntime:
     # ------------------------------------------------------------------
 
     def _set_node_status(
-        self, org: Organization, node: OrgNode,
-        new_status: NodeStatus, reason: str = "",
+        self,
+        org: Organization,
+        node: OrgNode,
+        new_status: NodeStatus,
+        reason: str = "",
     ) -> None:
         """Set node status with audit trail (event_store + log)."""
         old_status = node.status
@@ -3277,7 +3445,8 @@ class OrgRuntime:
             self._node_busy_since.pop(key, None)
         node.status = new_status
         self.get_event_store(org.id).emit(
-            "node_status_change", node.id,
+            "node_status_change",
+            node.id,
             {"from": old_status.value, "to": new_status.value, "reason": reason},
         )
         logger.info(
@@ -3308,12 +3477,15 @@ class OrgRuntime:
         """
         self._set_node_status(org, node, new_status, reason)
         await self._save_org(org)
-        await self._broadcast_ws("org:node_status", {
-            "org_id": org.id,
-            "node_id": node.id,
-            "status": new_status.value,
-            "current_task": current_task,
-        })
+        await self._broadcast_ws(
+            "org:node_status",
+            {
+                "org_id": org.id,
+                "node_id": node.id,
+                "status": new_status.value,
+                "current_task": current_task,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Internal
@@ -3337,15 +3509,22 @@ class OrgRuntime:
         async def _on_deadlock(cycles: list[list[str]], _oid=org.id) -> None:
             es = self.get_event_store(_oid)
             for cycle in cycles:
-                es.emit("conflict_detected", "system", {
-                    "type": "deadlock", "cycle": cycle,
-                })
+                es.emit(
+                    "conflict_detected",
+                    "system",
+                    {
+                        "type": "deadlock",
+                        "cycle": cycle,
+                    },
+                )
             inbox = self.get_inbox(_oid)
             inbox.push_warning(
-                _oid, "system",
+                _oid,
+                "system",
                 title="检测到死锁",
                 body=f"以下节点间存在循环等待: {cycles}",
             )
+
         messenger.set_deadlock_handler(_on_deadlock)
 
         task = asyncio.ensure_future(messenger.start_background_tasks())
@@ -3367,8 +3546,7 @@ class OrgRuntime:
         self._org_quota_failures.pop(org_id, None)
         self._suppress_post_hook.pop(org_id, None)
         self._post_hook_cooldown = {
-            k: v for k, v in self._post_hook_cooldown.items()
-            if not k.startswith(f"{org_id}:")
+            k: v for k, v in self._post_hook_cooldown.items() if not k.startswith(f"{org_id}:")
         }
 
         keys_to_remove = [k for k in self._agent_cache if k.startswith(f"{org_id}:")]
@@ -3416,9 +3594,7 @@ class OrgRuntime:
                     )
                     self._active_orgs.pop(org.id, None)
             except FileNotFoundError:
-                logger.warning(
-                    f"[OrgRuntime] _save_org race — org {org.id} disappeared mid-write"
-                )
+                logger.warning(f"[OrgRuntime] _save_org race — org {org.id} disappeared mid-write")
                 self._active_orgs.pop(org.id, None)
 
     def _save_state(self, org_id: str) -> None:
@@ -3462,9 +3638,7 @@ class OrgRuntime:
 
         self._recover_orphan_tasks(org, recovered_node_ids)
 
-    def _recover_orphan_tasks(
-        self, org: Organization, recovered_node_ids: set[str]
-    ) -> None:
+    def _recover_orphan_tasks(self, org: Organization, recovered_node_ids: set[str]) -> None:
         """Reset in_progress tasks whose assignee nodes are now idle.
 
         Called after node recovery to maintain task ↔ node consistency.
@@ -3499,13 +3673,13 @@ class OrgRuntime:
             reset_count += 1
             logger.info(
                 "[OrgRuntime] Reset orphan task %s (assignee=%s) to todo in org %s",
-                task_id[:12], assignee, org.name,
+                task_id[:12],
+                assignee,
+                org.name,
             )
 
         if reset_count > 0:
-            logger.info(
-                "[OrgRuntime] Reset %d orphan tasks for org %s", reset_count, org.name
-            )
+            logger.info("[OrgRuntime] Reset %d orphan tasks for org %s", reset_count, org.name)
 
     def _evict_expired_agents(self) -> None:
         expired = [k for k, v in self._agent_cache.items() if v.expired]
@@ -3527,13 +3701,17 @@ class OrgRuntime:
             for server_name in mcp_servers:
                 if hasattr(client, "connect"):
                     import asyncio
+
                     try:
                         loop = asyncio.get_running_loop()
                         task = loop.create_task(client.connect(server_name))
                         task.add_done_callback(
                             lambda t, s=server_name: (
-                                logger.warning(f"[OrgRuntime] MCP connect '{s}' failed: {t.exception()}")
-                                if t.exception() else None
+                                logger.warning(
+                                    f"[OrgRuntime] MCP connect '{s}' failed: {t.exception()}"
+                                )
+                                if t.exception()
+                                else None
                             )
                         )
                     except RuntimeError:
@@ -3548,13 +3726,14 @@ class OrgRuntime:
     def _node_active_count(self, org_id: str, node_id: str) -> int:
         """Count running (not-done) tasks for a node."""
         running = self._running_tasks.get(org_id, {})
-        return sum(
-            1 for k, t in running.items()
-            if k.startswith(f"{node_id}:") and not t.done()
-        )
+        return sum(1 for k, t in running.items() if k.startswith(f"{node_id}:") and not t.done())
 
     async def _drain_node_pending(
-        self, org: Organization, node: OrgNode, *, max_msgs: int = 0,
+        self,
+        org: Organization,
+        node: OrgNode,
+        *,
+        max_msgs: int = 0,
     ) -> int:
         """Drain pending messages from a node's mailbox.
 
@@ -3579,9 +3758,8 @@ class OrgRuntime:
 
         try:
             from openakita.config import settings as _settings
-            suppress_on = getattr(
-                _settings, "org_suppress_closed_chain_reactivation", True
-            )
+
+            suppress_on = getattr(_settings, "org_suppress_closed_chain_reactivation", True)
         except Exception:
             suppress_on = True
 
@@ -3603,10 +3781,9 @@ class OrgRuntime:
             # 2026-04-28 收紧：去重已被 root 主任务验收过的 chain，避免空跑「补汇总」轮。
             if suppress_on:
                 chain_peek = msg.metadata.get("task_chain_id") if msg.metadata else None
-                closed = (
-                    bool(msg.metadata and msg.metadata.get("chain_closed"))
-                    or self.is_chain_closed(org.id, chain_peek)
-                )
+                closed = bool(
+                    msg.metadata and msg.metadata.get("chain_closed")
+                ) or self.is_chain_closed(org.id, chain_peek)
                 try:
                     _is_root_for_drain = org.get_parent(node.id) is None
                 except Exception:
@@ -3616,13 +3793,19 @@ class OrgRuntime:
                     and msg.msg_type == MsgType.TASK_DELIVERED
                     and not self._is_chain_processed_by_root(org.id, chain_peek)
                 )
-                if closed and msg.msg_type not in (
-                    MsgType.TASK_ASSIGN,
-                    MsgType.TASK_REJECTED,
-                ) and not _root_delivery_bypass:
+                if (
+                    closed
+                    and msg.msg_type
+                    not in (
+                        MsgType.TASK_ASSIGN,
+                        MsgType.TASK_REJECTED,
+                    )
+                    and not _root_delivery_bypass
+                ):
                     logger.info(
                         "[OrgRuntime] drain-gate skip closed chain=%s msg=%s",
-                        chain_peek, msg.id,
+                        chain_peek,
+                        msg.id,
                     )
                     continue
 
@@ -3634,8 +3817,11 @@ class OrgRuntime:
             chain_id = msg.metadata.get("task_chain_id") or None
             msg_origin = self._origin_from_msg_type(msg.msg_type)
             await self._activate_and_run(
-                org, node, task_prompt,
-                chain_id=chain_id, activation_origin=msg_origin,
+                org,
+                node,
+                task_prompt,
+                chain_id=chain_id,
+                activation_origin=msg_origin,
             )
             dispatched += 1
         return dispatched
@@ -3692,9 +3878,14 @@ class OrgRuntime:
             # 如需要保持历史行为，可把 org_post_task_notify_parent 设为 True。
             try:
                 from openakita.config import settings as _settings
-                notify_parent = bool(getattr(
-                    _settings, "org_post_task_notify_parent", False,
-                ))
+
+                notify_parent = bool(
+                    getattr(
+                        _settings,
+                        "org_post_task_notify_parent",
+                        False,
+                    )
+                )
             except Exception:
                 notify_parent = False
 
@@ -3717,16 +3908,33 @@ class OrgRuntime:
             # post_task_notify 不是"用户命令路径"，不应写入 _latest_root_result，
             # 否则父节点处理这条通知产生的文本会污染用户侧最终结果。
             await self._activate_and_run(
-                org, parent, prompt, activation_origin="post_task_notify",
+                org,
+                parent,
+                prompt,
+                activation_origin="post_task_notify",
             )
         except Exception as e:
             logger.debug(f"[OrgRuntime] Post-task hook error: {e}")
 
-    _STOP_KEYWORDS = frozenset({
-        "暂停", "停止", "取消", "别做了", "先不做", "到此为止",
-        "不要继续", "停下来", "先暂停", "不用做了", "够了",
-        "终止", "中止", "全部停止", "不做了",
-    })
+    _STOP_KEYWORDS = frozenset(
+        {
+            "暂停",
+            "停止",
+            "取消",
+            "别做了",
+            "先不做",
+            "到此为止",
+            "不要继续",
+            "停下来",
+            "先暂停",
+            "不用做了",
+            "够了",
+            "终止",
+            "中止",
+            "全部停止",
+            "不做了",
+        }
+    )
 
     def _is_stop_intent(self, content: str) -> bool:
         return any(kw in content for kw in self._STOP_KEYWORDS)
@@ -3768,7 +3976,8 @@ class OrgRuntime:
                     ev.set()
         except Exception:
             logger.debug(
-                "[OrgRuntime] soft_stop wake waiters failed", exc_info=True,
+                "[OrgRuntime] soft_stop wake waiters failed",
+                exc_info=True,
             )
         self.get_event_store(org_id).emit("soft_stop", "user", {})
 
@@ -3825,23 +4034,28 @@ class OrgRuntime:
             root_status = root.status.value if root else "missing"
             for node in org.nodes:
                 if node.id != tracker.root_node_id and node.status in (
-                    NodeStatus.BUSY, NodeStatus.WAITING,
+                    NodeStatus.BUSY,
+                    NodeStatus.WAITING,
                 ):
-                    busy_nodes.append({
-                        "node_id": node.id,
-                        "role_title": node.role_title,
-                        "status": node.status.value,
-                    })
+                    busy_nodes.append(
+                        {
+                            "node_id": node.id,
+                            "role_title": node.role_title,
+                            "status": node.status.value,
+                        }
+                    )
             messenger = self.get_messenger(tracker.org_id)
             if messenger:
                 for node in org.nodes:
                     count = messenger.get_pending_count(node.id)
                     if count > 0:
-                        pending_mailbox.append({
-                            "node_id": node.id,
-                            "role_title": node.role_title,
-                            "pending": count,
-                        })
+                        pending_mailbox.append(
+                            {
+                                "node_id": node.id,
+                                "role_title": node.role_title,
+                                "pending": count,
+                            }
+                        )
 
         blockers: list[str] = []
         if open_subtree:
@@ -3865,8 +4079,7 @@ class OrgRuntime:
             summary_parts.append(f"忙碌节点: {names}")
         if pending_mailbox:
             names = ", ".join(
-                f"{n['role_title'] or n['node_id']}({n['pending']})"
-                for n in pending_mailbox[:3]
+                f"{n['role_title'] or n['node_id']}({n['pending']})" for n in pending_mailbox[:3]
             )
             summary_parts.append(f"待处理消息: {names}")
         if tracker.state == "awaiting_summary":
@@ -3876,10 +4089,7 @@ class OrgRuntime:
             "blockers": blockers,
             "summary": "；".join(summary_parts),
             "open_subtree_chains": open_subtree,
-            "chain_parent": {
-                cid: self._chain_parent.get(cid)
-                for cid in open_subtree
-            },
+            "chain_parent": {cid: self._chain_parent.get(cid) for cid in open_subtree},
             "root_status": root_status,
             "busy_nodes": busy_nodes,
             "pending_mailbox": pending_mailbox,
@@ -3926,7 +4136,8 @@ class OrgRuntime:
             await self._soft_stop_org(org_id)
         except Exception as e:
             logger.warning(
-                "[OrgRuntime] cancel_user_command soft_stop failed: %s", e,
+                "[OrgRuntime] cancel_user_command soft_stop failed: %s",
+                e,
             )
 
         try:
@@ -3943,7 +4154,9 @@ class OrgRuntime:
 
         logger.info(
             "[OrgRuntime] cancel_user_command: org=%s cmd=%s roots=%s",
-            org_id, command_id, cancelled_roots,
+            org_id,
+            command_id,
+            cancelled_roots,
         )
         return {
             "ok": True,
@@ -3981,7 +4194,9 @@ class OrgRuntime:
     # ------------------------------------------------------------------
 
     def _get_tracker(
-        self, org_id: str, root_node_id: str,
+        self,
+        org_id: str,
+        root_node_id: str,
     ) -> UserCommandTracker | None:
         return self._active_user_cmd.get((org_id, root_node_id))
 
@@ -4029,10 +4244,7 @@ class OrgRuntime:
 
     def _trackers_for_org(self, org_id: str) -> list[UserCommandTracker]:
         """Return all active trackers for an organization (usually 0 or 1)."""
-        return [
-            t for (oid, _nid), t in self._active_user_cmd.items()
-            if oid == org_id
-        ]
+        return [t for (oid, _nid), t in self._active_user_cmd.items() if oid == org_id]
 
     def _touch_trackers_for_org(self, org_id: str) -> None:
         """Refresh progress timestamp on every tracker active in this org.
@@ -4047,7 +4259,8 @@ class OrgRuntime:
             tracker._touch()
 
     def _collect_chain_subtree(
-        self, root_chain_id: str | None,
+        self,
+        root_chain_id: str | None,
     ) -> set[str]:
         """Walk forward from ``root_chain_id`` collecting all descendant chains.
 
@@ -4071,7 +4284,8 @@ class OrgRuntime:
         return subtree
 
     def _is_subtree_fully_closed(
-        self, tracker: UserCommandTracker,
+        self,
+        tracker: UserCommandTracker,
     ) -> bool:
         """Return True iff every chain in the tracker's chain-subtree is closed.
 
@@ -4081,9 +4295,14 @@ class OrgRuntime:
         """
         try:
             from openakita.config import settings as _settings
-            enforced = bool(getattr(
-                _settings, "org_chain_parent_enforced", True,
-            ))
+
+            enforced = bool(
+                getattr(
+                    _settings,
+                    "org_chain_parent_enforced",
+                    True,
+                )
+            )
         except Exception:
             enforced = True
 
@@ -4096,7 +4315,8 @@ class OrgRuntime:
         return all(cid in bucket for cid in subtree)
 
     def _maybe_finalize_tracker(
-        self, tracker: UserCommandTracker,
+        self,
+        tracker: UserCommandTracker,
     ) -> None:
         """If completion conditions are met, advance tracker state.
 
@@ -4122,7 +4342,8 @@ class OrgRuntime:
         root = org.get_node(tracker.root_node_id)
         if not root or root.status != NodeStatus.IDLE:
             self._log_finalize_decision(
-                tracker, "root_not_idle",
+                tracker,
+                "root_not_idle",
                 root_status=root.status.value if root else None,
             )
             return
@@ -4132,9 +4353,14 @@ class OrgRuntime:
 
         try:
             from openakita.config import settings as _settings
-            post_summary_enabled = bool(getattr(
-                _settings, "org_root_post_summary", True,
-            ))
+
+            post_summary_enabled = bool(
+                getattr(
+                    _settings,
+                    "org_root_post_summary",
+                    True,
+                )
+            )
         except Exception:
             post_summary_enabled = True
 
@@ -4209,8 +4435,7 @@ class OrgRuntime:
                 "open_chains": len(tracker.open_chains),
                 "subtree_size": len(subtree),
                 "subtree_closed": sum(
-                    1 for c in subtree
-                    if c in (self._closed_chains.get(tracker.org_id) or {})
+                    1 for c in subtree if c in (self._closed_chains.get(tracker.org_id) or {})
                 ),
                 "blockers": blockers.get("blockers", []),
                 "blocker_summary": blockers.get("summary", ""),
@@ -4244,7 +4469,8 @@ class OrgRuntime:
             logger.debug("[Finalize] phase emit failed", exc_info=True)
 
     def _push_root_summary_prompt(
-        self, tracker: UserCommandTracker,
+        self,
+        tracker: UserCommandTracker,
     ) -> bool:
         """Wake up the root node so it can produce a final summary ReAct.
 
@@ -4288,6 +4514,7 @@ class OrgRuntime:
         allowed_chain_ids: list[str] = []
         try:
             from openakita.orgs.project_store import ProjectStore as _PS
+
             store = _PS(self._manager._org_dir(tracker.org_id))
             for cid in list(subtree)[:10]:
                 task = store.find_task_by_chain(cid)
@@ -4302,12 +4529,15 @@ class OrgRuntime:
                     allowed_chain_ids.append(cid)
         except Exception:
             logger.debug(
-                "[PushSummary] project_store recap failed", exc_info=True,
+                "[PushSummary] project_store recap failed",
+                exc_info=True,
             )
             allowed_chain_ids = list(subtree)[:10]
 
-        recap = "\n".join(recap_parts) if recap_parts else (
-            "（无可识别的子任务记录，请直接根据已收到的下级 deliverable 汇总）"
+        recap = (
+            "\n".join(recap_parts)
+            if recap_parts
+            else ("（无可识别的子任务记录，请直接根据已收到的下级 deliverable 汇总）")
         )
         whitelist_str = ", ".join(c[:12] for c in allowed_chain_ids) or "（空）"
         body = (
@@ -4340,14 +4570,17 @@ class OrgRuntime:
                 )
         except Exception:
             logger.debug(
-                "[PushSummary] inbox push failed", exc_info=True,
+                "[PushSummary] inbox push failed",
+                exc_info=True,
             )
 
         # Actually wake the root for a summary ReAct.
         try:
             _t = asyncio.create_task(
                 self._activate_and_run(
-                    org, root, body,
+                    org,
+                    root,
+                    body,
                     activation_origin="delivery_followup",
                 ),
                 name=f"summary_followup:{tracker.org_id}:{tracker.root_node_id}",
@@ -4362,7 +4595,8 @@ class OrgRuntime:
             return False
         except Exception:
             logger.debug(
-                "[PushSummary] schedule activate failed", exc_info=True,
+                "[PushSummary] schedule activate failed",
+                exc_info=True,
             )
             return False
         return True
@@ -4374,7 +4608,10 @@ class OrgRuntime:
             self._maybe_finalize_tracker(tracker)
 
     def _tracker_register_chain(
-        self, org_id: str, opener_node_id: str, chain_id: str,
+        self,
+        org_id: str,
+        opener_node_id: str,
+        chain_id: str,
     ) -> None:
         """Hook point for tool_handler: register a newly opened chain.
 
@@ -4391,12 +4628,16 @@ class OrgRuntime:
             return
         for tracker in self._trackers_for_org(org_id):
             if tracker.root_node_id == opener_node_id or self._is_descendant(
-                org, tracker.root_node_id, opener_node_id,
+                org,
+                tracker.root_node_id,
+                opener_node_id,
             ):
                 tracker.register_chain(chain_id)
 
     def _tracker_unregister_chain(
-        self, org_id: str, chain_id: str,
+        self,
+        org_id: str,
+        chain_id: str,
     ) -> None:
         if not self._active_user_cmd or not chain_id:
             return
@@ -4407,7 +4648,9 @@ class OrgRuntime:
 
     @staticmethod
     def _is_descendant(
-        org: Organization, ancestor_id: str, node_id: str,
+        org: Organization,
+        ancestor_id: str,
+        node_id: str,
     ) -> bool:
         """Return True if ``node_id`` is a descendant of (or equal to) ``ancestor_id``."""
         if ancestor_id == node_id:
@@ -4430,7 +4673,10 @@ class OrgRuntime:
         return False
 
     def _mark_root_origin(
-        self, org_id: str, node_id: str, origin: str,
+        self,
+        org_id: str,
+        node_id: str,
+        origin: str,
     ) -> None:
         """Tag the next `_activate_and_run_inner` for this root node with an origin.
 
@@ -4446,10 +4692,14 @@ class OrgRuntime:
         self._root_activation_origin[f"{org_id}:{node_id}"] = origin
 
     def _pop_root_origin(
-        self, org_id: str, node_id: str, default: str = "user_command",
+        self,
+        org_id: str,
+        node_id: str,
+        default: str = "user_command",
     ) -> str:
         return self._root_activation_origin.pop(
-            f"{org_id}:{node_id}", default,
+            f"{org_id}:{node_id}",
+            default,
         )
 
     @staticmethod
@@ -4471,11 +4721,13 @@ class OrgRuntime:
             MsgType.HANDSHAKE.value: "handshake",
         }.get(value, "other")
 
-    _FINAL_RESULT_ORIGINS: frozenset[str] = frozenset({
-        "user_command",
-        "task_delivered",
-        "delivery_followup",
-    })
+    _FINAL_RESULT_ORIGINS: frozenset[str] = frozenset(
+        {
+            "user_command",
+            "task_delivered",
+            "delivery_followup",
+        }
+    )
     _ROOT_INCOMPLETE_RESULT_MIN_CHARS = 200
 
     def _capture_root_visible_result(
@@ -4520,10 +4772,7 @@ class OrgRuntime:
                 "origin": origin,
                 "exit_reason": exit_reason,
                 "usable_incomplete": True,
-                "warning": (
-                    "最终汇总已生成，但任务校验器未确认完成；"
-                    "已保留完整汇总内容。"
-                ),
+                "warning": ("最终汇总已生成，但任务校验器未确认完成；已保留完整汇总内容。"),
             }
 
         if payload is not None:
@@ -4568,13 +4817,19 @@ class OrgRuntime:
         autostop_secs_default = _cfg("org_command_stuck_autostop_secs", 3600)
         hard_cap_default = _cfg("org_command_timeout_secs", 0)
         warn_secs = self._org_setting(
-            tracker.org_id, "command_stuck_warn_secs", warn_secs_default,
+            tracker.org_id,
+            "command_stuck_warn_secs",
+            warn_secs_default,
         )
         autostop_secs = self._org_setting(
-            tracker.org_id, "command_stuck_autostop_secs", autostop_secs_default,
+            tracker.org_id,
+            "command_stuck_autostop_secs",
+            autostop_secs_default,
         )
         hard_cap = self._org_setting(
-            tracker.org_id, "command_timeout_secs", hard_cap_default,
+            tracker.org_id,
+            "command_timeout_secs",
+            hard_cap_default,
         )
         # 死锁早停：全员 IDLE + 无消息 + 仍有 open chain 持续多久后立即收口。
         # 比 autostop 更激进——后者要等 1 小时；deadlock 路径默认 90 秒就能
@@ -4586,22 +4841,19 @@ class OrgRuntime:
         if warn_secs > 0:
             warn_secs = max(30, warn_secs)
         if autostop_secs > 0:
-            autostop_secs = max(
-                (warn_secs + 60) if warn_secs > 0 else 60, autostop_secs
-            )
+            autostop_secs = max((warn_secs + 60) if warn_secs > 0 else 60, autostop_secs)
         if deadlock_grace > 0:
             deadlock_grace = max(15, deadlock_grace)
 
         active = [t for t in (warn_secs, autostop_secs, hard_cap, deadlock_grace) if t > 0]
-        poll_interval = (
-            max(5.0, min(30.0, min(active) / 3.0)) if active else 30.0
-        )
+        poll_interval = max(5.0, min(30.0, min(active) / 3.0)) if active else 30.0
 
         try:
             while not tracker.completed.is_set():
                 try:
                     await asyncio.wait_for(
-                        tracker.completed.wait(), timeout=poll_interval,
+                        tracker.completed.wait(),
+                        timeout=poll_interval,
                     )
                     return
                 except TimeoutError:
@@ -4613,20 +4865,19 @@ class OrgRuntime:
                 now = time.monotonic()
                 idle = now - tracker.last_progress_at
 
-                if (
-                    warn_secs > 0
-                    and idle >= warn_secs
-                    and not tracker.warned_stuck
-                ):
+                if warn_secs > 0 and idle >= warn_secs and not tracker.warned_stuck:
                     tracker.warned_stuck = True
                     try:
-                        await self._broadcast_ws("org:command_stuck_warning", {
-                            "org_id": tracker.org_id,
-                            "root_node_id": tracker.root_node_id,
-                            "command_id": tracker.command_id or "",
-                            "open_chains": list(tracker.open_chains),
-                            "idle_secs": int(idle),
-                        })
+                        await self._broadcast_ws(
+                            "org:command_stuck_warning",
+                            {
+                                "org_id": tracker.org_id,
+                                "root_node_id": tracker.root_node_id,
+                                "command_id": tracker.command_id or "",
+                                "open_chains": list(tracker.open_chains),
+                                "idle_secs": int(idle),
+                            },
+                        )
                     except Exception:
                         logger.debug(
                             "[CmdWatchdog] broadcast stuck_warning failed",
@@ -4634,26 +4885,28 @@ class OrgRuntime:
                         )
                     logger.warning(
                         "[CmdWatchdog] org=%s root=%s idle=%ds (warn)",
-                        tracker.org_id, tracker.root_node_id, int(idle),
+                        tracker.org_id,
+                        tracker.root_node_id,
+                        int(idle),
                     )
 
                 should_autostop = autostop_secs > 0 and idle >= autostop_secs
-                if (
-                    not should_autostop
-                    and hard_cap > 0
-                    and (now - tracker.started_at) >= hard_cap
-                ):
+                if not should_autostop and hard_cap > 0 and (now - tracker.started_at) >= hard_cap:
                     should_autostop = True
                     logger.warning(
                         "[CmdWatchdog] org=%s root=%s hit hard cap %ds",
-                        tracker.org_id, tracker.root_node_id, hard_cap,
+                        tracker.org_id,
+                        tracker.root_node_id,
+                        hard_cap,
                     )
 
                 if should_autostop and not tracker.auto_stopped:
                     tracker.auto_stopped = True
                     logger.warning(
                         "[CmdWatchdog] org=%s root=%s auto soft-stopping (idle=%ds)",
-                        tracker.org_id, tracker.root_node_id, int(idle),
+                        tracker.org_id,
+                        tracker.root_node_id,
+                        int(idle),
                     )
                     try:
                         self.get_event_store(tracker.org_id).emit(
@@ -4688,13 +4941,14 @@ class OrgRuntime:
                     if tracker._quiet_deadlock_since <= 0:
                         tracker._quiet_deadlock_since = now
                         logger.info(
-                            "[CmdWatchdog] org=%s root=%s entered quiet-deadlock "
-                            "watch window",
-                            tracker.org_id, tracker.root_node_id,
+                            "[CmdWatchdog] org=%s root=%s entered quiet-deadlock watch window",
+                            tracker.org_id,
+                            tracker.root_node_id,
                         )
                     elif (now - tracker._quiet_deadlock_since) >= deadlock_grace:
                         await self._trigger_deadlock_stop(
-                            tracker, int(now - tracker._quiet_deadlock_since),
+                            tracker,
+                            int(now - tracker._quiet_deadlock_since),
                         )
                         return
                 else:
@@ -4743,7 +4997,9 @@ class OrgRuntime:
         return True
 
     async def _trigger_deadlock_stop(
-        self, tracker: UserCommandTracker, quiet_secs: int,
+        self,
+        tracker: UserCommandTracker,
+        quiet_secs: int,
     ) -> None:
         """Mark tracker as deadlock-stopped and tear down the org-side state.
 
@@ -4775,31 +5031,40 @@ class OrgRuntime:
             )
         except Exception:
             logger.debug(
-                "[CmdWatchdog] emit deadlock event failed", exc_info=True,
+                "[CmdWatchdog] emit deadlock event failed",
+                exc_info=True,
             )
         try:
-            await self._broadcast_ws("org:command_deadlock_stopped", {
-                "org_id": tracker.org_id,
-                "root_node_id": tracker.root_node_id,
-                "command_id": tracker.command_id or "",
-                "quiet_secs": quiet_secs,
-                "open_chains": list(tracker.open_chains),
-            })
+            await self._broadcast_ws(
+                "org:command_deadlock_stopped",
+                {
+                    "org_id": tracker.org_id,
+                    "root_node_id": tracker.root_node_id,
+                    "command_id": tracker.command_id or "",
+                    "quiet_secs": quiet_secs,
+                    "open_chains": list(tracker.open_chains),
+                },
+            )
         except Exception:
             logger.debug(
-                "[CmdWatchdog] broadcast deadlock event failed", exc_info=True,
+                "[CmdWatchdog] broadcast deadlock event failed",
+                exc_info=True,
             )
         try:
             await self._soft_stop_org(tracker.org_id)
         except Exception:
             logger.error(
-                "[CmdWatchdog] soft_stop on deadlock failed", exc_info=True,
+                "[CmdWatchdog] soft_stop on deadlock failed",
+                exc_info=True,
             )
         finally:
             tracker.completed.set()
 
     async def _wait_delegation_completion(
-        self, org_id: str, root_node_id: str, timeout: int = 300,
+        self,
+        org_id: str,
+        root_node_id: str,
+        timeout: int = 300,
     ) -> dict | None:
         """Deprecated: legacy time-based waiter, kept only for back-compat.
 
@@ -4816,7 +5081,9 @@ class OrgRuntime:
             root = org.get_node(root_node_id)
             if not root:
                 break
-            if root.status == NodeStatus.IDLE and not self._has_active_delegations(org_id, root_node_id):
+            if root.status == NodeStatus.IDLE and not self._has_active_delegations(
+                org_id, root_node_id
+            ):
                 return self._latest_root_result.pop(org_id, None)
         return self._latest_root_result.pop(org_id, None)
 
@@ -4838,10 +5105,15 @@ class OrgRuntime:
                         recovered_nodes.append(node)
                 await self._save_org(org)
                 for node in recovered_nodes:
-                    await self._broadcast_ws("org:node_status", {
-                        "org_id": org_id, "node_id": node.id,
-                        "status": "idle", "current_task": "",
-                    })
+                    await self._broadcast_ws(
+                        "org:node_status",
+                        {
+                            "org_id": org_id,
+                            "node_id": node.id,
+                            "status": "idle",
+                            "current_task": "",
+                        },
+                    )
 
             except asyncio.CancelledError:
                 break
@@ -4850,7 +5122,11 @@ class OrgRuntime:
                 await asyncio.sleep(60)
 
     async def _watchdog_notify_delegator(
-        self, org: Organization, node: OrgNode, reason: str, stuck_secs: int,
+        self,
+        org: Organization,
+        node: OrgNode,
+        reason: str,
+        stuck_secs: int,
     ) -> None:
         """Notify the parent (delegator) node when watchdog recovers a stuck/error child."""
         parent = org.get_parent(node.id)
@@ -4923,20 +5199,34 @@ class OrgRuntime:
                             self._set_node_status(org, node, NodeStatus.IDLE, "watchdog_recovery")
                             stuck_secs = int(now - busy_since)
                             self.get_event_store(org_id).emit(
-                                "watchdog_recovery", node.id,
+                                "watchdog_recovery",
+                                node.id,
                                 {"reason": "stuck_busy", "stuck_secs": stuck_secs},
                             )
                             await self._save_org(org)
-                            await self._broadcast_ws("org:node_status", {
-                                "org_id": org_id, "node_id": node.id,
-                                "status": "idle", "current_task": "",
-                            })
-                            await self._broadcast_ws("org:watchdog_recovery", {
-                                "org_id": org_id, "node_id": node.id,
-                                "reason": "stuck_busy", "stuck_secs": stuck_secs,
-                            })
+                            await self._broadcast_ws(
+                                "org:node_status",
+                                {
+                                    "org_id": org_id,
+                                    "node_id": node.id,
+                                    "status": "idle",
+                                    "current_task": "",
+                                },
+                            )
+                            await self._broadcast_ws(
+                                "org:watchdog_recovery",
+                                {
+                                    "org_id": org_id,
+                                    "node_id": node.id,
+                                    "reason": "stuck_busy",
+                                    "stuck_secs": stuck_secs,
+                                },
+                            )
                             await self._watchdog_notify_delegator(
-                                org, node, "stuck_busy", stuck_secs,
+                                org,
+                                node,
+                                "stuck_busy",
+                                stuck_secs,
                             )
                             logger.warning(
                                 f"[OrgRuntime] Watchdog recovered stuck node {node.id} "
@@ -4947,19 +5237,33 @@ class OrgRuntime:
                         self._set_node_status(org, node, NodeStatus.IDLE, "watchdog_recovery")
                         self._agent_cache.pop(key, None)
                         self.get_event_store(org_id).emit(
-                            "watchdog_recovery", node.id, {"reason": "error_not_recovering"},
+                            "watchdog_recovery",
+                            node.id,
+                            {"reason": "error_not_recovering"},
                         )
                         await self._save_org(org)
-                        await self._broadcast_ws("org:node_status", {
-                            "org_id": org_id, "node_id": node.id,
-                            "status": "idle", "current_task": "",
-                        })
-                        await self._broadcast_ws("org:watchdog_recovery", {
-                            "org_id": org_id, "node_id": node.id,
-                            "reason": "error_not_recovering",
-                        })
+                        await self._broadcast_ws(
+                            "org:node_status",
+                            {
+                                "org_id": org_id,
+                                "node_id": node.id,
+                                "status": "idle",
+                                "current_task": "",
+                            },
+                        )
+                        await self._broadcast_ws(
+                            "org:watchdog_recovery",
+                            {
+                                "org_id": org_id,
+                                "node_id": node.id,
+                                "reason": "error_not_recovering",
+                            },
+                        )
                         await self._watchdog_notify_delegator(
-                            org, node, "error_not_recovering", 0,
+                            org,
+                            node,
+                            "error_not_recovering",
+                            0,
                         )
 
                 if mode == "autonomous":
@@ -4978,7 +5282,9 @@ class OrgRuntime:
                                 self._heartbeat.record_activity(org_id)
                                 _t = asyncio.ensure_future(
                                     self._activate_and_run(
-                                        org, root, prompt,
+                                        org,
+                                        root,
+                                        prompt,
                                         activation_origin="watchdog_kick",
                                     )
                                 )
@@ -5037,8 +5343,10 @@ class OrgRuntime:
         """
         for node in org.nodes:
             if node.status not in (
-                NodeStatus.IDLE, NodeStatus.ERROR,
-                NodeStatus.FROZEN, NodeStatus.OFFLINE,
+                NodeStatus.IDLE,
+                NodeStatus.ERROR,
+                NodeStatus.FROZEN,
+                NodeStatus.OFFLINE,
             ):
                 return True
         messenger = self.get_messenger(org.id)
@@ -5106,7 +5414,10 @@ class OrgRuntime:
                                 "无需调用任何 org_* 工具。"
                             )
                             await self._activate_and_run(
-                                org, root, prompt, activation_origin="idle_probe",
+                                org,
+                                root,
+                                prompt,
+                                activation_origin="idle_probe",
                             )
                             break
                         continue
@@ -5139,7 +5450,9 @@ class OrgRuntime:
                                 logger.info(
                                     "[OrgRuntime] idle probe paused for %s/%s "
                                     "after %d ineffective wakeups",
-                                    org_id, node.id, ineffective,
+                                    org_id,
+                                    node.id,
+                                    ineffective,
                                 )
                         self._idle_probe_pending_since.pop(cache_key, None)
                         if ineffective >= self._idle_max_ineffective:
@@ -5152,7 +5465,8 @@ class OrgRuntime:
                     idle_secs = now - last_active if last_active > 0 else 0
 
                     threshold = self._idle_node_thresholds.get(
-                        cache_key, self._idle_base_threshold,
+                        cache_key,
+                        self._idle_base_threshold,
                     )
 
                     if 0 < idle_secs >= threshold:
@@ -5182,13 +5496,17 @@ class OrgRuntime:
 
                         self._idle_node_last_probed[cache_key] = now
                         self._idle_node_thresholds[cache_key] = min(
-                            threshold * 1.5, self._idle_max_threshold,
+                            threshold * 1.5,
+                            self._idle_max_threshold,
                         )
                         self._idle_probe_pending_since[cache_key] = now
                         if self._suppress_post_hook.get(org_id):
                             continue
                         await self._activate_and_run(
-                            org, node, prompt, activation_origin="idle_probe",
+                            org,
+                            node,
+                            prompt,
+                            activation_origin="idle_probe",
                         )
                         break
 
@@ -5201,11 +5519,13 @@ class OrgRuntime:
     async def _broadcast_ws(self, event: str, data: dict) -> None:
         try:
             from openakita.orgs.event_router import route_org_event
+
             await route_org_event(event, data)
         except Exception:
             logger.debug("[OrgRuntime] route_org_event failed: %s %s", event, data, exc_info=True)
         try:
             from openakita.api.routes.websocket import broadcast_event
+
             await broadcast_event(event, data)
         except Exception:
             logger.debug("[OrgRuntime] _broadcast_ws failed: %s %s", event, data, exc_info=True)
@@ -5220,9 +5540,7 @@ class OrgRuntime:
         """Public entry point for org tool execution."""
         return await self._tool_handler.handle(tool_name, arguments, org_id, node_id)
 
-    def _register_org_tool_handler(
-        self, agent: Any, org_id: str, node_id: str
-    ) -> None:
+    def _register_org_tool_handler(self, agent: Any, org_id: str, node_id: str) -> None:
         """Patch agent's ToolExecutor to intercept org_* tool calls and bridge plan tools.
 
         The ReAct execution path is:
@@ -5263,7 +5581,8 @@ class OrgRuntime:
             from ..core.permission import PermissionDecision as _PermissionDecision
 
             def _patched_check_permission(
-                tool_name: str, tool_input: dict,
+                tool_name: str,
+                tool_input: dict,
             ) -> _PermissionDecision:
                 if tool_name.startswith("org_"):
                     return _PermissionDecision(
@@ -5276,8 +5595,11 @@ class OrgRuntime:
             executor.check_permission = _patched_check_permission
 
         async def _patched_with_policy(
-            tool_name: str, tool_input: dict, policy_result: Any = None,
-            *, session_id: str | None = None,
+            tool_name: str,
+            tool_input: dict,
+            policy_result: Any = None,
+            *,
+            session_id: str | None = None,
         ) -> tuple[str, Any]:
             self._node_last_activity[f"{org_id}:{node_id}"] = time.monotonic()
             if tool_name.startswith("org_"):
@@ -5293,12 +5615,15 @@ class OrgRuntime:
                 # 误把"正在等远端结果"判成 stuck（默认 900s warn / 3600s
                 # autostop），多镜头串行很容易触发。
                 self._touch_trackers_for_org(org_id)
-                await self._broadcast_ws("org:workbench_tool_status", {
-                    "org_id": org_id,
-                    "node_id": node_id,
-                    "tool_name": tool_name,
-                    "status": "running",
-                })
+                await self._broadcast_ws(
+                    "org:workbench_tool_status",
+                    {
+                        "org_id": org_id,
+                        "node_id": node_id,
+                        "tool_name": tool_name,
+                        "status": "running",
+                    },
+                )
                 self.get_event_store(org_id).emit(
                     "workbench_tool_started",
                     node_id,
@@ -5306,18 +5631,24 @@ class OrgRuntime:
                 )
             try:
                 _raw = await original_with_policy(
-                    tool_name, tool_input, policy_result, session_id=session_id,
+                    tool_name,
+                    tool_input,
+                    policy_result,
+                    session_id=session_id,
                 )
             except Exception as exc:
                 if is_plugin_tool:
                     self._touch_trackers_for_org(org_id)
-                    await self._broadcast_ws("org:workbench_tool_status", {
-                        "org_id": org_id,
-                        "node_id": node_id,
-                        "tool_name": tool_name,
-                        "status": "failed",
-                        "error": str(exc)[:_LIM_WS],
-                    })
+                    await self._broadcast_ws(
+                        "org:workbench_tool_status",
+                        {
+                            "org_id": org_id,
+                            "node_id": node_id,
+                            "tool_name": tool_name,
+                            "status": "failed",
+                            "error": str(exc)[:_LIM_WS],
+                        },
+                    )
                     self.get_event_store(org_id).emit(
                         "workbench_tool_failed",
                         node_id,
@@ -5349,12 +5680,17 @@ class OrgRuntime:
                 try:
                     ws = getattr(agent, "_org_context", {}).get("workspace")
                     self._record_file_output(
-                        org_id, node_id, tool_name, tool_input, result,
+                        org_id,
+                        node_id,
+                        tool_name,
+                        tool_input,
+                        result,
                         workspace=ws,
                     )
                 except Exception:
                     logger.debug(
-                        "[OrgRuntime] failed to record file output", exc_info=True,
+                        "[OrgRuntime] failed to record file output",
+                        exc_info=True,
                     )
             elif is_plugin_tool:
                 # 工作台节点：插件工具产出（image_urls / video_url / local_paths /
@@ -5363,6 +5699,7 @@ class OrgRuntime:
                 plugin_ok = True
                 try:
                     import json as _json
+
                     parsed = _json.loads(result) if isinstance(result, str) else None
                     if isinstance(parsed, dict) and parsed.get("ok") is False:
                         plugin_ok = False
@@ -5373,10 +5710,18 @@ class OrgRuntime:
                     plugin_id = self._plugin_id_for_tool(agent, tool_name)
                     logger.debug(
                         "[OrgRuntime] plugin asset hook fired: org=%s node=%s tool=%s plugin=%s",
-                        org_id, node_id, tool_name, plugin_id or "plugin",
+                        org_id,
+                        node_id,
+                        tool_name,
+                        plugin_id or "plugin",
                     )
                     enhanced = await self._record_plugin_asset_output(
-                        agent, org_id, node_id, tool_name, tool_input, result,
+                        agent,
+                        org_id,
+                        node_id,
+                        tool_name,
+                        tool_input,
+                        result,
                         workspace=ws,
                     )
                     if enhanced is not None:
@@ -5385,17 +5730,22 @@ class OrgRuntime:
                     logger.warning(
                         "[OrgRuntime] failed to record plugin asset output "
                         "(org=%s node=%s tool=%s)",
-                        org_id, node_id, tool_name,
+                        org_id,
+                        node_id,
+                        tool_name,
                         exc_info=True,
                     )
                 self._touch_trackers_for_org(org_id)
                 if plugin_ok:
-                    await self._broadcast_ws("org:workbench_tool_status", {
-                        "org_id": org_id,
-                        "node_id": node_id,
-                        "tool_name": tool_name,
-                        "status": "finished",
-                    })
+                    await self._broadcast_ws(
+                        "org:workbench_tool_status",
+                        {
+                            "org_id": org_id,
+                            "node_id": node_id,
+                            "tool_name": tool_name,
+                            "status": "finished",
+                        },
+                    )
                     self.get_event_store(org_id).emit(
                         "workbench_tool_succeeded",
                         node_id,
@@ -5480,7 +5830,9 @@ class OrgRuntime:
         if size_bytes <= 0:
             logger.info(
                 "[OrgRuntime] _register_file_output skip empty file: %s (org=%s node=%s)",
-                str(p), org_id, node_id,
+                str(p),
+                org_id,
+                node_id,
             )
             return None
         resolved_name = filename or p.name
@@ -5539,14 +5891,14 @@ class OrgRuntime:
         content_for_task = f"📎 产出文件：**{resolved_name}**\n📂 路径：`{str(p)}`"
         if text_preview:
             content_for_task += (
-                f"\n\n<details><summary>文件内容预览</summary>\n\n"
-                f"{text_preview}\n\n</details>"
+                f"\n\n<details><summary>文件内容预览</summary>\n\n{text_preview}\n\n</details>"
             )
 
         if chain_id:
             try:
                 self._tool_handler._link_project_task(
-                    org_id, chain_id,
+                    org_id,
+                    chain_id,
                     deliverable_content=content_for_task,
                     file_attachment={
                         "filename": resolved_name,
@@ -5572,8 +5924,7 @@ class OrgRuntime:
                 "file_size": size_bytes,
             }
             if not any(
-                isinstance(a, dict)
-                and str(a.get("file_path") or "").lower() == str(p).lower()
+                isinstance(a, dict) and str(a.get("file_path") or "").lower() == str(p).lower()
                 for a in attachments
             ):
                 attachments.append(registered_attachment)
@@ -5587,9 +5938,7 @@ class OrgRuntime:
         }
 
     @staticmethod
-    def _react_trace_has_tool(
-        react_trace: list[dict] | None, tool_name: str
-    ) -> bool:
+    def _react_trace_has_tool(react_trace: list[dict] | None, tool_name: str) -> bool:
         """扫一遍最近一次 ReAct trace，判断指定工具是否真的被调用过。
 
         用于 auto-persist 后的"是否需要合成 TASK_DELIVERED"决策——LLM 自己
@@ -5635,10 +5984,12 @@ class OrgRuntime:
                         continue
                     total += 1
                     result = results_by_id.get(str(call.get("id") or ""), {})
-                    tools.append({
-                        "name": name,
-                        "success": not bool(result.get("is_error")),
-                    })
+                    tools.append(
+                        {
+                            "name": name,
+                            "success": not bool(result.get("is_error")),
+                        }
+                    )
         except Exception:
             return {"tools_used": [], "tools_total": 0}
         return {"tools_used": tools[:20], "tools_total": total}
@@ -5669,7 +6020,7 @@ class OrgRuntime:
                 if not isinstance(iter_entry, dict):
                     continue
                 results_by_id: dict[str, dict] = {}
-                for r in (iter_entry.get("tool_results") or ()):
+                for r in iter_entry.get("tool_results") or ():
                     if isinstance(r, dict):
                         rid = r.get("tool_use_id") or r.get("id") or ""
                         if rid:
@@ -5761,13 +6112,17 @@ class OrgRuntime:
             logger.info(
                 "[OrgRuntime] synthetic TASK_DELIVERED dropped by messenger "
                 "(dedupe/bandwidth/target-not-found): org=%s from=%s to=%s chain=%s",
-                org.id, from_node.id, parent.id, chain_id,
+                org.id,
+                from_node.id,
+                parent.id,
+                chain_id,
             )
             return False
 
         try:
             self.get_event_store(org.id).emit(
-                "task_delivered", from_node.id,
+                "task_delivered",
+                from_node.id,
                 {
                     "to": parent.id,
                     "chain_id": chain_id,
@@ -5779,19 +6134,23 @@ class OrgRuntime:
         except Exception:
             pass
         try:
-            await self._broadcast_ws("org:task_delivered", {
-                "org_id": org.id,
-                "from_node": from_node.id,
-                "to_node": parent.id,
-                "chain_id": chain_id,
-                "summary": summary[:_LIM_WS],
-                "auto_synthesized": True,
-            })
+            await self._broadcast_ws(
+                "org:task_delivered",
+                {
+                    "org_id": org.id,
+                    "from_node": from_node.id,
+                    "to_node": parent.id,
+                    "chain_id": chain_id,
+                    "summary": summary[:_LIM_WS],
+                    "auto_synthesized": True,
+                },
+            )
         except Exception:
             pass
         try:
             self._tool_handler._link_project_task(
-                org.id, chain_id,
+                org.id,
+                chain_id,
                 status="delivered",
                 deliverable_content=body[:2000],
                 delivery_summary=summary[:500],
@@ -5803,9 +6162,11 @@ class OrgRuntime:
         except Exception:
             pass
         logger.info(
-            "[OrgRuntime] synthesized TASK_DELIVERED: org=%s from=%s to=%s "
-            "chain=%s file=%s",
-            org.id, from_node.id, parent.id, chain_id,
+            "[OrgRuntime] synthesized TASK_DELIVERED: org=%s from=%s to=%s chain=%s file=%s",
+            org.id,
+            from_node.id,
+            parent.id,
+            chain_id,
             attachment.get("filename"),
         )
         return True
@@ -5848,7 +6209,8 @@ class OrgRuntime:
                 return
             chain_id = self.get_current_chain_id(org_id, node_id)
             self._register_file_output(
-                org_id, node_id,
+                org_id,
+                node_id,
                 chain_id=chain_id,
                 filename=None,
                 file_path=file_path,
@@ -5868,7 +6230,8 @@ class OrgRuntime:
                 return
             chain_id = self.get_current_chain_id(org_id, node_id)
             self._register_file_output(
-                org_id, node_id,
+                org_id,
+                node_id,
                 chain_id=chain_id,
                 filename=None,
                 file_path=file_path,
@@ -5904,7 +6267,8 @@ class OrgRuntime:
                 if not path:
                     continue
                 self._register_file_output(
-                    org_id, node_id,
+                    org_id,
+                    node_id,
                     chain_id=chain_id,
                     filename=r.get("name") or r.get("filename"),
                     file_path=path,
@@ -5999,7 +6363,8 @@ class OrgRuntime:
 
     async def _download_to_workspace(self, url: str, dest: Path) -> bool:
         return await _plugin_download_to_workspace(
-            url, dest,
+            url,
+            dest,
             max_bytes=self._PLUGIN_ASSET_MAX_BYTES,
             timeout_s=self._PLUGIN_ASSET_DOWNLOAD_TIMEOUT_S,
         )
@@ -6068,14 +6433,17 @@ class OrgRuntime:
                         "terminal": failure["terminal"],
                     },
                 )
-                await self._broadcast_ws("org:workbench_tool_status", {
-                    "org_id": org_id,
-                    "node_id": node_id,
-                    "tool_name": tool_name,
-                    "status": "failed",
-                    "error": str(failure["error"])[:_LIM_WS],
-                    "terminal": failure["terminal"],
-                })
+                await self._broadcast_ws(
+                    "org:workbench_tool_status",
+                    {
+                        "org_id": org_id,
+                        "node_id": node_id,
+                        "tool_name": tool_name,
+                        "status": "failed",
+                        "error": str(failure["error"])[:_LIM_WS],
+                        "terminal": failure["terminal"],
+                    },
+                )
             except Exception:
                 logger.debug("[OrgRuntime] plugin failure emit failed", exc_info=True)
             if failure["terminal"]:
@@ -6083,11 +6451,7 @@ class OrgRuntime:
             return None
 
         plugin_id = self._plugin_id_for_tool(agent, tool_name) or "plugin"
-        task_id = (
-            payload.get("task_id")
-            or tool_input.get("task_id")
-            or "task"
-        )
+        task_id = payload.get("task_id") or tool_input.get("task_id") or "task"
         # path-traversal safety: only use the basename of each component
         plugin_slug = self._safe_asset_filename(str(plugin_id), default_ext="")
         task_slug = self._safe_asset_filename(str(task_id), default_ext="")
@@ -6131,12 +6495,7 @@ class OrgRuntime:
                 candidates.append({"kind": "asset", "asset_id": raw})
 
         def _add_url(raw: object, ext_hint: str = ".bin") -> None:
-            if (
-                isinstance(raw, str)
-                and raw
-                and not raw.startswith("data:")
-                and raw not in seen_url
-            ):
+            if isinstance(raw, str) and raw and not raw.startswith("data:") and raw not in seen_url:
                 seen_url.add(raw)
                 candidates.append({"kind": "url", "url": raw, "ext_hint": ext_hint})
 
@@ -6239,7 +6598,8 @@ class OrgRuntime:
                     # _host_refs 是 _LiveFilteredHostRefs（dict-like）
                     asset_bus = (
                         pm._external_host_refs.get("asset_bus")
-                        if hasattr(pm, "_external_host_refs") else None
+                        if hasattr(pm, "_external_host_refs")
+                        else None
                     )
             except Exception:
                 asset_bus = None
@@ -6271,9 +6631,7 @@ class OrgRuntime:
                     try:
                         row = await asset_bus.get(aid, requester_plugin_id=plugin_id)
                     except Exception:
-                        logger.debug(
-                            "[OrgRuntime] asset_bus.get(%s) failed", aid, exc_info=True
-                        )
+                        logger.debug("[OrgRuntime] asset_bus.get(%s) failed", aid, exc_info=True)
                     if not row:
                         continue
                     sp = row.get("source_path")
@@ -6318,7 +6676,8 @@ class OrgRuntime:
                 seen_paths.add(key)
 
                 att = self._register_file_output(
-                    org_id, node_id,
+                    org_id,
+                    node_id,
                     chain_id=chain_id,
                     filename=local_path.name,
                     file_path=str(local_path),
@@ -6331,14 +6690,13 @@ class OrgRuntime:
                     buf = self._node_plugin_attachments_in_task.setdefault(
                         f"{org_id}:{node_id}", []
                     )
-                    if not any(
-                        b.get("file_path") == att.get("file_path") for b in buf
-                    ):
+                    if not any(b.get("file_path") == att.get("file_path") for b in buf):
                         buf.append(dict(att))
             except Exception:
                 logger.debug(
                     "[OrgRuntime] plugin asset candidate failed: %s",
-                    cand, exc_info=True,
+                    cand,
+                    exc_info=True,
                 )
                 continue
 
@@ -6350,8 +6708,11 @@ class OrgRuntime:
         payload["registered_attachments"] = registered
         # Mirror to a stable top-level array of paths for convenience
         payload.setdefault("local_paths", []).extend(
-            [a["file_path"] for a in registered
-             if a.get("file_path") not in (payload.get("local_paths") or [])]
+            [
+                a["file_path"]
+                for a in registered
+                if a.get("file_path") not in (payload.get("local_paths") or [])
+            ]
         )
         try:
             return _json.dumps(payload, ensure_ascii=False)

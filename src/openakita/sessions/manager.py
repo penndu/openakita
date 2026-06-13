@@ -33,8 +33,22 @@ import re as _re
 
 _SESSION_ID_SAFE_RE = _re.compile(r"^[A-Za-z0-9_\-:.|@/]{1,256}$")
 _SESSION_ID_FORBIDDEN_FRAGMENTS = (
-    "..", "\x00", "\r", "\n", "\t", "<", ">", '"', "'", "`",
-    "\\", "//", "%00", "<script", "${", "{{",
+    "..",
+    "\x00",
+    "\r",
+    "\n",
+    "\t",
+    "<",
+    ">",
+    '"',
+    "'",
+    "`",
+    "\\",
+    "//",
+    "%00",
+    "<script",
+    "${",
+    "{{",
 )
 
 
@@ -156,17 +170,11 @@ class SessionManager:
                     try:
                         n = self.backfill_sessions_from_store()
                         if n:
-                            logger.info(
-                                f"[SessionManager] auto-backfill restored {n} turns"
-                            )
+                            logger.info(f"[SessionManager] auto-backfill restored {n} turns")
                     except Exception as exc:
-                        logger.warning(
-                            f"[SessionManager] auto-backfill failed: {exc}"
-                        )
+                        logger.warning(f"[SessionManager] auto-backfill failed: {exc}")
 
-                threading.Thread(
-                    target=_run, name="sm-backfill", daemon=True
-                ).start()
+                threading.Thread(target=_run, name="sm-backfill", daemon=True).start()
             except Exception as exc:
                 logger.debug(f"[SessionManager] auto-backfill spawn failed: {exc}")
 
@@ -278,7 +286,11 @@ class SessionManager:
                         msg["timestamp"] = ts
                     with session.context._msg_lock:
                         last = session.context.messages[-1] if session.context.messages else None
-                        if last and last.get("role") == msg["role"] and last.get("content") == msg["content"]:
+                        if (
+                            last
+                            and last.get("role") == msg["role"]
+                            and last.get("content") == msg["content"]
+                        ):
                             continue
                         session.context.messages.append(msg)
                 if newer:
@@ -776,9 +788,7 @@ class SessionManager:
         if skipped_error:
             parts.append(f"skipped {skipped_error} errors")
         if skipped_invalid_id:
-            parts.append(
-                f"skipped {skipped_invalid_id} invalid_id (samples={invalid_id_samples})"
-            )
+            parts.append(f"skipped {skipped_invalid_id} invalid_id (samples={invalid_id_samples})")
         logger.info(f"{parts[0]}" + (f" ({', '.join(parts[1:])})" if len(parts) > 1 else ""))
 
         self._sessions_loaded = True

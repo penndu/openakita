@@ -56,9 +56,7 @@ def _validate_regex_list(patterns: list[str]) -> list[str]:
     the classifier.
     """
     if len(patterns) > _MAX_REGEX_LIST_LEN:
-        raise ValueError(
-            f"regex list has {len(patterns)} entries (max {_MAX_REGEX_LIST_LEN})"
-        )
+        raise ValueError(f"regex list has {len(patterns)} entries (max {_MAX_REGEX_LIST_LEN})")
     for idx, pat in enumerate(patterns):
         if not isinstance(pat, str):
             raise ValueError(f"entry {idx} is not a string: {type(pat).__name__}")
@@ -88,9 +86,7 @@ def _validate_safe_path(value: str) -> str:
         raise ValueError(f"path length {len(value)} exceeds {_MAX_PATH_LEN}")
     parts = value.replace("\\", "/").split("/")
     if ".." in parts:
-        raise ValueError(
-            f"path traversal segment '..' is not allowed in this field: {value!r}"
-        )
+        raise ValueError(f"path traversal segment '..' is not allowed in this field: {value!r}")
     return value
 
 
@@ -107,6 +103,7 @@ def _validate_loose_path(value: str) -> str:
     if len(value) > _MAX_PATH_LEN:
         raise ValueError(f"path length {len(value)} exceeds {_MAX_PATH_LEN}")
     return value
+
 
 # ---------------------------------------------------------------------------
 # Sub-models
@@ -499,9 +496,7 @@ class PolicyConfigV2(_Strict):
 
         cwd_path = cwd or Path.cwd()
         data = self.model_dump()
-        data["workspace"]["paths"] = resolve_path_list(
-            data["workspace"]["paths"], cwd=cwd_path
-        )
+        data["workspace"]["paths"] = resolve_path_list(data["workspace"]["paths"], cwd=cwd_path)
         data["safety_immune"]["paths"] = resolve_path_list(
             data["safety_immune"]["paths"], cwd=cwd_path
         )

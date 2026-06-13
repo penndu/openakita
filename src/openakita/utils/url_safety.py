@@ -40,16 +40,21 @@ def safe_urlparse(url: str) -> ParseResult:
     except (ValueError, TypeError):
         return _EMPTY_PARSE_RESULT
 
-_BLOCKED_HOSTNAMES = frozenset({
-    "localhost",
-    "metadata.google.internal",
-    "metadata.internal",
-})
 
-_METADATA_IPS = frozenset({
-    "169.254.169.254",
-    "169.254.170.2",
-})
+_BLOCKED_HOSTNAMES = frozenset(
+    {
+        "localhost",
+        "metadata.google.internal",
+        "metadata.internal",
+    }
+)
+
+_METADATA_IPS = frozenset(
+    {
+        "169.254.169.254",
+        "169.254.170.2",
+    }
+)
 
 
 def _is_blocked_ip(ip_str: str) -> bool:

@@ -86,4 +86,3 @@ def build_catalog() -> dict[str, Any]:
         "output_formats": sorted(OUTPUT_FORMATS),
         "experimental_formats": sorted(EXPERIMENTAL_FORMATS),
     }
-

@@ -281,9 +281,7 @@ class TestFullReloadChain:
         loader2 = SkillLoader()
         loader2.load_from_directory(skills_root)
         _, al2 = allowlist_io.read_allowlist()
-        loader2.prune_external_by_allowlist(
-            loader2.compute_effective_allowlist(al2)
-        )
+        loader2.prune_external_by_allowlist(loader2.compute_effective_allowlist(al2))
         assert loader2.get_skill("alpha") is None, "重启后禁用状态应持久"
         assert loader2.get_skill("beta") is not None
 
@@ -291,8 +289,6 @@ class TestFullReloadChain:
         allowlist_io.overwrite_allowlist({"alpha", "beta"})
         _, al3 = allowlist_io.read_allowlist()
         loader2.load_from_directory(skills_root)  # 重新扫盘
-        loader2.prune_external_by_allowlist(
-            loader2.compute_effective_allowlist(al3)
-        )
+        loader2.prune_external_by_allowlist(loader2.compute_effective_allowlist(al3))
         assert loader2.get_skill("alpha") is not None
         assert loader2.get_skill("beta") is not None

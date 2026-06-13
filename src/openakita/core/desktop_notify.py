@@ -218,9 +218,7 @@ def send_desktop_notification(
     """
     if _is_pytest_runtime():
         # 测试环境直接跳过，避免误弹真实的系统通知打扰开发者
-        logger.debug(
-            f"Skipping desktop notification under pytest: [{title}] {body[:60]}"
-        )
+        logger.debug(f"Skipping desktop notification under pytest: [{title}] {body[:60]}")
         return False
 
     logger.info(f"Sending desktop notification: [{title}] {body[:60]}")

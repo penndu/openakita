@@ -34,13 +34,15 @@ class TestNodeErrorRecovery:
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "node_cto", "task": "修复bug"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "任务已分配" in result or "已分配" in result
 
     async def test_frozen_node_rejects_activation(self, persisted_org, mock_runtime):
         """Frozen nodes should return error, not crash."""
         from openakita.orgs.runtime import OrgRuntime
+
         persisted_org.nodes[1].status = NodeStatus.FROZEN
         rt = MagicMock(spec=OrgRuntime)
         rt.get_org = MagicMock(return_value=persisted_org)
@@ -62,7 +64,8 @@ class TestCascadeDepthLimiting:
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "node_cto", "task": "传递任务", "task_chain_id": "chain_a"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "任务已分配" in result or "已分配" in result
         assert mock_runtime._chain_delegation_depth.get("chain_a", 0) == 1
@@ -72,7 +75,8 @@ class TestCascadeDepthLimiting:
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "node_cto", "task": "太深了", "task_chain_id": "chain_deep"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "上限" in result or "无法" in result
 
@@ -81,7 +85,8 @@ class TestCascadeDepthLimiting:
         result = await handler.handle(
             "org_escalate",
             {"content": "需要决策", "priority": 1},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         assert "上报" in result
 
@@ -97,7 +102,8 @@ class TestInvalidToolArguments:
         result = await handler.handle(
             "org_send_message",
             {"to_node": "node_cto", "content": "测试", "msg_type": "invalid_type_xyz"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert isinstance(result, str)
 
@@ -105,7 +111,8 @@ class TestInvalidToolArguments:
         result = await handler.handle(
             "org_send_message",
             {"to_node": "node_cto", "content": "", "msg_type": "question"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert isinstance(result, str)
 
@@ -113,16 +120,20 @@ class TestInvalidToolArguments:
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "node_fantasy", "task": "不存在的节点"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert isinstance(result, str)
 
-    async def test_delegate_with_role_title_instead_of_id(self, handler, persisted_org, mock_runtime):
+    async def test_delegate_with_role_title_instead_of_id(
+        self, handler, persisted_org, mock_runtime
+    ):
         """LLM may pass role title like 'CTO' instead of 'node_cto'."""
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "CTO", "task": "测试角色名解析"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "任务已分配" in result or "已分配" in result
 
@@ -131,7 +142,8 @@ class TestInvalidToolArguments:
         result = await handler.handle(
             "org_delegate_task",
             {"target": "node_cto", "task_description": "别名参数测试"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "任务已分配" in result or "已分配" in result
 
@@ -139,7 +151,8 @@ class TestInvalidToolArguments:
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "node_cto", "task": "测试", "priority": "high"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert isinstance(result, str)
 
@@ -154,12 +167,16 @@ class TestMessageFormatting:
 
     def test_task_assign_format(self):
         from openakita.orgs.runtime import OrgRuntime
+
         rt = MagicMock(spec=OrgRuntime)
         rt._format_incoming_message = OrgRuntime._format_incoming_message.__get__(rt)
 
         msg = OrgMessage(
-            org_id="test", from_node="boss", to_node="worker",
-            msg_type=MsgType.TASK_ASSIGN, content="写报告",
+            org_id="test",
+            from_node="boss",
+            to_node="worker",
+            msg_type=MsgType.TASK_ASSIGN,
+            content="写报告",
             metadata={"task_chain_id": "chain_123"},
         )
         text = rt._format_incoming_message(msg)
@@ -170,12 +187,16 @@ class TestMessageFormatting:
 
     def test_task_delivered_format(self):
         from openakita.orgs.runtime import OrgRuntime
+
         rt = MagicMock(spec=OrgRuntime)
         rt._format_incoming_message = OrgRuntime._format_incoming_message.__get__(rt)
 
         msg = OrgMessage(
-            org_id="test", from_node="worker", to_node="boss",
-            msg_type=MsgType.TASK_DELIVERED, content="完成了",
+            org_id="test",
+            from_node="worker",
+            to_node="boss",
+            msg_type=MsgType.TASK_DELIVERED,
+            content="完成了",
             metadata={"deliverable": "报告.pdf", "summary": "Q2报告"},
         )
         text = rt._format_incoming_message(msg)
@@ -185,12 +206,16 @@ class TestMessageFormatting:
 
     def test_task_rejected_format(self):
         from openakita.orgs.runtime import OrgRuntime
+
         rt = MagicMock(spec=OrgRuntime)
         rt._format_incoming_message = OrgRuntime._format_incoming_message.__get__(rt)
 
         msg = OrgMessage(
-            org_id="test", from_node="boss", to_node="worker",
-            msg_type=MsgType.TASK_REJECTED, content="需要修改",
+            org_id="test",
+            from_node="boss",
+            to_node="worker",
+            msg_type=MsgType.TASK_REJECTED,
+            content="需要修改",
             metadata={"rejection_reason": "格式不对"},
         )
         text = rt._format_incoming_message(msg)
@@ -200,12 +225,16 @@ class TestMessageFormatting:
 
     def test_empty_chain_id_in_task_assign(self):
         from openakita.orgs.runtime import OrgRuntime
+
         rt = MagicMock(spec=OrgRuntime)
         rt._format_incoming_message = OrgRuntime._format_incoming_message.__get__(rt)
 
         msg = OrgMessage(
-            org_id="test", from_node="boss", to_node="worker",
-            msg_type=MsgType.TASK_ASSIGN, content="无chain任务",
+            org_id="test",
+            from_node="boss",
+            to_node="worker",
+            msg_type=MsgType.TASK_ASSIGN,
+            content="无chain任务",
             metadata={},
         )
         text = rt._format_incoming_message(msg)
@@ -241,6 +270,7 @@ class TestAdaptiveHeartbeatEdgeCases:
     @pytest.fixture()
     def heartbeat(self, mock_runtime):
         from openakita.orgs.heartbeat import OrgHeartbeat
+
         return OrgHeartbeat(mock_runtime)
 
     def test_very_recent_activity_clamps_to_300s(self, heartbeat, persisted_org):
@@ -278,7 +308,8 @@ class TestDeliverableWorkflow:
         result = await handler.handle(
             "org_submit_deliverable",
             {"to_node": "node_ceo", "deliverable": "API 文档 v1", "summary": "初版完成"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         assert isinstance(result, str)
         ws_calls = [c.args[0] for c in mock_runtime._broadcast_ws.call_args_list]
@@ -288,13 +319,15 @@ class TestDeliverableWorkflow:
         await handler.handle(
             "org_accept_deliverable",
             {"from_node": "node_cto", "task_chain_id": "c1", "feedback": "好"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         mock_runtime._broadcast_ws.reset_mock()
         await handler.handle(
             "org_reject_deliverable",
             {"from_node": "node_dev", "task_chain_id": "c2", "reason": "不完整"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         ws_calls = [c.args[0] for c in mock_runtime._broadcast_ws.call_args_list]
         assert "org:task_rejected" in ws_calls
@@ -303,7 +336,8 @@ class TestDeliverableWorkflow:
         result = await handler.handle(
             "org_submit_deliverable",
             {"to_node": "node_ceo", "deliverable": "完成了", "summary": ""},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         assert isinstance(result, str)
 
@@ -319,20 +353,25 @@ class TestBlackboardTools:
         await handler.handle(
             "org_write_blackboard",
             {"content": "项目进度50%", "memory_type": "progress", "tags": ["进度"]},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         result = await handler.handle(
             "org_read_blackboard",
             {},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "项目进度50%" in result
 
-    async def test_write_with_invalid_memory_type_falls_back(self, handler, persisted_org, mock_runtime):
+    async def test_write_with_invalid_memory_type_falls_back(
+        self, handler, persisted_org, mock_runtime
+    ):
         result = await handler.handle(
             "org_write_blackboard",
             {"content": "测试内容", "memory_type": "random_type"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert isinstance(result, str)
 
@@ -340,7 +379,8 @@ class TestBlackboardTools:
         result = await handler.handle(
             "org_read_blackboard",
             {},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert isinstance(result, str)
 
@@ -357,7 +397,8 @@ class TestNodeReferenceResolution:
         result = await handler.handle(
             "org_send_message",
             {"to_node": "CTO", "content": "你好", "msg_type": "question"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "已发送" in result or "发送" in result
 
@@ -366,7 +407,8 @@ class TestNodeReferenceResolution:
         result = await handler.handle(
             "org_send_message",
             {"to_node": "cto", "content": "测试", "msg_type": "question"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "已发送" in result or "发送" in result
 
@@ -374,7 +416,8 @@ class TestNodeReferenceResolution:
         result = await handler.handle(
             "org_send_message",
             {"to_node": "不存在的人", "content": "测试", "msg_type": "question"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert isinstance(result, str)
 
@@ -406,6 +449,7 @@ class TestTimeoutDifferentiation:
     def test_run_agent_task_returns_str(self):
         """_run_agent_task should return str (no timeout wrapper)."""
         from openakita.orgs.runtime import OrgRuntime
+
         sig = OrgRuntime._run_agent_task.__annotations__
         assert "return" in sig
         ret_type = sig["return"]
@@ -423,7 +467,8 @@ class TestInvalidMemoryTypeFallback:
         result = await handler.handle(
             "org_write_blackboard",
             {"content": "测试内容", "memory_type": "completely_invalid"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "已写入" in result or "相似内容" in result
 
@@ -431,7 +476,8 @@ class TestInvalidMemoryTypeFallback:
         result = await handler.handle(
             "org_write_dept_memory",
             {"content": "部门测试", "memory_type": "xyz"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         assert isinstance(result, str)
 
@@ -447,7 +493,8 @@ class TestInvalidMsgTypeFallback:
         result = await handler.handle(
             "org_send_message",
             {"to_node": "node_cto", "content": "你好", "msg_type": "not_a_real_type"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "已发送" in result or "发送" in result
 
@@ -455,7 +502,8 @@ class TestInvalidMsgTypeFallback:
         result = await handler.handle(
             "org_send_message",
             {"to_node": "node_cto", "content": "数字类型", "msg_type": "12345"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "已发送" in result or "发送" in result
 
@@ -469,4 +517,3 @@ class TestPostTaskHookSafety:
         for status in (NodeStatus.FROZEN, NodeStatus.OFFLINE, NodeStatus.BUSY):
             parent.status = status
             assert parent.status in (NodeStatus.FROZEN, NodeStatus.OFFLINE, NodeStatus.BUSY)
-

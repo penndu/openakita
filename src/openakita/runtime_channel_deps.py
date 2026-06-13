@@ -170,7 +170,8 @@ def _purge_incompatible_websockets(target_dir: Path) -> list[str]:
     if removed:
         logger.info(
             "Purged %d incompatible websockets entries from channel-deps: %s",
-            len(removed), ", ".join(removed),
+            len(removed),
+            ", ".join(removed),
         )
     return removed
 
@@ -210,7 +211,8 @@ def _purge_broken_crypto(target_dir: Path) -> list[str]:
     if removed:
         logger.info(
             "Purged %d stale pycryptodome entries from channel-deps: %s",
-            len(removed), ", ".join(removed),
+            len(removed),
+            ", ".join(removed),
         )
     return removed
 
@@ -274,7 +276,9 @@ def ensure_channel_dependencies(
                     patch_simplejson_jsondecodeerror(logger=logger)
                     try:
                         importlib.import_module(import_name)
-                        logger.info("lark_oapi import recovered after simplejson compatibility patch")
+                        logger.info(
+                            "lark_oapi import recovered after simplejson compatibility patch"
+                        )
                         continue
                     except Exception:
                         pass
@@ -312,7 +316,9 @@ def ensure_channel_dependencies(
         message = f"未找到 OpenAkita 托管 Python，无法自动安装: {pkg_list}"
         logger.warning(message)
         if print_fn:
-            print_fn(f"[yellow]⚠[/yellow] {message}\n  请前往「设置中心 → Python 环境」点击「一键修复」")
+            print_fn(
+                f"[yellow]⚠[/yellow] {message}\n  请前往「设置中心 → Python 环境」点击「一键修复」"
+            )
         return {"status": "error", "installed": [], "missing": missing, "message": message}
 
     target_dir = get_channel_deps_dir()
@@ -334,11 +340,15 @@ def ensure_channel_dependencies(
         message = f"Python 运行时异常（无法导入 encodings/pip）: {probe_err}"
         logger.error("自动安装依赖前的 Python 运行时探测失败: %s", probe_err)
         if print_fn:
-            print_fn(f"[red]✗[/red] {message}\n  建议：前往「设置中心 → Python 环境」点击「一键修复」。")
+            print_fn(
+                f"[red]✗[/red] {message}\n  建议：前往「设置中心 → Python 环境」点击「一键修复」。"
+            )
         return {"status": "error", "installed": [], "missing": missing, "message": message}
 
     def _on_install_success(source_label: str, packages: list[str]) -> None:
-        logger.info("依赖安装成功 (source=%s, target=%s): %s", source_label, target_dir, ", ".join(packages))
+        logger.info(
+            "依赖安装成功 (source=%s, target=%s): %s", source_label, target_dir, ", ".join(packages)
+        )
         if print_fn:
             print_fn(f"[green]✓[/green] 依赖安装成功: {', '.join(packages)}")
         stale = [
@@ -389,7 +399,9 @@ def ensure_channel_dependencies(
     bundled_wheels = _find_bundled_channel_wheels(py_path) if IS_FROZEN else None
     if bundled_wheels is not None:
         if print_fn:
-            print_fn(f"[yellow]⏳[/yellow] 自动安装 IM 通道依赖: [bold]{pkg_list}[/bold] (源: offline wheels)")
+            print_fn(
+                f"[yellow]⏳[/yellow] 自动安装 IM 通道依赖: [bold]{pkg_list}[/bold] (源: offline wheels)"
+            )
         offline_cmd = [
             py,
             "-m",
@@ -418,7 +430,10 @@ def ensure_channel_dependencies(
                 _on_install_success("offline", missing)
                 installed = True
             else:
-                logger.warning("离线 wheels 安装失败，回退在线镜像: %s", (offline.stderr or offline.stdout or "").strip()[-400:])
+                logger.warning(
+                    "离线 wheels 安装失败，回退在线镜像: %s",
+                    (offline.stderr or offline.stdout or "").strip()[-400:],
+                )
         except Exception as exc:
             logger.warning("离线 wheels 安装异常，回退在线镜像: %s", exc)
 
@@ -470,11 +485,14 @@ def ensure_channel_dependencies(
                     return True, ""
                 local_err = (result.stderr or result.stdout or "").strip()[-500:]
                 last_err = local_err
-                logger.warning("镜像源 %s 安装失败 (exit %s): %s", source_label, result.returncode, local_err[-300:])
-            except subprocess.TimeoutExpired:
-                local_err = (
-                    f"镜像源 {source_label} 在 {subprocess_timeout}s 内未完成下载"
+                logger.warning(
+                    "镜像源 %s 安装失败 (exit %s): %s",
+                    source_label,
+                    result.returncode,
+                    local_err[-300:],
                 )
+            except subprocess.TimeoutExpired:
+                local_err = f"镜像源 {source_label} 在 {subprocess_timeout}s 内未完成下载"
                 last_err = local_err
                 logger.warning(local_err)
             except Exception as exc:

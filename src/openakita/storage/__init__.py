@@ -30,4 +30,3 @@ __all__ = [
     "DegradedRegistry",
     "degraded_registry",
 ]
-

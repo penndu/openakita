@@ -44,17 +44,11 @@ class TestReactTraceHasTool:
             {"tool_calls": [{"name": "write_file"}]},
             {"tool_calls": [{"name": "org_submit_deliverable"}]},
         ]
-        assert (
-            OrgRuntime._react_trace_has_tool(trace, "org_submit_deliverable")
-            is True
-        )
+        assert OrgRuntime._react_trace_has_tool(trace, "org_submit_deliverable") is True
 
     def test_tool_absent_returns_false(self):
         trace = [{"tool_calls": [{"name": "write_file"}]}]
-        assert (
-            OrgRuntime._react_trace_has_tool(trace, "org_submit_deliverable")
-            is False
-        )
+        assert OrgRuntime._react_trace_has_tool(trace, "org_submit_deliverable") is False
 
     def test_malformed_entries_safe(self):
         trace = [
@@ -112,7 +106,8 @@ class TestRegisterFileOutputCounter:
         assert rt._node_files_registered_in_task.get(cache_key, 0) == 0
 
         registered = rt._register_file_output(
-            persisted_org.id, node_id,
+            persisted_org.id,
+            node_id,
             chain_id=None,
             filename=None,
             file_path=str(f),
@@ -130,7 +125,8 @@ class TestRegisterFileOutputCounter:
         ]
 
         registered2 = rt._register_file_output(
-            persisted_org.id, node_id,
+            persisted_org.id,
+            node_id,
             chain_id=None,
             filename=None,
             file_path=str(f),
@@ -152,7 +148,8 @@ class TestRegisterFileOutputCounter:
         cache_key = f"{persisted_org.id}:{node_id}"
 
         registered = rt._register_file_output(
-            persisted_org.id, node_id,
+            persisted_org.id,
+            node_id,
             chain_id=None,
             filename=None,
             file_path=str(ghost),
@@ -174,16 +171,15 @@ class TestRegisterFileOutputCounter:
         node_b = persisted_org.nodes[1].id
 
         rt._register_file_output(
-            persisted_org.id, node_a,
-            chain_id=None, filename=None, file_path=str(f), workspace=ws,
+            persisted_org.id,
+            node_a,
+            chain_id=None,
+            filename=None,
+            file_path=str(f),
+            workspace=ws,
         )
         assert rt._node_files_registered_in_task[f"{persisted_org.id}:{node_a}"] == 1
-        assert (
-            rt._node_files_registered_in_task.get(
-                f"{persisted_org.id}:{node_b}", 0
-            )
-            == 0
-        )
+        assert rt._node_files_registered_in_task.get(f"{persisted_org.id}:{node_b}", 0) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -192,9 +188,7 @@ class TestRegisterFileOutputCounter:
 
 
 class TestAutoPersistNodeFinalAnswer:
-    def test_short_body_returns_none(
-        self, runtime_with_blackboard, persisted_org, tmp_path
-    ):
+    def test_short_body_returns_none(self, runtime_with_blackboard, persisted_org, tmp_path):
         rt = runtime_with_blackboard
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -208,9 +202,7 @@ class TestAutoPersistNodeFinalAnswer:
         )
         assert out is None
 
-    def test_workspace_none_returns_none(
-        self, runtime_with_blackboard, persisted_org
-    ):
+    def test_workspace_none_returns_none(self, runtime_with_blackboard, persisted_org):
         rt = runtime_with_blackboard
         out = rt._tool_handler.auto_persist_node_final_answer(
             org_id=persisted_org.id,
@@ -230,10 +222,7 @@ class TestAutoPersistNodeFinalAnswer:
         ws.mkdir()
         node_id = persisted_org.nodes[0].id
 
-        long_body = (
-            "下面是一份 200+ 字符的长文回复，用于触发 auto_persist_node_final_answer。"
-            * 10
-        )
+        long_body = "下面是一份 200+ 字符的长文回复，用于触发 auto_persist_node_final_answer。" * 10
         out = rt._tool_handler.auto_persist_node_final_answer(
             org_id=persisted_org.id,
             node_id=node_id,
@@ -300,4 +289,3 @@ class TestAutoPersistOrgSetting:
         legacy = {"id": "o2", "name": "n", "nodes": [], "edges": []}
         restored = Organization.from_dict(legacy)
         assert restored.auto_persist_final_answer is True
-

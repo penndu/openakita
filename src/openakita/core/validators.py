@@ -204,9 +204,7 @@ class ArtifactValidator(BaseValidator):
             r for r in context.delivery_receipts if r.get("status") in self._SUCCESS_STATUSES
         ]
         failed = [
-            r
-            for r in context.delivery_receipts
-            if r.get("status") not in self._SUCCESS_STATUSES
+            r for r in context.delivery_receipts if r.get("status") not in self._SUCCESS_STATUSES
         ]
 
         if failed:
@@ -525,4 +523,3 @@ class ValidatorRegistry:
 def create_default_registry() -> ValidatorRegistry:
     """创建默认验证器注册表"""
     return ValidatorRegistry()
-

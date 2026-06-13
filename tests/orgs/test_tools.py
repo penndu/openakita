@@ -21,11 +21,15 @@ class TestOrgNodeToolsConstant:
 
     def test_tool_names_are_unique(self):
         names = [t["name"] for t in ORG_NODE_TOOLS]
-        assert len(names) == len(set(names)), f"Duplicate tool names: {[n for n in names if names.count(n) > 1]}"
+        assert len(names) == len(set(names)), (
+            f"Duplicate tool names: {[n for n in names if names.count(n) > 1]}"
+        )
 
     def test_all_tool_names_start_with_org(self):
         for tool in ORG_NODE_TOOLS:
-            assert tool["name"].startswith("org_"), f"Tool name should start with 'org_': {tool['name']}"
+            assert tool["name"].startswith("org_"), (
+                f"Tool name should start with 'org_': {tool['name']}"
+            )
 
     def test_parameters_are_valid_json_schema(self):
         for tool in ORG_NODE_TOOLS:
@@ -120,18 +124,14 @@ class TestBuildOrgNodeTools:
         org = _make_three_level_org()
         ceo = org.get_node("ceo")
 
-        template = next(
-            t for t in ORG_NODE_TOOLS if t["name"] == "org_delegate_task"
-        )
+        template = next(t for t in ORG_NODE_TOOLS if t["name"] == "org_delegate_task")
         original_to_node = dict(template["input_schema"]["properties"]["to_node"])
         assert "enum" not in original_to_node, "Sanity: template must not start with enum"
 
         _ = build_org_node_tools(org, ceo)
         _ = build_org_node_tools(org, ceo)
 
-        template_after = next(
-            t for t in ORG_NODE_TOOLS if t["name"] == "org_delegate_task"
-        )
+        template_after = next(t for t in ORG_NODE_TOOLS if t["name"] == "org_delegate_task")
         to_node_after = template_after["input_schema"]["properties"]["to_node"]
         assert "enum" not in to_node_after, (
             "ORG_NODE_TOOLS template must remain untouched after per-node builds"

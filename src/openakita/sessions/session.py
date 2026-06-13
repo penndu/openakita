@@ -654,9 +654,7 @@ class Session:
 
         # Best-effort SQLite persistence, identical guards to ``add_message``.
         try:
-            if role in ("user", "assistant", "tool") and not metadata.get(
-                "transient_for_llm"
-            ):
+            if role in ("user", "assistant", "tool") and not metadata.get("transient_for_llm"):
                 self._write_turn_to_store(role, content, metadata)
         except Exception as exc:
             logger.debug(f"[Session] append_marker write_turn_to_store skipped: {exc}")
@@ -674,10 +672,7 @@ class Session:
             # 仅持久化主对话角色（user/assistant），且 transient_for_llm 的
             # 临时消息（如 RiskGate 确认应答）不写盘。
             try:
-                if (
-                    role in ("user", "assistant", "tool")
-                    and not metadata.get("transient_for_llm")
-                ):
+                if role in ("user", "assistant", "tool") and not metadata.get("transient_for_llm"):
                     self._write_turn_to_store(role, content, metadata)
             except Exception as exc:
                 logger.debug(f"[Session] write_turn_to_store skipped: {exc}")

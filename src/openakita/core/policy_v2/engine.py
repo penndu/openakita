@@ -662,11 +662,7 @@ class PolicyEngineV2:
             exempt = any(pat and pat in command for pat in sandbox_cfg.exempt_commands)
             risk = clf.shell_risk_level.value if clf.shell_risk_level is not None else ""
             sandbox_levels = {str(level).lower() for level in sandbox_cfg.sandbox_risk_levels}
-            needs_sandbox = (
-                sandbox_cfg.enabled
-                and not exempt
-                and risk.lower() in sandbox_levels
-            )
+            needs_sandbox = sandbox_cfg.enabled and not exempt and risk.lower() in sandbox_levels
 
         needs_checkpoint = clf.needs_checkpoint and self._config.checkpoint.enabled
         if needs_sandbox == clf.needs_sandbox and needs_checkpoint == clf.needs_checkpoint:
@@ -861,9 +857,7 @@ class PolicyEngineV2:
         # Tier 2: session 临时白名单（C8b-3）—— v1 ``_session_allowlist`` 等价
         from .session_allowlist import get_session_allowlist_manager
 
-        session_entry = get_session_allowlist_manager().is_allowed(
-            event.tool, event.params
-        )
+        session_entry = get_session_allowlist_manager().is_allowed(event.tool, event.params)
         if session_entry is not None:
             needs_sb = bool(session_entry.get("needs_sandbox", False))
             return f"session_allowlist match (needs_sandbox={needs_sb})"
@@ -1059,9 +1053,7 @@ class PolicyEngineV2:
                     },
                 )
             except Exception:
-                logger.exception(
-                    "[PolicyEngineV2] evolution audit hook raised; ignored"
-                )
+                logger.exception("[PolicyEngineV2] evolution audit hook raised; ignored")
 
     def _maybe_audit_intent(
         self,

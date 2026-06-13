@@ -123,7 +123,10 @@ class TestPlannerToContentTeamMembers:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("target", ["writer-a", "writer-b", "visual"])
     async def test_planner_delegate_to_direct_subordinate_no_self_loop(
-        self, mock_runtime_ct, content_team_org, target,
+        self,
+        mock_runtime_ct,
+        content_team_org,
+        target,
     ):
         handler = OrgToolHandler(mock_runtime_ct)
         # handle() 是真实入口（会跑 _resolve_aliases / _resolve_node_refs）；
@@ -139,7 +142,10 @@ class TestPlannerToContentTeamMembers:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("target", ["writer-a", "writer-b", "visual"])
     async def test_planner_delegate_inherits_editor_chain(
-        self, mock_runtime_ct, content_team_org, target,
+        self,
+        mock_runtime_ct,
+        content_team_org,
+        target,
     ):
         # editor 先把 chain X 派给 planner，affinity[X]=planner。
         messenger = mock_runtime_ct.get_messenger(content_team_org.id)
@@ -161,7 +167,10 @@ class TestPlannerToContentTeamMembers:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("target", ["writer-a", "writer-b", "visual"])
     async def test_planner_delegate_with_explicit_chain_id_eq_inherited(
-        self, mock_runtime_ct, content_team_org, target,
+        self,
+        mock_runtime_ct,
+        content_team_org,
+        target,
     ):
         """LLM 显式回传上级 chain_id（日志里 planner 也确实这么干过）。"""
         messenger = mock_runtime_ct.get_messenger(content_team_org.id)
@@ -186,7 +195,9 @@ class TestPlannerToContentTeamMembers:
 
     @pytest.mark.asyncio
     async def test_planner_delegate_to_role_title(
-        self, mock_runtime_ct, content_team_org,
+        self,
+        mock_runtime_ct,
+        content_team_org,
     ):
         """LLM 偶尔会传角色名（"文案写手A"）而不是 id；strict 模式下应通过
         exact_title 改写到 writer-a，不应误判自指。"""
@@ -205,7 +216,8 @@ class TestPlannerNotMisidentifiedAsSelf:
 
     @pytest.mark.asyncio
     async def test_resolve_reference_writer_a_returns_writer_a_node(
-        self, content_team_org,
+        self,
+        content_team_org,
     ):
         node, _candidates, status = content_team_org.resolve_reference("writer-a")
         assert status == "exact_id"
@@ -219,7 +231,9 @@ class TestPlannerNotMisidentifiedAsSelf:
 
     @pytest.mark.asyncio
     async def test_planner_delegate_with_chain_already_open(
-        self, mock_runtime_ct, content_team_org,
+        self,
+        mock_runtime_ct,
+        content_team_org,
     ):
         """模拟一种已有 chain_delegation_depth 状态：planner 已经派过一轮
         writer-a，再来一轮 visual。两轮都不应自指。"""
@@ -228,13 +242,15 @@ class TestPlannerNotMisidentifiedAsSelf:
         r1 = await handler.handle(
             "org_delegate_task",
             {"to_node": "writer-a", "task": "第一篇"},
-            content_team_org.id, "planner",
+            content_team_org.id,
+            "planner",
         )
         assert _ok(r1), r1
 
         r2 = await handler.handle(
             "org_delegate_task",
             {"to_node": "visual", "task": "配图"},
-            content_team_org.id, "planner",
+            content_team_org.id,
+            "planner",
         )
         assert _ok(r2), r2

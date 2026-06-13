@@ -303,9 +303,7 @@ class Plugin(PluginBase):
         self._tm = HappyhorseTaskManager(self._data_dir / "happyhorse.db")
         self._settings_cache: dict[str, Any] = {}
         self._client = HappyhorseDashScopeClient(self._read_settings)
-        self._oss = OssUploader(
-            read_settings=self._read_settings, plugin_dir=PLUGIN_DIR
-        )
+        self._oss = OssUploader(read_settings=self._read_settings, plugin_dir=PLUGIN_DIR)
         self._sysdeps = SystemDepsManager()
         self._poll_tasks: dict[str, asyncio.Task[Any]] = {}
         self._chain_tasks: dict[str, asyncio.Task[Any]] = {}
@@ -383,12 +381,11 @@ class Plugin(PluginBase):
                 count += 1
             if count:
                 logger.warning(
-                    "happyhorse-video: drained %d orphaned pending task(s) "
-                    "after plugin (re)start", count,
+                    "happyhorse-video: drained %d orphaned pending task(s) after plugin (re)start",
+                    count,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("happyhorse-video: orphan pending drain error: %s", exc)
-
 
         try:
             pending_figures = await self._tm.list_pending_figures()
@@ -651,9 +648,7 @@ class Plugin(PluginBase):
             base["created_at"] = task.get("created_at")
         return base
 
-    async def _expand_from_asset_ids(
-        self, asset_ids: list[str], mode: str
-    ) -> dict[str, Any]:
+    async def _expand_from_asset_ids(self, asset_ids: list[str], mode: str) -> dict[str, Any]:
         """Materialise upstream Asset Bus rows into per-mode input fields.
 
         Per-mode role assignment:
@@ -685,9 +680,7 @@ class Plugin(PluginBase):
             try:
                 asset = await self._api.consume_asset(aid)
             except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "happyhorse-video: consume_asset(%s) failed: %s", aid, exc
-                )
+                logger.warning("happyhorse-video: consume_asset(%s) failed: %s", aid, exc)
                 continue
             if not asset:
                 continue
@@ -767,15 +760,12 @@ class Plugin(PluginBase):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "尚未配置百炼 API Key — 请到「设置 → 阿里云百炼」填写"
-                    "DashScope 密钥（北京区）。"
+                    "尚未配置百炼 API Key — 请到「设置 → 阿里云百炼」填写DashScope 密钥（北京区）。"
                 ),
             )
         spec = MODES_BY_ID.get(body.mode)
         if spec is None:
-            raise HTTPException(
-                status_code=400, detail=f"不支持的模式 {body.mode!r}"
-            )
+            raise HTTPException(status_code=400, detail=f"不支持的模式 {body.mode!r}")
         # Resolve default model when caller leaves model_id blank.
         if not body.model_id:
             entry = default_model(body.mode)
@@ -788,9 +778,7 @@ class Plugin(PluginBase):
 
         # Idempotency guard against double-clicks / bridge retries.
         if body.client_request_id:
-            existing = await self._tm.get_task_by_client_request_id(
-                body.client_request_id
-            )
+            existing = await self._tm.get_task_by_client_request_id(body.client_request_id)
             if existing:
                 return existing
             in_flight = self._pending_create.get(body.client_request_id)
@@ -812,9 +800,7 @@ class Plugin(PluginBase):
             # Expand from_asset_ids before validation so per-mode required
             # asset checks see the materialised URLs.
             if body.from_asset_ids:
-                expanded = await self._expand_from_asset_ids(
-                    body.from_asset_ids, body.mode
-                )
+                expanded = await self._expand_from_asset_ids(body.from_asset_ids, body.mode)
                 for k, v in expanded.items():
                     if v and not params.get(k):
                         params[k] = v
@@ -836,9 +822,7 @@ class Plugin(PluginBase):
             except HTTPException:
                 raise
             except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "preflight asset probe failed (non-blocking): %s", exc
-                )
+                logger.warning("preflight asset probe failed (non-blocking): %s", exc)
 
             task_id = await self._tm.create_task(
                 mode=body.mode,
@@ -861,9 +845,7 @@ class Plugin(PluginBase):
             if body.client_request_id:
                 self._pending_create.pop(body.client_request_id, None)
 
-    async def _preflight_asset_specs(
-        self, mode: str, params: dict[str, Any]
-    ) -> None:
+    async def _preflight_asset_specs(self, mode: str, params: dict[str, Any]) -> None:
         """Probe local-file inputs and assert per-endpoint vendor specs.
 
         Only the modes that drive a vendor with strict input-validation
@@ -920,7 +902,7 @@ class Plugin(PluginBase):
             marker = f"/uploads/{PLUGIN_ID}/"
             idx = s.find(marker)
             if idx >= 0:
-                rel = s[idx + len(marker):].split("?", 1)[0].split("#", 1)[0]
+                rel = s[idx + len(marker) :].split("?", 1)[0].split("#", 1)[0]
                 candidate = uploads_root / rel
                 try:
                     if candidate.exists() and candidate.is_file():
@@ -971,44 +953,30 @@ class Plugin(PluginBase):
         required = list(getattr(spec, "required_assets", []) or [])
         for key in required:
             if key == "prompt" and not params.get("prompt"):
-                raise HTTPException(
-                    status_code=400, detail="该模式需要 prompt（生成提示词）"
-                )
+                raise HTTPException(status_code=400, detail="该模式需要 prompt（生成提示词）")
             if key == "story" and not params.get("story") and not params.get("segments"):
-                raise HTTPException(
-                    status_code=400, detail="长视频模式需要 story 或 segments"
-                )
+                raise HTTPException(status_code=400, detail="长视频模式需要 story 或 segments")
             if key == "first_frame_url" and not params.get("first_frame_url"):
-                raise HTTPException(
-                    status_code=400, detail="i2v 模式需要先上传或指定首帧图片"
-                )
+                raise HTTPException(status_code=400, detail="i2v 模式需要先上传或指定首帧图片")
             if key == "last_frame_url" and not params.get("last_frame_url"):
-                raise HTTPException(
-                    status_code=400, detail="首尾帧模式需要同时提供首帧和尾帧"
-                )
+                raise HTTPException(status_code=400, detail="首尾帧模式需要同时提供首帧和尾帧")
             if key == "source_video_url" and not params.get("source_video_url"):
                 raise HTTPException(
                     status_code=400, detail="该模式需要先指定 source_video_url（公网 http(s)）"
                 )
             if key == "reference_urls" and not params.get("reference_urls"):
-                raise HTTPException(
-                    status_code=400, detail="r2v 模式至少需要 1 张参考人物图"
-                )
+                raise HTTPException(status_code=400, detail="r2v 模式至少需要 1 张参考人物图")
             if key == "image_url" and not params.get("image_url"):
-                raise HTTPException(
-                    status_code=400, detail="该模式需要 image_url（人脸 / 形象图）"
-                )
+                raise HTTPException(status_code=400, detail="该模式需要 image_url（人脸 / 形象图）")
             if key == "image_urls" and not (
-                params.get("image_urls")
-                or params.get("image_url")
-                or params.get("ref_images_url")
+                params.get("image_urls") or params.get("image_url") or params.get("ref_images_url")
             ):
-                raise HTTPException(
-                    status_code=400, detail="数字人合成至少需要 1 张参考图"
-                )
-            if key in {"audio_url", "audio_or_text"} and not params.get(
-                "audio_url"
-            ) and not params.get("text"):
+                raise HTTPException(status_code=400, detail="数字人合成至少需要 1 张参考图")
+            if (
+                key in {"audio_url", "audio_or_text"}
+                and not params.get("audio_url")
+                and not params.get("text")
+            ):
                 raise HTTPException(
                     status_code=400,
                     detail="该模式需要 audio_url 或 text（用于 TTS 生成音频）",
@@ -1089,14 +1057,10 @@ class Plugin(PluginBase):
             )
             return aid or ""
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "happyhorse-video: publish_asset(%s) failed: %s", kind, exc
-            )
+            logger.warning("happyhorse-video: publish_asset(%s) failed: %s", kind, exc)
             return ""
 
-    async def _oss_upload_audio(
-        self, local_path: Path | str, filename: str
-    ) -> str:
+    async def _oss_upload_audio(self, local_path: Path | str, filename: str) -> str:
         """Push a TTS-synthesized audio file to OSS and return a signed URL.
 
         Wired into the pipeline through
@@ -1117,13 +1081,9 @@ class Plugin(PluginBase):
                 kind="client",
             )
         path = Path(local_path)
-        oss_key = self._oss.build_object_key(
-            scope="uploads/audios", filename=filename or path.name
-        )
+        oss_key = self._oss.build_object_key(scope="uploads/audios", filename=filename or path.name)
         try:
-            return await asyncio.to_thread(
-                self._oss.upload_file, path, key=oss_key
-            )
+            return await asyncio.to_thread(self._oss.upload_file, path, key=oss_key)
         except OssUploadError as exc:
             raise VendorError(
                 f"OSS upload of TTS audio failed: {exc}",
@@ -1158,9 +1118,7 @@ class Plugin(PluginBase):
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as cli:
             resp = await cli.get(url)
             if resp.status_code != 200:
-                raise RuntimeError(
-                    f"chain segment download failed HTTP {resp.status_code}"
-                )
+                raise RuntimeError(f"chain segment download failed HTTP {resp.status_code}")
             target.write_bytes(resp.content)
         return str(target)
 
@@ -1204,7 +1162,9 @@ class Plugin(PluginBase):
         filename = source.stem or f"{kind}_{index}"
         mode_part = self._safe_output_segment(mode, fallback="mode")
 
-        root = self._active_data_dir() / "outputs" / self._safe_output_segment(kind, fallback="files")
+        root = (
+            self._active_data_dir() / "outputs" / self._safe_output_segment(kind, fallback="files")
+        )
         if subdir_mode == "task":
             out_dir = root / self._safe_output_segment(task_id, fallback="task")
         elif subdir_mode == "date":
@@ -1277,9 +1237,7 @@ class Plugin(PluginBase):
 
     # ── Built-in image generation ─────────────────────────────────────
 
-    async def _create_image_task_internal(
-        self, body: ImageCreateTaskBody
-    ) -> dict[str, Any]:
+    async def _create_image_task_internal(self, body: ImageCreateTaskBody) -> dict[str, Any]:
         if body.mode not in IMAGE_MODE_BY_ID:
             raise HTTPException(status_code=400, detail=f"不支持的图片模式: {body.mode}")
         if not self._client.has_api_key():
@@ -1318,8 +1276,7 @@ class Plugin(PluginBase):
         allowed_sizes = list(resolved.sizes) if resolved.sizes else []
         if allowed_sizes and size not in allowed_sizes:
             logger.info(
-                "happyhorse-video: image size %r not supported by %s, "
-                "falling back to %s",
+                "happyhorse-video: image size %r not supported by %s, falling back to %s",
                 size,
                 resolved.model_id,
                 allowed_sizes[0],
@@ -1414,7 +1371,12 @@ class Plugin(PluginBase):
             )
             self._broadcast(
                 "task_update",
-                {"task_id": task_id, "status": "failed", "mode": mode, "error_message": str(detail)},
+                {
+                    "task_id": task_id,
+                    "status": "failed",
+                    "mode": mode,
+                    "error_message": str(detail),
+                },
             )
 
     async def _assert_background_source_has_transparency(self, image_url: str) -> None:
@@ -1540,7 +1502,9 @@ class Plugin(PluginBase):
             prompts = []
             for scene in ECOMMERCE_SCENES:
                 if scene["id"] in scene_ids:
-                    prompts.append(f"{base_prompt}，{scene['prompt']}，商品：{product_name}".strip("，"))
+                    prompts.append(
+                        f"{base_prompt}，{scene['prompt']}，商品：{product_name}".strip("，")
+                    )
             if not prompts:
                 prompts = [base_prompt]
             urls: list[str] = []
@@ -1659,7 +1623,12 @@ class Plugin(PluginBase):
                     kind="image",
                     local_path=path,
                     preview_url=url,
-                    metadata={"plugin": PLUGIN_ID, "task_id": task_id, "mode": mode, "prompt": prompt},
+                    metadata={
+                        "plugin": PLUGIN_ID,
+                        "task_id": task_id,
+                        "mode": mode,
+                        "prompt": prompt,
+                    },
                 )
                 if aid:
                     asset_ids.append(aid)
@@ -1677,14 +1646,10 @@ class Plugin(PluginBase):
             "filled automatically."
         )
 
-        def _video_tool(
-            name: str, mode: str, *, description: str
-        ) -> dict[str, Any]:
+        def _video_tool(name: str, mode: str, *, description: str) -> dict[str, Any]:
             return {
                 "name": name,
-                "description": (
-                    f"{description} {common_workbench_note}"
-                ),
+                "description": (f"{description} {common_workbench_note}"),
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -1709,13 +1674,9 @@ class Plugin(PluginBase):
                             "type": "string",
                             "description": "Alias for source_video_url.",
                         },
-                        "reference_urls": {
-                            "type": "array", "items": {"type": "string"}
-                        },
+                        "reference_urls": {"type": "array", "items": {"type": "string"}},
                         "image_url": {"type": "string"},
-                        "image_urls": {
-                            "type": "array", "items": {"type": "string"}
-                        },
+                        "image_urls": {"type": "array", "items": {"type": "string"}},
                         "ref_images_url": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -1932,8 +1893,7 @@ class Plugin(PluginBase):
             {
                 "name": "hh_status",
                 "description": (
-                    "Check the status of a happyhorse-video task. "
-                    + common_workbench_note
+                    "Check the status of a happyhorse-video task. " + common_workbench_note
                 ),
                 "input_schema": {
                     "type": "object",
@@ -1944,8 +1904,7 @@ class Plugin(PluginBase):
             {
                 "name": "hh_list",
                 "description": (
-                    "List recent happyhorse-video tasks. Returns JSON "
-                    "{ok, total, tasks: [...]}."
+                    "List recent happyhorse-video tasks. Returns JSON {ok, total, tasks: [...]}."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -1994,8 +1953,7 @@ class Plugin(PluginBase):
                             "type": "array",
                             "items": {"type": "object"},
                             "description": (
-                                "List of {index, prompt, duration, "
-                                "transition_to_next?} objects."
+                                "List of {index, prompt, duration, transition_to_next?} objects."
                             ),
                         },
                         "model_id": {
@@ -2092,10 +2050,7 @@ class Plugin(PluginBase):
                                 "ai_extend",
                             ],
                             "default": "none",
-                            "description": (
-                                "转场方式；插件会归一化为 'none' "
-                                "或 'crossfade'。"
-                            ),
+                            "description": ("转场方式；插件会归一化为 'none' 或 'crossfade'。"),
                         },
                         "fade_duration": {
                             "type": "number",
@@ -2167,7 +2122,9 @@ class Plugin(PluginBase):
 
     async def _tool_video(self, mode: str, args: dict[str, Any]) -> str:
         try:
-            body = CreateTaskBody(mode=mode, **{k: v for k, v in args.items() if k in CreateTaskBody.model_fields})
+            body = CreateTaskBody(
+                mode=mode, **{k: v for k, v in args.items() if k in CreateTaskBody.model_fields}
+            )
             task = await self._create_task_internal(body)
             if args.get("wait_for_completion", True):
                 task = await self._wait_for_task(task["id"])
@@ -2238,9 +2195,7 @@ class Plugin(PluginBase):
             {
                 "ok": True,
                 "total": total,
-                "tasks": [
-                    self._task_to_tool_payload(t, brief=True) for t in rows
-                ],
+                "tasks": [self._task_to_tool_payload(t, brief=True) for t in rows],
             },
             ensure_ascii=False,
         )
@@ -2253,9 +2208,8 @@ class Plugin(PluginBase):
                 ensure_ascii=False,
             )
         params = {
-            "model": args.get("model_id") or (
-                default_model(mode).model_id if default_model(mode) else ""
-            ),
+            "model": args.get("model_id")
+            or (default_model(mode).model_id if default_model(mode) else ""),
             "duration": args.get("duration"),
             "resolution": args.get("resolution") or "720P",
             "aspect_ratio": args.get("aspect_ratio") or "16:9",
@@ -2445,20 +2399,24 @@ class Plugin(PluginBase):
             },
         )
         row = await self._tm.get_task(task_id)
-        base = self._task_to_tool_payload(row) if row else {
-            "ok": True,
-            "task_id": task_id,
-            "status": "succeeded",
-            "mode": "storyboard_decompose",
-            "model_id": "brain",
-            "video_url": "",
-            "video_path": "",
-            "last_frame_url": "",
-            "last_frame_path": "",
-            "image_urls": [],
-            "local_paths": [],
-            "asset_ids": [],
-        }
+        base = (
+            self._task_to_tool_payload(row)
+            if row
+            else {
+                "ok": True,
+                "task_id": task_id,
+                "status": "succeeded",
+                "mode": "storyboard_decompose",
+                "model_id": "brain",
+                "video_url": "",
+                "video_path": "",
+                "last_frame_url": "",
+                "last_frame_path": "",
+                "image_urls": [],
+                "local_paths": [],
+                "asset_ids": [],
+            }
+        )
         payload: dict[str, Any] = {
             **base,
             "segments": segments,
@@ -2659,9 +2617,7 @@ class Plugin(PluginBase):
             )
             if aid:
                 asset_ids.append(aid)
-                await self._tm.update_task_safe(
-                    concat_task_id, asset_ids_json=asset_ids
-                )
+                await self._tm.update_task_safe(concat_task_id, asset_ids_json=asset_ids)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "happyhorse-video: failed to publish concat tool asset: %s",
@@ -2678,20 +2634,24 @@ class Plugin(PluginBase):
             },
         )
         row = await self._tm.get_task(concat_task_id)
-        base = self._task_to_tool_payload(row) if row else {
-            "ok": True,
-            "task_id": concat_task_id,
-            "status": "succeeded",
-            "mode": "long_video_concat",
-            "model_id": "ffmpeg-concat",
-            "video_url": preview_url,
-            "video_path": str(output_path),
-            "last_frame_url": "",
-            "last_frame_path": "",
-            "image_urls": [],
-            "local_paths": [str(output_path)],
-            "asset_ids": list(asset_ids),
-        }
+        base = (
+            self._task_to_tool_payload(row)
+            if row
+            else {
+                "ok": True,
+                "task_id": concat_task_id,
+                "status": "succeeded",
+                "mode": "long_video_concat",
+                "model_id": "ffmpeg-concat",
+                "video_url": preview_url,
+                "video_path": str(output_path),
+                "last_frame_url": "",
+                "last_frame_path": "",
+                "image_urls": [],
+                "local_paths": [str(output_path)],
+                "asset_ids": list(asset_ids),
+            }
+        )
         return json.dumps(
             {
                 **base,
@@ -2731,10 +2691,7 @@ class Plugin(PluginBase):
         @router.get("/catalog")
         async def get_catalog() -> dict:
             cat = build_catalog()
-            cloned = [
-                self._custom_voice_to_catalog(v)
-                for v in await self._tm.list_voices()
-            ]
+            cloned = [self._custom_voice_to_catalog(v) for v in await self._tm.list_voices()]
             return {
                 "ok": True,
                 "catalog": {
@@ -2771,9 +2728,7 @@ class Plugin(PluginBase):
             ):
                 if redacted.get(sensitive):
                     val = redacted[sensitive]
-                    redacted[sensitive] = (
-                        f"{val[:4]}***{val[-2:]}" if len(val) > 8 else "***"
-                    )
+                    redacted[sensitive] = f"{val[:4]}***{val[-2:]}" if len(val) > 8 else "***"
                     redacted[f"{sensitive}_set"] = True
             return {"ok": True, "config": redacted}
 
@@ -2946,8 +2901,7 @@ class Plugin(PluginBase):
                 **{
                     k: v
                     for k, v in params.items()
-                    if k in CreateTaskBody.model_fields
-                    and k not in {"mode", "model_id", "prompt"}
+                    if k in CreateTaskBody.model_fields and k not in {"mode", "model_id", "prompt"}
                 },
             )
             new_row = await self._create_task_internal(body)
@@ -3003,9 +2957,7 @@ class Plugin(PluginBase):
             if t is not None and not t.done():
                 t.cancel()
             await self._tm.update_task_safe(task_id, status="cancelled")
-            self._broadcast(
-                "task_update", {"task_id": task_id, "status": "cancelled"}
-            )
+            self._broadcast("task_update", {"task_id": task_id, "status": "cancelled"})
             return {"ok": True}
 
         # Cost preview ---------------------------------------------------
@@ -3013,9 +2965,7 @@ class Plugin(PluginBase):
         async def cost_preview_route(body: CostPreviewBody) -> dict:
             params = body.model_dump()
             params["model"] = body.model_id or (
-                default_model(body.mode).model_id
-                if default_model(body.mode)
-                else ""
+                default_model(body.mode).model_id if default_model(body.mode) else ""
             )
             preview = estimate_cost(
                 body.mode,
@@ -3184,10 +3134,7 @@ class Plugin(PluginBase):
             if body.mode not in valid_modes:
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        f"未知的 chain 模式 {body.mode!r}；"
-                        f"可选: {sorted(valid_modes)}"
-                    ),
+                    detail=(f"未知的 chain 模式 {body.mode!r}；可选: {sorted(valid_modes)}"),
                 )
             chain_group_id = uuid.uuid4().hex
             root_task_id = await self._tm.create_task(
@@ -3237,9 +3184,7 @@ class Plugin(PluginBase):
                         root_task_id,
                         status="failed" if failed else "succeeded",
                         error_kind="long_video" if failed else None,
-                        error_message=(
-                            f"{len(failed)} 个分镜片段生成失败" if failed else None
-                        ),
+                        error_message=(f"{len(failed)} 个分镜片段生成失败" if failed else None),
                         completed_at=time.time(),
                     )
                     self._broadcast(
@@ -3277,9 +3222,7 @@ class Plugin(PluginBase):
                         {"chain_group_id": chain_group_id, "status": "finished"},
                     )
 
-            t = self._api.spawn_task(
-                _run(), name=f"{PLUGIN_ID}:chain:{chain_group_id}"
-            )
+            t = self._api.spawn_task(_run(), name=f"{PLUGIN_ID}:chain:{chain_group_id}")
             self._chain_tasks[chain_group_id] = t
             return {
                 "ok": True,
@@ -3497,9 +3440,7 @@ class Plugin(PluginBase):
                 if aid:
                     asset_ids.append(aid)
                     if concat_task_id:
-                        await self._tm.update_task_safe(
-                            concat_task_id, asset_ids_json=asset_ids
-                        )
+                        await self._tm.update_task_safe(concat_task_id, asset_ids_json=asset_ids)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "happyhorse-video: failed to publish concat asset: %s",
@@ -3564,6 +3505,7 @@ class Plugin(PluginBase):
                 raise HTTPException(status_code=400, detail="missing path")
             import subprocess
             import sys
+
             try:
                 if raw_file:
                     target = Path(raw_file).expanduser()
@@ -3578,9 +3520,7 @@ class Plugin(PluginBase):
                         # Explorer.exe syntax. Passing ``/select,`` and the
                         # path as separate argv entries lets Python escape
                         # the path correctly even when it contains spaces.
-                        subprocess.Popen(
-                            ["explorer", "/select,", str(target)]
-                        )
+                        subprocess.Popen(["explorer", "/select,", str(target)])
                     elif sys.platform == "darwin":
                         subprocess.Popen(["open", "-R", str(target)])
                     else:
@@ -3599,9 +3539,7 @@ class Plugin(PluginBase):
             except HTTPException:
                 raise
             except (OSError, FileNotFoundError) as exc:
-                raise HTTPException(
-                    status_code=500, detail=f"cannot open: {exc}"
-                ) from exc
+                raise HTTPException(status_code=500, detail=f"cannot open: {exc}") from exc
             return {"ok": True, "path": str(target)}
 
         @router.post("/cleanup")
@@ -3640,9 +3578,7 @@ class Plugin(PluginBase):
                 "dashscope": ("dashscope", "dashscope>=1.20.0"),
             }
             if target not in specs:
-                raise HTTPException(
-                    status_code=400, detail=f"unsupported dep: {target}"
-                )
+                raise HTTPException(status_code=400, detail=f"unsupported dep: {target}")
             try:
                 from happyhorse_inline.dep_bootstrap import ensure_importable
 
@@ -3681,11 +3617,7 @@ class Plugin(PluginBase):
                 filename = f"{uuid.uuid4().hex[:8]}.mp3"
                 out = preview_path / filename
                 voice_id = await self._resolve_tts_voice_id(body.voice_id)
-                engine = (
-                    "edge"
-                    if voice_id.startswith(("zh-CN", "zh-HK", "zh-TW"))
-                    else "cosyvoice"
-                )
+                engine = "edge" if voice_id.startswith(("zh-CN", "zh-HK", "zh-TW")) else "cosyvoice"
                 if engine == "edge":
                     from happyhorse_tts_edge import synth_voice as edge_synth
 
@@ -3842,9 +3774,7 @@ class Plugin(PluginBase):
                 try:
                     while True:
                         try:
-                            msg = await asyncio.wait_for(
-                                queue.get(), timeout=15.0
-                            )
+                            msg = await asyncio.wait_for(queue.get(), timeout=15.0)
                         except TimeoutError:
                             yield ": keepalive\n\n"
                             continue
@@ -3870,9 +3800,7 @@ class Plugin(PluginBase):
         @router.post("/system/{dep_id}/install")
         async def system_install(dep_id: str, body: SystemInstallBody) -> dict:
             try:
-                return await self._sysdeps.start_install(
-                    dep_id, method_index=body.method_index
-                )
+                return await self._sysdeps.start_install(dep_id, method_index=body.method_index)
             except ValueError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -3929,12 +3857,8 @@ class Plugin(PluginBase):
         oss_error = ""
         if self._oss.is_configured():
             try:
-                oss_key = self._oss.build_object_key(
-                    scope=f"uploads/{subdir}", filename=filename
-                )
-                oss_url = await asyncio.to_thread(
-                    self._oss.upload_file, local_path, key=oss_key
-                )
+                oss_key = self._oss.build_object_key(scope=f"uploads/{subdir}", filename=filename)
+                oss_url = await asyncio.to_thread(self._oss.upload_file, local_path, key=oss_key)
             except OssUploadError as exc:
                 oss_error = str(exc)
                 logger.warning("happyhorse-video: OSS upload failed: %s", exc)
@@ -3963,20 +3887,31 @@ class Plugin(PluginBase):
 
             if kind == "image":
                 p = await asyncio.to_thread(probe_image, local_path)
-                probe_meta.update({
-                    "width": p.width, "height": p.height, "format": p.fmt,
-                })
+                probe_meta.update(
+                    {
+                        "width": p.width,
+                        "height": p.height,
+                        "format": p.fmt,
+                    }
+                )
             elif kind == "audio":
                 p = await asyncio.to_thread(probe_audio, local_path)
-                probe_meta.update({
-                    "duration_sec": round(p.duration_sec, 2), "format": p.fmt,
-                })
+                probe_meta.update(
+                    {
+                        "duration_sec": round(p.duration_sec, 2),
+                        "format": p.fmt,
+                    }
+                )
             elif kind == "video":
                 p = await asyncio.to_thread(probe_video, local_path)
-                probe_meta.update({
-                    "width": p.width, "height": p.height,
-                    "duration_sec": round(p.duration_sec, 2), "format": p.fmt,
-                })
+                probe_meta.update(
+                    {
+                        "width": p.width,
+                        "height": p.height,
+                        "duration_sec": round(p.duration_sec, 2),
+                        "format": p.fmt,
+                    }
+                )
         except Exception as exc:  # noqa: BLE001
             logger.info("upload probe failed (%s, %s); returning size-only", file.filename, exc)
 

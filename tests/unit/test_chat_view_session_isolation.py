@@ -3,14 +3,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHAT_VIEW = REPO_ROOT / "apps" / "setup-center" / "src" / "views" / "ChatView.tsx"
 CHAT_HELPERS = (
-    REPO_ROOT
-    / "apps"
-    / "setup-center"
-    / "src"
-    / "views"
-    / "chat"
-    / "utils"
-    / "chatHelpers.ts"
+    REPO_ROOT / "apps" / "setup-center" / "src" / "views" / "chat" / "utils" / "chatHelpers.ts"
 )
 
 
@@ -34,7 +27,7 @@ def test_backend_history_patch_prefers_stable_message_identity():
 
     assert "type BackendHistoryMessage" in source
     assert "backendByHistoryIndex" in source
-    assert "typeof m.historyIndex === \"number\"" in source
+    assert 'typeof m.historyIndex === "number"' in source
     assert "backendByHistoryIndex.get(m.historyIndex)" in source
     assert "backendById.get(m.id)" in source
 

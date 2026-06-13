@@ -459,8 +459,6 @@ def _sanitize_path(full_path: Path, workspace_root: Path) -> str:
         return full_path.name
 
 
-
-
 def _runtime_env_key_map() -> dict[str, str]:
     """Map env-style keys to RuntimeState-managed settings fields."""
     from openakita.config import _PERSISTABLE_KEYS
@@ -1692,40 +1690,44 @@ async def preview_security_config(body: dict | None = None):
         try:
             d = engine.evaluate_tool_call(ToolCallEvent(tool=tool, params=params), ctx)
             params_preview = ", ".join(f"{k}={v!s}"[:80] for k, v in params.items())
-            decisions.append({
-                "tool": tool,
-                "tool_label_key": f"security.tool.{tool}",
-                "params_preview": params_preview,
-                "decision": d.action.value,
-                "decision_label_key": f"security.decision.{d.action.value}",
-                "reason": d.reason,
-                "reason_code": (d.chain[-1].name if d.chain else "unknown"),
-                "approval_class": d.approval_class.value if d.approval_class else None,
-                "approval_class_label_key": (
-                    f"security.approvalClass.{d.approval_class.value}"
-                    if d.approval_class
-                    else None
-                ),
-                "risk_level": d.shell_risk_level or "",
-                "safety_immune_match": d.safety_immune_match,
-                "flags": {
-                    "safety_immune": bool(d.safety_immune_match),
-                    "needs_sandbox": bool(d.needs_sandbox),
-                    "needs_checkpoint": bool(d.needs_checkpoint),
-                },
-                "effective_confirmation_mode": ctx.confirmation_mode.value,
-                "security_profile": cfg.profile.current,
-            })
+            decisions.append(
+                {
+                    "tool": tool,
+                    "tool_label_key": f"security.tool.{tool}",
+                    "params_preview": params_preview,
+                    "decision": d.action.value,
+                    "decision_label_key": f"security.decision.{d.action.value}",
+                    "reason": d.reason,
+                    "reason_code": (d.chain[-1].name if d.chain else "unknown"),
+                    "approval_class": d.approval_class.value if d.approval_class else None,
+                    "approval_class_label_key": (
+                        f"security.approvalClass.{d.approval_class.value}"
+                        if d.approval_class
+                        else None
+                    ),
+                    "risk_level": d.shell_risk_level or "",
+                    "safety_immune_match": d.safety_immune_match,
+                    "flags": {
+                        "safety_immune": bool(d.safety_immune_match),
+                        "needs_sandbox": bool(d.needs_sandbox),
+                        "needs_checkpoint": bool(d.needs_checkpoint),
+                    },
+                    "effective_confirmation_mode": ctx.confirmation_mode.value,
+                    "security_profile": cfg.profile.current,
+                }
+            )
         except Exception as exc:
-            decisions.append({
-                "tool": tool,
-                "params_preview": "",
-                "decision": "error",
-                "reason": f"engine error: {exc}",
-                "approval_class": None,
-                "risk_level": "",
-                "safety_immune_match": None,
-            })
+            decisions.append(
+                {
+                    "tool": tool,
+                    "params_preview": "",
+                    "decision": "error",
+                    "reason": f"engine error: {exc}",
+                    "approval_class": None,
+                    "risk_level": "",
+                    "safety_immune_match": None,
+                }
+            )
     return {"decisions": decisions, "preview_uses_proposed": proposed_security is not None}
 
 
@@ -1738,8 +1740,7 @@ async def read_security_approval_matrix():
     for role in SessionRole:
         for klass in ApprovalClass:
             cells = {
-                mode.value: lookup_matrix(role, mode, klass).value
-                for mode in ConfirmationMode
+                mode.value: lookup_matrix(role, mode, klass).value for mode in ConfirmationMode
             }
             rows.append({"role": role.value, "approval_class": klass.value, "decisions": cells})
     return {
@@ -1757,11 +1758,7 @@ async def read_security_zones():
     data = _read_policies_yaml() or {}
     sec = data.get("security", {})
     workspace = sec.get("workspace", {}) if isinstance(sec.get("workspace"), dict) else {}
-    immune = (
-        sec.get("safety_immune", {})
-        if isinstance(sec.get("safety_immune"), dict)
-        else {}
-    )
+    immune = sec.get("safety_immune", {}) if isinstance(sec.get("safety_immune"), dict) else {}
     return {
         "workspace": workspace.get("paths", ["${CWD}"]),
         "controlled": [],
@@ -1799,11 +1796,7 @@ async def read_security_path_policy():
     data = _read_policies_yaml() or {}
     sec = data.get("security", {})
     workspace = sec.get("workspace", {}) if isinstance(sec.get("workspace"), dict) else {}
-    immune = (
-        sec.get("safety_immune", {})
-        if isinstance(sec.get("safety_immune"), dict)
-        else {}
-    )
+    immune = sec.get("safety_immune", {}) if isinstance(sec.get("safety_immune"), dict) else {}
     internal_roots: list[str] = []
     try:
         from openakita.config import settings
@@ -2008,7 +2001,9 @@ async def read_security_profile():
     data = _read_policies_yaml() or {}
     sec = data.get("security", {})
     profile = sec.get("profile") or {}
-    current = _normalize_security_profile(str(profile.get("current") or _permission_label(_mode_from_security(sec))))
+    current = _normalize_security_profile(
+        str(profile.get("current") or _permission_label(_mode_from_security(sec)))
+    )
     return {
         "current": current,
         "base": profile.get("base"),
@@ -2161,9 +2156,7 @@ async def security_confirm_batch(body: SecurityConfirmBatchRequest):
         # 被收紧到配置值——避免恶意客户端用超大窗"清空整个 session 的所
         # 有等待 confirm"。
         try:
-            cfg_window = float(
-                get_config_v2().confirmation.aggregation_window_seconds
-            )
+            cfg_window = float(get_config_v2().confirmation.aggregation_window_seconds)
         except Exception:
             cfg_window = 0.0
 
@@ -2178,12 +2171,9 @@ async def security_confirm_batch(body: SecurityConfirmBatchRequest):
             # UI 路径在 enabled=false 时根本不会调这个端点。
             effective_window = body.within_seconds
 
-        candidates = bus.list_batch_candidates(
-            body.session_id, within_seconds=effective_window
-        )
+        candidates = bus.list_batch_candidates(body.session_id, within_seconds=effective_window)
         logger.info(
-            "[Security] Batch confirm session=%s decision=%s window=%s "
-            "candidates=%d",
+            "[Security] Batch confirm session=%s decision=%s window=%s candidates=%d",
             body.session_id[:12] if body.session_id else "",
             decision,
             effective_window,
@@ -2200,9 +2190,7 @@ async def security_confirm_batch(body: SecurityConfirmBatchRequest):
                 else:
                     missing_ids.append(cid)
             except Exception as e:
-                logger.warning(
-                    "[Security] Batch confirm failed for id=%s: %s", cid, e
-                )
+                logger.warning("[Security] Batch confirm failed for id=%s: %s", cid, e)
                 missing_ids.append(cid)
 
         return {
@@ -2360,7 +2348,9 @@ async def read_self_protection():
     audit_cfg = sec.get("audit", {}) if isinstance(sec.get("audit"), dict) else {}
     immune = sec.get("safety_immune", {}) if isinstance(sec.get("safety_immune"), dict) else {}
     # legacy fallback —— 仅读，写路径不再触碰
-    legacy_sp = sec.get("self_protection", {}) if isinstance(sec.get("self_protection"), dict) else {}
+    legacy_sp = (
+        sec.get("self_protection", {}) if isinstance(sec.get("self_protection"), dict) else {}
+    )
     try:
         from openakita.core.policy_v2 import get_death_switch_tracker
 
@@ -2369,10 +2359,10 @@ async def read_self_protection():
         readonly = False
     return {
         "enabled": ds.get("enabled", legacy_sp.get("enabled", True)),
-        "protected_dirs": immune.get("paths", legacy_sp.get("protected_dirs", _DEFAULT_PROTECTED_DIRS)),
-        "death_switch_threshold": ds.get(
-            "threshold", legacy_sp.get("death_switch_threshold", 3)
+        "protected_dirs": immune.get(
+            "paths", legacy_sp.get("protected_dirs", _DEFAULT_PROTECTED_DIRS)
         ),
+        "death_switch_threshold": ds.get("threshold", legacy_sp.get("death_switch_threshold", 3)),
         "death_switch_total_multiplier": ds.get(
             "total_multiplier", legacy_sp.get("death_switch_total_multiplier", 3)
         ),

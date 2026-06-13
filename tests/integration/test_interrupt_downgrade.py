@@ -83,9 +83,7 @@ def _allow_interrupt(monkeypatch):
 
 @pytest.fixture
 def _interrupt_channel(monkeypatch, _allow_interrupt):
-    monkeypatch.setitem(
-        config_mod.settings.double_texting_per_channel, "ch_intr", "interrupt"
-    )
+    monkeypatch.setitem(config_mod.settings.double_texting_per_channel, "ch_intr", "interrupt")
     yield "ch_intr"
 
 
@@ -138,9 +136,7 @@ class TestInFlightTrackingPrimitives:
         t.begin_tool("read_file")
         t.begin_tool("write_file")
         t.begin_tool("grep")
-        assert sorted(t.get_in_flight_tools()) == sorted(
-            ["read_file", "write_file", "grep"]
-        )
+        assert sorted(t.get_in_flight_tools()) == sorted(["read_file", "write_file", "grep"])
         t.end_tool("write_file")
         assert sorted(t.get_in_flight_tools()) == sorted(["read_file", "grep"])
 
@@ -237,9 +233,7 @@ class TestToolExecutorBeginEndWiring:
         assert executor._resolve_task("s1") is None
 
     @pytest.mark.asyncio
-    async def test_execute_tool_with_policy_registers_in_flight(
-        self, monkeypatch
-    ) -> None:
+    async def test_execute_tool_with_policy_registers_in_flight(self, monkeypatch) -> None:
         """End-to-end smoke for FIX-S4-1: calling execute_tool_with_policy
         with a real (stubbed) handler dispatch must observe the tool in
         the task's in_flight list WHILE the handler is running.
@@ -272,9 +266,7 @@ class TestToolExecutorBeginEndWiring:
         executor._canonicalize_tool_name = lambda n: n
         executor._check_todo_required = lambda *a, **kw: None
         executor._check_current_turn_grounding = lambda *a, **kw: None
-        executor._dispatch_hook = MagicMock(
-            side_effect=lambda *a, **kw: asyncio.sleep(0)
-        )
+        executor._dispatch_hook = MagicMock(side_effect=lambda *a, **kw: asyncio.sleep(0))
         executor._record_experience = MagicMock()
         executor._observe_current_turn_tool_result = MagicMock()
         executor._guard_truncate = lambda _n, r: r
@@ -326,9 +318,7 @@ class TestPreemptDowngradeWhenBlockToolInFlight:
 
         asyncio.create_task(settle_later())
 
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s1", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s1", session=sess)
 
         # Downgraded → QUEUE branch taken → queued_then_proceed.
         assert decision == "queued_then_proceed"
@@ -362,14 +352,11 @@ class TestPreemptDowngradeWhenBlockToolInFlight:
 
         asyncio.create_task(settle_later())
 
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s2", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s2", session=sess)
         assert decision == "queued_then_proceed"
         snap = metrics.snapshot()
         assert any(
-            s["name"] == "interrupt_downgrade"
-            and s["labels"]["reason"] == "block_in_flight"
+            s["name"] == "interrupt_downgrade" and s["labels"]["reason"] == "block_in_flight"
             for s in snap
         )
 
@@ -392,9 +379,7 @@ class TestPreemptDowngradeWhenBlockToolInFlight:
             prev.mark_settled()
 
         asyncio.create_task(settle_later())
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s3", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s3", session=sess)
         assert decision == "queued_then_proceed"
 
 
@@ -402,9 +387,7 @@ class TestNoDowngradeWhenAllCancelSafe:
     """INTERRUPT must NOT downgrade when every in-flight tool is cancel-safe."""
 
     @pytest.mark.asyncio
-    async def test_only_cancel_tools_real_preempt(
-        self, _interrupt_channel
-    ) -> None:
+    async def test_only_cancel_tools_real_preempt(self, _interrupt_channel) -> None:
         a = _make_stub_agent()
         prev = a.agent_state.begin_task(session_id="s4")
         prev.transition(TaskStatus.REASONING)
@@ -417,17 +400,12 @@ class TestNoDowngradeWhenAllCancelSafe:
 
         asyncio.create_task(cooperative_settle())
         sess = MagicMock(channel=_interrupt_channel)
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s4", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s4", session=sess)
         assert decision == "preempted"
         assert prev.cancelled is True
         snap = metrics.snapshot()
         assert not any(s["name"] == "interrupt_downgrade" for s in snap)
-        assert any(
-            s["name"] == "preempt" and s["labels"]["policy"] == "interrupt"
-            for s in snap
-        )
+        assert any(s["name"] == "preempt" and s["labels"]["policy"] == "interrupt" for s in snap)
 
     @pytest.mark.asyncio
     async def test_empty_in_flight_real_preempt(self, _interrupt_channel) -> None:
@@ -443,9 +421,7 @@ class TestNoDowngradeWhenAllCancelSafe:
 
         asyncio.create_task(cooperative_settle())
         sess = MagicMock(channel=_interrupt_channel)
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s5", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s5", session=sess)
         assert decision == "preempted"
         assert prev.cancelled is True
         snap = metrics.snapshot()
@@ -473,9 +449,7 @@ class TestUnknownToolDowngrade:
             prev.mark_settled()
 
         asyncio.create_task(settle_later())
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s6", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s6", session=sess)
         assert decision == "queued_then_proceed"
         snap = metrics.snapshot()
         downgrade = [s for s in snap if s["name"] == "interrupt_downgrade"]
@@ -515,9 +489,7 @@ class TestUnknownToolDowngrade:
 
 class TestOtherPoliciesUnaffected:
     @pytest.mark.asyncio
-    async def test_queue_policy_does_not_check_in_flight(
-        self, _short_settle_timeout
-    ) -> None:
+    async def test_queue_policy_does_not_check_in_flight(self, _short_settle_timeout) -> None:
         """QUEUE is supposed to wait regardless of in-flight state.  The
         S4 downgrade logic must not divert it elsewhere."""
         a = _make_stub_agent()
@@ -533,9 +505,7 @@ class TestOtherPoliciesUnaffected:
 
         # ``cli`` channel resolves to QUEUE.
         sess = MagicMock(channel="cli")
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s8", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s8", session=sess)
         assert decision == "queued_then_proceed"
         snap = metrics.snapshot()
         # No interrupt_downgrade because policy was already QUEUE.
@@ -562,9 +532,7 @@ class TestOtherPoliciesUnaffected:
 
         # ``desktop`` channel now resolves to STEER.
         sess = MagicMock(channel="desktop")
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s_steer", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s_steer", session=sess)
         # QUEUE behaviour, NOT preempt: old task settled naturally.
         assert decision == "queued_then_proceed"
         snap = metrics.snapshot()
@@ -573,12 +541,8 @@ class TestOtherPoliciesUnaffected:
         assert not any(s["name"] == "preempt" for s in snap)
 
     @pytest.mark.asyncio
-    async def test_reject_policy_does_not_consult_in_flight(
-        self, monkeypatch
-    ) -> None:
-        monkeypatch.setitem(
-            config_mod.settings.double_texting_per_channel, "ch_reject", "reject"
-        )
+    async def test_reject_policy_does_not_consult_in_flight(self, monkeypatch) -> None:
+        monkeypatch.setitem(config_mod.settings.double_texting_per_channel, "ch_reject", "reject")
         a = _make_stub_agent()
         prev = a.agent_state.begin_task(session_id="s9")
         prev.transition(TaskStatus.REASONING)
@@ -586,9 +550,7 @@ class TestOtherPoliciesUnaffected:
         prev.begin_tool("read_file")
 
         sess = MagicMock(channel="ch_reject")
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s9", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s9", session=sess)
         # REJECT in agent layer is treated as recoverable proceed
         # (HTTP layer should have blocked); no downgrade telemetry.
         assert decision == "proceed"
@@ -657,9 +619,7 @@ class TestQueueTimeoutBlockExtension:
     @pytest.fixture
     def _queue_channel(self, monkeypatch):
         """Channel resolving to QUEUE policy (no allow_interrupt)."""
-        monkeypatch.setitem(
-            config_mod.settings.double_texting_per_channel, "ch_q", "queue"
-        )
+        monkeypatch.setitem(config_mod.settings.double_texting_per_channel, "ch_q", "queue")
         return "ch_q"
 
     @pytest.mark.asyncio
@@ -673,9 +633,7 @@ class TestQueueTimeoutBlockExtension:
         # first wait floor is 500ms regardless of fixture-set 200ms.  We
         # need the settle to happen AFTER first timeout (>500ms) but
         # WITHIN the extension window (extension_ms=500 -> total <1000ms).
-        monkeypatch.setattr(
-            config_mod.settings, "preempt_block_tool_extension_ms", 500
-        )
+        monkeypatch.setattr(config_mod.settings, "preempt_block_tool_extension_ms", 500)
 
         a = _make_stub_agent()
         prev = a.agent_state.begin_task(session_id="s_ext1")
@@ -693,19 +651,11 @@ class TestQueueTimeoutBlockExtension:
         asyncio.create_task(settle_during_extension())
 
         sess = MagicMock(channel=_queue_channel)
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s_ext1", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s_ext1", session=sess)
 
         assert decision == "queued_then_proceed"
-        labels = [
-            r["labels"]
-            for r in metrics.snapshot()
-            if r["name"] == "queue_extended"
-        ]
-        assert any(
-            label.get("reason") == "block_in_flight" for label in labels
-        )
+        labels = [r["labels"] for r in metrics.snapshot() if r["name"] == "queue_extended"]
+        assert any(label.get("reason") == "block_in_flight" for label in labels)
         # Settled within extension window -> no cancel marker.
         a._append_preempt_marker.assert_not_called()
 
@@ -715,9 +665,7 @@ class TestQueueTimeoutBlockExtension:
     ) -> None:
         """Old task has only cancel-class tools in flight -> no extension,
         normal timeout -> cancel marker written."""
-        monkeypatch.setattr(
-            config_mod.settings, "preempt_block_tool_extension_ms", 5000
-        )
+        monkeypatch.setattr(config_mod.settings, "preempt_block_tool_extension_ms", 5000)
 
         a = _make_stub_agent()
         prev = a.agent_state.begin_task(session_id="s_ext2")
@@ -727,15 +675,9 @@ class TestQueueTimeoutBlockExtension:
         a._append_preempt_marker = MagicMock()
 
         sess = MagicMock(channel=_queue_channel)
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s_ext2", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s_ext2", session=sess)
         assert decision == "queued_then_proceed"
-        labels = [
-            r["labels"]
-            for r in metrics.snapshot()
-            if r["name"] == "queue_extended"
-        ]
+        labels = [r["labels"] for r in metrics.snapshot() if r["name"] == "queue_extended"]
         assert labels == []
         a._append_preempt_marker.assert_called_once()
 
@@ -745,9 +687,7 @@ class TestQueueTimeoutBlockExtension:
     ) -> None:
         """preempt_block_tool_extension_ms=0 disables the mechanism even
         with block tools in flight (back-compat with v1.28.2 pre-fix)."""
-        monkeypatch.setattr(
-            config_mod.settings, "preempt_block_tool_extension_ms", 0
-        )
+        monkeypatch.setattr(config_mod.settings, "preempt_block_tool_extension_ms", 0)
 
         a = _make_stub_agent()
         prev = a.agent_state.begin_task(session_id="s_ext3")
@@ -757,15 +697,9 @@ class TestQueueTimeoutBlockExtension:
         a._append_preempt_marker = MagicMock()
 
         sess = MagicMock(channel=_queue_channel)
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s_ext3", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s_ext3", session=sess)
         assert decision == "queued_then_proceed"
-        labels = [
-            r["labels"]
-            for r in metrics.snapshot()
-            if r["name"] == "queue_extended"
-        ]
+        labels = [r["labels"] for r in metrics.snapshot() if r["name"] == "queue_extended"]
         assert labels == []
         a._append_preempt_marker.assert_called_once()
 
@@ -813,12 +747,7 @@ class TestMcpSubToolEncoding:
         client = MagicMock()
         client._tools = {"notion:search_pages": fake_tool}
 
-        assert (
-            resolve_mcp_tool_behavior(
-                "notion", "search_pages", mcp_client=client
-            )
-            == "cancel"
-        )
+        assert resolve_mcp_tool_behavior("notion", "search_pages", mcp_client=client) == "cancel"
 
     def test_resolve_mcp_falls_back_to_block_when_no_annotation(self) -> None:
         from openakita.core.tool_interrupt_behavior import (
@@ -830,22 +759,14 @@ class TestMcpSubToolEncoding:
         client = MagicMock()
         client._tools = {"github:create_issue": fake_tool}
 
-        assert (
-            resolve_mcp_tool_behavior(
-                "github", "create_issue", mcp_client=client
-            )
-            == "block"
-        )
+        assert resolve_mcp_tool_behavior("github", "create_issue", mcp_client=client) == "block"
 
     def test_resolve_mcp_no_client(self) -> None:
         from openakita.core.tool_interrupt_behavior import (
             resolve_mcp_tool_behavior,
         )
 
-        assert (
-            resolve_mcp_tool_behavior("any", "any", mcp_client=None)
-            == "block"
-        )
+        assert resolve_mcp_tool_behavior("any", "any", mcp_client=None) == "block"
 
     def test_has_any_block_in_flight_with_readonly_mcp(self) -> None:
         """Mixed in_flight: pure-cancel built-in + read-only MCP sub-tool
@@ -894,14 +815,8 @@ class TestMcpSubToolEncoding:
             )
             == "mcp:notion:search_pages"
         )
-        assert (
-            ToolExecutor._in_flight_name("call_mcp_tool", {})
-            == "call_mcp_tool"
-        )
-        assert (
-            ToolExecutor._in_flight_name("read_file", {"path": "/x"})
-            == "read_file"
-        )
+        assert ToolExecutor._in_flight_name("call_mcp_tool", {}) == "call_mcp_tool"
+        assert ToolExecutor._in_flight_name("read_file", {"path": "/x"}) == "read_file"
 
     @pytest.mark.asyncio
     async def test_readonly_mcp_does_not_downgrade_interrupt(
@@ -932,14 +847,8 @@ class TestMcpSubToolEncoding:
         asyncio.create_task(settle_later())
 
         sess = MagicMock(channel=_interrupt_channel)
-        decision = await a._preempt_or_queue_prev_task(
-            session_id="s_mcp_ro", session=sess
-        )
+        decision = await a._preempt_or_queue_prev_task(session_id="s_mcp_ro", session=sess)
         assert decision == "preempted"
         # No downgrade counter — INTERRUPT proceeded as real preempt.
-        labels = [
-            r["labels"]
-            for r in metrics.snapshot()
-            if r["name"] == "interrupt_downgrade"
-        ]
+        labels = [r["labels"] for r in metrics.snapshot() if r["name"] == "interrupt_downgrade"]
         assert labels == []

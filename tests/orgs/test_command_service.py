@@ -21,8 +21,14 @@ from openakita.orgs.models import OrgStatus
 def test_default_scope_for_surfaces():
     assert default_scope_for_surface(OrgCommandSurface.ORG_CONSOLE) == OrgOutputScope.CONSOLE_FULL
     assert default_scope_for_surface(OrgCommandSurface.DESKTOP_CHAT) == OrgOutputScope.CHAT_SUMMARY
-    assert default_scope_for_surface(OrgCommandSurface.IM, chat_type="private") == OrgOutputScope.IM_SUMMARY
-    assert default_scope_for_surface(OrgCommandSurface.IM, chat_type="group") == OrgOutputScope.FINAL_ONLY
+    assert (
+        default_scope_for_surface(OrgCommandSurface.IM, chat_type="private")
+        == OrgOutputScope.IM_SUMMARY
+    )
+    assert (
+        default_scope_for_surface(OrgCommandSurface.IM, chat_type="group")
+        == OrgOutputScope.FINAL_ONLY
+    )
 
 
 def test_submit_rejects_second_running_command(persisted_org):

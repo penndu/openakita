@@ -239,7 +239,9 @@ def _recover_method() -> str:
     if os.environ.get("OPENAKITA_SQLITE3_EXE"):
         candidates.append(Path(os.environ["OPENAKITA_SQLITE3_EXE"]))
     if os.environ.get("LOCALAPPDATA"):
-        candidates.append(Path(os.environ["LOCALAPPDATA"]) / "Programs" / "OpenAkita" / "sqlite3.exe")
+        candidates.append(
+            Path(os.environ["LOCALAPPDATA"]) / "Programs" / "OpenAkita" / "sqlite3.exe"
+        )
     if os.environ.get("PROGRAMFILES"):
         candidates.append(Path(os.environ["PROGRAMFILES"]) / "OpenAkita" / "sqlite3.exe")
     if any(p.exists() for p in candidates):
@@ -250,7 +252,10 @@ def _recover_method() -> str:
 
 
 def _sqlite3_executable() -> str | None:
-    if os.environ.get("OPENAKITA_SQLITE3_EXE") and Path(os.environ["OPENAKITA_SQLITE3_EXE"]).exists():
+    if (
+        os.environ.get("OPENAKITA_SQLITE3_EXE")
+        and Path(os.environ["OPENAKITA_SQLITE3_EXE"]).exists()
+    ):
         return os.environ["OPENAKITA_SQLITE3_EXE"]
     for env_name in ("LOCALAPPDATA", "PROGRAMFILES"):
         root = os.environ.get(env_name)

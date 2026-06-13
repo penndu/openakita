@@ -16,8 +16,12 @@ from openakita.core.identity import (
 def identity_dir(tmp_path):
     d = tmp_path / "identity"
     d.mkdir()
-    (d / "SOUL.md").write_text("# Soul\n\n你是 OpenAkita，一只忠诚的秋田犬AI助手。", encoding="utf-8")
-    (d / "AGENT.md").write_text("# Agent\n\n## Core\n永不放弃。\n\n## Tooling\n善用工具。", encoding="utf-8")
+    (d / "SOUL.md").write_text(
+        "# Soul\n\n你是 OpenAkita，一只忠诚的秋田犬AI助手。", encoding="utf-8"
+    )
+    (d / "AGENT.md").write_text(
+        "# Agent\n\n## Core\n永不放弃。\n\n## Tooling\n善用工具。", encoding="utf-8"
+    )
     (d / "USER.md").write_text("# User\n\n用户是一名开发者。", encoding="utf-8")
     (d / "MEMORY.md").write_text("# Memory\n\n用户喜欢 Python。", encoding="utf-8")
     return d
@@ -150,9 +154,7 @@ class TestSyncIdentityFileBundledFallback:
         user_id = self._make_user_identity(tmp_path, content)
         soul = user_id / "SOUL.md"
 
-        monkeypatch.setattr(
-            identity_mod, "_resolve_bundled_identity_template", lambda name: None
-        )
+        monkeypatch.setattr(identity_mod, "_resolve_bundled_identity_template", lambda name: None)
 
         identity = Identity(soul_path=soul)
         identity.load()
@@ -198,4 +200,3 @@ class TestSyncIdentityFileBundledFallback:
         assert soul.read_text(encoding="utf-8") == user_content
         pending_names = [item["name"] for item in identity.get_pending_upgrades()]
         assert "SOUL.md" in pending_names
-

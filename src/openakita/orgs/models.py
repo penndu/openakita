@@ -18,6 +18,7 @@ from openakita.memory.types import normalize_tags
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class OrgStatus(StrEnum):
     DORMANT = "dormant"
     ACTIVE = "active"
@@ -115,6 +116,7 @@ class TaskStatus(StrEnum):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -135,7 +137,10 @@ def infer_agent_profile_id_for_node(data: dict) -> str:
         return "architect"
     if any(k in haystack for k in ("devops", "运维", "部署", "ci/cd")):
         return "devops-engineer"
-    if any(k in haystack for k in ("dev", "engineer", "工程师", "开发", "全栈", "前端", "后端", "qa", "测试")):
+    if any(
+        k in haystack
+        for k in ("dev", "engineer", "工程师", "开发", "全栈", "前端", "后端", "qa", "测试")
+    ):
         return "code-assistant"
     if any(k in haystack for k in ("pm", "project", "项目", "产品", "cpo")):
         return "project-manager"
@@ -157,6 +162,7 @@ def infer_agent_profile_id_for_node(data: dict) -> str:
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class OrgNode:
@@ -253,9 +259,7 @@ class OrgNode:
             "frozen_reason": self.frozen_reason,
             "frozen_at": self.frozen_at,
             "status": self.status.value,
-            "runtime_overrides": (
-                dict(self.runtime_overrides) if self.runtime_overrides else {}
-            ),
+            "runtime_overrides": (dict(self.runtime_overrides) if self.runtime_overrides else {}),
         }
 
     @classmethod
@@ -356,13 +360,17 @@ class OrgEdge:
 @dataclass
 class UserPersona:
     """The human user's identity within an organization."""
+
     title: str = "负责人"
     display_name: str = ""
     description: str = ""
 
     def to_dict(self) -> dict:
-        return {"title": self.title, "display_name": self.display_name,
-                "description": self.description}
+        return {
+            "title": self.title,
+            "display_name": self.display_name,
+            "description": self.description,
+        }
 
     @classmethod
     def from_dict(cls, d: dict | None) -> UserPersona:
@@ -543,9 +551,7 @@ class Organization:
             "watchdog_stuck_threshold_s": self.watchdog_stuck_threshold_s,
             "watchdog_silence_threshold_s": self.watchdog_silence_threshold_s,
             "auto_persist_final_answer": self.auto_persist_final_answer,
-            "runtime_overrides": (
-                dict(self.runtime_overrides) if self.runtime_overrides else {}
-            ),
+            "runtime_overrides": (dict(self.runtime_overrides) if self.runtime_overrides else {}),
         }
 
     @classmethod
@@ -563,10 +569,7 @@ class Organization:
         filtered = {k: v for k, v in d.items() if k in known and k not in ("nodes", "edges")}
         org = cls(**filtered)
         org.nodes = [OrgNode.from_dict(n) for n in raw_nodes]
-        org.edges = [
-            OrgEdge.from_dict(e) for e in raw_edges
-            if e.get("source") != e.get("target")
-        ]
+        org.edges = [OrgEdge.from_dict(e) for e in raw_edges if e.get("source") != e.get("target")]
         if isinstance(raw_persona, dict):
             org.user_persona = UserPersona.from_dict(raw_persona)
         return org
@@ -588,8 +591,9 @@ class Organization:
             title_norm = title.replace(" ", "").replace("　", "").lower()
             if query == title or query in title or title in query:
                 return n
-            if query_norm and (query_norm == title_norm or query_norm in title_norm
-                              or title_norm in query_norm):
+            if query_norm and (
+                query_norm == title_norm or query_norm in title_norm or title_norm in query_norm
+            ):
                 return n
         if len(query_norm) >= 3:
             for n in self.nodes:
@@ -638,9 +642,7 @@ class Organization:
     # ``get_node``. Callers that need the strict contract (delegate,
     # send_message, reply_message) should consume ``resolve_reference``
     # directly and surface the candidate list in their error messages.
-    def resolve_reference(
-        self, query: str
-    ) -> tuple[OrgNode | None, list[OrgNode], str]:
+    def resolve_reference(self, query: str) -> tuple[OrgNode | None, list[OrgNode], str]:
         if not query:
             return None, [], "not_found"
 
@@ -659,9 +661,7 @@ class Organization:
             # Case-sensitive exact title wins first; if that also yields
             # multiple hits we still have to report ambiguity (e.g. two
             # nodes literally named "产品经理" across departments).
-            exact_title_hits = [
-                n for n in self.nodes if (n.role_title or "").strip() == q_title
-            ]
+            exact_title_hits = [n for n in self.nodes if (n.role_title or "").strip() == q_title]
             if len(exact_title_hits) == 1:
                 return exact_title_hits[0], [], "exact_title"
             if len(exact_title_hits) >= 2:
@@ -675,9 +675,10 @@ class Organization:
             q_norm = q_title.lower().replace(" ", "").replace("　", "")
             if q_norm:
                 ci_hits = [
-                    n for n in self.nodes
-                    if (n.role_title or "").strip().lower()
-                    .replace(" ", "").replace("　", "") == q_norm
+                    n
+                    for n in self.nodes
+                    if (n.role_title or "").strip().lower().replace(" ", "").replace("　", "")
+                    == q_norm
                 ]
                 if len(ci_hits) == 1:
                     return ci_hits[0], [], "exact_title"
@@ -696,15 +697,13 @@ class Organization:
     def get_children(self, node_id: str) -> list[OrgNode]:
         child_ids: set[str] = set()
         for e in self.edges:
-            if (e.edge_type == EdgeType.HIERARCHY
-                    and e.source == node_id and e.target != node_id):
+            if e.edge_type == EdgeType.HIERARCHY and e.source == node_id and e.target != node_id:
                 child_ids.add(e.target)
         return [n for n in self.nodes if n.id in child_ids]
 
     def get_parent(self, node_id: str) -> OrgNode | None:
         for e in self.edges:
-            if (e.edge_type == EdgeType.HIERARCHY
-                    and e.target == node_id and e.source != node_id):
+            if e.edge_type == EdgeType.HIERARCHY and e.target == node_id and e.source != node_id:
                 return self.get_node(e.source)
         return None
 
@@ -885,6 +884,7 @@ class InboxMessage:
 # ---------------------------------------------------------------------------
 # Project / Task tracking
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ProjectTask:

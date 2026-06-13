@@ -82,7 +82,9 @@ class TestAffinityNoSelfRewrite:
 
     @pytest.mark.asyncio
     async def test_explicit_chain_id_does_not_self_redirect_to_caller(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         # Mimic the bug log: a previous delegate already bound affinity[X]=cto.
         messenger = mock_runtime_full.get_messenger(persisted_org.id)
@@ -96,7 +98,8 @@ class TestAffinityNoSelfRewrite:
                 "task": "实现登录",
                 "task_chain_id": "chain_X",
             },
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
 
         assert "任务已分配" in result
@@ -111,7 +114,10 @@ class TestAffinityNoSelfRewrite:
 
     @pytest.mark.asyncio
     async def test_legacy_chain_mode_does_not_self_redirect_to_caller(
-        self, mock_runtime_full, persisted_org, monkeypatch,
+        self,
+        mock_runtime_full,
+        persisted_org,
+        monkeypatch,
     ):
         # Legacy: chain_id is reused from caller's current_chain instead of
         # re-generated each delegate. This is the original failure path before
@@ -125,7 +131,8 @@ class TestAffinityNoSelfRewrite:
         handler = OrgToolHandler(mock_runtime_full)
         result = await handler._handle_org_delegate_task(
             {"to_node": "node_dev", "task": "做需求评审"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         assert "任务已分配" in result
         assert "委派给自己" not in result
@@ -135,7 +142,9 @@ class TestAffinityNoSelfRewrite:
 
     @pytest.mark.asyncio
     async def test_default_mode_new_child_chain_is_unaffected_by_old_affinity(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         """In default (enforced) mode, a new child chain id is generated, so
         affinity bound on a parent chain must not bleed onto the new chain.
@@ -147,7 +156,8 @@ class TestAffinityNoSelfRewrite:
         handler = OrgToolHandler(mock_runtime_full)
         result = await handler._handle_org_delegate_task(
             {"to_node": "node_dev", "task": "实现搜索"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         assert "任务已分配" in result
         msg = _last_task_message(messenger)
@@ -163,7 +173,9 @@ class TestAffinityCloneGroupStillWorks:
 
     @pytest.mark.asyncio
     async def test_clone_group_member_is_redirected_back_to_existing_affinity(
-        self, org_manager, tmp_data_dir,
+        self,
+        org_manager,
+        tmp_data_dir,
     ):
         # Build a tiny org: ceo + two dev clones (dev_a, dev_b) of the same
         # source role. Only direct child of ceo to keep hierarchy validation
@@ -172,11 +184,17 @@ class TestAffinityCloneGroupStillWorks:
             make_node("node_ceo", "CEO", 0, "管理层"),
             make_node("role_dev", "开发", 1, "技术部"),
             make_node(
-                "node_dev_a", "开发A", 1, "技术部",
+                "node_dev_a",
+                "开发A",
+                1,
+                "技术部",
                 clone_source="role_dev",
             ),
             make_node(
-                "node_dev_b", "开发B", 1, "技术部",
+                "node_dev_b",
+                "开发B",
+                1,
+                "技术部",
                 clone_source="role_dev",
             ),
         ]
@@ -201,6 +219,7 @@ class TestAffinityCloneGroupStillWorks:
         messenger = OrgMessenger(org, org_dir)
 
         from unittest.mock import AsyncMock
+
         rt = MagicMock()
         rt._manager = org_manager
         rt.get_org = MagicMock(return_value=org)
@@ -235,7 +254,8 @@ class TestAffinityCloneGroupStillWorks:
                 "task": "继续聊上一轮的事情",
                 "task_chain_id": "chain_X",
             },
-            org.id, "node_ceo",
+            org.id,
+            "node_ceo",
         )
         assert "任务已分配" in result
         msg = _last_task_message(messenger)
@@ -251,10 +271,14 @@ class TestAffinityCloneGroupStillWorks:
 @pytest.mark.asyncio
 class TestDeliverableAutoAttachment:
     async def test_long_markdown_deliverable_is_auto_attached(
-        self, tmp_path, persisted_org, mock_runtime,
+        self,
+        tmp_path,
+        persisted_org,
+        mock_runtime,
     ):
         # Add the parent edge so the dev node has a "上级" to submit to.
         from openakita.orgs.models import EdgeType, OrgEdge
+
         persisted_org.edges.append(
             OrgEdge(source="node_cto", target="node_dev", edge_type=EdgeType.HIERARCHY),
         )
@@ -262,13 +286,21 @@ class TestDeliverableAutoAttachment:
         register_calls: list[dict] = []
 
         def fake_register(
-            org_id, node_id, *, chain_id, filename, file_path, workspace=None,
+            org_id,
+            node_id,
+            *,
+            chain_id,
+            filename,
+            file_path,
+            workspace=None,
         ):
-            register_calls.append({
-                "chain_id": chain_id,
-                "filename": filename,
-                "file_path": file_path,
-            })
+            register_calls.append(
+                {
+                    "chain_id": chain_id,
+                    "filename": filename,
+                    "file_path": file_path,
+                }
+            )
             return {
                 "filename": filename or Path(file_path).name,
                 "file_path": file_path,
@@ -306,7 +338,8 @@ class TestDeliverableAutoAttachment:
                 "deliverable": body,
                 "summary": "产品部本周工作计划",
             },
-            persisted_org.id, "node_dev",
+            persisted_org.id,
+            "node_dev",
         )
         assert "已提交" in result
 
@@ -330,18 +363,19 @@ class TestDeliverableAutoAttachment:
         sent = _last_task_message(messenger)
         meta = getattr(sent, "metadata", {}) or {}
         assert "file_attachments" in meta
-        assert any(
-            Path(a["file_path"]).name == produced.name
-            for a in meta["file_attachments"]
-        )
+        assert any(Path(a["file_path"]).name == produced.name for a in meta["file_attachments"])
 
     async def test_explicit_attachments_skip_auto_persist(
-        self, tmp_path, persisted_org, mock_runtime,
+        self,
+        tmp_path,
+        persisted_org,
+        mock_runtime,
     ):
         """If the caller already provided file_attachments, we must NOT
         spawn a parallel auto-persist file (no double registration).
         """
         from openakita.orgs.models import EdgeType, OrgEdge
+
         persisted_org.edges.append(
             OrgEdge(source="node_cto", target="node_dev", edge_type=EdgeType.HIERARCHY),
         )
@@ -352,7 +386,13 @@ class TestDeliverableAutoAttachment:
         register_calls: list[dict] = []
 
         def fake_register(
-            org_id, node_id, *, chain_id, filename, file_path, workspace=None,
+            org_id,
+            node_id,
+            *,
+            chain_id,
+            filename,
+            file_path,
+            workspace=None,
         ):
             register_calls.append({"file_path": file_path})
             return {
@@ -380,7 +420,8 @@ class TestDeliverableAutoAttachment:
                     {"filename": "explicit.md", "file_path": str(f)},
                 ],
             },
-            persisted_org.id, "node_dev",
+            persisted_org.id,
+            "node_dev",
         )
         assert "已提交" in result
         # Exactly one register call — for the explicit attachment, no auto file.
@@ -394,13 +435,17 @@ class TestDeliverableAutoAttachment:
             )
 
     async def test_short_or_unstructured_deliverable_does_not_trigger(
-        self, tmp_path, persisted_org, mock_runtime,
+        self,
+        tmp_path,
+        persisted_org,
+        mock_runtime,
     ):
         """Plain conversational replies (short / no markdown structure)
         must never auto-spawn a file attachment — that would make every
         chat-style "我已完成" turn into noise on the blackboard.
         """
         from openakita.orgs.models import EdgeType, OrgEdge
+
         persisted_org.edges.append(
             OrgEdge(source="node_cto", target="node_dev", edge_type=EdgeType.HIERARCHY),
         )
@@ -421,16 +466,14 @@ class TestDeliverableAutoAttachment:
                 "task_chain_id": "chain-short",
                 "deliverable": "我已经完成了，详情见聊天记录。",
             },
-            persisted_org.id, "node_dev",
+            persisted_org.id,
+            "node_dev",
         )
 
         # Case 2: long but unstructured paragraph (no heading, no bullets,
         # no fenced code block) — must NOT trigger either, since it's just
         # prose rather than a "document" worth attaching.
-        long_prose = (
-            "这是一段很长的纯文字汇报内容，没有任何 markdown 结构标记。"
-            * 30
-        )
+        long_prose = "这是一段很长的纯文字汇报内容，没有任何 markdown 结构标记。" * 30
         assert len(long_prose) >= 300
         await handler.handle(
             "org_submit_deliverable",
@@ -439,7 +482,8 @@ class TestDeliverableAutoAttachment:
                 "task_chain_id": "chain-prose",
                 "deliverable": long_prose,
             },
-            persisted_org.id, "node_dev",
+            persisted_org.id,
+            "node_dev",
         )
 
         deliverables_dir = tmp_path / "deliverables"
@@ -458,11 +502,11 @@ class TestDeliverableAutoAttachment:
 
 class TestIdentityPromptUsesRealNodeIds:
     """``OrgIdentity.build_org_context_prompt`` must:
-      - never emit the literal placeholder ``node_xxxxxxxx``
-      - reference the calling node's actual id as the example for
-        ``to_node``-shaped parameters
-      - still mention an org introspection tool so a confused LLM has a
-        recovery path.
+    - never emit the literal placeholder ``node_xxxxxxxx``
+    - reference the calling node's actual id as the example for
+      ``to_node``-shaped parameters
+    - still mention an org introspection tool so a confused LLM has a
+      recovery path.
     """
 
     def _build(self, tmp_path: Path, org, node):
@@ -471,7 +515,8 @@ class TestIdentityPromptUsesRealNodeIds:
         return identity.build_org_context_prompt(node, org, resolved)
 
     def test_short_id_org_does_not_emit_node_xxxxxxxx_placeholder(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         # Match the user's real org shape: short ids like ``cpo`` / ``pm``.
         nodes = [

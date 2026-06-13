@@ -181,9 +181,7 @@ class DeltaCoalescer:
             self._reset_bucket(bucket, now)
         return flushed
 
-    def tick(
-        self, *, now: float | None = None
-    ) -> list[tuple[str, dict[str, Any]]]:
+    def tick(self, *, now: float | None = None) -> list[tuple[str, dict[str, Any]]]:
         """Check time-based flushes.  Call this periodically when idle.
 
         Args:
@@ -234,9 +232,7 @@ class DeltaCoalescer:
         except Exception:  # pragma: no cover
             return ""
 
-    def _build_merged_event(
-        self, bucket: _Bucket, now: float
-    ) -> tuple[str, dict[str, Any]]:
+    def _build_merged_event(self, bucket: _Bucket, now: float) -> tuple[str, dict[str, Any]]:
         merged_content = "".join(bucket.parts)
         data = dict(bucket.template or {})
         data["content"] = merged_content

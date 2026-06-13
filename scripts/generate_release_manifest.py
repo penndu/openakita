@@ -159,6 +159,7 @@ PLATFORM_DOWNLOADS: dict[str, list[dict]] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def fetch_json(url: str, token: str | None = None) -> dict:
     headers = {"Accept": "application/vnd.github+json"}
     if token:
@@ -297,9 +298,8 @@ def parse_semver(v: str) -> tuple:
 # Core generation
 # ---------------------------------------------------------------------------
 
-def build_updater_platforms(
-    assets: list[dict], cdn_base: str, tag: str
-) -> dict:
+
+def build_updater_platforms(assets: list[dict], cdn_base: str, tag: str) -> dict:
     platforms = {}
     for platform_key, config in UPDATER_PATTERNS.items():
         asset = find_asset(assets, config)
@@ -320,9 +320,7 @@ def build_updater_platforms(
     return platforms
 
 
-def build_grouped_downloads(
-    assets: list[dict], cdn_base: str, tag: str
-) -> dict[str, list[dict]]:
+def build_grouped_downloads(assets: list[dict], cdn_base: str, tag: str) -> dict[str, list[dict]]:
     downloads: dict[str, list[dict]] = {}
     for platform, patterns in PLATFORM_DOWNLOADS.items():
         items = []
@@ -331,13 +329,15 @@ def build_grouped_downloads(
             if not asset:
                 continue
             urls = make_download_url(asset, cdn_base, tag)
-            items.append({
-                "key": pat["key"],
-                "nickname": pat["nickname"],
-                "name": asset["name"],
-                "size": asset.get("size", 0),
-                **urls,
-            })
+            items.append(
+                {
+                    "key": pat["key"],
+                    "nickname": pat["nickname"],
+                    "name": asset["name"],
+                    "size": asset.get("size", 0),
+                    **urls,
+                }
+            )
             print(f"  download.{pat['key']}: {asset['name']} ✓")
         if items:
             downloads[platform] = items
@@ -386,8 +386,12 @@ def generate_manifest(
 # Version index management
 # ---------------------------------------------------------------------------
 
+
 def update_version_index(
-    existing: dict | None, version: str, channel: str, pub_date: str,
+    existing: dict | None,
+    version: str,
+    channel: str,
+    pub_date: str,
     available_platforms: list[str],
 ) -> dict:
     if existing is None:
@@ -423,6 +427,7 @@ def update_version_index(
 # Backward-compatible flat downloads (for old website code during transition)
 # ---------------------------------------------------------------------------
 
+
 def flatten_downloads(grouped: dict[str, list[dict]]) -> dict[str, dict]:
     flat: dict[str, dict] = {}
     for items in grouped.values():
@@ -435,28 +440,34 @@ def flatten_downloads(grouped: dict[str, list[dict]]) -> dict[str, dict]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate release manifests for download page + Tauri updater"
     )
     parser.add_argument("--tag", required=True, help="Release tag (e.g. v1.25.9)")
     parser.add_argument(
-        "--channel", required=True, choices=["release", "pre-release", "dev"],
-        help="Release channel"
+        "--channel",
+        required=True,
+        choices=["release", "pre-release", "dev"],
+        help="Release channel",
     )
     parser.add_argument(
-        "--output-dir", required=True,
-        help="Directory for output files (channel manifest, per-version, index)"
+        "--output-dir",
+        required=True,
+        help="Directory for output files (channel manifest, per-version, index)",
     )
     parser.add_argument("--repo", default=DEFAULT_REPO)
     parser.add_argument("--cdn-base-url", default=os.environ.get("CDN_BASE_URL", ""))
     parser.add_argument(
-        "--existing-index", default="",
-        help="Path to existing versions.json to merge into (downloaded from OSS)"
+        "--existing-index",
+        default="",
+        help="Path to existing versions.json to merge into (downloaded from OSS)",
     )
     parser.add_argument(
-        "--compat-release-json", action="store_true",
-        help="Also output latest.json in flat format (Tauri updater compat)"
+        "--compat-release-json",
+        action="store_true",
+        help="Also output latest.json in flat format (Tauri updater compat)",
     )
     args = parser.parse_args()
 

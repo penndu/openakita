@@ -18,8 +18,10 @@ def notifier(mock_runtime) -> OrgNotifier:
 class TestFormatMessage:
     def test_info_message(self, notifier: OrgNotifier):
         msg = InboxMessage(
-            org_name="测试公司", priority=InboxPriority.INFO,
-            title="任务完成", body="节点A完成了任务X",
+            org_name="测试公司",
+            priority=InboxPriority.INFO,
+            title="任务完成",
+            body="节点A完成了任务X",
         )
         text = notifier._format_message(msg)
         assert "[测试公司]" in text
@@ -27,8 +29,10 @@ class TestFormatMessage:
 
     def test_approval_message_includes_id(self, notifier: OrgNotifier):
         msg = InboxMessage(
-            org_name="测试公司", priority=InboxPriority.APPROVAL,
-            title="克隆审批", body="请批准",
+            org_name="测试公司",
+            priority=InboxPriority.APPROVAL,
+            title="克隆审批",
+            body="请批准",
             requires_approval=True,
             approval_id="#A1",
             approval_options=["approve", "reject"],
@@ -47,8 +51,10 @@ class TestFormatMessage:
 
     def test_no_org_name(self, notifier: OrgNotifier):
         msg = InboxMessage(
-            org_name="", priority=InboxPriority.NOTICE,
-            title="测试", body="内容",
+            org_name="",
+            priority=InboxPriority.NOTICE,
+            title="测试",
+            body="内容",
         )
         text = notifier._format_message(msg)
         assert "测试" in text
@@ -106,6 +112,7 @@ class TestHandleImReply:
 
     async def test_valid_approval(self, notifier: OrgNotifier, persisted_org, mock_runtime):
         from openakita.orgs.inbox import OrgInbox
+
         inbox = OrgInbox(mock_runtime)
         mock_runtime.get_inbox = MagicMock(return_value=inbox)
         msg = inbox.push(persisted_org.id, "审批", "body", requires_approval=True)
@@ -121,4 +128,3 @@ class TestHandleImReply:
         result = await notifier.handle_im_reply(persisted_org.id, "#A1 批准")
         assert result["matched"] is True
         assert "error" in result
-

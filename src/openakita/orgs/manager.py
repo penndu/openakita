@@ -141,6 +141,7 @@ class OrgManager:
         self._templates_dir.mkdir(parents=True, exist_ok=True)
         self._cache: dict[str, Organization] = {}
         import threading
+
         self._write_lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -189,18 +190,20 @@ class OrgManager:
                 org = self._load(p.name)
                 if not include_archived and org.status == OrgStatus.ARCHIVED:
                     continue
-                result.append({
-                    "id": org.id,
-                    "name": org.name,
-                    "description": org.description,
-                    "icon": org.icon,
-                    "status": org.status.value,
-                    "node_count": len(org.nodes),
-                    "edge_count": len(org.edges),
-                    "tags": org.tags,
-                    "created_at": org.created_at,
-                    "updated_at": org.updated_at,
-                })
+                result.append(
+                    {
+                        "id": org.id,
+                        "name": org.name,
+                        "description": org.description,
+                        "icon": org.icon,
+                        "status": org.status.value,
+                        "node_count": len(org.nodes),
+                        "edge_count": len(org.edges),
+                        "tags": org.tags,
+                        "created_at": org.created_at,
+                        "updated_at": org.updated_at,
+                    }
+                )
             except Exception as exc:
                 logger.warning(f"Failed to load org {p.name}: {exc}")
         return result
@@ -316,6 +319,7 @@ class OrgManager:
                     val = OrgStatus(val)
                 elif key == "user_persona" and isinstance(val, dict):
                     from .models import UserPersona
+
                     val = UserPersona.from_dict(val)
                 setattr(org, key, val)
 
@@ -340,9 +344,9 @@ class OrgManager:
             org.nodes = updated
         if edges_raw is not None:
             from .models import OrgEdge
+
             org.edges = [
-                OrgEdge.from_dict(e) for e in edges_raw
-                if e.get("source") != e.get("target")
+                OrgEdge.from_dict(e) for e in edges_raw if e.get("source") != e.get("target")
             ]
 
         # 工作台节点（plugin_origin 非空）必须是叶子节点。把这一规则放在
@@ -455,9 +459,7 @@ class OrgManager:
         raw = json.loads(p.read_text(encoding="utf-8"))
         return [NodeSchedule.from_dict(s) for s in raw]
 
-    def save_node_schedules(
-        self, org_id: str, node_id: str, schedules: list[NodeSchedule]
-    ) -> None:
+    def save_node_schedules(self, org_id: str, node_id: str, schedules: list[NodeSchedule]) -> None:
         p = self._schedules_json(org_id, node_id)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(
@@ -465,9 +467,7 @@ class OrgManager:
             encoding="utf-8",
         )
 
-    def add_node_schedule(
-        self, org_id: str, node_id: str, schedule: NodeSchedule
-    ) -> NodeSchedule:
+    def add_node_schedule(self, org_id: str, node_id: str, schedule: NodeSchedule) -> NodeSchedule:
         schedules = self.get_node_schedules(org_id, node_id)
         schedules.append(schedule)
         self.save_node_schedules(org_id, node_id, schedules)
@@ -483,6 +483,7 @@ class OrgManager:
                     if hasattr(s, k) and k != "id":
                         if k == "schedule_type" and isinstance(v, str):
                             from .models import ScheduleType
+
                             v = ScheduleType(v)
                         setattr(s, k, v)
                 schedules[i] = s
@@ -490,9 +491,7 @@ class OrgManager:
                 return s
         return None
 
-    def delete_node_schedule(
-        self, org_id: str, node_id: str, schedule_id: str
-    ) -> bool:
+    def delete_node_schedule(self, org_id: str, node_id: str, schedule_id: str) -> bool:
         schedules = self.get_node_schedules(org_id, node_id)
         before = len(schedules)
         schedules = [s for s in schedules if s.id != schedule_id]
@@ -510,14 +509,16 @@ class OrgManager:
         for p in sorted(self._templates_dir.glob("*.json")):
             try:
                 data = json.loads(p.read_text(encoding="utf-8"))
-                result.append({
-                    "id": p.stem,
-                    "name": data.get("name", p.stem),
-                    "description": data.get("description", ""),
-                    "icon": data.get("icon", "🏢"),
-                    "node_count": len(data.get("nodes", [])),
-                    "tags": normalize_tags(data.get("tags")),
-                })
+                result.append(
+                    {
+                        "id": p.stem,
+                        "name": data.get("name", p.stem),
+                        "description": data.get("description", ""),
+                        "icon": data.get("icon", "🏢"),
+                        "node_count": len(data.get("nodes", [])),
+                        "tags": normalize_tags(data.get("tags")),
+                    }
+                )
             except Exception as exc:
                 logger.warning(f"Failed to load template {p.name}: {exc}")
         return result
@@ -528,9 +529,7 @@ class OrgManager:
             return None
         return json.loads(p.read_text(encoding="utf-8"))
 
-    def create_from_template(
-        self, template_id: str, overrides: dict | None = None
-    ) -> Organization:
+    def create_from_template(self, template_id: str, overrides: dict | None = None) -> Organization:
         """从模板创建组织。
 
         名字冲突策略：
@@ -576,9 +575,7 @@ class OrgManager:
         data["total_tokens_used"] = 0
         tid = template_id or org.name.lower().replace(" ", "-")
         p = self._templates_dir / f"{tid}.json"
-        p.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info(f"[OrgManager] Saved template: {tid}")
         return tid
 
@@ -620,6 +617,7 @@ class OrgManager:
         tmp = p.with_suffix(".tmp")
         payload = json.dumps(org.to_dict(), ensure_ascii=False, indent=2)
         import os
+
         with self._write_lock:
             tmp.write_text(payload, encoding="utf-8")
             os.replace(str(tmp), str(p))
@@ -672,9 +670,7 @@ class OrgManager:
                 sched.write_text("[]", encoding="utf-8")
 
         for dept in org.get_departments():
-            (self._org_dir(org.id) / "departments" / dept).mkdir(
-                parents=True, exist_ok=True
-            )
+            (self._org_dir(org.id) / "departments" / dept).mkdir(parents=True, exist_ok=True)
 
     def invalidate_cache(self, org_id: str | None = None) -> None:
         if org_id:

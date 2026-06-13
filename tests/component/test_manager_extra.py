@@ -22,6 +22,7 @@ def memory_dir(tmp_workspace):
 @pytest.fixture
 def manager(memory_dir, mock_brain):
     from openakita.memory.manager import MemoryManager
+
     mem_dir, memory_md = memory_dir
     mgr = MemoryManager(data_dir=mem_dir, memory_md_path=memory_md, brain=mock_brain)
     mgr.start_session("test-session-1")
@@ -90,12 +91,14 @@ class TestRecordTurnWithAttachments:
         manager.record_turn(
             role="user",
             content="看看这张照片",
-            attachments=[{
-                "filename": "cat.jpg",
-                "mime_type": "image/jpeg",
-                "local_path": "/tmp/cat.jpg",
-                "description": "一只猫",
-            }],
+            attachments=[
+                {
+                    "filename": "cat.jpg",
+                    "mime_type": "image/jpeg",
+                    "local_path": "/tmp/cat.jpg",
+                    "description": "一只猫",
+                }
+            ],
         )
         results = manager.search_attachments(query="猫")
         assert len(results) >= 1
@@ -104,11 +107,13 @@ class TestRecordTurnWithAttachments:
         manager.record_turn(
             role="assistant",
             content="已生成报告",
-            attachments=[{
-                "filename": "report.pdf",
-                "mime_type": "application/pdf",
-                "direction": "outbound",
-            }],
+            attachments=[
+                {
+                    "filename": "report.pdf",
+                    "mime_type": "application/pdf",
+                    "direction": "outbound",
+                }
+            ],
         )
         results = manager.search_attachments(direction="outbound")
         assert len(results) >= 1

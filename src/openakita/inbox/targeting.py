@@ -10,10 +10,14 @@ from .models import ClientContext, InboxMessage
 
 
 def should_show_message(message: InboxMessage, context: ClientContext) -> bool:
-    return _is_active_window(message) and match_target_rule(message.target_rule, context) and is_in_rollout(
-        message.id,
-        context.install_id_hash,
-        message.rollout_percent,
+    return (
+        _is_active_window(message)
+        and match_target_rule(message.target_rule, context)
+        and is_in_rollout(
+            message.id,
+            context.install_id_hash,
+            message.rollout_percent,
+        )
     )
 
 
@@ -47,7 +51,9 @@ def _match_install_id(rule: Mapping[str, Any], install_id_hash: str) -> bool:
     )
     if install_id_hash in excluded:
         return False
-    included = _string_values(rule, "install_id_hash", "install_id_hashes", "install_id", "install_ids")
+    included = _string_values(
+        rule, "install_id_hash", "install_id_hashes", "install_id", "install_ids"
+    )
     return not included or install_id_hash in included
 
 

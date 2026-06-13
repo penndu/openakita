@@ -341,9 +341,7 @@ class TestUIConfirmBusBroadcast:
     def test_active_confirms_for_session(self) -> None:
         bus = UIConfirmBus(ttl_seconds=300)
         bus.store_pending("tu_1", "shell", {"command": "ls"}, session_id="conv_a")
-        bus.store_pending(
-            "tu_2", "write_file", {"path": "/tmp/x"}, session_id="conv_a"
-        )
+        bus.store_pending("tu_2", "write_file", {"path": "/tmp/x"}, session_id="conv_a")
         bus.store_pending("tu_3", "shell", {}, session_id="conv_b")
         a = bus.active_confirms_for_session("conv_a")
         assert {c["confirm_id"] for c in a} == {"tu_1", "tu_2"}

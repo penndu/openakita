@@ -41,7 +41,9 @@ def remove_security_allowlist_entry(entry_type: str = "command", index: int = -1
     }
 
 
-def add_security_allowlist_entry(entry_type: str = "command", entry: dict[str, Any] | None = None) -> dict[str, Any]:
+def add_security_allowlist_entry(
+    entry_type: str = "command", entry: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """C8b-6a: v1 ``pe._config.user_allowlist.append() + pe._save_user_allowlist()``
     → v2 ``UserAllowlistManager.add_raw_entry() + save_to_yaml()``。
     """
@@ -98,7 +100,9 @@ async def maybe_broadcast_death_switch_reset(result: dict[str, Any]) -> None:
         pass
 
 
-async def maybe_refresh_skills(result: dict[str, Any], get_agent: Callable[[], Any] | None = None) -> None:
+async def maybe_refresh_skills(
+    result: dict[str, Any], get_agent: Callable[[], Any] | None = None
+) -> None:
     if result.get("kind") != "skill_external_allowlist" or result.get("status") != "ok":
         return
     if get_agent is None:
@@ -110,12 +114,16 @@ async def maybe_refresh_skills(result: dict[str, Any], get_agent: Callable[[], A
         agent = get_agent()
         actual_agent = agent if isinstance(agent, Agent) else getattr(agent, "_local_agent", None)
         if actual_agent is not None and hasattr(actual_agent, "propagate_skill_change"):
-            await asyncio.to_thread(actual_agent.propagate_skill_change, SkillEvent.ENABLE, rescan=False)
+            await asyncio.to_thread(
+                actual_agent.propagate_skill_change, SkillEvent.ENABLE, rescan=False
+            )
     except Exception:
         pass
 
 
-def execute_controlled_action(action: str | None, parameters: dict[str, Any] | None = None) -> dict[str, Any]:
+def execute_controlled_action(
+    action: str | None, parameters: dict[str, Any] | None = None
+) -> dict[str, Any]:
     params = parameters or {}
     if action == "list_security_allowlist":
         return list_security_allowlist()

@@ -65,6 +65,7 @@ def auth_header(token: str) -> dict[str, str]:
 # 1. 本地直连请求免认证
 # ---------------------------------------------------------------------------
 
+
 class TestLocalBypassAuth:
     async def test_local_request_no_auth_needed(self, client):
         resp = await client.get("/api/config/workspace-info")
@@ -78,6 +79,7 @@ class TestLocalBypassAuth:
 # ---------------------------------------------------------------------------
 # 2. 反向代理模式 + X-Forwarded-For → 需要认证
 # ---------------------------------------------------------------------------
+
 
 class TestReverseProxyRequiresAuth:
     async def test_proxy_with_forwarded_for_requires_auth(self, client, monkeypatch):
@@ -106,10 +108,9 @@ class TestReverseProxyRequiresAuth:
 # 3. 反向代理模式 + 无 X-Forwarded-For（Tauri 桌面端直连）→ 仍免认证
 # ---------------------------------------------------------------------------
 
+
 class TestReverseProxyLocalDirect:
-    async def test_proxy_mode_local_no_forwarded_for_bypasses_auth(
-        self, client, monkeypatch
-    ):
+    async def test_proxy_mode_local_no_forwarded_for_bypasses_auth(self, client, monkeypatch):
         monkeypatch.setenv("TRUST_PROXY", "true")
         resp = await client.get("/api/config/workspace-info")
         assert resp.status_code == 200
@@ -118,6 +119,7 @@ class TestReverseProxyLocalDirect:
 # ---------------------------------------------------------------------------
 # 4. trust_proxy 动态读取
 # ---------------------------------------------------------------------------
+
 
 class TestTrustProxyDynamic:
     async def test_trust_proxy_off_then_on(self, client, access_token, monkeypatch):
@@ -155,6 +157,7 @@ class TestTrustProxyDynamic:
 # 5. WebSocket 认证与 HTTP 一致
 # ---------------------------------------------------------------------------
 
+
 class TestWebSocketAuth:
     async def test_ws_local_direct_connects(self, app, monkeypatch):
         from openakita.api.routes import websocket as ws_mod
@@ -188,10 +191,13 @@ class TestWebSocketAuth:
         monkeypatch.setenv("TRUST_PROXY", "true")
         from starlette.testclient import TestClient
 
-        with TestClient(app) as tc, tc.websocket_connect(
-            f"/ws/events?token={access_token}",
-            headers={"X-Forwarded-For": "203.0.113.50"},
-        ) as ws:
+        with (
+            TestClient(app) as tc,
+            tc.websocket_connect(
+                f"/ws/events?token={access_token}",
+                headers={"X-Forwarded-For": "203.0.113.50"},
+            ) as ws,
+        ):
             data = ws.receive_json()
             assert data["event"] == "connected"
 
@@ -199,6 +205,7 @@ class TestWebSocketAuth:
 # ---------------------------------------------------------------------------
 # 6. /web/ 路径始终免认证
 # ---------------------------------------------------------------------------
+
 
 class TestWebPathExempt:
     async def test_web_path_no_auth_with_proxy(self, client, monkeypatch):
@@ -214,6 +221,7 @@ class TestWebPathExempt:
 # 7. /api/health 免认证
 # ---------------------------------------------------------------------------
 
+
 class TestHealthExempt:
     async def test_health_no_auth(self, client, monkeypatch):
         monkeypatch.setenv("TRUST_PROXY", "true")
@@ -227,6 +235,7 @@ class TestHealthExempt:
 # ---------------------------------------------------------------------------
 # 8. /api/config 需要认证
 # ---------------------------------------------------------------------------
+
 
 class TestConfigRequiresAuth:
     async def test_config_rejected_without_token(self, client, monkeypatch):
@@ -253,6 +262,7 @@ class TestConfigRequiresAuth:
 # 9. 记忆管理 API 需要认证
 # ---------------------------------------------------------------------------
 
+
 class TestMemoryRequiresAuth:
     async def test_memories_rejected_without_token(self, client, monkeypatch):
         monkeypatch.setenv("TRUST_PROXY", "true")
@@ -277,6 +287,7 @@ class TestMemoryRequiresAuth:
 # ---------------------------------------------------------------------------
 # 10. token 刷新流程
 # ---------------------------------------------------------------------------
+
 
 class TestTokenRefresh:
     async def test_refresh_returns_new_access_token(self, client, refresh_token):

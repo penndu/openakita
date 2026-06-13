@@ -137,17 +137,16 @@ def _find_force_writes(path: pathlib.Path) -> list[tuple[int, str]]:
             continue
         for handler in node.handlers:
             exc_type = handler.type
-            is_value_error = (
-                isinstance(exc_type, ast.Name) and exc_type.id == "ValueError"
-            )
+            is_value_error = isinstance(exc_type, ast.Name) and exc_type.id == "ValueError"
             if not is_value_error:
                 continue
             # Walk the handler body for any ``.status = ...`` assignment.
             for body_node in ast.walk(ast.Module(body=handler.body, type_ignores=[])):
                 if _is_status_assign(body_node):
                     rhs_repr = ast.unparse(
-                        body_node.value if isinstance(body_node, ast.Assign) else
-                        getattr(body_node, "value", ast.Constant(value="?"))
+                        body_node.value
+                        if isinstance(body_node, ast.Assign)
+                        else getattr(body_node, "value", ast.Constant(value="?"))
                     )
                     surface = f"-> {rhs_repr[:60]}"
                     findings.append((handler.lineno, surface))
@@ -210,9 +209,7 @@ class TestNoForceWriteStateTransitions:
                     f"{[lineno for lineno, _ in found]}"
                 )
         assert diffs == [], (
-            "Force-write count drifted:\n"
-            + "\n".join(diffs)
-            + "\n\n"
+            "Force-write count drifted:\n" + "\n".join(diffs) + "\n\n"
             "If you ADDED a force-write: think hard — S5-A's "
             "ensure_ready_for_reasoning() helper and the "
             "TaskState.transition() docstring contract forbid "
@@ -253,9 +250,7 @@ class TestNoForceWriteStateTransitions:
         assert missing == [], (
             "Force-writes without any opt-in token within "
             f"±{TOKEN_PROXIMITY_LINES} lines of ``except ValueError:``:\n"
-            + "\n".join(
-                f"  {f}:{lineno} {surface}" for f, lineno, surface in missing
-            )
+            + "\n".join(f"  {f}:{lineno} {surface}" for f, lineno, surface in missing)
             + "\n\n"
             "Add ``# s5b-allow-force-write`` (S5-B backlog) or "
             "``# cancel-idempotent-force-write`` (cancel() permanent) "
@@ -281,9 +276,7 @@ class TestNoForceWriteStateTransitions:
             source = path.read_text(encoding="utf-8")
             lines = source.splitlines()
             token_linenos = [
-                i + 1
-                for i, line in enumerate(lines)
-                if any(tk in line for tk in RECOGNISED_TOKENS)
+                i + 1 for i, line in enumerate(lines) if any(tk in line for tk in RECOGNISED_TOKENS)
             ]
             findings = _find_force_writes(path)
             force_write_linenos = {lineno for lineno, _ in findings}
@@ -292,8 +285,7 @@ class TestNoForceWriteStateTransitions:
                 window_start = token_lineno - TOKEN_PROXIMITY_LINES
                 window_end = token_lineno + TOKEN_PROXIMITY_LINES
                 nearby = any(
-                    window_start <= fw_line <= window_end
-                    for fw_line in force_write_linenos
+                    window_start <= fw_line <= window_end for fw_line in force_write_linenos
                 )
                 # Allow tokens in docstrings / comments that describe
                 # the protocol (not opt-in markers); detect by
@@ -303,9 +295,10 @@ class TestNoForceWriteStateTransitions:
                 if not nearby:
                     line = lines[token_lineno - 1].lstrip()
                     is_doc_reference = (
-                        line.startswith("#")
-                        and "token" in line.lower()
-                    ) or line.startswith('"""') or "``" in line
+                        (line.startswith("#") and "token" in line.lower())
+                        or line.startswith('"""')
+                        or "``" in line
+                    )
                     if is_doc_reference:
                         continue
                     assert nearby, (
@@ -357,9 +350,7 @@ def test_each_known_force_write_target_is_present(expected_target: str) -> None:
     assert expected_target in surfaces, (
         f"Expected force-write target TaskStatus.{expected_target} "
         f"not found in {path.relative_to(REPO_ROOT)}.\n"
-        f"Findings:\n"
-        + "\n".join(f"  line {lineno}: {s}" for lineno, s in findings)
-        + "\n\n"
+        f"Findings:\n" + "\n".join(f"  line {lineno}: {s}" for lineno, s in findings) + "\n\n"
         f"If S5-B intentionally deleted the {expected_target} force-write, "
         f"remove ``{expected_target}`` from this parametrize list."
     )

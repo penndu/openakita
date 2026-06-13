@@ -58,59 +58,71 @@ class TestQuietDeadlockDetection:
         return t
 
     def test_fires_when_everyone_idle_but_chain_open(self) -> None:
-        rt = self._runtime_with_blockers({
-            "open_subtree_chains": ["chain_root"],
-            "busy_nodes": [],
-            "pending_mailbox": [],
-            "root_status": NodeStatus.IDLE.value,
-        })
+        rt = self._runtime_with_blockers(
+            {
+                "open_subtree_chains": ["chain_root"],
+                "busy_nodes": [],
+                "pending_mailbox": [],
+                "root_status": NodeStatus.IDLE.value,
+            }
+        )
         assert rt._is_tracker_quiet_deadlock(self._tracker()) is True
 
     def test_quiet_but_no_open_chain_does_not_fire(self) -> None:
-        rt = self._runtime_with_blockers({
-            "open_subtree_chains": [],
-            "busy_nodes": [],
-            "pending_mailbox": [],
-            "root_status": NodeStatus.IDLE.value,
-        })
+        rt = self._runtime_with_blockers(
+            {
+                "open_subtree_chains": [],
+                "busy_nodes": [],
+                "pending_mailbox": [],
+                "root_status": NodeStatus.IDLE.value,
+            }
+        )
         assert rt._is_tracker_quiet_deadlock(self._tracker()) is False
 
     def test_busy_nodes_block_detection(self) -> None:
-        rt = self._runtime_with_blockers({
-            "open_subtree_chains": ["chain_root"],
-            "busy_nodes": [{"node_id": "n1", "role_title": "x", "status": "busy"}],
-            "pending_mailbox": [],
-            "root_status": NodeStatus.IDLE.value,
-        })
+        rt = self._runtime_with_blockers(
+            {
+                "open_subtree_chains": ["chain_root"],
+                "busy_nodes": [{"node_id": "n1", "role_title": "x", "status": "busy"}],
+                "pending_mailbox": [],
+                "root_status": NodeStatus.IDLE.value,
+            }
+        )
         assert rt._is_tracker_quiet_deadlock(self._tracker()) is False
 
     def test_pending_mailbox_blocks_detection(self) -> None:
-        rt = self._runtime_with_blockers({
-            "open_subtree_chains": ["chain_root"],
-            "busy_nodes": [],
-            "pending_mailbox": [{"node_id": "n1", "pending": 1}],
-            "root_status": NodeStatus.IDLE.value,
-        })
+        rt = self._runtime_with_blockers(
+            {
+                "open_subtree_chains": ["chain_root"],
+                "busy_nodes": [],
+                "pending_mailbox": [{"node_id": "n1", "pending": 1}],
+                "root_status": NodeStatus.IDLE.value,
+            }
+        )
         assert rt._is_tracker_quiet_deadlock(self._tracker()) is False
 
     def test_root_busy_blocks_detection(self) -> None:
-        rt = self._runtime_with_blockers({
-            "open_subtree_chains": ["chain_root"],
-            "busy_nodes": [],
-            "pending_mailbox": [],
-            "root_status": NodeStatus.BUSY.value,
-        })
+        rt = self._runtime_with_blockers(
+            {
+                "open_subtree_chains": ["chain_root"],
+                "busy_nodes": [],
+                "pending_mailbox": [],
+                "root_status": NodeStatus.BUSY.value,
+            }
+        )
         assert rt._is_tracker_quiet_deadlock(self._tracker()) is False
 
     def test_awaiting_summary_state_is_excluded(self) -> None:
         # When the post-summary ReAct is in flight, the root will swing to
         # BUSY shortly. Don't trip the deadlock path during that window.
-        rt = self._runtime_with_blockers({
-            "open_subtree_chains": ["chain_root"],
-            "busy_nodes": [],
-            "pending_mailbox": [],
-            "root_status": NodeStatus.IDLE.value,
-        })
+        rt = self._runtime_with_blockers(
+            {
+                "open_subtree_chains": ["chain_root"],
+                "busy_nodes": [],
+                "pending_mailbox": [],
+                "root_status": NodeStatus.IDLE.value,
+            }
+        )
         t = self._tracker()
         t.state = "awaiting_summary"
         assert rt._is_tracker_quiet_deadlock(t) is False

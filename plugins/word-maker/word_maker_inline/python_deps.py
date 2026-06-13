@@ -21,4 +21,3 @@ def check_optional_deps() -> dict[str, dict[str, bool]]:
         group: {name: importlib.util.find_spec(name) is not None for name in modules}
         for group, modules in OPTIONAL_GROUPS.items()
     }
-

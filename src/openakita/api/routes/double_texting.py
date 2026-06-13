@@ -45,9 +45,7 @@ def _coerce_policy(raw: str | None, *, default: DoubleTextingPolicy) -> DoubleTe
     if not raw_lower:
         return default
     if raw_lower not in _VALID_POLICY_VALUES:
-        logger.warning(
-            "[DoubleTexting] Unknown policy %r; falling back to %s", raw, default.value
-        )
+        logger.warning("[DoubleTexting] Unknown policy %r; falling back to %s", raw, default.value)
         return default
     return DoubleTextingPolicy(raw_lower)
 
@@ -83,9 +81,8 @@ def resolve_policy(
             channel_raw = settings.double_texting_per_channel.get(channel)
         policy = _coerce_policy(channel_raw, default=default_policy)
 
-    if (
-        policy is DoubleTextingPolicy.INTERRUPT
-        and not getattr(settings, "double_texting_allow_interrupt", False)
+    if policy is DoubleTextingPolicy.INTERRUPT and not getattr(
+        settings, "double_texting_allow_interrupt", False
     ):
         logger.debug(
             "[DoubleTexting] INTERRUPT requested (channel=%s) but feature flag off; "
@@ -94,9 +91,8 @@ def resolve_policy(
         )
         policy = DoubleTextingPolicy.QUEUE
 
-    if (
-        policy is DoubleTextingPolicy.STEER
-        and not getattr(settings, "double_texting_allow_steer", True)
+    if policy is DoubleTextingPolicy.STEER and not getattr(
+        settings, "double_texting_allow_steer", True
     ):
         logger.debug(
             "[DoubleTexting] STEER requested (channel=%s) but feature flag off; "

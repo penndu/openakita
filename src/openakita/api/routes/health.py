@@ -56,7 +56,9 @@ def _memory_subsystem_status(request: Request) -> dict:
     try:
         agent = getattr(request.app.state, "agent", None)
         mm = getattr(agent, "memory_manager", None) if agent is not None else None
-        if _memory_repair_restart_required or getattr(mm, "repair_completed_restart_required", False):
+        if _memory_repair_restart_required or getattr(
+            mm, "repair_completed_restart_required", False
+        ):
             return {
                 "status": "repair_completed_restart_required",
                 "reason": None,
@@ -154,12 +156,12 @@ def _resolve_api_port_display(request: Request) -> int:
 
 
 _VIRTUAL_PREFIXES = (
-    "26.",       # Radmin VPN
-    "25.",       # Hamachi
-    "100.64.",   # CGNAT / Tailscale
-    "172.17.",   # Docker default bridge
-    "172.18.",   # Docker user-defined
-    "172.19.",   # Docker user-defined
+    "26.",  # Radmin VPN
+    "25.",  # Hamachi
+    "100.64.",  # CGNAT / Tailscale
+    "172.17.",  # Docker default bridge
+    "172.18.",  # Docker user-defined
+    "172.19.",  # Docker user-defined
 )
 
 

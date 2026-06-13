@@ -77,9 +77,7 @@ class DomainAllowlist:
             if h in rules.blocked:
                 return False
             rules.blocked.add(h)
-            logger.info(
-                "[DomainAllowlist] BLOCK conv=%s host=%s", conversation_id, h
-            )
+            logger.info("[DomainAllowlist] BLOCK conv=%s host=%s", conversation_id, h)
             return True
 
     def unblock(self, conversation_id: str, host: str) -> bool:

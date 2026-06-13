@@ -31,25 +31,29 @@ def test_unknown_target_delete_natural_language_requires_confirmation():
 
 
 def test_legacy_org_node_gets_profile_binding():
-    node = OrgNode.from_dict({
-        "id": "dev-a",
-        "role_title": "全栈工程师",
-        "department": "技术部",
-    })
+    node = OrgNode.from_dict(
+        {
+            "id": "dev-a",
+            "role_title": "全栈工程师",
+            "department": "技术部",
+        }
+    )
 
     assert node.agent_profile_id == "code-assistant"
 
 
 def test_org_runtime_collects_tool_stats_from_trace():
-    stats = OrgRuntime._collect_tool_stats_from_trace([
-        {
-            "tool_calls": [
-                {"id": "t1", "name": "org_delegate_task"},
-                {"id": "t2", "name": "org_accept_deliverable"},
-            ],
-            "tool_results": [{"tool_use_id": "t1", "is_error": False}],
-        }
-    ])
+    stats = OrgRuntime._collect_tool_stats_from_trace(
+        [
+            {
+                "tool_calls": [
+                    {"id": "t1", "name": "org_delegate_task"},
+                    {"id": "t2", "name": "org_accept_deliverable"},
+                ],
+                "tool_results": [{"tool_use_id": "t1", "is_error": False}],
+            }
+        ]
+    )
 
     assert stats["tools_total"] == 2
     assert [t["name"] for t in stats["tools_used"]] == [
@@ -65,7 +69,7 @@ def test_powershell_clixml_noise_is_stripped():
 
 
 def test_powershell_multiline_clixml_noise_is_stripped():
-    raw = "#< CLIXML\r\n<Objs Version=\"1.1.0.1\">\r\n<Obj>progress</Obj>\r\n</Objs>\r\nreal output"
+    raw = '#< CLIXML\r\n<Objs Version="1.1.0.1">\r\n<Obj>progress</Obj>\r\n</Objs>\r\nreal output'
 
     assert PowerShellHandler._strip_clixml_noise(raw) == "real output"
 
@@ -117,10 +121,12 @@ async def test_create_plan_file_accepts_legacy_aliases(tmp_path):
     handler = PlanHandler(agent=object())
     handler.plan_dir = tmp_path
 
-    result = await handler._create_plan_file({
-        "plan_name": "文档计划",
-        "content": "| 步骤 | 任务 |\n|---|---|\n| 1 | 创建 README |\n| 2 | 写贡献指南 |",
-    })
+    result = await handler._create_plan_file(
+        {
+            "plan_name": "文档计划",
+            "content": "| 步骤 | 任务 |\n|---|---|\n| 1 | 创建 README |\n| 2 | 写贡献指南 |",
+        }
+    )
 
     assert result.startswith("✅ Plan 文件已创建")
     plan_file = next(tmp_path.glob("*.plan.md"))

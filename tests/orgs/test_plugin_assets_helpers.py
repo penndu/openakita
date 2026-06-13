@@ -27,7 +27,7 @@ class TestSafeAssetFilename:
         assert safe_asset_filename("foo\\bar\\baz.png") == "baz.png"
 
     def test_replaces_dangerous_chars(self) -> None:
-        out = safe_asset_filename('a:b<c>d|e?.png')
+        out = safe_asset_filename("a:b<c>d|e?.png")
         assert out == "a_b_c_d_e_.png"
 
     def test_default_when_empty(self) -> None:

@@ -70,7 +70,9 @@ _OVERFLOW_MAX_FILES = 200  # fallback; runtime value comes from settings
 
 def _get_tool_result_max_chars() -> int:
     try:
-        return max(1000, int(getattr(settings, "tool_result_max_chars", DEFAULT_TOOL_RESULT_MAX_CHARS)))
+        return max(
+            1000, int(getattr(settings, "tool_result_max_chars", DEFAULT_TOOL_RESULT_MAX_CHARS))
+        )
     except (TypeError, ValueError):
         return DEFAULT_TOOL_RESULT_MAX_CHARS
 
@@ -542,9 +544,7 @@ class ToolExecutor:
             tool_scope = parent_scope.create_child(f"tool:{tool_name}")
             scope_token = current_abort_scope.set(tool_scope)
         try:
-            return await self._execute_tool_impl(
-                tool_name, tool_input, session_id=session_id
-            )
+            return await self._execute_tool_impl(tool_name, tool_input, session_id=session_id)
         finally:
             if scope_token is not None:
                 try:
@@ -626,9 +626,7 @@ class ToolExecutor:
         except Exception as e:
             logger.debug(f"[ToolExecutor] {hook_name} hook error (ignored): {e}")
 
-    async def _dispatch_before_tool_use_hook(
-        self, *, tool_name: str, tool_input: Any
-    ) -> None:
+    async def _dispatch_before_tool_use_hook(self, *, tool_name: str, tool_input: Any) -> None:
         """C10：on_before_tool_use 专用 dispatch + R2-12 强制审计。
 
         步骤：
@@ -653,13 +651,9 @@ class ToolExecutor:
         before_snapshot = auditor.snapshot(tool_input)
 
         try:
-            await hooks.dispatch(
-                "on_before_tool_use", tool_name=tool_name, tool_input=tool_input
-            )
+            await hooks.dispatch("on_before_tool_use", tool_name=tool_name, tool_input=tool_input)
         except Exception as e:
-            logger.debug(
-                f"[ToolExecutor] on_before_tool_use hook error (ignored): {e}"
-            )
+            logger.debug(f"[ToolExecutor] on_before_tool_use hook error (ignored): {e}")
 
         if not isinstance(tool_input, dict):
             # Hook 不会原地改非 dict，diff 没意义
@@ -678,11 +672,10 @@ class ToolExecutor:
             )
 
         plugin_manager = getattr(self, "_plugin_manager", None)
-        if plugin_manager is not None and hasattr(
-            plugin_manager, "plugin_allows_param_mutation"
-        ):
+        if plugin_manager is not None and hasattr(plugin_manager, "plugin_allows_param_mutation"):
             is_authorized = plugin_manager.plugin_allows_param_mutation
         else:
+
             def is_authorized(_plugin_id: str, _tool: str) -> bool:
                 return False
 
@@ -772,9 +765,7 @@ class ToolExecutor:
             )
             return err_msg, None
 
-        await self._dispatch_hook(
-            "on_before_tool_use", tool_name=tool_name, tool_input=tool_input
-        )
+        await self._dispatch_hook("on_before_tool_use", tool_name=tool_name, tool_input=tool_input)
 
         # 导入日志缓存
         from ..logging import get_session_log_buffer
@@ -850,7 +841,10 @@ class ToolExecutor:
                 # can't learn to mimic UI markers in its own outputs.
                 logger.info(
                     "[ToolExecutor] %s raised ToolConfigError(scope=%s, code=%s): %s",
-                    tool_name, e.hint.scope, e.hint.error_code, e.hint.title,
+                    tool_name,
+                    e.hint.scope,
+                    e.hint.error_code,
+                    e.hint.title,
                 )
                 span.set_attribute("config_hint_scope", e.hint.scope)
                 span.set_attribute("config_hint_code", e.hint.error_code)
@@ -1087,9 +1081,7 @@ class ToolExecutor:
                 sandbox_output += f"stderr:\n{sb_result.stderr}\n"
             return self._guard_truncate(tool_name, sandbox_output), None
 
-        return await self._execute_tool_impl(
-            tool_name, tool_input, session_id=session_id
-        )
+        return await self._execute_tool_impl(tool_name, tool_input, session_id=session_id)
 
     async def execute_batch(
         self,
@@ -1202,6 +1194,7 @@ class ToolExecutor:
                     if state_task_id is None:
                         try:
                             from ..scheduler.locks import get_current_scheduled_task_id
+
                             state_task_id = get_current_scheduled_task_id()
                         except Exception:
                             state_task_id = None
@@ -1381,7 +1374,8 @@ class ToolExecutor:
                     # after the type sweep), accept the raw value as text.
                     logger.warning(
                         "[ToolExecutor] %s returned non-tuple result: %r",
-                        tool_name, type(result).__name__,
+                        tool_name,
+                        type(result).__name__,
                     )
                     result_content = result
                     hint = None
@@ -1425,7 +1419,8 @@ class ToolExecutor:
                 # 三者都算 TaskVerify 眼里的有效交付证据。
                 if (
                     capture_delivery_receipts
-                    and tool_name in (
+                    and tool_name
+                    in (
                         "deliver_artifacts",
                         "org_submit_deliverable",
                         "org_accept_deliverable",
@@ -1838,9 +1833,7 @@ class ToolExecutor:
                     try:
                         ac = _registry.get_tool_class(tool_name)
                         if ac is not None:
-                            approval_class_str = (
-                                ac.value if hasattr(ac, "value") else str(ac)
-                            )
+                            approval_class_str = ac.value if hasattr(ac, "value") else str(ac)
                     except Exception:
                         # Unknown / dynamic tool → preview just says "unknown".
                         # UI renders that with a neutral badge; engine still
@@ -1932,16 +1925,12 @@ class ToolExecutor:
             return {
                 "type": "tool_result",
                 "tool_use_id": tool_use_id,
-                "content": (
-                    "⚠️ 无人值守审批写入失败，工具调用已拒绝以保护安全。"
-                    f"详情: {exc}"
-                ),
+                "content": (f"⚠️ 无人值守审批写入失败，工具调用已拒绝以保护安全。详情: {exc}"),
                 "is_error": True,
             }
 
         logger.info(
-            "[ToolExec] Created pending_approval %s for %s "
-            "(strategy=%s, session=%s, task=%s)",
+            "[ToolExec] Created pending_approval %s for %s (strategy=%s, session=%s, task=%s)",
             entry.id,
             tool_name,
             unattended_strategy,

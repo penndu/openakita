@@ -74,9 +74,7 @@ _UNSAFE_DOMAIN_RE = re.compile(
 
 
 def _result_blob(r: SearchResult) -> str:
-    return " ".join(
-        [r.title or "", r.url or "", r.snippet or "", r.source or ""]
-    )
+    return " ".join([r.title or "", r.url or "", r.snippet or "", r.source or ""])
 
 
 def _is_unsafe_search_result(r: SearchResult) -> bool:
@@ -204,6 +202,7 @@ def _raise_config_error(code: ConfigHintErrorCode, *, scope: str = "web_search")
 
 
 # ---- Handler ------------------------------------------------------------------------
+
 
 class WebSearchHandler:
     """Web Search 处理器"""

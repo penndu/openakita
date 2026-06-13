@@ -303,7 +303,9 @@ class TestExecuteTaskWiringContract:
         from openakita.core.agent import Agent
 
         src = inspect.getsource(Agent.execute_task)
-        block = src[src.find("_drain_steer_before_finish(") : src.find("_drain_steer_before_finish(") + 600]
+        block = src[
+            src.find("_drain_steer_before_finish(") : src.find("_drain_steer_before_finish(") + 600
+        ]
         assert "iteration - 1" in block, (
             "execute_task must convert its 1-based loop counter to 0-based "
             "(iteration - 1) so the anti-hang ceiling fires on the true last "
@@ -336,9 +338,7 @@ def _final_answer(n: int) -> MockResponse:
     >=10 chars so execute_task does not fall into its summary-request branch.
     """
     return MockResponse(
-        content=(
-            f"## 任务结果\n\n- 已完成第 {n} 轮处理\n- 结果已整理完毕，可供查看。"
-        )
+        content=(f"## 任务结果\n\n- 已完成第 {n} 轮处理\n- 结果已整理完毕，可供查看。")
     )
 
 
@@ -416,9 +416,7 @@ class TestExecuteTaskDoneDrainEndToEnd:
         # … and the second call DID — proving the message was carried forward
         # into the next turn's context rather than dropped.
         assert any(
-            role == "user"
-            and "[用户插入消息]" in content
-            and "再顺手把结论翻译成英文" in content
+            role == "user" and "[用户插入消息]" in content and "再顺手把结论翻译成英文" in content
             for role, content in seen_messages[1]
         )
         # the just-finished answer was folded in as a settled assistant turn
@@ -427,9 +425,7 @@ class TestExecuteTaskDoneDrainEndToEnd:
         # the steer queue is drained, not duplicated
         assert task_state.pending_user_inserts == []
 
-    async def test_relentless_steering_still_terminates_at_the_ceiling(
-        self, monkeypatch
-    ) -> None:
+    async def test_relentless_steering_still_terminates_at_the_ceiling(self, monkeypatch) -> None:
         """Pathological client: a fresh follow-up is steered in on EVERY final
         answer. The real loop must still stop — bounded by max_iterations — and
         return a normal success result instead of hanging."""

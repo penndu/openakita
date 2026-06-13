@@ -94,9 +94,7 @@ def test_v3_migration_backs_up_and_quarantines_legacy_desktop_memory(tmp_path):
     # by v1.27.15 S2 P1-6 for ``conversation_turns.metadata``).
     from openakita.memory.storage import _SCHEMA_VERSION
 
-    assert list(
-        db_path.parent.glob(f"openakita.db.bak.v2_to_v{_SCHEMA_VERSION}.*")
-    )
+    assert list(db_path.parent.glob(f"openakita.db.bak.v2_to_v{_SCHEMA_VERSION}.*"))
 
 
 def test_two_users_do_not_see_each_other_long_term_memory(tmp_path):

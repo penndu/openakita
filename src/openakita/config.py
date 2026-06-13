@@ -630,7 +630,9 @@ class Settings(BaseSettings):
 
     # === 会话配置 ===
     session_timeout_minutes: int = Field(default=30, description="会话超时时间（分钟）")
-    session_max_history: int = Field(default=2000, description="会话消息硬上限（日常由 metadata trim 控制体积）")
+    session_max_history: int = Field(
+        default=2000, description="会话消息硬上限（日常由 metadata trim 控制体积）"
+    )
     session_storage_path: str = Field(default="data/sessions", description="会话存储路径")
 
     # === 多 Agent 模式 (Beta) ===
@@ -898,7 +900,9 @@ class Settings(BaseSettings):
         default=False,
         description="是否启用运行时监督器 (RuntimeSupervisor)，默认关闭。开启后会在工具抖动/编辑抖动/推理死循环等模式被检测到时主动干预",
     )
-    task_budget_tokens: int = Field(default=0, description="单次任务最大 token 消耗，0=不限（默认）")
+    task_budget_tokens: int = Field(
+        default=0, description="单次任务最大 token 消耗，0=不限（默认）"
+    )
     task_budget_cost: float = Field(default=0.0, description="单次任务最大成本 USD，0=不限（默认）")
     task_budget_duration: int = Field(
         default=0,
@@ -1319,9 +1323,7 @@ class RuntimeState:
                     new_val = data[key]
                     if old_val != new_val:
                         setattr(settings, key, new_val)
-                        applied.append(
-                            f"{key}: {redact_value(old_val)} -> {redact_value(new_val)}"
-                        )
+                        applied.append(f"{key}: {redact_value(old_val)} -> {redact_value(new_val)}")
             if applied:
                 logger.info(f"[RuntimeState] Restored: {'; '.join(applied)}")
             else:
@@ -1367,10 +1369,7 @@ def _create_settings_safe() -> Settings:
 
             try:
                 lines = env_path.read_text(encoding="utf-8", errors="replace").splitlines()
-                cleaned = [
-                    ln for ln in lines
-                    if not ln.strip().startswith(f"{bad_field}=")
-                ]
+                cleaned = [ln for ln in lines if not ln.strip().startswith(f"{bad_field}=")]
                 env_path.write_text("\n".join(cleaned) + "\n", encoding="utf-8")
             except Exception as io_err:
                 logger.error(f"[Config] Failed to repair .env: {io_err}")

@@ -12,7 +12,11 @@ def test_tool_event_normalization_adds_stable_aliases():
 
 def test_security_confirm_normalization_adds_confirm_aliases():
     event = normalize_stream_event(
-        {"type": StreamEventType.SECURITY_CONFIRM.value, "tool": "run_powershell", "id": "confirm-1"}
+        {
+            "type": StreamEventType.SECURITY_CONFIRM.value,
+            "tool": "run_powershell",
+            "id": "confirm-1",
+        }
     )
     assert event["tool_name"] == "run_powershell"
     assert event["confirm_id"] == "confirm-1"

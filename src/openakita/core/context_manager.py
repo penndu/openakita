@@ -302,10 +302,7 @@ class ContextManager:
         # Otherwise long-running tasks with many side tools see a large fixed
         # tools_tokens overhead and trip token-anomaly compaction prematurely.
         if tools:
-            effective_tools = [
-                t for t in tools
-                if not (isinstance(t, dict) and t.get("_deferred"))
-            ]
+            effective_tools = [t for t in tools if not (isinstance(t, dict) and t.get("_deferred"))]
         else:
             effective_tools = tools
         tools_tokens = self.estimate_tools_tokens(effective_tools)
@@ -1279,7 +1276,8 @@ class ContextManager:
             # Remove orphaned tool_results from user messages
             if role == "user" and isinstance(content, list) and orphan_results:
                 filtered = [
-                    block for block in content
+                    block
+                    for block in content
                     if not (
                         isinstance(block, dict)
                         and block.get("type") == "tool_result"
@@ -1302,11 +1300,13 @@ class ContextManager:
                         and block.get("type") == "tool_use"
                         and block.get("id", "") in missing_results
                     ):
-                        stubs.append({
-                            "type": "tool_result",
-                            "tool_use_id": block["id"],
-                            "content": "[结果来自早期对话，已被压缩 — 参见上方摘要]",
-                        })
+                        stubs.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block["id"],
+                                "content": "[结果来自早期对话，已被压缩 — 参见上方摘要]",
+                            }
+                        )
                 if stubs:
                     result.append({"role": "user", "content": stubs})
 
@@ -1492,7 +1492,9 @@ class ContextManager:
                     try:
                         save_snapshot(snapshot)
                     except Exception:
-                        logger.debug("[HardTruncate] save_precompact_snapshot failed", exc_info=True)
+                        logger.debug(
+                            "[HardTruncate] save_precompact_snapshot failed", exc_info=True
+                        )
         protected_truncated_idx = (
             protected_media_idx - drop_until if protected_media_idx >= drop_until else -1
         )
@@ -1570,7 +1572,9 @@ class ContextManager:
             "must",
         )
         facts: list[str] = []
-        path_re = re.compile(r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|[\w./\\-]+\.(?:py|ts|tsx|js|md|json|yaml|toml))")
+        path_re = re.compile(
+            r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|[\w./\\-]+\.(?:py|ts|tsx|js|md|json|yaml|toml))"
+        )
         for msg in dropped_messages:
             if msg.get("role") not in ("user", "assistant"):
                 continue
@@ -1588,7 +1592,9 @@ class ContextManager:
             if len(facts) >= max_facts:
                 break
         return {
-            "session_id": getattr(memory_manager, "_current_session_id", "") if memory_manager else "",
+            "session_id": getattr(memory_manager, "_current_session_id", "")
+            if memory_manager
+            else "",
             "created_at": time.time(),
             "facts": facts,
         }

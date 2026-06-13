@@ -382,9 +382,7 @@ def load_persisted_working_messages(
     return msgs
 
 
-def clear_persisted_working_messages(
-    conversation_id: str, *, base_dir: str | os.PathLike
-) -> bool:
+def clear_persisted_working_messages(conversation_id: str, *, base_dir: str | os.PathLike) -> bool:
     """Delete the persisted file for ``conversation_id``.  Returns True if a
     file was removed, False otherwise.  Never raises."""
     target = _wm_path(conversation_id, base_dir)
@@ -393,9 +391,7 @@ def clear_persisted_working_messages(
             target.unlink()
             return True
     except OSError as exc:
-        logger.debug(
-            "[CancelCleanup] could not delete %s: %s", target, exc
-        )
+        logger.debug("[CancelCleanup] could not delete %s: %s", target, exc)
     return False
 
 

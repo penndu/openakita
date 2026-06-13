@@ -34,6 +34,7 @@ def _resolve_db_path() -> Path:
     if _DB_PATH is None:
         try:
             from openakita.config import settings
+
             _DB_PATH = settings.data_dir / "feedback.db"
         except Exception:
             _DB_PATH = Path.cwd() / "data" / "feedback.db"
@@ -142,9 +143,7 @@ async def save_record(
             (report_id, feedback_token, title, report_type, contact_email, now),
         )
         await conn.commit()
-        count_row = await conn.execute(
-            "SELECT COUNT(*) as cnt FROM feedback_records"
-        )
+        count_row = await conn.execute("SELECT COUNT(*) as cnt FROM feedback_records")
         row = await count_row.fetchone()
         if row and row["cnt"] > _MAX_RECORDS:
             excess = row["cnt"] - _MAX_RECORDS
@@ -177,22 +176,21 @@ async def get_all_records() -> list[dict]:
         for r in rows:
             has_unread = bool(
                 r["last_reply_at"]
-                and (
-                    not r["last_checked_at"]
-                    or r["last_reply_at"] > r["last_checked_at"]
-                )
+                and (not r["last_checked_at"] or r["last_reply_at"] > r["last_checked_at"])
             )
-            results.append({
-                "report_id": r["report_id"],
-                "has_token": r["feedback_token"] is not None,
-                "feedback_token": r["feedback_token"],
-                "title": r["title"],
-                "type": r["type"],
-                "contact_email": r["contact_email"] or "",
-                "submitted_at": r["submitted_at"],
-                "cached_status": r["cached_status"] or "pending",
-                "has_unread": has_unread,
-            })
+            results.append(
+                {
+                    "report_id": r["report_id"],
+                    "has_token": r["feedback_token"] is not None,
+                    "feedback_token": r["feedback_token"],
+                    "title": r["title"],
+                    "type": r["type"],
+                    "contact_email": r["contact_email"] or "",
+                    "submitted_at": r["submitted_at"],
+                    "cached_status": r["cached_status"] or "pending",
+                    "has_unread": has_unread,
+                }
+            )
         return results
     finally:
         await conn.close()
@@ -237,8 +235,7 @@ async def update_status(
             return
         vals.append(report_id)
         await conn.execute(
-            f"UPDATE feedback_records SET {', '.join(sets)} "
-            "WHERE report_id = ?",
+            f"UPDATE feedback_records SET {', '.join(sets)} WHERE report_id = ?",
             vals,
         )
         await conn.commit()

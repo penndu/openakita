@@ -341,9 +341,7 @@ class FilesystemHandler:
                 f"检测到你传了 '{wrong_alias}'，请改名为 'command' 后重试，参数值原样保留即可。"
             )
         else:
-            lines.append(
-                "常见误传字段：script / cmd / shell / bash / code → 都应使用 'command'。"
-            )
+            lines.append("常见误传字段：script / cmd / shell / bash / code → 都应使用 'command'。")
         return "\n".join(lines)
 
     @classmethod
@@ -354,9 +352,7 @@ class FilesystemHandler:
         if not stripped:
             return None
         # Extract the first command segment, handling pipes / && / ;
-        first_segment = (
-            stripped.split("|")[0].strip().split("&&")[0].strip().split(";")[0].strip()
-        )
+        first_segment = stripped.split("|")[0].strip().split("&&")[0].strip().split(";")[0].strip()
         # Split into tokens; skip leading env-var assignments (VAR=val)
         tokens = first_segment.split()
         while tokens and "=" in tokens[0]:
@@ -697,7 +693,9 @@ class FilesystemHandler:
         content = await self.agent.file_tool.read(path)
 
         offset = params.get("offset", 1)  # 起始行号（1-based），默认第 1 行
-        limit = params.get("limit", getattr(settings, "read_file_default_limit", self.READ_FILE_DEFAULT_LIMIT))
+        limit = params.get(
+            "limit", getattr(settings, "read_file_default_limit", self.READ_FILE_DEFAULT_LIMIT)
+        )
 
         # 确保 offset/limit 合法
         try:
@@ -1098,8 +1096,7 @@ class FilesystemHandler:
         if not skipped:
             return output
         return (
-            f"{output}\n\n[提示] 已跳过 {skipped} 个不可访问或临时变化的目录，"
-            "其余结果已正常返回。"
+            f"{output}\n\n[提示] 已跳过 {skipped} 个不可访问或临时变化的目录，其余结果已正常返回。"
         )
 
     async def _move_file(self, params: dict) -> str:
@@ -1143,7 +1140,9 @@ class FilesystemHandler:
         if not src_path.exists():
             return f"❌ 源路径不存在: {src}"
 
-        final_dst_path = dst_path / src_path.name if dst_path.exists() and dst_path.is_dir() else dst_path
+        final_dst_path = (
+            dst_path / src_path.name if dst_path.exists() and dst_path.is_dir() else dst_path
+        )
         kind = "目录" if src_path.is_dir() else "文件"
         success = await self.agent.file_tool.move(src, dst)
         if not success:

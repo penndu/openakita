@@ -59,7 +59,9 @@ def checkpoint_and_close_all_storages(timeout_mode: bool = True) -> None:
         try:
             storage.checkpoint_and_close(truncate=timeout_mode)
         except Exception as e:
-            logger.warning("[MemoryStorage] Checkpoint/close failed for %s: %s", storage._db_path, e)
+            logger.warning(
+                "[MemoryStorage] Checkpoint/close failed for %s: %s", storage._db_path, e
+            )
 
 
 def _is_db_locked(e: Exception) -> bool:
@@ -538,8 +540,7 @@ class MemoryStorage:
         #
         # 这一步只补 session_tenants，**不动** memories 表本身，零数据丢失风险。
         existing_sessions = {
-            row[0]
-            for row in c.execute("SELECT session_id FROM session_tenants").fetchall()
+            row[0] for row in c.execute("SELECT session_id FROM session_tenants").fetchall()
         }
         backfill_rows: list[tuple[str, str, str, str]] = []
         for (session_id,) in c.execute(
@@ -549,9 +550,11 @@ class MemoryStorage:
             if not session_id or session_id in existing_sessions:
                 continue
             parts = session_id.split("__")
-            if len(parts) >= 3 and parts[2] and parts[2] not in {
-                "default", "anonymous", "system", "legacy", ""
-            }:
+            if (
+                len(parts) >= 3
+                and parts[2]
+                and parts[2] not in {"default", "anonymous", "system", "legacy", ""}
+            ):
                 user_id = parts[2]
             else:
                 user_id = "default"
@@ -622,9 +625,7 @@ class MemoryStorage:
         cols = {row[1] for row in cur.fetchall()}
         if "metadata" not in cols:
             c.execute("ALTER TABLE conversation_turns ADD COLUMN metadata TEXT")
-            logger.info(
-                "[MemoryStorage] v4→v5: added conversation_turns.metadata column"
-            )
+            logger.info("[MemoryStorage] v4→v5: added conversation_turns.metadata column")
         if commit:
             c.commit()
 
@@ -1305,10 +1306,15 @@ class MemoryStorage:
         except Exception:
             return 0
 
-    SORTABLE_COLUMNS = frozenset({
-        "importance_score", "created_at", "updated_at",
-        "last_accessed_at", "access_count",
-    })
+    SORTABLE_COLUMNS = frozenset(
+        {
+            "importance_score",
+            "created_at",
+            "updated_at",
+            "last_accessed_at",
+            "access_count",
+        }
+    )
 
     def query_paged(
         self,
@@ -1363,17 +1369,13 @@ class MemoryStorage:
         where = " AND ".join(conditions) if conditions else "1=1"
 
         try:
-            count_cur = self._conn.execute(
-                f"SELECT COUNT(*) FROM memories WHERE {where}", params
-            )
+            count_cur = self._conn.execute(f"SELECT COUNT(*) FROM memories WHERE {where}", params)
             total = count_cur.fetchone()[0]
 
             order = sort_order.upper()
             page_params = params + [limit, offset]
             cursor = self._conn.execute(
-                f"SELECT * FROM memories WHERE {where} "
-                f"ORDER BY {sort_by} {order} "
-                f"LIMIT ? OFFSET ?",
+                f"SELECT * FROM memories WHERE {where} ORDER BY {sort_by} {order} LIMIT ? OFFSET ?",
                 page_params,
             )
             rows = self._rows_to_dicts(cursor)
@@ -1588,8 +1590,7 @@ class MemoryStorage:
         table_expr = "episodes"
         if use_tenant_filter:
             table_expr = (
-                "episodes INNER JOIN session_tenants st "
-                "ON episodes.session_id = st.session_id"
+                "episodes INNER JOIN session_tenants st ON episodes.session_id = st.session_id"
             )
             if user_id is not None:
                 conditions.append("st.user_id = ?")
@@ -1816,8 +1817,7 @@ class MemoryStorage:
                 )
             else:
                 cur = self._conn.execute(
-                    "SELECT session_id FROM session_tenants "
-                    "WHERE user_id = ? AND workspace_id = ?",
+                    "SELECT session_id FROM session_tenants WHERE user_id = ? AND workspace_id = ?",
                     (user_id, workspace_id),
                 )
             return [row[0] for row in cur.fetchall() if row[0]]
@@ -1867,7 +1867,8 @@ class MemoryStorage:
         if not self._conn:
             return 0
         if (
-            not from_workspace_id or not to_workspace_id
+            not from_workspace_id
+            or not to_workspace_id
             or from_workspace_id == to_workspace_id
             or not user_id
         ):
@@ -1904,7 +1905,11 @@ class MemoryStorage:
                     logger.info(
                         "[MemoryStorage] workspace migrate: %d rows scope=%s user_id=%s "
                         "from %s → %s",
-                        moved, scope, user_id, from_workspace_id, to_workspace_id,
+                        moved,
+                        scope,
+                        user_id,
+                        from_workspace_id,
+                        to_workspace_id,
                     )
                 return moved
             except Exception as e:
@@ -2255,9 +2260,7 @@ class MemoryStorage:
             conditions.append("st.workspace_id = ?")
             params.append(workspace_id)
         if session_id:
-            conditions.append(
-                "ct.session_id = ?" if use_tenant_filter else "session_id = ?"
-            )
+            conditions.append("ct.session_id = ?" if use_tenant_filter else "session_id = ?")
             params.append(session_id)
         conditions.append(("ct." if use_tenant_filter else "") + "timestamp >= ?")
         params.append(cutoff)
@@ -2274,8 +2277,7 @@ class MemoryStorage:
         ordering = "ct.timestamp DESC" if use_tenant_filter else "timestamp DESC"
         try:
             cur = self._conn.execute(
-                f"SELECT {select_cols} FROM {table_expr} WHERE {where} "
-                f"ORDER BY {ordering} LIMIT ?",
+                f"SELECT {select_cols} FROM {table_expr} WHERE {where} ORDER BY {ordering} LIMIT ?",
                 params,
             )
             return self._rows_to_dicts(cur, json_fields=["tool_calls", "tool_results"])
@@ -2683,7 +2685,9 @@ class MemoryStorage:
         if self._conn is None or not self._db_path.exists():
             return None
         if self._is_sync_folder_path() and os.environ.get("OPENAKITA_FORCE_SNAPSHOT") != "1":
-            logger.warning("[MemoryStorage] Snapshot skipped for sync folder path: %s", self._db_path)
+            logger.warning(
+                "[MemoryStorage] Snapshot skipped for sync folder path: %s", self._db_path
+            )
             return None
         size = self._db_path.stat().st_size
         if size > max_size_bytes:
@@ -2708,7 +2712,9 @@ class MemoryStorage:
                     row = check_conn.execute("PRAGMA quick_check").fetchone()
                     if str(row[0] if row else "").lower() != "ok":
                         snapshot.unlink(missing_ok=True)
-                        raise MemoryStorageUnavailable("schema_corrupt", "snapshot quick_check failed")
+                        raise MemoryStorageUnavailable(
+                            "schema_corrupt", "snapshot quick_check failed"
+                        )
                 finally:
                     check_conn.close()
                 self._prune_backups(pattern=f"{self._db_path.name}.snapshot.*", keep=keep)

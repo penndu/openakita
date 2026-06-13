@@ -185,9 +185,7 @@ class UIConfirmBus:
 
     # C13 §15.5: dedup helpers ----------------------------------------------
 
-    def find_dedup_leader(
-        self, *, session_id: str, dedup_key: str
-    ) -> str | None:
+    def find_dedup_leader(self, *, session_id: str, dedup_key: str) -> str | None:
         """Return existing pending confirm_id with matching dedup_key.
 
         Used by ``delegate_parallel`` siblings: if a leader sub-agent already
@@ -277,9 +275,7 @@ class UIConfirmBus:
         ``_dedup_followers`` (each ``register_follower`` without a paired
         ``deregister_follower`` after the session is gone).
         """
-        to_remove = [
-            k for k, v in self._pending.items() if v.get("session_id") == session_id
-        ]
+        to_remove = [k for k, v in self._pending.items() if v.get("session_id") == session_id]
         for k in to_remove:
             self._pending.pop(k, None)
             self._events.pop(k, None)
@@ -291,9 +287,7 @@ class UIConfirmBus:
         """Garbage-collect pending confirms older than ``_ttl_seconds``."""
         now = time.time()
         expired = [
-            k
-            for k, v in self._pending.items()
-            if now - v.get("created_at", 0) > self._ttl_seconds
+            k for k, v in self._pending.items() if now - v.get("created_at", 0) > self._ttl_seconds
         ]
         for k in expired:
             self._pending.pop(k, None)
@@ -428,9 +422,7 @@ class UIConfirmBus:
         # confirms that arrived ~together. This is what "5s aggregation"
         # means in UX terms — the user reacts to the latest popup.
         latest_ts = max(ts for _, ts in in_session)
-        return [
-            cid for cid, ts in in_session if (latest_ts - ts) <= within_seconds
-        ]
+        return [cid for cid, ts in in_session if (latest_ts - ts) <= within_seconds]
 
     def batch_resolve(
         self,
@@ -448,9 +440,7 @@ class UIConfirmBus:
 
         Idempotent on each confirm_id: a previously-resolved id is a no-op.
         """
-        ids = self.list_batch_candidates(
-            session_id, within_seconds=within_seconds
-        )
+        ids = self.list_batch_candidates(session_id, within_seconds=within_seconds)
         results: list[dict[str, Any]] = []
         for cid in ids:
             resolved = self.resolve(cid, decision)

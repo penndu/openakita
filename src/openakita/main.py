@@ -290,9 +290,7 @@ def _setup_session_backfill(agent_or_master):
                         _meta = {
                             k: v
                             for k, v in metadata.items()
-                            if k != "timestamp"
-                            and v is not None
-                            and isinstance(k, str)
+                            if k != "timestamp" and v is not None and isinstance(k, str)
                         }
                         if not _meta:
                             _meta = None
@@ -938,11 +936,17 @@ async def run_interactive():
                     pass
                 agent._cli_session = cs
                 cs.context.focus_terms = list(getattr(cs.context, "focus_terms", []) or [])
-                cs.context.task_checkpoints = list(getattr(cs.context, "task_checkpoints", []) or [])
-                cs.context.delegation_chain = list(getattr(cs.context, "delegation_chain", []) or [])
+                cs.context.task_checkpoints = list(
+                    getattr(cs.context, "task_checkpoints", []) or []
+                )
+                cs.context.delegation_chain = list(
+                    getattr(cs.context, "delegation_chain", []) or []
+                )
                 if getattr(cs.context, "precompact_snapshot", None):
                     try:
-                        agent.memory_manager.save_precompact_snapshot(cs.context.precompact_snapshot)
+                        agent.memory_manager.save_precompact_snapshot(
+                            cs.context.precompact_snapshot
+                        )
                     except Exception:
                         logger.debug("[CLI] precompact snapshot hydration skipped", exc_info=True)
                 mc = len(cs.context.get_messages())
@@ -1461,7 +1465,7 @@ def main(
             console.print("[yellow]检测到 stdin 非 TTY（管道输入或非交互环境）[/yellow]")
             console.print(
                 "交互式 CLI 需要终端。请改用以下任一非交互入口：\n"
-                "  • [bold]openakita run \"<task>\"[/bold] - 单次任务执行（unattended）\n"
+                '  • [bold]openakita run "<task>"[/bold] - 单次任务执行（unattended）\n'
                 "  • [bold]openakita serve[/bold] - 启动 API 服务并通过 /api/chat 调用"
             )
             raise typer.Exit(1)
@@ -2005,9 +2009,10 @@ def serve(
             )
             _api_port = API_PORT
             if _api_host in ("0.0.0.0", "::"):
-                if not _web_password_already_set() and not (
-                    os.environ.get("OPENAKITA_WEB_PASSWORD") or ""
-                ).strip():
+                if (
+                    not _web_password_already_set()
+                    and not (os.environ.get("OPENAKITA_WEB_PASSWORD") or "").strip()
+                ):
                     console.print(
                         "[yellow]⚠ HTTP API 将绑定到 "
                         f"{_api_host}（外部可访问），但当前未设置访问密码。[/yellow]"
@@ -2177,13 +2182,9 @@ def serve(
                     # Agent 异步关闭（flush memory, close event bus）
                     # Must run BEFORE LLM client close: pending memory tasks
                     # (episode generation) may need LLM calls.
-                    if agent_or_master is not None and hasattr(
-                        agent_or_master, "shutdown"
-                    ):
+                    if agent_or_master is not None and hasattr(agent_or_master, "shutdown"):
                         try:
-                            await asyncio.wait_for(
-                                agent_or_master.shutdown(), timeout=10.0
-                            )
+                            await asyncio.wait_for(agent_or_master.shutdown(), timeout=10.0)
                         except (TimeoutError, Exception):
                             pass
                     # 关闭 LLM client httpx 连接池，释放 TCP 连接。
@@ -2194,9 +2195,7 @@ def serve(
                         try:
                             from .llm.client import get_default_client
 
-                            await asyncio.wait_for(
-                                get_default_client().close(), timeout=5.0
-                            )
+                            await asyncio.wait_for(get_default_client().close(), timeout=5.0)
                         except (TimeoutError, Exception):
                             pass
                 except TimeoutError:
@@ -2532,7 +2531,7 @@ class Plugin(PluginBase):
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>{manifest['name']}</title>
+  <title>{manifest["name"]}</title>
   <script type="module">
     // Replace with: import {{ PluginBridge }} from "@openakita/plugin-ui-sdk";
     const bridge = {{ init: () => window.parent.postMessage({{ __akita_bridge: true, version: 1, type: "bridge:ready" }}, "*") }};
@@ -2540,7 +2539,7 @@ class Plugin(PluginBase):
   </script>
 </head>
 <body>
-  <h1>{manifest['name']}</h1>
+  <h1>{manifest["name"]}</h1>
   <p>Plugin UI scaffold — replace this with your frontend app.</p>
 </body>
 </html>
@@ -2592,9 +2591,7 @@ def run_mcp_module(
 
 @app.command(name="reset-password")
 def reset_password(
-    yes: bool = typer.Option(
-        False, "--yes", "-y", help="跳过交互确认（脚本/CI 场景）"
-    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="跳过交互确认（脚本/CI 场景）"),
 ):
     """清除 Web 访问密码，下次访问会进入 setup 流程。
 
@@ -2660,4 +2657,3 @@ def reset_password(
 
 if __name__ == "__main__":
     app()
-

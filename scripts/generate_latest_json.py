@@ -39,7 +39,7 @@ DEFAULT_REPO = "openakita/openakita"
 PLATFORM_PATTERNS = {
     "windows-x86_64": {
         "extensions": [".exe"],
-        "keywords": ["core"],         # prefer core variant
+        "keywords": ["core"],  # prefer core variant
         "exclude": ["full", "uninstall"],
     },
     "darwin-aarch64": {

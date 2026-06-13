@@ -163,7 +163,7 @@ _EXIT_REASON_DISPLAY: dict[str, str] = {
     "ask_user": "等待用户回复",
     "verify_incomplete": "验证未完成",
     # 预算暂停场景：用户对话历史和已有进展都已保留，回复"继续"即可让系统接力完成
-    "budget_paused": "预算暂停（可回复\"继续\"接力）",
+    "budget_paused": '预算暂停（可回复"继续"接力）',
 }
 
 
@@ -196,10 +196,7 @@ class DelegationResult:
             f" | 耗时: {self.elapsed_s}s"
         )
         if self.tools_used:
-            tools_line = (
-                f"工具调用: {len(self.tools_used)} 次"
-                f" ({', '.join(self.tools_used[:8])})"
-            )
+            tools_line = f"工具调用: {len(self.tools_used)} 次 ({', '.join(self.tools_used[:8])})"
         else:
             tools_line = "工具调用: 0 次"
 
@@ -766,9 +763,7 @@ class AgentOrchestrator:
                 try:
                     _re = getattr(agent, "reasoning_engine", None)
                     if _re is not None:
-                        _tokens_used = getattr(
-                            getattr(_re, "_budget", None), "tokens_used", 0
-                        )
+                        _tokens_used = getattr(getattr(_re, "_budget", None), "tokens_used", 0)
                 except Exception:
                     pass
 
@@ -1036,9 +1031,7 @@ class AgentOrchestrator:
                 from openakita.config import settings as _cfg
 
                 _profile = getattr(agent, "_agent_profile", None)
-                _profile_role = (
-                    getattr(_profile, "role", "worker") if _profile else "worker"
-                )
+                _profile_role = getattr(_profile, "role", "worker") if _profile else "worker"
                 _coord_enabled = bool(getattr(_cfg, "coordinator_mode_enabled", False))
                 # Two activation paths for coordinator mode:
                 #

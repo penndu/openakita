@@ -23,11 +23,7 @@ logger = logging.getLogger(__name__)
 def _default_goal_for(manifest: Any) -> str:
     """Compose a default role goal string for a workbench node."""
     name = manifest.display_name_zh or manifest.name or manifest.id
-    desc = (
-        (manifest.description_i18n or {}).get("zh")
-        or manifest.description
-        or ""
-    ).strip()
+    desc = ((manifest.description_i18n or {}).get("zh") or manifest.description or "").strip()
     if desc:
         return f"在组织中作为「{name}」工作台节点，按上级派单调用工作台工具完成产出。能力：{desc}"
     return f"在组织中作为「{name}」工作台节点，按上级派单调用工作台工具完成产出。"
@@ -108,8 +104,7 @@ def _collect_host_tool_defs(pm: PluginManager | None) -> dict[str, dict]:
             if name:
                 out[name] = td
     except Exception:
-        logger.debug("[workbench-templates] failed to index host tool_definitions",
-                     exc_info=True)
+        logger.debug("[workbench-templates] failed to index host tool_definitions", exc_info=True)
     return out
 
 
@@ -251,8 +246,4 @@ def deprecated_tools_for_node(
                     known.add(name)
         except Exception:
             continue
-    return [
-        t
-        for t in node_external_tools
-        if t and t not in ALL_CATEGORY_NAMES and t not in known
-    ]
+    return [t for t in node_external_tools if t and t not in ALL_CATEGORY_NAMES and t not in known]

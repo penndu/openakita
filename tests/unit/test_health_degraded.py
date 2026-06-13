@@ -48,9 +48,7 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     # Redirect data_dir into the per-test tmp_path so a real ``shutil.move``
     # of the .db file can happen without touching the developer's workspace.
-    monkeypatch.setattr(
-        repair_module.settings, "project_root", tmp_path, raising=False
-    )
+    monkeypatch.setattr(repair_module.settings, "project_root", tmp_path, raising=False)
     (tmp_path / "data" / "memory").mkdir(parents=True, exist_ok=True)
 
     # No desktop token in env -> _verify_desktop_token becomes a no-op.
@@ -198,14 +196,10 @@ class TestQuarantineHappyPath:
         shm.write_bytes(b"fake-shm")
         return db, wal, shm
 
-    def test_moves_db_triplet_and_clears_registry(
-        self, client: TestClient, tmp_path: Path
-    ) -> None:
+    def test_moves_db_triplet_and_clears_registry(self, client: TestClient, tmp_path: Path) -> None:
         db, wal, shm = self._make_triplet(tmp_path)
 
-        degraded_registry.register(
-            "feedback", reason="corrupted", details="quick_check failed"
-        )
+        degraded_registry.register("feedback", reason="corrupted", details="quick_check failed")
         assert "feedback" in {e["subsystem"] for e in degraded_registry.snapshot()}
 
         token = client.get("/api/memory/repair/degraded").json()["confirmation_token"]
@@ -238,13 +232,9 @@ class TestQuarantineHappyPath:
         # via the memory subsystem block (sticky for this process).
         h = client.get("/api/health").json()
         assert h["degraded_subsystems"] == []
-        assert (
-            h["memory_subsystem"]["status"] == "repair_completed_restart_required"
-        )
+        assert h["memory_subsystem"]["status"] == "repair_completed_restart_required"
 
-    def test_quarantine_when_no_file_exists_still_succeeds(
-        self, client: TestClient
-    ) -> None:
+    def test_quarantine_when_no_file_exists_still_succeeds(self, client: TestClient) -> None:
         """If the user is in degraded state but the .db file is already
         gone (e.g. they manually deleted it), quarantine should still
         succeed and just clear the registry."""
@@ -384,8 +374,6 @@ class TestTokenStatsRegistersUnderTokenTrackingKey:
         keys = {e["subsystem"] for e in degraded_registry.snapshot()}
         assert keys == {"token_tracking"}
         # Reason is preserved; details truncated below 200 chars.
-        entry = next(
-            e for e in degraded_registry.snapshot() if e["subsystem"] == "token_tracking"
-        )
+        entry = next(e for e in degraded_registry.snapshot() if e["subsystem"] == "token_tracking")
         assert entry["reason"] == "corrupted"
         assert "header magic mismatch" in entry.get("details", "")

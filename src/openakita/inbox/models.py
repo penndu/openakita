@@ -40,7 +40,9 @@ class InboxMessage:
             type=str(payload.get("type") or "notice"),
             priority=str(payload.get("priority") or "normal"),
             cta=cta,
-            target_rule=payload.get("target_rule") if isinstance(payload.get("target_rule"), dict) else {},
+            target_rule=payload.get("target_rule")
+            if isinstance(payload.get("target_rule"), dict)
+            else {},
             rollout_percent=int(payload.get("rollout_percent") or 100),
             publish_at=payload.get("publish_at") or payload.get("start_at"),
             expire_at=payload.get("expire_at") or payload.get("end_at"),

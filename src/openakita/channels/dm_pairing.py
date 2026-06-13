@@ -152,12 +152,15 @@ class DMPairingManager:
         rec.last_attempt = now
         if rec.count >= MAX_ATTEMPTS:
             rec.locked_until = now + LOCKOUT_SECONDS
-            logger.warning(f"DM Pairing: locked {key} for {LOCKOUT_SECONDS}s after {rec.count} failures")
+            logger.warning(
+                f"DM Pairing: locked {key} for {LOCKOUT_SECONDS}s after {rec.count} failures"
+            )
 
     def _cleanup_expired(self) -> None:
         now = time.time()
         expired = [
-            code for code, pc in self._active_codes.items()
+            code
+            for code, pc in self._active_codes.items()
             if now - pc.created_at > CODE_TTL_SECONDS
         ]
         for code in expired:

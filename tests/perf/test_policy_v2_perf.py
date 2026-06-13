@@ -205,8 +205,8 @@ class TestShellRiskLruSpeedup:
 
         speedup = uncached / max(cached, 1e-9)
         print(
-            f"\n[perf] classify_shell_command uncached={uncached*1000:.1f}ms "
-            f"cached={cached*1000:.1f}ms speedup={speedup:.1f}x"
+            f"\n[perf] classify_shell_command uncached={uncached * 1000:.1f}ms "
+            f"cached={cached * 1000:.1f}ms speedup={speedup:.1f}x"
         )
         assert speedup >= SHELL_LRU_SPEEDUP_MIN, (
             f"LRU speedup {speedup:.1f}x below {SHELL_LRU_SPEEDUP_MIN}x "
@@ -256,9 +256,7 @@ class TestAuditWriterSlo:
                 await asyncio.sleep(0)
 
             budget = SLO_BUDGETS_MS["audit_writer_100record_flush_ms_p95"]
-            _print_report(
-                "AsyncBatchAuditWriter 100-rec flush", durations, budget
-            )
+            _print_report("AsyncBatchAuditWriter 100-rec flush", durations, budget)
             p95 = _percentile(durations, 0.95)
             assert p95 <= budget, (
                 f"100-record batch flush p95={p95:.1f}ms > budget "
@@ -282,10 +280,7 @@ def test_perf_marker_registered() -> None:
 
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     content = pyproject.read_text(encoding="utf-8")
-    assert 'markers = [' in content, (
-        "pyproject.toml missing [tool.pytest.ini_options] markers list"
-    )
+    assert "markers = [" in content, "pyproject.toml missing [tool.pytest.ini_options] markers list"
     assert '"perf:' in content, (
-        "pyproject.toml markers must register 'perf:' or pytest will "
-        "warn on every C22 P3-3 run."
+        "pyproject.toml markers must register 'perf:' or pytest will warn on every C22 P3-3 run."
     )

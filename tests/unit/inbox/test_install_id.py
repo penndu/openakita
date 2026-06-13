@@ -13,4 +13,6 @@ async def test_install_id_hash_is_stable(tmp_path) -> None:
 
 
 def test_hash_install_id_is_sha256_hex() -> None:
-    assert hash_install_id("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    assert (
+        hash_install_id("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    )

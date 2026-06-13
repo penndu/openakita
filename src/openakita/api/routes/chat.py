@@ -147,9 +147,9 @@ async def _handle_pending_risk_answer(
     # 决策是 CONFIRM/INSPECT_ONLY（即非 CANCEL），则向 session 写入一条
     # 信任规则。仅按 operation_kind 维度记录，不绑定具体 path_pattern，
     # 因为前端 UI 此处暂不传具体路径；保持克制 ⇒ 仅在本会话内生效。
-    if (
-        remember_for_session
-        and decision in (ConfirmationDecision.CONFIRM, ConfirmationDecision.INSPECT_ONLY)
+    if remember_for_session and decision in (
+        ConfirmationDecision.CONFIRM,
+        ConfirmationDecision.INSPECT_ONLY,
     ):
         try:
             session_manager = getattr(request.app.state, "session_manager", None)
@@ -241,14 +241,10 @@ async def _handle_pending_risk_answer(
                                     _intent.scope,
                                 )
                         except Exception as exc:
-                            logger.warning(
-                                "[Chat API] Failed to derive AuthorizedIntent: %s", exc
-                            )
+                            logger.warning("[Chat API] Failed to derive AuthorizedIntent: %s", exc)
                         session_manager.persist()
                 except Exception as exc:
-                    logger.warning(
-                        "[Chat API] Failed to persist risk_authorized_replay: %s", exc
-                    )
+                    logger.warning("[Chat API] Failed to persist risk_authorized_replay: %s", exc)
             logger.info(
                 "[RiskGate] User confirmed high-risk action without controlled entry — "
                 "replaying original message via LLM (session=%s, confirmation=%s)",
@@ -515,7 +511,7 @@ def _extract_source_used(event: dict) -> dict | None:
         marker = "[OPENAKITA_SOURCE]"
         if marker not in result:
             return None
-        line = result[result.index(marker) + len(marker):].strip().splitlines()[0].strip()
+        line = result[result.index(marker) + len(marker) :].strip().splitlines()[0].strip()
         try:
             payload = json.loads(line)
         except (json.JSONDecodeError, TypeError, ValueError):
@@ -548,7 +544,7 @@ def _extract_mcp_call(event: dict) -> dict | None:
     if marker not in result:
         return None
     try:
-        line = result[result.index(marker) + len(marker):].strip().splitlines()[0].strip()
+        line = result[result.index(marker) + len(marker) :].strip().splitlines()[0].strip()
         payload = json.loads(line)
     except (json.JSONDecodeError, TypeError, ValueError, IndexError):
         return None
@@ -806,11 +802,7 @@ async def _stream_chat(
     )
 
     _sse_conv_key = chat_request.conversation_id or ""
-    _sse_session = (
-        _get_sse_registry().get_or_create(_sse_conv_key)
-        if _sse_conv_key
-        else None
-    )
+    _sse_session = _get_sse_registry().get_or_create(_sse_conv_key) if _sse_conv_key else None
 
     def _sse(event_type: str, data: dict | None = None) -> str:
         nonlocal _reply_chars, _reply_preview, _full_reply, _chain_reply, _done_sent
@@ -942,7 +934,9 @@ async def _stream_chat(
                     if chat_request.agent_profile_id:
                         _apply_agent_profile(session, chat_request.agent_profile_id)
                     session.set_metadata("selected_endpoint", chat_request.endpoint or "")
-                    session.set_metadata("endpoint_policy", chat_request.endpoint_policy or "prefer")
+                    session.set_metadata(
+                        "endpoint_policy", chat_request.endpoint_policy or "prefer"
+                    )
                     session.set_metadata(
                         "ui_org_state",
                         {
@@ -995,9 +989,7 @@ async def _stream_chat(
                             f"/api/pending_approvals/{approval_id}" if approval_id else None
                         ),
                         "resolve_url": (
-                            f"/api/pending_approvals/{approval_id}/resolve"
-                            if approval_id
-                            else None
+                            f"/api/pending_approvals/{approval_id}/resolve" if approval_id else None
                         ),
                         "unattended_strategy": exc.unattended_strategy,
                         "message": str(exc),
@@ -1081,9 +1073,7 @@ async def _stream_chat(
         _agent_errored = False
         _agent_error_msg = ""
 
-        def _emit_via_coalescer(
-            etype: str, edata: dict | None
-        ) -> list[str]:
+        def _emit_via_coalescer(etype: str, edata: dict | None) -> list[str]:
             """Push one upstream event through the coalescer.
 
             Returns the (possibly empty) list of fully-formed SSE
@@ -1113,9 +1103,7 @@ async def _stream_chat(
 
         while True:
             try:
-                event = await asyncio.wait_for(
-                    _agent_queue.get(), timeout=COALESCER_TICK_INTERVAL
-                )
+                event = await asyncio.wait_for(_agent_queue.get(), timeout=COALESCER_TICK_INTERVAL)
             except TimeoutError:
                 # No new event in the last 50ms.  Two responsibilities:
                 # 1) Flush any time-window-due coalescer buckets.
@@ -1521,14 +1509,19 @@ async def _stream_chat(
             # 透传本轮真实生效的 mode（IntentAnalyzer 可能把 CHAT 类闲聊静默
             # 降级为 ask），让前端能识别"用户传 agent 但被降为 ask"的场景。
             _eff_mode = getattr(actual_agent, "_last_effective_mode", None) or chat_request.mode
-            yield _sse("done", {
-                "usage": _usage_data,
-                "request_id": request_id,
-                "turn_id": turn_id,
-                "effective_mode": _eff_mode,
-                "requested_mode": requested_mode or chat_request.mode,
-                "tool_policy_source": getattr(actual_agent, "_last_tool_policy_source", "mode_ruleset"),
-            })
+            yield _sse(
+                "done",
+                {
+                    "usage": _usage_data,
+                    "request_id": request_id,
+                    "turn_id": turn_id,
+                    "effective_mode": _eff_mode,
+                    "requested_mode": requested_mode or chat_request.mode,
+                    "tool_policy_source": getattr(
+                        actual_agent, "_last_tool_policy_source", "mode_ruleset"
+                    ),
+                },
+            )
 
     except Exception as e:
         logger.error(f"Chat stream error: {e}", exc_info=True)
@@ -1618,6 +1611,7 @@ async def _stream_chat(
                 pass
             try:
                 import openakita.main as _main_mod
+
                 _orch = getattr(_main_mod, "_orchestrator", None)
                 _sid = chat_request.conversation_id or ""
                 if _orch is not None and _sid:
@@ -1649,13 +1643,9 @@ async def _stream_chat(
 
             try:
                 if _full_reply:
-                    await get_turn_registry().mark_succeeded(
-                        _turn_id, summary=_full_reply[:80]
-                    )
+                    await get_turn_registry().mark_succeeded(_turn_id, summary=_full_reply[:80])
                 else:
-                    await get_turn_registry().mark_failed(
-                        _turn_id, summary="no_reply"
-                    )
+                    await get_turn_registry().mark_failed(_turn_id, summary="no_reply")
             except Exception:
                 logger.debug(
                     "[Chat API] turn_registry mark failed for turn_id=%s",
@@ -1683,19 +1673,19 @@ def _org_file_attachments_to_chat_attachments(attachments: list[dict]) -> list[d
         name = str(att.get("filename") or Path(file_path).name or "file")
         suffix = Path(name).suffix.lower()
         att_type = "document" if suffix in {".doc", ".docx", ".pdf", ".md", ".txt"} else "file"
-        converted.append({
-            "type": att_type,
-            "name": name,
-            "localPath": file_path,
-            "size": att.get("file_size") or att.get("size"),
-            "uploadStatus": "uploaded",
-        })
+        converted.append(
+            {
+                "type": att_type,
+                "name": name,
+                "localPath": file_path,
+                "size": att.get("file_size") or att.get("size"),
+                "uploadStatus": "uploaded",
+            }
+        )
     return converted
 
 
-def _enrich_org_content_with_attachments(
-    content: str, attachments: list | None
-) -> str:
+def _enrich_org_content_with_attachments(content: str, attachments: list | None) -> str:
     """Read text file content from desktop attachments and append to org content.
 
     Mirrors the gateway's ``_extract_text_file_content`` logic for the desktop
@@ -1726,9 +1716,7 @@ def _enrich_org_content_with_attachments(
             ):
                 if fpath.stat().st_size <= MessageGateway._TEXT_FILE_SIZE_LIMIT:
                     file_content = fpath.read_text(encoding="utf-8", errors="replace")
-                    parts.append(
-                        f"\n\n--- 文件: {name} ---\n{file_content}\n--- 文件结束 ---"
-                    )
+                    parts.append(f"\n\n--- 文件: {name} ---\n{file_content}\n--- 文件结束 ---")
                 else:
                     parts.append(
                         f"\n[附件: {name} ({mime or suffix}), "
@@ -1737,9 +1725,7 @@ def _enrich_org_content_with_attachments(
             elif suffix == ".pdf" or (mime and "pdf" in mime):
                 parts.append(f"\n[附件: {name} (PDF), 本地路径: {local_path}]")
             else:
-                parts.append(
-                    f"\n[附件: {name} ({mime or suffix}), 本地路径: {local_path}]"
-                )
+                parts.append(f"\n[附件: {name} ({mime or suffix}), 本地路径: {local_path}]")
         except Exception:
             logger.warning(f"Failed to read attachment for org content: {local_path}")
     if parts:
@@ -1838,11 +1824,14 @@ async def _stream_org_command_chat(
             surface="desktop_chat",
             target=conversation_id,
         )
-        yield _sse("org_command_started", {
-            "org_id": org_id,
-            "command_id": command_id,
-            "root_node_id": started.get("root_node_id", ""),
-        })
+        yield _sse(
+            "org_command_started",
+            {
+                "org_id": org_id,
+                "command_id": command_id,
+                "root_node_id": started.get("root_node_id", ""),
+            },
+        )
 
         final_text = ""
         # 进度行只用于历史持久化中的 org_timeline 字段，前端已经通过 org_progress
@@ -1858,13 +1847,15 @@ async def _stream_org_command_chat(
             if item.get("type") == "org_progress":
                 summary = item.get("summary") or ""
                 if summary:
-                    progress_entries.append({
-                        "status": "progress",
-                        "summary": str(summary),
-                        "node_id": item.get("node_id"),
-                        "category": item.get("category") or item.get("label"),
-                        "timestamp": int(time.time() * 1000),
-                    })
+                    progress_entries.append(
+                        {
+                            "status": "progress",
+                            "summary": str(summary),
+                            "node_id": item.get("node_id"),
+                            "category": item.get("category") or item.get("label"),
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
                     yield _sse("org_progress", item)
                 continue
 
@@ -2113,9 +2104,7 @@ async def chat(request: Request, body: ChatRequest):
                 # Mark this turn as succeeded so a retry with the same
                 # turn_id is treated as duplicate (steered messages are
                 # not "new turns" — they are appendices to the active one).
-                await get_turn_registry().mark_succeeded(
-                    turn_id, summary="steered"
-                )
+                await get_turn_registry().mark_succeeded(turn_id, summary="steered")
             return JSONResponse(
                 status_code=202,
                 content={
@@ -2141,10 +2130,7 @@ async def chat(request: Request, body: ChatRequest):
         # wait_for_idle returns True we retry start() and fall back into
         # the normal SSE pipeline; on timeout we emit a final error frame
         # and close cleanly.
-        if (
-            conflict is not None
-            and start_result.queued_after_generation is not None
-        ):
+        if conflict is not None and start_result.queued_after_generation is not None:
             from openakita.config import settings
 
             # Queue wait uses its own (generous) timeout — NOT
@@ -2202,8 +2188,7 @@ async def chat(request: Request, body: ChatRequest):
                     yield f": ping queued-wait elapsed={_waited:.1f}s\n\n"
                     if await request.is_disconnected():
                         logger.info(
-                            "[Chat API] QUEUE wait abandoned (client disconnect) "
-                            "conv=%s",
+                            "[Chat API] QUEUE wait abandoned (client disconnect) conv=%s",
                             conversation_id,
                         )
                         return
@@ -2229,9 +2214,7 @@ async def chat(request: Request, body: ChatRequest):
                         try:
                             from .turn_registry import get_turn_registry
 
-                            await get_turn_registry().mark_failed(
-                                turn_id, summary="queue_timeout"
-                            )
+                            await get_turn_registry().mark_failed(turn_id, summary="queue_timeout")
                         except Exception:
                             pass
                     return
@@ -2269,10 +2252,7 @@ async def chat(request: Request, body: ChatRequest):
                             {
                                 "type": "error",
                                 "error": "conversation_busy",
-                                "message": (
-                                    "上一次任务结束后立即又有新任务占用，"
-                                    "请稍后重试。"
-                                ),
+                                "message": ("上一次任务结束后立即又有新任务占用，请稍后重试。"),
                             },
                             ensure_ascii=False,
                         )
@@ -2404,9 +2384,7 @@ async def chat(request: Request, body: ChatRequest):
             if turn_id:
                 from .turn_registry import get_turn_registry
 
-                await get_turn_registry().mark_failed(
-                    turn_id, summary="conversation_busy"
-                )
+                await get_turn_registry().mark_failed(turn_id, summary="conversation_busy")
             return JSONResponse(
                 status_code=409,
                 content={
@@ -2476,6 +2454,7 @@ async def chat(request: Request, body: ChatRequest):
     if body.agent_profile_id:
         from openakita.agents.presets import SYSTEM_PRESETS
         from openakita.agents.profile import get_profile_store
+
         _known = any(p.id == body.agent_profile_id for p in SYSTEM_PRESETS)
         if not _known:
             try:
@@ -2758,9 +2737,7 @@ async def chat_sync(request: Request, body: ChatRequest):
             return JSONResponse(
                 status_code=202,
                 headers=(
-                    {"Location": f"/api/pending_approvals/{approval_id}"}
-                    if approval_id
-                    else {}
+                    {"Location": f"/api/pending_approvals/{approval_id}"} if approval_id else {}
                 ),
                 content={
                     "status": "pending_approval",
@@ -2771,9 +2748,7 @@ async def chat_sync(request: Request, body: ChatRequest):
                         f"/api/pending_approvals/{approval_id}" if approval_id else None
                     ),
                     "resolve_url": (
-                        f"/api/pending_approvals/{approval_id}/resolve"
-                        if approval_id
-                        else None
+                        f"/api/pending_approvals/{approval_id}/resolve" if approval_id else None
                     ),
                     "unattended_strategy": exc.unattended_strategy,
                     "message": (
@@ -2924,10 +2899,7 @@ async def chat_resume(
             content={
                 "error": "no_sse_session",
                 "conversation_id": conversation_id,
-                "message": (
-                    "没有可恢复的会话流。可能是后端重启或会话已超时；"
-                    "请直接发起新消息。"
-                ),
+                "message": ("没有可恢复的会话流。可能是后端重启或会话已超时；请直接发起新消息。"),
             },
         )
 
@@ -2945,8 +2917,7 @@ async def chat_resume(
             initial = sse_session.replay_from(_last_emitted_seq)
             if initial:
                 logger.info(
-                    "[Chat Resume] conv=%s flushing %d buffered event(s) "
-                    "(since_seq=%d → up to %d)",
+                    "[Chat Resume] conv=%s flushing %d buffered event(s) (since_seq=%d → up to %d)",
                     conversation_id,
                     len(initial),
                     _last_emitted_seq,
@@ -2985,9 +2956,7 @@ async def chat_resume(
                     break
                 try:
                     if await request.is_disconnected():
-                        logger.debug(
-                            "[Chat Resume] conv=%s client disconnected", conversation_id
-                        )
+                        logger.debug("[Chat Resume] conv=%s client disconnected", conversation_id)
                         break
                 except Exception:
                     pass
@@ -3065,9 +3034,7 @@ async def chat_cancel(request: Request, body: ChatControlRequest):
             org_id, node_id = parts[1], parts[3]
             rt = getattr(request.app.state, "org_runtime", None)
             if rt:
-                logger.info(
-                    f"[Chat API] Cancel routed to OrgRuntime: org={org_id}, node={node_id}"
-                )
+                logger.info(f"[Chat API] Cancel routed to OrgRuntime: org={org_id}, node={node_id}")
                 result = await to_engine(rt.cancel_node_task(org_id, node_id, reason))
                 return {"status": "ok", "action": "cancel", "reason": reason, **result}
 
@@ -3270,4 +3237,3 @@ async def dismiss_plan_approval(request: Request):
     if isinstance(pending_map, dict):
         pending_map.pop(conversation_id, None)
     return {"ok": True}
-

@@ -29,6 +29,7 @@ async def app_client(tmp_data_dir: Path):
     manager = OrgManager(tmp_data_dir)
 
     from openakita.orgs.runtime import OrgRuntime
+
     runtime = OrgRuntime(manager)
 
     app.state.org_manager = manager
@@ -100,9 +101,7 @@ class TestOrgCRUDRoutes:
         client, manager, _ = app_client
         manager.create({"name": "目标占用名"})
         src = manager.create({"name": "源组织"})
-        resp = await client.post(
-            f"/api/orgs/{src.id}/duplicate", json={"name": "目标占用名"}
-        )
+        resp = await client.post(f"/api/orgs/{src.id}/duplicate", json={"name": "目标占用名"})
         assert resp.status_code == 409
         assert resp.json()["detail"]["code"] == "org_name_conflict"
 
@@ -133,6 +132,7 @@ class TestTemplateRoutes:
     async def test_list_templates(self, app_client):
         client, manager, _ = app_client
         from openakita.orgs.templates import ensure_builtin_templates
+
         ensure_builtin_templates(manager._templates_dir)
 
         resp = await client.get("/api/orgs/templates")
@@ -143,6 +143,7 @@ class TestTemplateRoutes:
     async def test_create_from_template(self, app_client):
         client, manager, _ = app_client
         from openakita.orgs.templates import ensure_builtin_templates
+
         ensure_builtin_templates(manager._templates_dir)
 
         resp = await client.post(
@@ -159,6 +160,7 @@ class TestNodeScheduleRoutes:
     async def test_schedule_crud(self, app_client):
         client, manager, _ = app_client
         from .conftest import make_org
+
         org = manager.create(make_org().to_dict())
         nid = org.nodes[0].id
 
@@ -182,6 +184,7 @@ class TestPolicyRoutes:
     async def test_policy_write_and_read(self, app_client):
         client, manager, _ = app_client
         from .conftest import make_org
+
         org = manager.create(make_org().to_dict())
 
         resp = await client.put(
@@ -197,10 +200,12 @@ class TestPolicyRoutes:
     async def test_policy_list(self, app_client):
         client, manager, _ = app_client
         from .conftest import make_org
+
         org = manager.create(make_org().to_dict())
         manager.invalidate_cache(org.id)
 
         from openakita.orgs.policies import OrgPolicies
+
         policies = OrgPolicies(manager._org_dir(org.id))
         policies.write_policy("a.md", "# A")
 
@@ -213,6 +218,7 @@ class TestLifecycleRoutes:
     async def test_start_org(self, app_client):
         client, manager, runtime = app_client
         from .conftest import make_org
+
         org = manager.create(make_org().to_dict())
 
         with patch("openakita.orgs.templates.ensure_builtin_templates"):
@@ -251,5 +257,3 @@ class TestInboxRoutes:
             assert "total_unread" in resp.json()
         finally:
             await runtime.shutdown()
-
-

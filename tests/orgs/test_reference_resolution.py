@@ -42,7 +42,8 @@ def _mk_org(titles: list[tuple[str, str]]) -> Organization:
     for i in range(len(nodes) - 1):
         edges.append(
             OrgEdge(
-                source=nodes[i].id, target=nodes[i + 1].id,
+                source=nodes[i].id,
+                target=nodes[i + 1].id,
                 edge_type=EdgeType.HIERARCHY,
             )
         )
@@ -82,11 +83,13 @@ class TestResolveReferenceBranches:
 
     def test_ambiguous_title_lists_candidates(self):
         # Two nodes literally named "产品经理" ⇒ ambiguous.
-        org = _mk_org([
-            ("node_a", "产品经理"),
-            ("node_b", "产品经理"),
-            ("node_c", "CTO"),
-        ])
+        org = _mk_org(
+            [
+                ("node_a", "产品经理"),
+                ("node_b", "产品经理"),
+                ("node_c", "CTO"),
+            ]
+        )
         node, candidates, status = org.resolve_reference("产品经理")
         assert status == "ambiguous_title"
         assert node is None
@@ -97,10 +100,12 @@ class TestResolveReferenceBranches:
         # "产品经理" via get_node's legacy substring fallback, but neither
         # is exact. Must surface as fuzzy with at least one candidate so
         # the strict handler can emit a "请用精确 id" error.
-        org = _mk_org([
-            ("node_director", "产品总监"),
-            ("node_pm", "产品经理"),
-        ])
+        org = _mk_org(
+            [
+                ("node_director", "产品总监"),
+                ("node_pm", "产品经理"),
+            ]
+        )
         node, candidates, status = org.resolve_reference("产品")
         assert status == "fuzzy"
         assert node is None
@@ -141,10 +146,12 @@ class TestStrictRefToolsConstant:
 
 @pytest.fixture()
 def substring_org():
-    return _mk_org([
-        ("node_director", "产品总监"),
-        ("node_pm", "产品经理"),
-    ])
+    return _mk_org(
+        [
+            ("node_director", "产品总监"),
+            ("node_pm", "产品经理"),
+        ]
+    )
 
 
 class TestResolveNodeRefsStrict:
@@ -155,7 +162,9 @@ class TestResolveNodeRefsStrict:
 
         args = {"to_node": "产品", "content": "hi"}
         handler._resolve_node_refs(
-            args, substring_org.id, tool_name="org_send_message",
+            args,
+            substring_org.id,
+            tool_name="org_send_message",
         )
         # fuzzy ⇒ NOT rewritten, preserved for the handler's error branch
         assert args["to_node"] == "产品"
@@ -167,7 +176,9 @@ class TestResolveNodeRefsStrict:
 
         args = {"to_node": "node_pm", "content": "hi"}
         handler._resolve_node_refs(
-            args, substring_org.id, tool_name="org_send_message",
+            args,
+            substring_org.id,
+            tool_name="org_send_message",
         )
         assert args["to_node"] == "node_pm"
 
@@ -178,7 +189,9 @@ class TestResolveNodeRefsStrict:
 
         args = {"to_node": "产品总监", "content": "hi"}
         handler._resolve_node_refs(
-            args, substring_org.id, tool_name="org_send_message",
+            args,
+            substring_org.id,
+            tool_name="org_send_message",
         )
         assert args["to_node"] == "node_director"
 
@@ -195,7 +208,9 @@ class TestResolveNodeRefsStrict:
 
         args = {"node_id": "产品总监"}
         handler._resolve_node_refs(
-            args, substring_org.id, tool_name="org_find_colleague",
+            args,
+            substring_org.id,
+            tool_name="org_find_colleague",
         )
         # Value preserved, and downstream can still resolve it.
         assert args["node_id"] == "产品总监"
@@ -212,11 +227,13 @@ class TestResolveNodeRefsStrict:
 def handler_with_substring_org(org_dir, persisted_org, mock_runtime):
     """Reuse the persisted_org fixture but swap in an org whose role_titles
     are substring-collidy so the strict guard has something to reject."""
-    org = _mk_org([
-        ("node_ceo", "CEO"),
-        ("node_director", "产品总监"),
-        ("node_pm", "产品经理"),
-    ])
+    org = _mk_org(
+        [
+            ("node_ceo", "CEO"),
+            ("node_director", "产品总监"),
+            ("node_pm", "产品经理"),
+        ]
+    )
     # Hierarchy: CEO → 产品总监 → 产品经理 (so 产品经理 is 总监's child)
     org.edges = [
         OrgEdge(source="node_ceo", target="node_director", edge_type=EdgeType.HIERARCHY),
@@ -240,7 +257,8 @@ def handler_with_substring_org(org_dir, persisted_org, mock_runtime):
 class TestStrictHandlerErrors:
     @pytest.mark.asyncio
     async def test_delegate_fuzzy_to_self_gets_self_error(
-        self, handler_with_substring_org,
+        self,
+        handler_with_substring_org,
     ):
         handler, org = handler_with_substring_org
         # 产品总监 tries "to_node=产品" — fuzzy will match both, we want a
@@ -248,7 +266,8 @@ class TestStrictHandlerErrors:
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "产品", "task": "写个方案"},
-            org.id, "node_director",
+            org.id,
+            "node_director",
         )
         assert "[org_delegate_task 失败]" in result
         assert "精确" in result or "node_xxxxxxxx" in result
@@ -262,12 +281,14 @@ class TestStrictHandlerErrors:
         from openakita.orgs.event_store import OrgEventStore
         from openakita.orgs.blackboard import OrgBlackboard
 
-        org = _mk_org([
-            ("node_ceo", "CEO"),
-            ("node_director", "产品总监"),
-            ("node_pm_a", "产品经理"),
-            ("node_pm_b", "产品经理"),
-        ])
+        org = _mk_org(
+            [
+                ("node_ceo", "CEO"),
+                ("node_director", "产品总监"),
+                ("node_pm_a", "产品经理"),
+                ("node_pm_b", "产品经理"),
+            ]
+        )
         org.edges = [
             OrgEdge(source="node_ceo", target="node_director", edge_type=EdgeType.HIERARCHY),
             OrgEdge(source="node_director", target="node_pm_a", edge_type=EdgeType.HIERARCHY),
@@ -290,14 +311,16 @@ class TestStrictHandlerErrors:
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "产品经理", "task": "写 PRD"},
-            org.id, "node_director",
+            org.id,
+            "node_director",
         )
         assert "[org_delegate_task 失败]" in result
         assert "node_pm_a" in result and "node_pm_b" in result
 
     @pytest.mark.asyncio
     async def test_send_message_fuzzy_to_self_blocked(
-        self, handler_with_substring_org,
+        self,
+        handler_with_substring_org,
     ):
         handler, org = handler_with_substring_org
         # 产品总监 sends a message with a fuzzy title that also matches
@@ -305,7 +328,8 @@ class TestStrictHandlerErrors:
         result = await handler.handle(
             "org_send_message",
             {"to_node": "产品", "content": "hi"},
-            org.id, "node_director",
+            org.id,
+            "node_director",
         )
         assert "[org_send_message 失败]" in result
         assert "node_director" in result

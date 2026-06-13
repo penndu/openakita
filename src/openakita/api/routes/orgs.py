@@ -49,8 +49,11 @@ def _log_task_exception(task: _asyncio.Task) -> None:  # type: ignore[type-arg]
     if exc is not None:
         logger.error(
             "[OrgAPI] fire-and-forget task %s raised: %s",
-            task.get_name(), exc, exc_info=exc,
+            task.get_name(),
+            exc,
+            exc_info=exc,
         )
+
 
 def _safe_int(value: str | None, default: int) -> int:
     """Parse query param to int, returning *default* on failure."""
@@ -353,12 +356,9 @@ async def update_org(request: Request, org_id: str):
         raise HTTPException(404, f"Organization not found: {org_id}")
     body = await request.json()
     from openakita.orgs.manager import OrgNameConflictError
+
     rt = getattr(request.app.state, "org_runtime", None)
-    live_org = (
-        rt._active_orgs.get(org_id)
-        if rt and hasattr(rt, "_active_orgs")
-        else None
-    )
+    live_org = rt._active_orgs.get(org_id) if rt and hasattr(rt, "_active_orgs") else None
     live_node_state: dict[str, dict] = {}
     if live_org:
         for n in live_org.nodes:
@@ -1143,19 +1143,21 @@ async def query_events(request: Request, org_id: str):
 
 # ---- Activity stream (unified timeline across IM / desktop / org console) ----
 
-_ACTIVITY_INTERESTING_EVENTS: frozenset[str] = frozenset({
-    "user_command",
-    "user_command_cancelled",
-    "task_assigned",
-    "task_completed",
-    "task_cancelled",
-    "broadcast",
-    "node_activated",
-    "command_phase",
-    "workbench_tool_started",
-    "workbench_tool_succeeded",
-    "workbench_tool_failed",
-})
+_ACTIVITY_INTERESTING_EVENTS: frozenset[str] = frozenset(
+    {
+        "user_command",
+        "user_command_cancelled",
+        "task_assigned",
+        "task_completed",
+        "task_cancelled",
+        "broadcast",
+        "node_activated",
+        "command_phase",
+        "workbench_tool_started",
+        "workbench_tool_succeeded",
+        "workbench_tool_failed",
+    }
+)
 
 _ACTIVITY_KIND_BY_EVENT: dict[str, str] = {
     "user_command": "user_command",
@@ -1209,17 +1211,11 @@ async def query_activity(request: Request, org_id: str):
     # --- Events ----------------------------------------------------------
     try:
         es = rt.get_event_store(org_id)
-        ev_kinds = (
-            request.query_params.get("kind")
-            or request.query_params.get("event_type")
-        )
+        ev_kinds = request.query_params.get("kind") or request.query_params.get("event_type")
         events: list[dict[str, Any]] = []
         if ev_kinds:
             for kind in ev_kinds.split(","):
-                events.extend(
-                    es.query(event_type=kind.strip(), since=since, limit=limit)
-                    or []
-                )
+                events.extend(es.query(event_type=kind.strip(), since=since, limit=limit) or [])
         else:
             events = es.query(since=since, limit=limit * 3) or []
         for ev in events:
@@ -1230,12 +1226,7 @@ async def query_activity(request: Request, org_id: str):
             metadata = ev.get("metadata") or {}
             kind = _ACTIVITY_KIND_BY_EVENT.get(evt_type, evt_type)
             from_node = ev.get("actor")
-            to_node = (
-                data.get("to")
-                or data.get("to_node")
-                or data.get("target_node_id")
-                or None
-            )
+            to_node = data.get("to") or data.get("to_node") or data.get("target_node_id") or None
             content_raw = (
                 data.get("task")
                 or data.get("content")
@@ -1244,22 +1235,24 @@ async def query_activity(request: Request, org_id: str):
                 or data.get("summary")
                 or ""
             )
-            items.append({
-                "id": ev.get("event_id"),
-                "ts": ev.get("timestamp"),
-                "kind": kind,
-                "source": {
-                    "surface": metadata.get("origin_surface") or "org",
-                    "channel": metadata.get("channel") or "",
-                    "display_name": metadata.get("display_name") or "",
-                },
-                "from_node": from_node,
-                "to_node": to_node,
-                "content": _activity_preview(content_raw),
-                "command_id": data.get("command_id"),
-                "chain_id": data.get("chain_id") or data.get("root_chain_id"),
-                "event_type": evt_type,
-            })
+            items.append(
+                {
+                    "id": ev.get("event_id"),
+                    "ts": ev.get("timestamp"),
+                    "kind": kind,
+                    "source": {
+                        "surface": metadata.get("origin_surface") or "org",
+                        "channel": metadata.get("channel") or "",
+                        "display_name": metadata.get("display_name") or "",
+                    },
+                    "from_node": from_node,
+                    "to_node": to_node,
+                    "content": _activity_preview(content_raw),
+                    "command_id": data.get("command_id"),
+                    "chain_id": data.get("chain_id") or data.get("root_chain_id"),
+                    "event_type": evt_type,
+                }
+            )
     except Exception as exc:  # noqa: BLE001
         logger.debug("[Activity] event store query failed: %s", exc)
 
@@ -1275,19 +1268,21 @@ async def query_activity(request: Request, org_id: str):
                     msg = json.loads(line)
                 except Exception:
                     continue
-                items.append({
-                    "id": msg.get("id") or msg.get("message_id"),
-                    "ts": msg.get("ts") or msg.get("timestamp"),
-                    "kind": "message",
-                    "source": {"surface": "org", "channel": "", "display_name": ""},
-                    "from_node": msg.get("from_node"),
-                    "to_node": msg.get("to_node"),
-                    "content": _activity_preview(msg.get("content")),
-                    "command_id": msg.get("metadata", {}).get("command_id"),
-                    "chain_id": msg.get("metadata", {}).get("task_chain_id"),
-                    "event_type": "communication",
-                    "msg_type": msg.get("msg_type"),
-                })
+                items.append(
+                    {
+                        "id": msg.get("id") or msg.get("message_id"),
+                        "ts": msg.get("ts") or msg.get("timestamp"),
+                        "kind": "message",
+                        "source": {"surface": "org", "channel": "", "display_name": ""},
+                        "from_node": msg.get("from_node"),
+                        "to_node": msg.get("to_node"),
+                        "content": _activity_preview(msg.get("content")),
+                        "command_id": msg.get("metadata", {}).get("command_id"),
+                        "chain_id": msg.get("metadata", {}).get("task_chain_id"),
+                        "event_type": "communication",
+                        "msg_type": msg.get("msg_type"),
+                    }
+                )
                 if len(items) >= limit * 3:
                     break
     except Exception as exc:  # noqa: BLE001
@@ -1298,30 +1293,33 @@ async def query_activity(request: Request, org_id: str):
         svc = getattr(request.app.state, "org_command_service", None)
         if svc is None:
             from openakita.orgs.command_service import get_command_service
+
             svc = get_command_service()
         if svc is not None:
             for cmd_id, cmd in svc.commands.items():
                 if cmd.get("org_id") != org_id:
                     continue
                 src = cmd.get("source") or {}
-                items.append({
-                    "id": f"cmd_{cmd_id}",
-                    "ts": cmd.get("created_at"),
-                    "kind": "command",
-                    "source": {
-                        "surface": cmd.get("origin_surface") or "org_console",
-                        "channel": src.get("channel") or "",
-                        "display_name": src.get("display_name") or "",
-                    },
-                    "from_node": src.get("user_id") or "user",
-                    "to_node": cmd.get("target_node_id") or cmd.get("root_node_id"),
-                    "content": "",
-                    "command_id": cmd_id,
-                    "chain_id": None,
-                    "event_type": "command_state",
-                    "status": cmd.get("status"),
-                    "phase": cmd.get("phase"),
-                })
+                items.append(
+                    {
+                        "id": f"cmd_{cmd_id}",
+                        "ts": cmd.get("created_at"),
+                        "kind": "command",
+                        "source": {
+                            "surface": cmd.get("origin_surface") or "org_console",
+                            "channel": src.get("channel") or "",
+                            "display_name": src.get("display_name") or "",
+                        },
+                        "from_node": src.get("user_id") or "user",
+                        "to_node": cmd.get("target_node_id") or cmd.get("root_node_id"),
+                        "content": "",
+                        "command_id": cmd_id,
+                        "chain_id": None,
+                        "event_type": "command_state",
+                        "status": cmd.get("status"),
+                        "phase": cmd.get("phase"),
+                    }
+                )
     except Exception as exc:  # noqa: BLE001
         logger.debug("[Activity] command_service snapshot failed: %s", exc)
 
@@ -1332,6 +1330,7 @@ async def query_activity(request: Request, org_id: str):
         if isinstance(ts, str) and ts:
             try:
                 from datetime import datetime
+
                 return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
             except Exception:
                 return 0.0
@@ -1895,7 +1894,8 @@ async def get_org_stats(request: Request, org_id: str):
             "frozen": n.frozen_by is not None,
             "running_since": round(running_since_ms) if running_since_ms is not None else None,
             "recent_activity_ts": round((now_wall - (now_mono - last_act)) * 1000)
-                if last_act and last_act > 0 else None,
+            if last_act and last_act > 0
+            else None,
             "active_task_count": active_task_count,
         }
         per_node.append(entry)
@@ -1931,6 +1931,7 @@ async def get_org_stats(request: Request, org_id: str):
     # Push new anomalies to inbox with cooldown to avoid spam
     if anomalies and inbox:
         from openakita.orgs.models import InboxPriority
+
         _ANOMALY_COOLDOWN = 600  # 10 min between duplicate pushes
         pushed: dict[str, float] = getattr(rt, "_anomaly_inbox_ts", {})
         if not hasattr(rt, "_anomaly_inbox_ts"):
@@ -1960,7 +1961,9 @@ async def get_org_stats(request: Request, org_id: str):
             entries = bb.read_org(limit=5)
             for e in entries:
                 item: dict = {
-                    "content": (e.content[:_LIM_API] + "…") if len(e.content) > _LIM_API else e.content,
+                    "content": (e.content[:_LIM_API] + "…")
+                    if len(e.content) > _LIM_API
+                    else e.content,
                     "source_node": e.source_node,
                     "memory_type": e.memory_type.value
                     if hasattr(e.memory_type, "value")
@@ -2011,7 +2014,13 @@ async def get_org_stats(request: Request, org_id: str):
             ):
                 continue
             d = evt.get("data", {})
-            _pv = d.get("task") or d.get("content") or d.get("result_preview") or d.get("prompt") or ""
+            _pv = (
+                d.get("task")
+                or d.get("content")
+                or d.get("result_preview")
+                or d.get("prompt")
+                or ""
+            )
             preview = str(_pv)[:_LIM_API]
             recent_tasks.append(
                 {
@@ -2265,18 +2274,26 @@ async def cancel_dispatched_task(request: Request, org_id: str, project_id: str,
             logger.warning(f"[OrgAPI] cancel_node_task failed: {e}")
             cancel_result = {"ok": False, "error": str(e)}
 
-    store.update_task(project_id, task_id, {
-        "status": TaskStatus.CANCELLED,
-        "chain_id": None,
-    })
+    store.update_task(
+        project_id,
+        task_id,
+        {
+            "status": TaskStatus.CANCELLED,
+            "chain_id": None,
+        },
+    )
 
     try:
         from .websocket import broadcast_event
-        await broadcast_event("org:task_cancelled", {
-            "org_id": org_id,
-            "project_id": project_id,
-            "task_id": task_id,
-        })
+
+        await broadcast_event(
+            "org:task_cancelled",
+            {
+                "org_id": org_id,
+                "project_id": project_id,
+                "task_id": task_id,
+            },
+        )
     except Exception:
         pass
 
@@ -2544,4 +2561,3 @@ async def global_inbox_act(request: Request, msg_id: str):
         if msg:
             return msg.to_dict()
     raise HTTPException(404, "Message not found or not an approval")
-

@@ -97,16 +97,10 @@ class TestResolveApiHost:
         )
 
     def test_macos_defaults_to_loopback(self):
-        assert (
-            resolve_api_host({}, api_lan_mode=False, platform="darwin")
-            == "127.0.0.1"
-        )
+        assert resolve_api_host({}, api_lan_mode=False, platform="darwin") == "127.0.0.1"
 
     def test_windows_defaults_to_loopback(self):
-        assert (
-            resolve_api_host({}, api_lan_mode=False, platform="win32")
-            == "127.0.0.1"
-        )
+        assert resolve_api_host({}, api_lan_mode=False, platform="win32") == "127.0.0.1"
 
     def test_empty_explicit_api_host_is_ignored(self):
         assert (

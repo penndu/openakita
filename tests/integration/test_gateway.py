@@ -82,9 +82,15 @@ class TestMediaFile:
 class TestMessageTypes:
     def test_all_message_types(self):
         types = [
-            MessageType.TEXT, MessageType.IMAGE, MessageType.VOICE,
-            MessageType.FILE, MessageType.VIDEO, MessageType.LOCATION,
-            MessageType.STICKER, MessageType.MIXED, MessageType.COMMAND,
+            MessageType.TEXT,
+            MessageType.IMAGE,
+            MessageType.VOICE,
+            MessageType.FILE,
+            MessageType.VIDEO,
+            MessageType.LOCATION,
+            MessageType.STICKER,
+            MessageType.MIXED,
+            MessageType.COMMAND,
             MessageType.UNKNOWN,
         ]
         assert len(types) == 10
@@ -178,9 +184,7 @@ class TestMessageGatewayBroadcast:
         # 都是 module-level lazy import，patch policy_v2 模块即可拦截。
         import openakita.core.policy_v2 as policy_v2_module
 
-        monkeypatch.setattr(
-            policy_v2_module, "read_permission_mode_label", lambda: "yolo"
-        )
+        monkeypatch.setattr(policy_v2_module, "read_permission_mode_label", lambda: "yolo")
         monkeypatch.setattr(policy_v2_module, "apply_resolution", _spy_apply)
 
         gateway = MessageGateway(session_manager=MagicMock())
@@ -376,7 +380,9 @@ class TestMessageGatewayDesktopMirror:
             bot_instance_id="feishu:reviewer",
         )
 
-        assert gateway._desktop_mirror_id_for_im(writer) != gateway._desktop_mirror_id_for_im(reviewer)
+        assert gateway._desktop_mirror_id_for_im(writer) != gateway._desktop_mirror_id_for_im(
+            reviewer
+        )
 
     def test_desktop_mirror_splits_same_chat_by_thread(self, tmp_path):
         session_manager = SessionManager(storage_path=tmp_path / "sessions")
@@ -396,7 +402,9 @@ class TestMessageGatewayDesktopMirror:
             bot_instance_id="feishu:writer",
         )
 
-        assert gateway._desktop_mirror_id_for_im(topic_a) != gateway._desktop_mirror_id_for_im(topic_b)
+        assert gateway._desktop_mirror_id_for_im(topic_a) != gateway._desktop_mirror_id_for_im(
+            topic_b
+        )
 
 
 class TestMessageGatewayInterruptResolution:
@@ -514,4 +522,3 @@ class TestMessageGatewayAgentTimeout:
         assert streamed_ok is True
         adapter.stream_token.assert_awaited_once()
         adapter.finalize_stream.assert_awaited_once()
-

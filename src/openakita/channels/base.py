@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Windows 文件名非法字符 (: * ? " < > |)
 _UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_UNSAFE_INSTANCE_RE = re.compile(r'[^A-Za-z0-9_.:@-]+')
+_UNSAFE_INSTANCE_RE = re.compile(r"[^A-Za-z0-9_.:@-]+")
 
 
 def sanitize_filename(name: str) -> str:

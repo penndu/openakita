@@ -27,10 +27,24 @@ def _typical_turn(builder: ChainTimelineBuilder) -> None:
     builder.observe({"type": "thinking_delta", "content": "let me "})
     builder.observe({"type": "thinking_delta", "content": "think"})
     builder.observe({"type": "chain_text", "content": "I will read the file"})
-    builder.observe({"type": "tool_call_start", "id": "t1", "tool": "read_file",
-                     "args": {"path": "a.py"}, "friendly_message": "Reading a.py"})
-    builder.observe({"type": "tool_call_end", "id": "t1", "tool": "read_file",
-                     "result": "file body", "is_error": False})
+    builder.observe(
+        {
+            "type": "tool_call_start",
+            "id": "t1",
+            "tool": "read_file",
+            "args": {"path": "a.py"},
+            "friendly_message": "Reading a.py",
+        }
+    )
+    builder.observe(
+        {
+            "type": "tool_call_end",
+            "id": "t1",
+            "tool": "read_file",
+            "result": "file body",
+            "is_error": False,
+        }
+    )
 
 
 def test_builder_preserves_causal_order_within_iteration():
@@ -70,7 +84,9 @@ def test_builder_tool_error_status():
     b = ChainTimelineBuilder()
     b.observe({"type": "iteration_start", "iteration": 1})
     b.observe({"type": "tool_call_start", "id": "t1", "tool": "x", "args": {}})
-    b.observe({"type": "tool_call_end", "id": "t1", "tool": "x", "result": "boom", "is_error": True})
+    b.observe(
+        {"type": "tool_call_end", "id": "t1", "tool": "x", "result": "boom", "is_error": True}
+    )
     entries = b.build()[0]["entries"]
     assert next(e for e in entries if e["kind"] == "tool_start")["status"] == "error"
     assert next(e for e in entries if e["kind"] == "tool_end")["status"] == "error"
@@ -83,7 +99,11 @@ def test_builder_context_compressed_prepended_to_next_group():
     b.observe({"type": "context_compressed", "before_tokens": 1000, "after_tokens": 400})
     b.observe({"type": "iteration_start", "iteration": 2})
     timeline = b.build()
-    assert timeline[1]["entries"][0] == {"kind": "compressed", "beforeTokens": 1000, "afterTokens": 400}
+    assert timeline[1]["entries"][0] == {
+        "kind": "compressed",
+        "beforeTokens": 1000,
+        "afterTokens": 400,
+    }
 
 
 def test_builder_events_before_iteration_go_to_synthetic_group():
@@ -177,8 +197,11 @@ def test_builder_never_raises_on_garbage():
 
 
 def test_build_message_parts_emits_reasoning_for_timeline_only():
-    msg = {"role": "assistant", "content": "done",
-           "chain_timeline": [{"iteration": 1, "entries": [{"kind": "text", "content": "x"}]}]}
+    msg = {
+        "role": "assistant",
+        "content": "done",
+        "chain_timeline": [{"iteration": 1, "entries": [{"kind": "text", "content": "x"}]}],
+    }
     kinds = [p["kind"] for p in build_message_parts(msg)]
     assert "reasoning" in kinds
     assert kinds.index("reasoning") < kinds.index("text")
@@ -190,11 +213,29 @@ def test_history_exposes_chain_timeline(tmp_path):
     manager = SessionManager(storage_path=tmp_path)
     session = manager.get_session("desktop", "conv1", "desktop_user")
     session.add_message("user", "do it")
-    timeline = [{"iteration": 1, "entries": [
-        {"kind": "thinking", "content": "t"},
-        {"kind": "tool_start", "toolId": "t1", "tool": "read_file", "args": {"path": "a"}, "description": "Reading", "status": "done"},
-        {"kind": "tool_end", "toolId": "t1", "tool": "read_file", "result": "body", "status": "done"},
-    ]}]
+    timeline = [
+        {
+            "iteration": 1,
+            "entries": [
+                {"kind": "thinking", "content": "t"},
+                {
+                    "kind": "tool_start",
+                    "toolId": "t1",
+                    "tool": "read_file",
+                    "args": {"path": "a"},
+                    "description": "Reading",
+                    "status": "done",
+                },
+                {
+                    "kind": "tool_end",
+                    "toolId": "t1",
+                    "tool": "read_file",
+                    "result": "body",
+                    "status": "done",
+                },
+            ],
+        }
+    ]
     session.add_message("assistant", "answer", chain_timeline=timeline)
     app.state.session_manager = manager
 

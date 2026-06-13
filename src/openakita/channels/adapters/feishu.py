@@ -71,9 +71,7 @@ def _drain_loop_tasks(loop: asyncio.AbstractEventLoop, timeout: float = 3.0) -> 
         pass
 
 
-def _feishu_ws_loop_exception_handler(
-    loop: asyncio.AbstractEventLoop, context: dict
-) -> None:
+def _feishu_ws_loop_exception_handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
     """飞书 WS 线程 loop 的异常处理器。
 
     Windows ProactorEventLoop 在 WebSocket 远端先关闭连接时，
@@ -123,8 +121,7 @@ def _import_lark():
                 from openakita.tools._import_helper import import_or_hint
 
                 raise ImportError(
-                    import_or_hint("Crypto")
-                    or "缺少依赖: pip install pycryptodome"
+                    import_or_hint("Crypto") or "缺少依赖: pip install pycryptodome"
                 ) from exc
             from openakita.tools._import_helper import import_or_hint
 
@@ -1136,8 +1133,7 @@ class FeishuAdapter(ChannelAdapter):
             return {"toast": {"type": "success", "content": labels.get(decision, decision)}}
         except TimeoutError:
             logger.warning(
-                "Feishu: security decision dispatch timed out "
-                "(confirm_id=%s, decision=%s)",
+                "Feishu: security decision dispatch timed out (confirm_id=%s, decision=%s)",
                 confirm_id,
                 decision,
             )
@@ -1417,9 +1413,7 @@ class FeishuAdapter(ChannelAdapter):
                 detail = resp.json()
             except Exception:
                 detail = {"raw": resp.text[:500]}
-            raise RuntimeError(
-                f"CardKit API HTTP {resp.status_code} on {method} {path}: {detail}"
-            )
+            raise RuntimeError(f"CardKit API HTTP {resp.status_code} on {method} {path}: {detail}")
         result = resp.json()
         if validate and result.get("code", 0) != 0:
             raise RuntimeError(
@@ -1536,9 +1530,7 @@ class FeishuAdapter(ChannelAdapter):
             body=body,
         )
 
-    async def _finish_cardkit_card(
-        self, card_id: str, *, summary_text: str | None = None
-    ) -> None:
+    async def _finish_cardkit_card(self, card_id: str, *, summary_text: str | None = None) -> None:
         """关闭 CardKit 流式态，并写入正确摘要（避免聊天预览停留在「[生成中...]」）。
 
         ``settings`` 字段必须是 JSON **字符串**，sequence 严格递增。
@@ -1830,9 +1822,7 @@ class FeishuAdapter(ChannelAdapter):
                     # 用最终内容前 60 字作为聊天预览摘要，避免停留在「[生成中...]」
                     await self._finish_cardkit_card(card_id, summary_text=new_content)
                 except Exception as e:
-                    logger.info(
-                        f"Feishu: CardKit finish failed (content already updated): {e}"
-                    )
+                    logger.info(f"Feishu: CardKit finish failed (content already updated): {e}")
             return True
 
         # --- PatchMessage 回退（仅用于非 CardKit 创建的 schemaV1 卡片） ---
@@ -2105,9 +2095,7 @@ class FeishuAdapter(ChannelAdapter):
         if ck:
             ck_card_id, ck_element_id = ck
             try:
-                await self._overwrite_cardkit_card(
-                    ck_card_id, final_text, element_id=ck_element_id
-                )
+                await self._overwrite_cardkit_card(ck_card_id, final_text, element_id=ck_element_id)
                 # 覆盖成功后关闭流式态、写入摘要
                 with contextlib.suppress(Exception):
                     await self._finish_cardkit_card(ck_card_id, summary_text=final_text)
@@ -2123,9 +2111,7 @@ class FeishuAdapter(ChannelAdapter):
                 self._typing_status.pop(sk, None)
                 return True
             except Exception as e:
-                logger.warning(
-                    f"Feishu: _overwrite_cardkit_card fallback also failed: {e}"
-                )
+                logger.warning(f"Feishu: _overwrite_cardkit_card fallback also failed: {e}")
             # 覆盖失败前主动关闭流式态，避免飞书侧卡片留在「[生成中...]」预览
             with contextlib.suppress(Exception):
                 await self._finish_cardkit_card(ck_card_id, summary_text=final_text)

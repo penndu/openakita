@@ -122,8 +122,7 @@ class TestAigcVideoStudioTemplate:
             if n.id in wb_ids and org.get_children(n.id)
         ]
         assert offenders == [], (
-            f"Workbench nodes must be leaves (no hierarchy children), "
-            f"offenders={offenders}"
+            f"Workbench nodes must be leaves (no hierarchy children), offenders={offenders}"
         )
 
     def test_workbench_external_tools_match_plugin_tool_names(self):
@@ -173,8 +172,7 @@ class TestAigcVideoStudioTemplate:
             parent = org.get_parent(wb_id)
             assert parent is not None, f"workbench {wb_id} has no hierarchy parent"
             assert parent.id == "art-director", (
-                f"workbench {wb_id} parent must be art-director, "
-                f"got {parent.id}"
+                f"workbench {wb_id} parent must be art-director, got {parent.id}"
             )
 
     def test_template_round_trips_plugin_origin(self):
@@ -246,9 +244,7 @@ class TestEnsureBuiltinTemplates:
         node_ids = {n["id"] for n in data["nodes"]}
         assert "wb-tongyi-image" not in node_ids
         assert "wb-seedance-video" not in node_ids
-        assert {"wb-hh-image", "wb-hh-video", "wb-hh-human", "wb-hh-long"}.issubset(
-            node_ids
-        )
+        assert {"wb-hh-image", "wb-hh-video", "wb-hh-human", "wb-hh-long"}.issubset(node_ids)
 
     def test_archives_removed_happyhorse_video_studio(self, tmp_path: Path):
         tpl_dir = tmp_path / "templates"
@@ -262,4 +258,3 @@ class TestEnsureBuiltinTemplates:
         archived = list(tpl_dir.glob("happyhorse-video-studio.json.deprecated*"))
         assert len(archived) == 1
         assert "百炼 AIGC 视频创作工作室" in archived[0].read_text(encoding="utf-8")
-

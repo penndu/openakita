@@ -11,8 +11,16 @@ from datetime import datetime
 from typing import Any
 
 _FACT_PATTERNS = [
-    ("test_code", re.compile(r"(?:测试代号|测试代码|代号)\s*(?:是|为|=|:)\s*([A-Za-z0-9_.-]{2,64})")),
-    ("temporary_name", re.compile(r"(?:本轮|这次|当前)?(?:临时)?(?:名称|名字)\s*(?:是|为|=|:)\s*([A-Za-z0-9_.\-\u4e00-\u9fff]{2,64})")),
+    (
+        "test_code",
+        re.compile(r"(?:测试代号|测试代码|代号)\s*(?:是|为|=|:)\s*([A-Za-z0-9_.-]{2,64})"),
+    ),
+    (
+        "temporary_name",
+        re.compile(
+            r"(?:本轮|这次|当前)?(?:临时)?(?:名称|名字)\s*(?:是|为|=|:)\s*([A-Za-z0-9_.\-\u4e00-\u9fff]{2,64})"
+        ),
+    ),
 ]
 
 
@@ -36,7 +44,9 @@ def extract_working_facts(message: str, *, source_turn: int = 0) -> dict[str, di
     return facts
 
 
-def merge_working_facts(existing: dict[str, Any] | None, updates: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def merge_working_facts(
+    existing: dict[str, Any] | None, updates: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     merged = dict(existing or {})
     for key, value in updates.items():
         merged[key] = value

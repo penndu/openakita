@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class _CounterTable:
     # key: (counter_name, frozenset of (label_key, label_value) pairs)
-    counts: dict[tuple[str, frozenset[tuple[str, str]]], int] = field(default_factory=lambda: defaultdict(int))
+    counts: dict[tuple[str, frozenset[tuple[str, str]]], int] = field(
+        default_factory=lambda: defaultdict(int)
+    )
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def inc(self, name: str, *, labels: dict[str, str] | None = None, by: int = 1) -> None:
@@ -43,11 +45,13 @@ class _CounterTable:
             items = list(self.counts.items())
         out: list[dict[str, object]] = []
         for (name, label_key), value in items:
-            out.append({
-                "name": name,
-                "labels": dict(label_key),
-                "value": value,
-            })
+            out.append(
+                {
+                    "name": name,
+                    "labels": dict(label_key),
+                    "value": value,
+                }
+            )
         return out
 
     def reset(self) -> None:

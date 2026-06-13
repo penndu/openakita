@@ -59,6 +59,19 @@ def test_should_show_message_honors_publish_and_expire_window() -> None:
     future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
     past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 
-    assert should_show_message(InboxMessage(id="future", title="x", body_markdown="x", publish_at=future), context()) is False
-    assert should_show_message(InboxMessage(id="expired", title="x", body_markdown="x", expire_at=past), context()) is False
-    assert should_show_message(InboxMessage(id="active", title="x", body_markdown="x"), context()) is True
+    assert (
+        should_show_message(
+            InboxMessage(id="future", title="x", body_markdown="x", publish_at=future), context()
+        )
+        is False
+    )
+    assert (
+        should_show_message(
+            InboxMessage(id="expired", title="x", body_markdown="x", expire_at=past), context()
+        )
+        is False
+    )
+    assert (
+        should_show_message(InboxMessage(id="active", title="x", body_markdown="x"), context())
+        is True
+    )

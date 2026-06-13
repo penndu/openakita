@@ -52,7 +52,9 @@ class TestBuildOrgContextPrompt:
         node = persisted_org.nodes[0]
         resolved = identity.resolve(node, persisted_org)
         prompt = identity.build_org_context_prompt(
-            node, persisted_org, resolved,
+            node,
+            persisted_org,
+            resolved,
             blackboard_summary="- 决策: 使用Python",
         )
         assert persisted_org.name in prompt
@@ -62,7 +64,9 @@ class TestBuildOrgContextPrompt:
         node = persisted_org.nodes[0]
         resolved = identity.resolve(node, persisted_org)
         prompt = identity.build_org_context_prompt(
-            node, persisted_org, resolved,
+            node,
+            persisted_org,
+            resolved,
             blackboard_summary="- 重要决策: 采用微服务",
         )
         assert "微服务" in prompt
@@ -71,7 +75,9 @@ class TestBuildOrgContextPrompt:
         node = persisted_org.nodes[1]
         resolved = identity.resolve(node, persisted_org)
         prompt = identity.build_org_context_prompt(
-            node, persisted_org, resolved,
+            node,
+            persisted_org,
+            resolved,
             dept_summary="- 技术部会议纪要",
         )
         assert "技术部会议纪要" in prompt
@@ -80,7 +86,9 @@ class TestBuildOrgContextPrompt:
         node = persisted_org.nodes[0]
         resolved = identity.resolve(node, persisted_org)
         prompt = identity.build_org_context_prompt(
-            node, persisted_org, resolved,
+            node,
+            persisted_org,
+            resolved,
             policy_index="- 沟通规范.md\n- 任务管理.md",
         )
         assert "沟通规范" in prompt
@@ -119,6 +127,7 @@ class TestCoreBusiness:
 
     def test_root_prompt_uses_dynamic_persona_label(self, identity: OrgIdentity):
         from openakita.orgs.models import UserPersona
+
         org = make_org(
             core_business="研发 AI 产品",
             user_persona=UserPersona(title="投资人", display_name="王总"),
@@ -149,8 +158,14 @@ class TestCoreBusiness:
         root = org.nodes[0]
         resolved = identity.resolve(root, org)
         prompt = identity.build_org_context_prompt(root, org, resolved)
-        template_sections = ["核心业务", "连续工作职责", "组织工具与行为约束",
-                             "你的权限", "制度与流程", "行为准则"]
+        template_sections = [
+            "核心业务",
+            "连续工作职责",
+            "组织工具与行为约束",
+            "你的权限",
+            "制度与流程",
+            "行为准则",
+        ]
         for section_name in template_sections:
             idx = prompt.find(section_name)
             if idx < 0:
@@ -167,6 +182,7 @@ class TestUserPersonaInPrompt:
 
     def test_root_shows_persona_as_superior(self, identity: OrgIdentity):
         from openakita.orgs.models import UserPersona
+
         org = make_org(user_persona=UserPersona(title="甲方", display_name="客户A"))
         root = org.nodes[0]
         resolved = identity.resolve(root, org)

@@ -40,7 +40,11 @@ ORG_NODE_TOOLS: list[dict] = [
                     "description": "消息类型",
                     "default": "question",
                 },
-                "priority": {"type": "integer", "description": "优先级 0=普通 1=紧急 2=最高", "default": 0},
+                "priority": {
+                    "type": "integer",
+                    "description": "优先级 0=普通 1=紧急 2=最高",
+                    "default": 0,
+                },
                 "propagate_chain": {
                     "type": "boolean",
                     "description": (
@@ -92,7 +96,10 @@ ORG_NODE_TOOLS: list[dict] = [
                     ),
                 },
                 "task": {"type": "string", "description": "任务描述"},
-                "deadline": {"type": "string", "description": "截止时间（ISO 格式，可选）。AI 节点通常在分钟内完成任务，建议设置 5-30 分钟的 deadline"},
+                "deadline": {
+                    "type": "string",
+                    "description": "截止时间（ISO 格式，可选）。AI 节点通常在分钟内完成任务，建议设置 5-30 分钟的 deadline",
+                },
                 "priority": {"type": "integer", "default": 0},
             },
             "required": ["to_node", "task"],
@@ -117,7 +124,11 @@ ORG_NODE_TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "广播内容"},
-                "scope": {"type": "string", "enum": ["department", "organization"], "default": "department"},
+                "scope": {
+                    "type": "string",
+                    "enum": ["department", "organization"],
+                    "default": "department",
+                },
             },
             "required": ["content"],
         },
@@ -357,13 +368,30 @@ ORG_NODE_TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "任务名称（如 '巡检服务器'）"},
-                "schedule_type": {"type": "string", "enum": ["cron", "interval", "once"], "default": "interval"},
-                "cron": {"type": "string", "description": "cron 表达式（schedule_type=cron 时必填）"},
-                "interval_s": {"type": "integer", "description": "间隔秒数（schedule_type=interval 时必填）"},
-                "run_at": {"type": "string", "description": "执行时间 ISO 格式（schedule_type=once 时必填）"},
+                "schedule_type": {
+                    "type": "string",
+                    "enum": ["cron", "interval", "once"],
+                    "default": "interval",
+                },
+                "cron": {
+                    "type": "string",
+                    "description": "cron 表达式（schedule_type=cron 时必填）",
+                },
+                "interval_s": {
+                    "type": "integer",
+                    "description": "间隔秒数（schedule_type=interval 时必填）",
+                },
+                "run_at": {
+                    "type": "string",
+                    "description": "执行时间 ISO 格式（schedule_type=once 时必填）",
+                },
                 "prompt": {"type": "string", "description": "触发时执行的指令"},
                 "report_to": {"type": "string", "description": "汇报对象节点 ID（可选）"},
-                "report_condition": {"type": "string", "enum": ["always", "on_issue", "never"], "default": "on_issue"},
+                "report_condition": {
+                    "type": "string",
+                    "enum": ["always", "on_issue", "never"],
+                    "default": "on_issue",
+                },
             },
             "required": ["name", "prompt"],
         },
@@ -381,12 +409,20 @@ ORG_NODE_TOOLS: list[dict] = [
             "properties": {
                 "target_node_id": {"type": "string", "description": "目标下级节点 ID"},
                 "name": {"type": "string", "description": "任务名称"},
-                "schedule_type": {"type": "string", "enum": ["cron", "interval", "once"], "default": "interval"},
+                "schedule_type": {
+                    "type": "string",
+                    "enum": ["cron", "interval", "once"],
+                    "default": "interval",
+                },
                 "cron": {"type": "string", "description": "cron 表达式"},
                 "interval_s": {"type": "integer", "description": "间隔秒数"},
                 "prompt": {"type": "string", "description": "触发时执行的指令"},
                 "report_to": {"type": "string", "description": "汇报对象（默认为自己）"},
-                "report_condition": {"type": "string", "enum": ["always", "on_issue", "never"], "default": "on_issue"},
+                "report_condition": {
+                    "type": "string",
+                    "enum": ["always", "on_issue", "never"],
+                    "default": "on_issue",
+                },
             },
             "required": ["target_node_id", "name", "prompt"],
         },
@@ -398,8 +434,14 @@ ORG_NODE_TOOLS: list[dict] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "to_node": {"type": "string", "description": "委派人节点 ID（可省略，系统自动提交给直属上级）"},
-                "task_chain_id": {"type": "string", "description": "任务链 ID（从收到的任务消息中获取）"},
+                "to_node": {
+                    "type": "string",
+                    "description": "委派人节点 ID（可省略，系统自动提交给直属上级）",
+                },
+                "task_chain_id": {
+                    "type": "string",
+                    "description": "任务链 ID（从收到的任务消息中获取）",
+                },
                 "deliverable": {
                     "type": "string",
                     "description": (
@@ -421,14 +463,20 @@ ORG_NODE_TOOLS: list[dict] = [
                         "- 每项必须含 filename + file_path（必填）\n"
                         "- file_path 必须是真实存在的本地文件路径，可以相对于"
                         "组织工作区也可以是绝对路径\n"
-                        "示例：file_attachments=[{\"filename\": \"scene_01.png\","
-                        " \"file_path\": \"data/plugin_assets/hh/.../scene_01.png\"}]"
+                        '示例：file_attachments=[{"filename": "scene_01.png",'
+                        ' "file_path": "data/plugin_assets/hh/.../scene_01.png"}]'
                     ),
                     "items": {
                         "type": "object",
                         "properties": {
-                            "filename": {"type": "string", "description": "文件显示名（含扩展名，如 scene_01.png）"},
-                            "file_path": {"type": "string", "description": "文件路径（相对于组织工作区或绝对路径，必须真实存在）"},
+                            "filename": {
+                                "type": "string",
+                                "description": "文件显示名（含扩展名，如 scene_01.png）",
+                            },
+                            "file_path": {
+                                "type": "string",
+                                "description": "文件路径（相对于组织工作区或绝对路径，必须真实存在）",
+                            },
                             "description": {"type": "string", "description": "文件说明（可选）"},
                         },
                         "required": ["filename", "file_path"],
@@ -456,7 +504,10 @@ ORG_NODE_TOOLS: list[dict] = [
                     "description": "完整的任务链 ID（来自下级 TASK_DELIVERED 消息或 org_list_delegated_tasks）。允许前缀缩写，但前缀必须唯一，否则系统会返回候选列表并要求重试。",
                 },
                 "from_node": {"type": "string", "description": "交付人节点 ID（即下级 node_id）"},
-                "feedback": {"type": "string", "description": "验收意见（可选；不写默认 \"验收通过\"）"},
+                "feedback": {
+                    "type": "string",
+                    "description": '验收意见（可选；不写默认 "验收通过"）',
+                },
             },
             "required": ["task_chain_id", "from_node"],
         },
@@ -513,7 +564,10 @@ ORG_NODE_TOOLS: list[dict] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "filename": {"type": "string", "description": "制度文件名（如 workflow-deploy.md）"},
+                "filename": {
+                    "type": "string",
+                    "description": "制度文件名（如 workflow-deploy.md）",
+                },
                 "title": {"type": "string", "description": "制度标题"},
                 "content": {"type": "string", "description": "制度内容（Markdown 格式）"},
                 "reason": {"type": "string", "description": "提议原因"},
@@ -531,7 +585,7 @@ ORG_NODE_TOOLS: list[dict] = [
                 "tools": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "申请的工具类目或具体工具名列表（如 [\"research\", \"planning\"]）",
+                    "description": '申请的工具类目或具体工具名列表（如 ["research", "planning"]）',
                 },
                 "reason": {"type": "string", "description": "申请原因，说明为什么需要这些工具"},
             },
@@ -578,7 +632,11 @@ ORG_NODE_TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "task_chain_id": {"type": "string", "description": "任务链 ID"},
-                "progress_pct": {"type": "integer", "description": "进度百分比 0-100", "default": 0},
+                "progress_pct": {
+                    "type": "integer",
+                    "description": "进度百分比 0-100",
+                    "default": 0,
+                },
                 "summary": {"type": "string", "description": "进度摘要"},
                 "log_entry": {"type": "string", "description": "追加到执行日志的条目"},
             },
@@ -602,7 +660,11 @@ ORG_NODE_TOOLS: list[dict] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "status": {"type": "string", "enum": ["todo", "in_progress", "delivered", "accepted", "rejected", "blocked"], "description": "按状态过滤"},
+                "status": {
+                    "type": "string",
+                    "enum": ["todo", "in_progress", "delivered", "accepted", "rejected", "blocked"],
+                    "description": "按状态过滤",
+                },
                 "limit": {"type": "integer", "default": 10, "description": "返回条数"},
             },
         },
@@ -613,7 +675,11 @@ ORG_NODE_TOOLS: list[dict] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "status": {"type": "string", "enum": ["todo", "in_progress", "delivered", "accepted", "rejected", "blocked"], "description": "按状态过滤"},
+                "status": {
+                    "type": "string",
+                    "enum": ["todo", "in_progress", "delivered", "accepted", "rejected", "blocked"],
+                    "description": "按状态过滤",
+                },
                 "limit": {"type": "integer", "default": 10, "description": "返回条数"},
             },
         },
@@ -625,7 +691,11 @@ ORG_NODE_TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "project_id": {"type": "string", "description": "项目 ID"},
-                "status": {"type": "string", "enum": ["todo", "in_progress", "delivered", "accepted", "rejected", "blocked"], "description": "按状态过滤"},
+                "status": {
+                    "type": "string",
+                    "enum": ["todo", "in_progress", "delivered", "accepted", "rejected", "blocked"],
+                    "description": "按状态过滤",
+                },
                 "limit": {"type": "integer", "default": 20, "description": "返回条数"},
             },
             "required": ["project_id"],
@@ -640,9 +710,20 @@ ORG_NODE_TOOLS: list[dict] = [
                 "task_id": {"type": "string", "description": "项目任务 ID"},
                 "task_chain_id": {"type": "string", "description": "任务链 ID（二选一）"},
                 "progress_pct": {"type": "integer", "description": "进度百分比 0-100"},
-                "status": {"type": "string", "enum": ["todo", "in_progress", "delivered", "accepted", "rejected", "blocked"]},
-                "plan_steps": {"type": "array", "items": {"type": "object"}, "description": "计划步骤"},
-                "execution_log": {"type": "array", "items": {"type": "string"}, "description": "执行日志（追加）"},
+                "status": {
+                    "type": "string",
+                    "enum": ["todo", "in_progress", "delivered", "accepted", "rejected", "blocked"],
+                },
+                "plan_steps": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "计划步骤",
+                },
+                "execution_log": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "执行日志（追加）",
+                },
             },
         },
     },

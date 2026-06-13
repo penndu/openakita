@@ -60,9 +60,7 @@ def _iso_now() -> str:
 
 
 def _iso_at(epoch_seconds: float) -> str:
-    return datetime.fromtimestamp(epoch_seconds, tz=UTC).isoformat(
-        timespec="seconds"
-    )
+    return datetime.fromtimestamp(epoch_seconds, tz=UTC).isoformat(timespec="seconds")
 
 
 def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
@@ -230,9 +228,7 @@ class AssetBus:
 
         asset_id = uuid.uuid4().hex
         now = _iso_now()
-        expires_at = (
-            _iso_at(time.time() + ttl_seconds) if ttl_seconds and ttl_seconds > 0 else None
-        )
+        expires_at = _iso_at(time.time() + ttl_seconds) if ttl_seconds and ttl_seconds > 0 else None
         await self._db.execute(
             """
             INSERT INTO assets_bus (
@@ -368,9 +364,7 @@ class AssetBus:
         await self._db.commit()
         removed = cur.rowcount or 0
         if removed:
-            logger.info(
-                "AssetBus: removed %d asset(s) owned by '%s'", removed, plugin_id
-            )
+            logger.info("AssetBus: removed %d asset(s) owned by '%s'", removed, plugin_id)
         return removed
 
     # --------------------------------------------------------------- counts

@@ -97,15 +97,11 @@ class TestResolvePolicy:
         assert resolve_policy(channel="telegram") is DoubleTextingPolicy.QUEUE
 
     def test_header_overrides_channel(self) -> None:
-        assert (
-            resolve_policy(channel="feishu", header_value="steer")
-            is DoubleTextingPolicy.STEER
-        )
+        assert resolve_policy(channel="feishu", header_value="steer") is DoubleTextingPolicy.STEER
 
     def test_invalid_header_falls_back(self) -> None:
         assert (
-            resolve_policy(channel="desktop", header_value="garbage")
-            is DoubleTextingPolicy.QUEUE
+            resolve_policy(channel="desktop", header_value="garbage") is DoubleTextingPolicy.QUEUE
         )
 
     def test_interrupt_downgrades_when_flag_off(self) -> None:
@@ -113,9 +109,7 @@ class TestResolvePolicy:
         assert resolve_policy(header_value="interrupt") is DoubleTextingPolicy.QUEUE
 
     def test_interrupt_honoured_when_flag_on(self, _allow_interrupt) -> None:
-        assert (
-            resolve_policy(header_value="interrupt") is DoubleTextingPolicy.INTERRUPT
-        )
+        assert resolve_policy(header_value="interrupt") is DoubleTextingPolicy.INTERRUPT
 
 
 # ── S1.2: ConversationLifecycleManager.start ──────────────────────────
@@ -328,9 +322,7 @@ class TestPreemptOrQueueHelper:
         )
 
     @pytest.mark.asyncio
-    async def test_preempt_discards_pending_cancel(
-        self, _allow_interrupt, monkeypatch
-    ) -> None:
+    async def test_preempt_discards_pending_cancel(self, _allow_interrupt, monkeypatch) -> None:
         """S1.3 guarantee: preempt cleans up stale pending_cancel so the new
         task created downstream isn't killed by a seconds-old cancel."""
         monkeypatch.setitem(
@@ -368,9 +360,7 @@ class _MarkerSession:
 
 class TestPreemptMarker:
     @pytest.mark.asyncio
-    async def test_interrupt_appends_marker(
-        self, _allow_interrupt, monkeypatch
-    ) -> None:
+    async def test_interrupt_appends_marker(self, _allow_interrupt, monkeypatch) -> None:
         monkeypatch.setitem(
             config_mod.settings.double_texting_per_channel, "ch_interrupt", "interrupt"
         )
@@ -540,9 +530,7 @@ class TestWaitForIdle:
 
         async def waiter():
             wait_started.set()
-            ok = await mgr.wait_for_idle(
-                "conv-1", target_generation=r1.generation, timeout=2.0
-            )
+            ok = await mgr.wait_for_idle("conv-1", target_generation=r1.generation, timeout=2.0)
             wait_returned.append(ok)
 
         t = asyncio.create_task(waiter())
@@ -551,9 +539,7 @@ class TestWaitForIdle:
         await asyncio.sleep(0.02)
 
         # Same-client INTERRUPT bumps the lock to gen=2
-        r2 = await mgr.start(
-            "conv-1", "client-A", policy=DoubleTextingPolicy.INTERRUPT
-        )
+        r2 = await mgr.start("conv-1", "client-A", policy=DoubleTextingPolicy.INTERRUPT)
         assert r2.took_over is not None
         assert r2.generation == r1.generation + 1
 
@@ -573,9 +559,7 @@ class TestWaitForIdle:
         assert r2.generation == r1.generation + 1
         # wait_for_idle on the new gen with short timeout must NOT see
         # the stale set-Event from r1's finish.
-        ok = await mgr.wait_for_idle(
-            "conv-1", target_generation=r2.generation, timeout=0.1
-        )
+        ok = await mgr.wait_for_idle("conv-1", target_generation=r2.generation, timeout=0.1)
         assert ok is False
 
 
@@ -647,9 +631,7 @@ class TestAppendMarkerPersistence:
         assert meta["policy"] == "interrupt"
 
     @pytest.mark.asyncio
-    async def test_append_marker_skips_persistence_when_transient(
-        self, monkeypatch
-    ) -> None:
+    async def test_append_marker_skips_persistence_when_transient(self, monkeypatch) -> None:
         from openakita.sessions.session import Session, SessionConfig
 
         captured: list[tuple] = []
@@ -733,8 +715,7 @@ class TestConversationMetrics:
 
         snap = {(s["name"], frozenset(s["labels"].items())): s["value"] for s in metrics.snapshot()}
         assert (
-            snap[("preempt", frozenset({"policy": "interrupt", "channel": "desktop"}.items()))]
-            == 2
+            snap[("preempt", frozenset({"policy": "interrupt", "channel": "desktop"}.items()))] == 2
         )
         assert snap[("queue", frozenset({"channel": "telegram"}.items()))] == 1
         assert (
@@ -1075,9 +1056,7 @@ class TestPostAuditFixes:
         """
         lifecycle = ConversationLifecycleManager()
         cid = "conv-fix-a"
-        res = await lifecycle.start(
-            cid, "client-1", policy=DoubleTextingPolicy.QUEUE
-        )
+        res = await lifecycle.start(cid, "client-1", policy=DoubleTextingPolicy.QUEUE)
         assert res.conflict is None
         gen = res.generation
 
@@ -1096,9 +1075,7 @@ class TestPostAuditFixes:
 
         # The lock is gone, so a new start() succeeds with a fresh
         # generation rather than 409.
-        next_res = await lifecycle.start(
-            cid, "client-2", policy=DoubleTextingPolicy.QUEUE
-        )
+        next_res = await lifecycle.start(cid, "client-2", policy=DoubleTextingPolicy.QUEUE)
         assert next_res.conflict is None
         assert next_res.generation > gen
 
@@ -1109,9 +1086,7 @@ class TestPostAuditFixes:
         outer safety-net) must be a no-op, not a crash."""
         lifecycle = ConversationLifecycleManager()
         cid = "conv-fix-a-2"
-        res = await lifecycle.start(
-            cid, "client-1", policy=DoubleTextingPolicy.QUEUE
-        )
+        res = await lifecycle.start(cid, "client-1", policy=DoubleTextingPolicy.QUEUE)
         gen = res.generation
 
         first = await lifecycle.finish(cid, generation=gen)

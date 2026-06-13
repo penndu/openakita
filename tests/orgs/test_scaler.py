@@ -20,7 +20,10 @@ def scaler(mock_runtime, persisted_org) -> OrgScaler:
 class TestRequestClone:
     async def test_creates_pending_request(self, scaler: OrgScaler, persisted_org):
         req = await scaler.request_clone(
-            persisted_org.id, "node_cto", "node_dev", reason="工作量过大",
+            persisted_org.id,
+            "node_cto",
+            "node_dev",
+            reason="工作量过大",
         )
         assert req.request_type == "clone"
         assert req.status == "pending"
@@ -39,9 +42,12 @@ class TestRequestClone:
 class TestRequestRecruit:
     def test_creates_recruit_request(self, scaler: OrgScaler, persisted_org):
         req = scaler.request_recruit(
-            persisted_org.id, "node_ceo",
-            role_title="安全专员", role_goal="负责安全审计",
-            department="技术部", parent_node_id="node_cto",
+            persisted_org.id,
+            "node_ceo",
+            role_title="安全专员",
+            role_goal="负责安全审计",
+            department="技术部",
+            parent_node_id="node_cto",
             reason="缺少安全人才",
         )
         assert req.request_type == "recruit"
@@ -78,7 +84,9 @@ class TestDismiss:
         result = await scaler.dismiss_node(persisted_org.id, persisted_org.nodes[2].id, by="admin")
         assert result is True
 
-    async def test_dismiss_non_ephemeral_returns_false(self, scaler: OrgScaler, persisted_org, mock_runtime):
+    async def test_dismiss_non_ephemeral_returns_false(
+        self, scaler: OrgScaler, persisted_org, mock_runtime
+    ):
         result = await scaler.dismiss_node(persisted_org.id, persisted_org.nodes[2].id, by="admin")
         assert result is False
 
@@ -90,10 +98,13 @@ class TestGetPendingRequests:
     async def test_after_multiple_requests(self, scaler: OrgScaler, persisted_org):
         await scaler.request_clone(persisted_org.id, "node_cto", "node_dev", reason="忙")
         scaler.request_recruit(
-            persisted_org.id, "node_ceo",
-            role_title="安全", role_goal="审计", department="技术部",
-            parent_node_id="node_cto", reason="需要",
+            persisted_org.id,
+            "node_ceo",
+            role_title="安全",
+            role_goal="审计",
+            department="技术部",
+            parent_node_id="node_cto",
+            reason="需要",
         )
         reqs = scaler.get_pending_requests(persisted_org.id)
         assert len(reqs) == 2
-

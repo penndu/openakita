@@ -184,7 +184,9 @@ async def _auto_search(
         except _FALLBACK_ERRORS as exc:
             logger.info(
                 "[web_search.auto] %s skipped (%s): %s",
-                provider.id, type(exc).__name__, exc,
+                provider.id,
+                type(exc).__name__,
+                exc,
             )
             last_err = exc
             continue

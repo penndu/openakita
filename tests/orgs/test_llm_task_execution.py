@@ -60,7 +60,8 @@ class TestToolCallExecution:
 
         result = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "node_ceo",
+                org.id,
+                "node_ceo",
                 "请在组织黑板上记录一条决策：'Q2目标确定为用户增长30%'。使用 org_write_blackboard 工具。",
             ),
             timeout=90.0,
@@ -69,8 +70,12 @@ class TestToolCallExecution:
 
         bb = runtime.get_blackboard(org.id)
         entries = bb.read_org(limit=10)
-        found = any("Q2" in e.content or "用户增长" in e.content or "30%" in e.content for e in entries)
-        assert found, f"Blackboard should contain the decision. Entries: {[e.content[:60] for e in entries]}"
+        found = any(
+            "Q2" in e.content or "用户增长" in e.content or "30%" in e.content for e in entries
+        )
+        assert found, (
+            f"Blackboard should contain the decision. Entries: {[e.content[:60] for e in entries]}"
+        )
 
     async def test_ceo_reads_blackboard(self, live_env):
         """CEO should use org_read_blackboard and reference its contents."""
@@ -83,15 +88,17 @@ class TestToolCallExecution:
 
         result = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "node_ceo",
+                org.id,
+                "node_ceo",
                 "请查看组织黑板（用 org_read_blackboard），然后告诉我黑板上有什么内容。",
             ),
             timeout=90.0,
         )
         assert "result" in result
         response = result["result"]
-        assert any(kw in response for kw in ["大会", "路线图", "产品", "下周"]), \
+        assert any(kw in response for kw in ["大会", "路线图", "产品", "下周"]), (
             f"Response should reference blackboard content. Got: {response[:200]}"
+        )
 
 
 class TestMultiHopDelegation:
@@ -105,7 +112,8 @@ class TestMultiHopDelegation:
 
         result = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "node_ceo",
+                org.id,
+                "node_ceo",
                 "请使用 org_delegate_task 工具，给CTO分配一个任务：'调研Python异步框架的技术选型'。",
             ),
             timeout=90.0,
@@ -115,8 +123,9 @@ class TestMultiHopDelegation:
         es = runtime.get_event_store(org.id)
         events = es.query(limit=50)
         event_types = [e.get("event_type", "") for e in events]
-        assert "task_assigned" in event_types, \
+        assert "task_assigned" in event_types, (
             f"Expected task_assigned event. Events: {event_types}"
+        )
 
     async def test_delegation_chain_generates_events(self, live_env):
         """A delegation should generate node_activated events for both CEO and CTO."""
@@ -126,7 +135,8 @@ class TestMultiHopDelegation:
 
         await asyncio.wait_for(
             runtime.send_command(
-                org.id, "node_ceo",
+                org.id,
+                "node_ceo",
                 "给CTO分配任务：写一份技术方案摘要。用 org_delegate_task。",
             ),
             timeout=120.0,
@@ -162,14 +172,16 @@ class TestErrorRecoveryWithLLM:
 
         refreshed = runtime.get_org(org.id)
         cto = refreshed.get_node("node_cto")
-        assert cto.status != NodeStatus.ERROR, \
+        assert cto.status != NodeStatus.ERROR, (
             f"CTO should have recovered from ERROR, got: {cto.status}"
+        )
 
         es = runtime.get_event_store(org.id)
         events = es.query(limit=30)
         event_types = [e.get("event_type", "") for e in events]
-        assert "node_auto_recovered" in event_types, \
+        assert "node_auto_recovered" in event_types, (
             f"Expected node_auto_recovered event. Types: {event_types}"
+        )
 
 
 class TestEventStoreIntegrity:
@@ -230,8 +242,9 @@ class TestOrgNodeStatusTransitions:
 
         refreshed = runtime.get_org(org.id)
         ceo = refreshed.get_node("node_ceo")
-        assert ceo.status != NodeStatus.ERROR, \
+        assert ceo.status != NodeStatus.ERROR, (
             f"CEO should not be in ERROR after task, got: {ceo.status}"
+        )
 
         es = runtime.get_event_store(org.id)
         events = es.query(event_type="task_completed", limit=5)
@@ -268,6 +281,6 @@ class TestCompletedTaskCount:
         )
 
         refreshed = runtime.get_org(org.id)
-        assert refreshed.total_tasks_completed > initial, \
+        assert refreshed.total_tasks_completed > initial, (
             f"Tasks completed should increment. Initial={initial}, Now={refreshed.total_tasks_completed}"
-
+        )

@@ -252,7 +252,9 @@ class WordTaskManager:
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
         if status:
-            sql = "SELECT * FROM projects WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = (
+                "SELECT * FROM projects WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            )
             args: tuple[Any, ...] = (status, limit, offset)
         else:
             sql = "SELECT * FROM projects ORDER BY created_at DESC LIMIT ? OFFSET ?"
@@ -367,7 +369,9 @@ class WordTaskManager:
             ),
         )
         await self._db.commit()
-        async with self._db.execute("SELECT * FROM templates WHERE id = ?", (template_id,)) as cursor:
+        async with self._db.execute(
+            "SELECT * FROM templates WHERE id = ?", (template_id,)
+        ) as cursor:
             row = _template_row(await cursor.fetchone())
         assert row is not None
         return row
@@ -441,4 +445,3 @@ class WordTaskManager:
             if await self.delete_project(str(row["id"])):
                 removed += 1
         return removed
-

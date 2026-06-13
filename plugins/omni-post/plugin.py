@@ -1171,9 +1171,7 @@ class OmniPostPlugin(PluginBase):
                 out[pid] = dict(selectors)
         return out
 
-    async def _default_selector_probe(
-        self, platform: str, key: str, spec: Any
-    ) -> bool:
+    async def _default_selector_probe(self, platform: str, key: str, spec: Any) -> bool:
         """Synthetic probe used when Playwright is not available.
 
         We treat any non-empty ``spec`` string (or dict containing a
@@ -1190,9 +1188,7 @@ class OmniPostPlugin(PluginBase):
             return bool(primary)
         return False
 
-    async def _default_selfheal_notifier(
-        self, platform: str, payload: dict[str, Any]
-    ) -> None:
+    async def _default_selfheal_notifier(self, platform: str, payload: dict[str, Any]) -> None:
         """Broadcast a structured UI event whenever a platform is rotting.
 
         A real IM channel (Slack / DingTalk / Feishu) plugs in by
@@ -1309,7 +1305,7 @@ class _TemplateCreateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    kind: str = "caption"          # caption | topic | cover
+    kind: str = "caption"  # caption | topic | cover
     body: dict[str, Any] | None = None
     tags: list[str] | None = None
 

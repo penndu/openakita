@@ -123,4 +123,3 @@ async def test_write_permission_mode_fails_when_yaml_write_fails(monkeypatch):
     result = await write_permission_mode(_PermissionModeBody(mode="smart"))
 
     assert result["status"] == "error"
-

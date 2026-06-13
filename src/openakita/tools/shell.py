@@ -242,9 +242,7 @@ class ShellTool:
     _PARTIAL_DRAIN_CAP_BYTES = 64 * 1024  # 64KB per stream
     _PARTIAL_DRAIN_TIMEOUT_S = 0.25
 
-    async def _soft_kill_then_hard(
-        self, process: asyncio.subprocess.Process
-    ) -> None:
+    async def _soft_kill_then_hard(self, process: asyncio.subprocess.Process) -> None:
         """Try a polite SIGINT/Ctrl-C first, then hard-kill if needed.
 
         v1.27.15 (S2 P2-8).  Previously cancel went straight to
@@ -282,9 +280,7 @@ class ShellTool:
             return
 
         try:
-            await asyncio.wait_for(
-                process.wait(), timeout=self._SOFT_KILL_GRACE_S
-            )
+            await asyncio.wait_for(process.wait(), timeout=self._SOFT_KILL_GRACE_S)
             return
         except TimeoutError:
             logger.info(
@@ -294,9 +290,7 @@ class ShellTool:
             )
             await self._kill_process_tree(process)
 
-    async def _drain_partial_output(
-        self, process: asyncio.subprocess.Process
-    ) -> dict:
+    async def _drain_partial_output(self, process: asyncio.subprocess.Process) -> dict:
         """Best-effort drain of any data still buffered in stdout/stderr pipes.
 
         v1.27.15 (S2 P2-8).  Called after ``_soft_kill_then_hard`` —

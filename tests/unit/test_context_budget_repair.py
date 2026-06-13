@@ -21,7 +21,9 @@ class DummyPluginCatalog:
 def test_context_pressure_includes_system_tools_and_real_usage():
     cm = ContextManager(DummyBrain())
     messages = [{"role": "user", "content": "短消息"}]
-    tools = [{"name": "big_tool", "input_schema": {"type": "object", "properties": {"x": "y" * 5000}}}]
+    tools = [
+        {"name": "big_tool", "input_schema": {"type": "object", "properties": {"x": "y" * 5000}}}
+    ]
 
     pressure = cm.calculate_context_pressure(
         messages,
@@ -148,8 +150,12 @@ def test_microcompact_dedupes_cached_and_repeated_tool_results():
 
 
 def test_token_anomaly_compaction_uses_configured_summary_chars(monkeypatch):
-    monkeypatch.setattr("openakita.core.reasoning_engine.settings.context_token_anomaly_threshold", 100)
-    monkeypatch.setattr("openakita.core.reasoning_engine.settings.context_cached_summary_chars", 100)
+    monkeypatch.setattr(
+        "openakita.core.reasoning_engine.settings.context_token_anomaly_threshold", 100
+    )
+    monkeypatch.setattr(
+        "openakita.core.reasoning_engine.settings.context_cached_summary_chars", 100
+    )
     engine = object.__new__(ReasoningEngine)
     working_messages = [
         {

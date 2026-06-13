@@ -112,7 +112,9 @@ def _is_dedupe_drop(result: str) -> bool:
 class TestDelegateInflightLock:
     @pytest.mark.asyncio
     async def test_concurrent_delegate_same_chain_target_no_double_enqueue(
-        self, runtime_with_locks, org,
+        self,
+        runtime_with_locks,
+        org,
     ):
         """实战场景下两道防线一起生效：
           * 第一次 delegate 成功，让 ProjectStore 落盘 in_progress
@@ -124,13 +126,15 @@ class TestDelegateInflightLock:
         first = await handler.handle(
             "org_delegate_task",
             {"to_node": "writer-a", "task": "产出 A", "task_chain_id": "chain-X"},
-            org.id, "planner",
+            org.id,
+            "planner",
         )
         assert not _is_dedupe_drop(first), f"first call wrongly dropped: {first!r}"
         second = await handler.handle(
             "org_delegate_task",
             {"to_node": "writer-a", "task": "产出 A", "task_chain_id": "chain-X"},
-            org.id, "planner",
+            org.id,
+            "planner",
         )
         # 第二次应被拦截，但拦截源可能是 ProjectStore 也可能是 inflight 锁，
         # 关键不变量：下游 mailbox 不会被重复入队。
@@ -143,7 +147,9 @@ class TestDelegateInflightLock:
 
     @pytest.mark.asyncio
     async def test_inflight_lock_blocks_when_projectstore_bypassed(
-        self, runtime_with_locks, org,
+        self,
+        runtime_with_locks,
+        org,
     ):
         """直接验证 inflight 锁单点功能：手动预占同 key 后，handle() 必须返回 [去重]。
 
@@ -156,7 +162,8 @@ class TestDelegateInflightLock:
         result = await handler.handle(
             "org_delegate_task",
             {"to_node": "writer-a", "task": "产出 Y", "task_chain_id": "chain-Y"},
-            org.id, "planner",
+            org.id,
+            "planner",
         )
         assert _is_dedupe_drop(result), (
             f"handle should hit inflight lock and return dedupe drop: {result!r}"
@@ -168,12 +175,14 @@ class TestDelegateInflightLock:
         r1 = await handler.handle(
             "org_delegate_task",
             {"to_node": "writer-a", "task": "A", "task_chain_id": "c1"},
-            org.id, "planner",
+            org.id,
+            "planner",
         )
         r2 = await handler.handle(
             "org_delegate_task",
             {"to_node": "writer-b", "task": "B", "task_chain_id": "c1"},
-            org.id, "planner",
+            org.id,
+            "planner",
         )
         assert not _is_dedupe_drop(r1)
         assert not _is_dedupe_drop(r2)
@@ -181,11 +190,13 @@ class TestDelegateInflightLock:
     @pytest.mark.asyncio
     async def test_window_expiry_allows_redelegate(self, runtime_with_locks, org):
         import time as _t
+
         handler = OrgToolHandler(runtime_with_locks)
         first = await handler.handle(
             "org_delegate_task",
             {"to_node": "writer-a", "task": "A", "task_chain_id": "c-expiry"},
-            org.id, "planner",
+            org.id,
+            "planner",
         )
         assert not _is_dedupe_drop(first)
         # 把锁的时间戳手动倒退到窗口外
@@ -194,7 +205,8 @@ class TestDelegateInflightLock:
         third = await handler.handle(
             "org_delegate_task",
             {"to_node": "writer-a", "task": "A", "task_chain_id": "c-expiry"},
-            org.id, "planner",
+            org.id,
+            "planner",
         )
         assert not _is_dedupe_drop(third), f"after expiry should pass: {third!r}"
 
@@ -202,7 +214,9 @@ class TestDelegateInflightLock:
 class TestSubmitDeliverableInflightLock:
     @pytest.mark.asyncio
     async def test_concurrent_submit_same_chain_dropped(
-        self, runtime_with_locks, org,
+        self,
+        runtime_with_locks,
+        org,
     ):
         handler = OrgToolHandler(runtime_with_locks)
         # writer-a -> planner 同一 chain 的两次 submit
@@ -215,7 +229,8 @@ class TestSubmitDeliverableInflightLock:
                 "summary": "v1",
                 "task_chain_id": "chain-S",
             },
-            org.id, "writer-a",
+            org.id,
+            "writer-a",
         )
         assert not _is_dedupe_drop(first), f"first submit wrongly dropped: {first!r}"
         second = await handler.handle(
@@ -226,7 +241,7 @@ class TestSubmitDeliverableInflightLock:
                 "summary": "v1",
                 "task_chain_id": "chain-S",
             },
-            org.id, "writer-a",
+            org.id,
+            "writer-a",
         )
         assert _is_dedupe_drop(second), f"second submit should be deduped: {second!r}"
-

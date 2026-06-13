@@ -94,9 +94,13 @@ class TestDecay:
 
 class TestRefreshMemoryMd:
     def test_refresh_creates_file(self, lifecycle, store, tmp_path):
-        store.save_semantic(SemanticMemory(
-            content="重要偏好", type=MemoryType.PREFERENCE, importance_score=0.9,
-        ))
+        store.save_semantic(
+            SemanticMemory(
+                content="重要偏好",
+                type=MemoryType.PREFERENCE,
+                importance_score=0.9,
+            )
+        )
 
         identity_dir = tmp_path / "identity"
         identity_dir.mkdir(exist_ok=True)

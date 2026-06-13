@@ -63,7 +63,9 @@ def _outline_to_markdown(outline: dict[str, Any], fields: dict[str, Any]) -> str
     return "\n".join(chunks).strip() + "\n"
 
 
-def audit_output(path: Path | None, *, markdown: str = "", missing: list[str] | None = None) -> dict[str, Any]:
+def audit_output(
+    path: Path | None, *, markdown: str = "", missing: list[str] | None = None
+) -> dict[str, Any]:
     warnings: list[str] = []
     errors: list[str] = []
     if path is None or not path.exists():
@@ -145,7 +147,12 @@ async def run_pipeline(
             ctx.outline = {
                 "title": ctx.fields.get("title") or "文档初稿",
                 "sections": [
-                    {"id": "main", "title": "正文", "goal": ctx.requirement or "整理核心内容", "bullets": []}
+                    {
+                        "id": "main",
+                        "title": "正文",
+                        "goal": ctx.requirement or "整理核心内容",
+                        "bullets": [],
+                    }
                 ],
                 "missing_inputs": [],
             }
@@ -207,7 +214,10 @@ async def run_pipeline(
             status=status,
             output_path=str(ctx.output_path) if ctx.output_path else None,
             completed_at=time.time(),
-            metadata={"pipeline_ms": int((time.time() - started) * 1000), "version": version["version"]},
+            metadata={
+                "pipeline_ms": int((time.time() - started) * 1000),
+                "version": version["version"],
+            },
         )
         await _emit(emit, "project_update", {"project_id": ctx.project_id, "status": status})
     except Exception as exc:
@@ -231,4 +241,3 @@ async def run_pipeline(
             encoding="utf-8",
         )
     return ctx
-

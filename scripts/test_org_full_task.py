@@ -1,6 +1,6 @@
 """
 完整任务执行测试 — 真实大模型端到端
- 
+
 创建一个组织 → 启动 → 下达任务 → 观察 CEO 分配给 CTO → CTO 执行 → 黑板记录
 → 检查事件链 → 检查节点状态 → 输出完整执行报告
 """
@@ -13,29 +13,44 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from openakita.orgs.manager import OrgManager
 from openakita.orgs.runtime import OrgRuntime
 from openakita.orgs.models import (
-    EdgeType, NodeStatus, OrgEdge, OrgNode, OrgStatus, Organization,
+    EdgeType,
+    NodeStatus,
+    OrgEdge,
+    OrgNode,
+    OrgStatus,
+    Organization,
 )
 
 
 def make_test_org() -> dict:
     nodes = [
         OrgNode(
-            id="ceo", role_title="总经理", level=0, department="管理层",
+            id="ceo",
+            role_title="总经理",
+            level=0,
+            department="管理层",
             role_goal="统筹全局，制定战略，分配任务给下属",
             role_backstory="你是一家AI创业公司的总经理，负责公司战略方向和团队管理",
         ),
         OrgNode(
-            id="cto", role_title="技术总监", level=1, department="技术部",
+            id="cto",
+            role_title="技术总监",
+            level=1,
+            department="技术部",
             role_goal="负责技术方案设计和技术团队管理",
             role_backstory="你是技术总监，精通AI和软件架构，负责技术路线制定",
         ),
         OrgNode(
-            id="product", role_title="产品经理", level=1, department="产品部",
+            id="product",
+            role_title="产品经理",
+            level=1,
+            department="产品部",
             role_goal="负责产品规划、需求分析和用户体验",
             role_backstory="你是产品经理，擅长用户需求分析和产品设计",
         ),
@@ -55,13 +70,14 @@ def make_test_org() -> dict:
 
 
 def print_section(title: str):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {title}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 async def main():
     import tempfile
+
     data_dir = Path(tempfile.mkdtemp(prefix="org_test_"))
     print(f"[数据目录] {data_dir}")
 
@@ -75,7 +91,7 @@ async def main():
     print_section("第1步：启动组织")
     t0 = time.time()
     await runtime.start_org(org.id)
-    print(f"  ✓ 组织已启动，耗时 {time.time()-t0:.1f}s")
+    print(f"  ✓ 组织已启动，耗时 {time.time() - t0:.1f}s")
     print(f"  节点状态:")
     for n in org.nodes:
         print(f"    - {n.role_title}: {n.status.value}")
@@ -104,7 +120,7 @@ async def main():
         for line in result["result"].split("\n")[:10]:
             print(f"    {line}")
         if result["result"].count("\n") > 10:
-            print(f"    ... (共 {result['result'].count(chr(10))+1} 行)")
+            print(f"    ... (共 {result['result'].count(chr(10)) + 1} 行)")
     elif "error" in result:
         print(f"  ❌ 错误: {result['error']}")
 
@@ -158,7 +174,7 @@ async def main():
             preview = f" content={data['content'][:60]}"
         elif "prompt" in data:
             preview = f" prompt={data['prompt'][:60]}"
-        print(f"    [{ts[11:19] if len(ts)>19 else ts}] {etype} by {actor}{preview}")
+        print(f"    [{ts[11:19] if len(ts) > 19 else ts}] {etype} by {actor}{preview}")
 
     print_section("第7步：统计摘要")
     print(f"  组织: {refreshed.name}")
@@ -168,7 +184,9 @@ async def main():
     print(f"  事件总数: {len(events)}")
     print(f"  黑板记录数: {len(org_entries)}")
 
-    tool_events = [e for e in events if e.get("event_type") in ("task_assigned", "blackboard_written")]
+    tool_events = [
+        e for e in events if e.get("event_type") in ("task_assigned", "blackboard_written")
+    ]
     print(f"  工具调用事件: {len(tool_events)}")
 
     has_delegate = any(e.get("event_type") == "task_assigned" for e in events)
@@ -195,11 +213,10 @@ async def main():
     await runtime.stop_org(org.id)
     await runtime.shutdown()
     print("  ✓ 组织已停止，运行时已关闭")
-    print(f"\n{'='*60}")
-    print(f"  测试完成，总耗时 {time.time()-t0:.1f}s")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print(f"  测试完成，总耗时 {time.time() - t0:.1f}s")
+    print(f"{'=' * 60}")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-

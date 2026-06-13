@@ -154,9 +154,7 @@ class TestPersistGuard:
 
 
 class TestLoadAndMerge:
-    def test_resume_restores_tools_and_appends_new_user_and_hint(
-        self, engine, data_dir
-    ) -> None:
+    def test_resume_restores_tools_and_appends_new_user_and_hint(self, engine, data_dir) -> None:
         persist_working_messages("conv-9", _tool_turn(), base_dir=data_dir)
 
         # Next turn's rebuilt text history + the new "继续" message.
@@ -181,9 +179,7 @@ class TestLoadAndMerge:
         assert "tu-1" in tool_use_ids
 
         # New human-user tail is appended after the restored state.
-        assert any(
-            m.get("role") == "user" and m.get("content") == "继续" for m in merged
-        )
+        assert any(m.get("role") == "user" and m.get("content") == "继续" for m in merged)
         # A continue nudge is appended last (framed as reusable context, not
         # an imperative to continue — avoids biasing a genuine topic change).
         assert "不要重复执行" in merged[-1]["content"]
@@ -235,15 +231,21 @@ class TestLoadAndMerge:
         assert has_tool_blocks(merged) is True
 
     def test_returns_none_when_no_persisted_state(self, engine, data_dir) -> None:
-        assert engine._maybe_load_resume_working_messages(
-            [{"role": "user", "content": "hi"}], "conv-absent", False
-        ) is None
+        assert (
+            engine._maybe_load_resume_working_messages(
+                [{"role": "user", "content": "hi"}], "conv-absent", False
+            )
+            is None
+        )
 
     def test_returns_none_for_sub_agent(self, engine, data_dir) -> None:
         persist_working_messages("conv-sa", _tool_turn(), base_dir=data_dir)
-        assert engine._maybe_load_resume_working_messages(
-            [{"role": "user", "content": "继续"}], "conv-sa", True
-        ) is None
+        assert (
+            engine._maybe_load_resume_working_messages(
+                [{"role": "user", "content": "继续"}], "conv-sa", True
+            )
+            is None
+        )
 
     def test_load_consumes_file(self, engine, data_dir) -> None:
         persist_working_messages("conv-consume", _tool_turn(), base_dir=data_dir)
@@ -263,9 +265,12 @@ class TestLoadAndMerge:
         import os
 
         os.utime(f, (long_ago, long_ago))
-        assert engine._maybe_load_resume_working_messages(
-            [{"role": "user", "content": "继续"}], "conv-old", False
-        ) is None
+        assert (
+            engine._maybe_load_resume_working_messages(
+                [{"role": "user", "content": "继续"}], "conv-old", False
+            )
+            is None
+        )
 
     def test_stale_within_load_window_resumes_tools_without_hint(self, engine, data_dir) -> None:
         """Past the hint-freshness window but inside the 24h load window: the

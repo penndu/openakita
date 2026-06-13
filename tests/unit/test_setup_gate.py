@@ -148,9 +148,7 @@ async def test_setup_gate_passes_spa_shell(tmp_path, monkeypatch):
     app, _cfg = _build_app_without_password(tmp_path)
     monkeypatch.setenv("TRUST_PROXY", "true")
     async with _make_async_client(app) as c:
-        resp = await c.get(
-            "/web/index.html", headers={"X-Forwarded-For": "10.0.0.5"}
-        )
+        resp = await c.get("/web/index.html", headers={"X-Forwarded-For": "10.0.0.5"})
     assert resp.status_code == 200
 
 
@@ -182,9 +180,7 @@ async def test_setup_gate_passes_non_api_paths_through_silently(tmp_path, monkey
 
     monkeypatch.setenv("TRUST_PROXY", "true")
     async with _make_async_client(app) as c:
-        resp = await c.get(
-            "/random-spa-route", headers={"X-Forwarded-For": "10.0.0.5"}
-        )
+        resp = await c.get("/random-spa-route", headers={"X-Forwarded-For": "10.0.0.5"})
     assert resp.status_code == 200, "SPA routes are not API; gate must not 428"
 
 

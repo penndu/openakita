@@ -104,4 +104,3 @@ class TestReportGeneration:
         summary = event_store.generate_summary_report(days=1)
         assert summary["total_events"] == 0
         assert summary["tasks_completed"] == 0
-

@@ -66,4 +66,3 @@ def add_upload_preview_route(
         return build_preview_url("word-maker", rel_path)
 
     return _make_url
-

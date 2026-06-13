@@ -67,9 +67,7 @@ class TestPromptNoSoulAgent:
         node = persisted_org.nodes[0]
         id_dir = org_dir / "nodes" / node.id / "identity"
         id_dir.mkdir(parents=True, exist_ok=True)
-        (id_dir / "SOUL.md").write_text(
-            "# 自定义灵魂\nSOUL_UNIQUE_MARKER_XYZ", encoding="utf-8"
-        )
+        (id_dir / "SOUL.md").write_text("# 自定义灵魂\nSOUL_UNIQUE_MARKER_XYZ", encoding="utf-8")
 
         resolved = identity.resolve(node, persisted_org)
         prompt = identity.build_org_context_prompt(node, persisted_org, resolved)
@@ -111,9 +109,7 @@ class TestRolePriorityChain:
 
         id_dir = org_dir / "nodes" / node.id / "identity"
         id_dir.mkdir(parents=True, exist_ok=True)
-        (id_dir / "ROLE.md").write_text(
-            "你是一位务实的技术总监，ROLE文件定义。", encoding="utf-8"
-        )
+        (id_dir / "ROLE.md").write_text("你是一位务实的技术总监，ROLE文件定义。", encoding="utf-8")
 
         resolved = identity.resolve(node, persisted_org)
         assert "ROLE文件定义" in resolved.role
@@ -123,9 +119,7 @@ class TestRolePriorityChain:
         prompt = identity.build_org_context_prompt(node, persisted_org, resolved)
         assert "ROLE文件定义" in prompt
 
-    def test_custom_prompt_appears_in_role_section(
-        self, identity: OrgIdentity, persisted_org
-    ):
+    def test_custom_prompt_appears_in_role_section(self, identity: OrgIdentity, persisted_org):
         """custom_prompt content goes into '你的组织角色' section."""
         node = persisted_org.nodes[0]
         node.custom_prompt = "CUSTOM_MARKER_ABC123"
@@ -143,9 +137,7 @@ class TestRolePriorityChain:
 
 
 class TestDelegationGuidance:
-    def test_manager_gets_delegation_instruction(
-        self, identity: OrgIdentity, persisted_org
-    ):
+    def test_manager_gets_delegation_instruction(self, identity: OrgIdentity, persisted_org):
         """Nodes with children should get explicit delegation guidance."""
         ceo = persisted_org.nodes[0]
         resolved = identity.resolve(ceo, persisted_org)
@@ -183,15 +175,24 @@ class TestDelegationGuidance:
 # 4. Tool carrying rules
 # ---------------------------------------------------------------------------
 
-_KEEP_TOOLS = frozenset({
-    "get_tool_info", "create_todo", "update_todo_step",
-    "get_todo_status", "complete_todo",
-})
+_KEEP_TOOLS = frozenset(
+    {
+        "get_tool_info",
+        "create_todo",
+        "update_todo_step",
+        "get_todo_status",
+        "complete_todo",
+    }
+)
 
-_ORG_CONFLICT_TOOLS = frozenset({
-    "delegate_to_agent", "spawn_agent",
-    "delegate_parallel", "create_agent",
-})
+_ORG_CONFLICT_TOOLS = frozenset(
+    {
+        "delegate_to_agent",
+        "spawn_agent",
+        "delegate_parallel",
+        "create_agent",
+    }
+)
 
 
 class TestToolCarryingRules:
@@ -208,8 +209,11 @@ class TestToolCarryingRules:
     def test_keep_tools_are_minimal(self):
         """_KEEP set should be small and focused on planning/discovery."""
         assert {
-            "get_tool_info", "create_todo", "update_todo_step",
-            "get_todo_status", "complete_todo",
+            "get_tool_info",
+            "create_todo",
+            "update_todo_step",
+            "get_todo_status",
+            "complete_todo",
         } == _KEEP_TOOLS
 
     def test_no_external_tools_means_empty_allowed(self):
@@ -354,12 +358,12 @@ class TestPromptPreviewStructure:
         resolved = identity.resolve(node, persisted_org)
 
         org_context_prompt = identity.build_org_context_prompt(
-            node, persisted_org, resolved,
+            node,
+            persisted_org,
+            resolved,
         )
 
-        allowed_external = expand_tool_categories(
-            node.external_tools
-        ) - _ORG_CONFLICT_TOOLS
+        allowed_external = expand_tool_categories(node.external_tools) - _ORG_CONFLICT_TOOLS
 
         assert isinstance(org_context_prompt, str)
         assert len(org_context_prompt) > 100
@@ -382,4 +386,3 @@ class TestPromptPreviewStructure:
 
         resolved_after = identity.resolve(node, persisted_org)
         assert resolved_after.level >= 1
-

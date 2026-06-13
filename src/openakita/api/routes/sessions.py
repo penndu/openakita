@@ -213,9 +213,7 @@ def _maybe_backfill_messages(session) -> None:
             session.context.messages.sort(key=lambda m: m.get("timestamp") or "")
         except Exception:
             pass
-        logger.info(
-            f"[Sessions] backfilled {appended} turns from SQLite for {session.session_key}"
-        )
+        logger.info(f"[Sessions] backfilled {appended} turns from SQLite for {session.session_key}")
 
     try:
         session.set_metadata(_BACKFILL_DONE_FLAG, True)

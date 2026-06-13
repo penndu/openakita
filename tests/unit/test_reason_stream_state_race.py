@@ -155,9 +155,7 @@ class TestReasonStreamRaceGuard:
         )
 
     def test_handle_llm_error_model_switch_transition_is_guarded(self) -> None:
-        src = self._strip_comments(
-            inspect.getsource(ReasoningEngine._handle_llm_error)
-        )
+        src = self._strip_comments(inspect.getsource(ReasoningEngine._handle_llm_error))
         pattern = re.compile(
             r"try\s*:\s*"
             r"\n\s*state\.transition\(TaskStatus\.MODEL_SWITCHING\)\s*"
@@ -213,9 +211,7 @@ class TestEnsureReadyForReasoning:
         "terminal_status",
         [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED],
     )
-    def test_terminal_raises_illegal_reasoning_entry(
-        self, terminal_status: TaskStatus
-    ) -> None:
+    def test_terminal_raises_illegal_reasoning_entry(self, terminal_status: TaskStatus) -> None:
         ts = TaskState(task_id="t1")
         ts.transition(TaskStatus.REASONING)
         ts.transition(terminal_status)
@@ -323,7 +319,7 @@ class TestS5AAuditFixes:
         # The except keyword line owning this marker is somewhere before
         # the marker but at most ~1500 chars upstream (handler body +
         # multi-line explanatory comment).
-        upstream = src[max(0, outer_marker - 1500):outer_marker]
+        upstream = src[max(0, outer_marker - 1500) : outer_marker]
         assert "except IllegalReasoningEntry" in upstream, (
             "FIX-S5A-1: the `reason_stream_outer` counter call must live "
             "inside an `except IllegalReasoningEntry` block — otherwise "
@@ -409,7 +405,7 @@ class TestS5AAuditFixes:
                 f"FIX-S5A-2: counter label {label!r} not found in "
                 f"_run_impl source — hot-fix wiring is missing."
             )
-            window = src[max(0, pos - 1500):pos]
+            window = src[max(0, pos - 1500) : pos]
             assert "if state.is_terminal:" in window, (
                 f"FIX-S5A-2: counter call at {label!r} must be guarded "
                 f"by `if state.is_terminal:` within the nearest 1500 chars "
@@ -443,9 +439,7 @@ class TestS5AAuditFixes:
             metrics.inc_illegal_reasoning_entry(source=label)
         snap = metrics.snapshot()
         seen_labels = {
-            s["labels"]["source"]
-            for s in snap
-            if s["name"] == "illegal_reasoning_entry"
+            s["labels"]["source"] for s in snap if s["name"] == "illegal_reasoning_entry"
         }
         assert seen_labels == {
             "reason_stream_iter",

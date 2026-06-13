@@ -46,11 +46,7 @@ def safe_asset_filename(raw: str, default_ext: str = ".bin") -> str:
     # Cap length so freakishly long filenames cannot blow up file systems.
     if len(cleaned) > 120:
         stem, dot, ext = cleaned.rpartition(".")
-        cleaned = (
-            stem[: 120 - len(ext) - 1] + "." + ext
-            if dot and len(ext) <= 8
-            else cleaned[:120]
-        )
+        cleaned = stem[: 120 - len(ext) - 1] + "." + ext if dot and len(ext) <= 8 else cleaned[:120]
     return cleaned
 
 
@@ -85,7 +81,10 @@ def copy_to_workspace(src: Path, dest: Path) -> bool:
             return True
     except Exception as exc:
         logger.debug(
-            "[plugin_assets] copy %s -> %s failed: %s", src, dest, exc,
+            "[plugin_assets] copy %s -> %s failed: %s",
+            src,
+            dest,
+            exc,
         )
         return False
 
@@ -124,7 +123,8 @@ async def download_to_workspace(
             if resp.status_code != 200:
                 logger.info(
                     "[plugin_assets] download %s returned HTTP %s",
-                    url, resp.status_code,
+                    url,
+                    resp.status_code,
                 )
                 return False
             with open(tmp, "wb") as fh:
@@ -133,7 +133,8 @@ async def download_to_workspace(
                     if total > max_bytes:
                         logger.warning(
                             "[plugin_assets] download %s aborted, exceeded %d bytes",
-                            url, max_bytes,
+                            url,
+                            max_bytes,
                         )
                         tmp.unlink(missing_ok=True)
                         return False

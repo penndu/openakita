@@ -78,6 +78,7 @@ def _resolve_engine(task: dict[str, Any], deps: "PipelineDeps") -> str:
         return "mp"
     return "pw"
 
+
 _PLATFORM_BREAKING_KINDS = {
     ErrorKind.PLATFORM_BREAKING_CHANGE.value,
     ErrorKind.DEPENDENCY.value,

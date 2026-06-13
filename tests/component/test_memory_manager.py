@@ -18,6 +18,7 @@ def memory_dir(tmp_workspace):
 @pytest.fixture
 def memory_manager(memory_dir, mock_brain):
     from openakita.memory.manager import MemoryManager
+
     mem_dir, memory_md = memory_dir
     return MemoryManager(
         data_dir=mem_dir,

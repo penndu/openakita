@@ -53,9 +53,9 @@ def _make_catalog(skills: list[_FakeSkill]) -> SkillCatalog:
 
 def test_generate_catalog_legacy_path_is_index_only():
     long_trigger = "Use this when " + ("very detailed trigger text " * 80)
-    catalog = _make_catalog([
-        _FakeSkill("long-skill", long_trigger, category="writing", when_to_use=long_trigger)
-    ])
+    catalog = _make_catalog(
+        [_FakeSkill("long-skill", long_trigger, category="writing", when_to_use=long_trigger)]
+    )
 
     output = catalog.generate_catalog()
 
@@ -84,9 +84,9 @@ def test_catalog_scope_index_uses_skill_index_without_grouped_expansion():
 
 
 def test_skill_catalog_marks_instructions_as_guidance():
-    catalog = _make_catalog([
-        _FakeSkill("brainstorming", "Must ask one question first", category="workflow")
-    ])
+    catalog = _make_catalog(
+        [_FakeSkill("brainstorming", "Must ask one question first", category="workflow")]
+    )
 
     grouped = catalog.get_grouped_compact_catalog()
     index = catalog.get_index_catalog()
@@ -96,9 +96,9 @@ def test_skill_catalog_marks_instructions_as_guidance():
 
 
 def test_skill_guidance_advisory_is_not_duplicated_in_prompt_rules():
-    catalog = _make_catalog([
-        _FakeSkill("brainstorming", "Must ask one question first", category="workflow")
-    ])
+    catalog = _make_catalog(
+        [_FakeSkill("brainstorming", "Must ask one question first", category="workflow")]
+    )
 
     output = _build_catalogs_section(
         tool_catalog=None,
@@ -184,7 +184,9 @@ def test_list_skills_defaults_to_compact_directory(tmp_path: Path):
     verbose = handler._list_skills({"verbose": True, "include_paths": True})
 
     assert len(compact) < 1200
-    assert "long trigger description long trigger description long trigger description" not in compact
+    assert (
+        "long trigger description long trigger description long trigger description" not in compact
+    )
     assert "path=" not in compact
     assert "long trigger description long trigger description long trigger description" in verbose
     assert "path=" in verbose

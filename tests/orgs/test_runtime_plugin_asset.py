@@ -38,9 +38,7 @@ def _make_agent_with_plugin_tool(tool_name: str = "tongyi_image_create") -> Simp
     plugin = SimpleNamespace(
         manifest=SimpleNamespace(id="tongyi-image", display_name_zh="通义生图"),
         api=SimpleNamespace(
-            _registered_tools=[
-                {"name": tool_name, "description": "...", "input_schema": {}}
-            ]
+            _registered_tools=[{"name": tool_name, "description": "...", "input_schema": {}}]
         ),
     )
     pm = SimpleNamespace(
@@ -161,8 +159,12 @@ async def test_record_plugin_asset_local_path_registers_attachment(runtime, tmp_
     }
 
     enhanced = await runtime._record_plugin_asset_output(
-        agent, "org_test", "node_wb",
-        "tongyi_image_create", {}, json.dumps(payload),
+        agent,
+        "org_test",
+        "node_wb",
+        "tongyi_image_create",
+        {},
+        json.dumps(payload),
         workspace=workspace,
     )
 
@@ -191,8 +193,12 @@ async def test_record_plugin_asset_returns_none_when_no_artifacts(runtime, tmp_p
     workspace.mkdir()
     payload = {"ok": True, "task_id": "tk", "status": "succeeded"}
     enhanced = await runtime._record_plugin_asset_output(
-        agent, "org_test", "node_wb",
-        "tongyi_image_create", {}, json.dumps(payload),
+        agent,
+        "org_test",
+        "node_wb",
+        "tongyi_image_create",
+        {},
+        json.dumps(payload),
         workspace=workspace,
     )
     assert enhanced is None
@@ -203,8 +209,13 @@ async def test_record_plugin_asset_skips_non_json(runtime, tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     out = await runtime._record_plugin_asset_output(
-        agent, "org", "node", "tongyi_image_create", {},
-        "this is not JSON", workspace=workspace,
+        agent,
+        "org",
+        "node",
+        "tongyi_image_create",
+        {},
+        "this is not JSON",
+        workspace=workspace,
     )
     assert out is None
 
@@ -219,8 +230,13 @@ async def test_record_plugin_asset_skips_when_ok_false(runtime, tmp_path):
         "image_urls": ["https://example.com/should-be-ignored.png"],
     }
     out = await runtime._record_plugin_asset_output(
-        agent, "org", "node", "tongyi_image_create", {},
-        json.dumps(payload), workspace=workspace,
+        agent,
+        "org",
+        "node",
+        "tongyi_image_create",
+        {},
+        json.dumps(payload),
+        workspace=workspace,
     )
     # failed plugin calls must not trigger downloads / registration
     assert out is None
@@ -233,7 +249,8 @@ def test_workbench_prompt_section_lists_tools_and_protocol(runtime):
         {"name": "tongyi_image_status", "description": "Status"},
     ]
     prompt = runtime._build_workbench_prompt_section(
-        agent, {"plugin_id": "tongyi-image", "template_id": "workbench:tongyi-image"},
+        agent,
+        {"plugin_id": "tongyi-image", "template_id": "workbench:tongyi-image"},
     )
     assert "通义生图" in prompt
     assert "tongyi_image_create" in prompt
@@ -245,7 +262,8 @@ def test_workbench_prompt_section_lists_tools_and_protocol(runtime):
 def test_workbench_prompt_section_falls_back_to_plugin_id(runtime):
     agent = SimpleNamespace(_plugin_manager=None, _tools=[])
     prompt = runtime._build_workbench_prompt_section(
-        agent, {"plugin_id": "some-workbench", "template_id": "workbench:some-workbench"},
+        agent,
+        {"plugin_id": "some-workbench", "template_id": "workbench:some-workbench"},
     )
     # gracefully degrades when manager is unavailable; still emits a section
     assert "some-workbench" in prompt

@@ -358,8 +358,10 @@ class FileTool:
         try:
             from ..core.feature_flags import is_enabled as _ff_enabled
         except Exception:
+
             def _ff_enabled(_name: str) -> bool:
                 return True
+
         if _ff_enabled("grep_safety_v1"):
             forbidden_reason = self._grep_path_forbidden(dir_path)
             if forbidden_reason:
@@ -609,7 +611,9 @@ class FileTool:
         if recursive:
             return [
                 str(p.relative_to(dir_path))
-                for p in self._iter_matching_paths(dir_path, pattern, recursive=True, files_only=False)
+                for p in self._iter_matching_paths(
+                    dir_path, pattern, recursive=True, files_only=False
+                )
             ]
 
         self.last_traversal_skipped = 0
@@ -680,15 +684,9 @@ class FileTool:
         if forbidden_reason:
             raise ValueError(f"glob refused: {forbidden_reason}")
 
-        dir_cap = (
-            max_dirs
-            if isinstance(max_dirs, int) and max_dirs > 0
-            else GLOB_DEFAULT_MAX_DIRS
-        )
+        dir_cap = max_dirs if isinstance(max_dirs, int) and max_dirs > 0 else GLOB_DEFAULT_MAX_DIRS
         file_cap = (
-            max_files
-            if isinstance(max_files, int) and max_files > 0
-            else GLOB_DEFAULT_MAX_FILES
+            max_files if isinstance(max_files, int) and max_files > 0 else GLOB_DEFAULT_MAX_FILES
         )
         result_cap = (
             max_results
@@ -869,7 +867,9 @@ class FileTool:
             return False
         rel_posix = rel.as_posix()
         pattern_posix = pattern.replace("\\", "/")
-        return rel.match(pattern) or fnmatch(rel_posix, pattern_posix) or fnmatch(path.name, pattern)
+        return (
+            rel.match(pattern) or fnmatch(rel_posix, pattern_posix) or fnmatch(path.name, pattern)
+        )
 
     @staticmethod
     def _should_skip_relative_path(path: Path, root: Path) -> bool:

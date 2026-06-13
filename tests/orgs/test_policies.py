@@ -114,4 +114,3 @@ class TestPolicyTemplates:
         policies.install_default_policies("default")
         count2 = policies.install_default_policies("default")
         assert count2 == 0
-

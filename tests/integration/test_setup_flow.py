@@ -107,9 +107,7 @@ class TestSetupEndpoint:
         assert app.state.web_access_config.verify_password("hunter22!")
 
     async def test_setup_sets_httponly_refresh_cookie(self, client):
-        resp = await client.post(
-            "/api/auth/setup", json={"new_password": "hunter22!"}
-        )
+        resp = await client.post("/api/auth/setup", json={"new_password": "hunter22!"})
         assert resp.status_code == 200
         cookie_header = resp.headers.get("set-cookie", "")
         assert "openakita_refresh=" in cookie_header
@@ -123,16 +121,12 @@ class TestSetupEndpoint:
         assert resp.json()["detail"] == "password_too_short"
 
     async def test_setup_rejects_all_digits(self, client):
-        resp = await client.post(
-            "/api/auth/setup", json={"new_password": "12345678"}
-        )
+        resp = await client.post("/api/auth/setup", json={"new_password": "12345678"})
         assert resp.status_code == 400
         assert resp.json()["detail"] == "password_all_digits"
 
     async def test_setup_rejects_all_letters(self, client):
-        resp = await client.post(
-            "/api/auth/setup", json={"new_password": "abcdefghij"}
-        )
+        resp = await client.post("/api/auth/setup", json={"new_password": "abcdefghij"})
         assert resp.status_code == 400
         assert resp.json()["detail"] == "password_all_letters"
 
@@ -149,9 +143,7 @@ class TestSetupEndpoint:
         first = await client.post("/api/auth/setup", json={"new_password": "hunter22!"})
         assert first.status_code == 200
         # Second call: password is already set → 409 conflict.
-        second = await client.post(
-            "/api/auth/setup", json={"new_password": "someoneElseTried99!"}
-        )
+        second = await client.post("/api/auth/setup", json={"new_password": "someoneElseTried99!"})
         assert second.status_code == 409
         assert second.json()["detail"] == "already_set"
         # And the original password still wins.
@@ -165,9 +157,7 @@ class TestSetupEndpoint:
 
 
 class TestSetupGate428:
-    async def test_lan_caller_to_protected_endpoint_returns_428(
-        self, client, monkeypatch
-    ):
+    async def test_lan_caller_to_protected_endpoint_returns_428(self, client, monkeypatch):
         monkeypatch.setenv("TRUST_PROXY", "true")
         resp = await client.get(
             "/api/memories",
@@ -178,9 +168,7 @@ class TestSetupGate428:
         assert body["error"] == "setup_required"
         assert "setup_url" in body
 
-    async def test_lan_caller_to_setup_endpoint_passes(
-        self, client, monkeypatch
-    ):
+    async def test_lan_caller_to_setup_endpoint_passes(self, client, monkeypatch):
         """Setup endpoints themselves must remain reachable even before setup."""
         monkeypatch.setenv("TRUST_PROXY", "true")
         resp = await client.get(
@@ -189,9 +177,7 @@ class TestSetupGate428:
         )
         assert resp.status_code == 200
 
-    async def test_after_setup_lan_caller_passes_gate_but_hits_auth(
-        self, client, monkeypatch
-    ):
+    async def test_after_setup_lan_caller_passes_gate_but_hits_auth(self, client, monkeypatch):
         """Once password is set, gate is open; auth middleware then takes over."""
         # Initial setup via loopback.
         setup = await client.post("/api/auth/setup", json={"new_password": "hunter22!"})
@@ -212,14 +198,10 @@ class TestSetupGate428:
 
 
 class TestChangePasswordFirstRun:
-    async def test_loopback_can_set_initial_password_via_change_password(
-        self, client, app
-    ):
+    async def test_loopback_can_set_initial_password_via_change_password(self, client, app):
         """Local-loopback users can call change-password without current_password
         even on a fresh install."""
-        resp = await client.post(
-            "/api/auth/change-password", json={"new_password": "hunter22!"}
-        )
+        resp = await client.post("/api/auth/change-password", json={"new_password": "hunter22!"})
         assert resp.status_code == 200, resp.text
         assert app.state.web_access_config.verify_password("hunter22!")
 

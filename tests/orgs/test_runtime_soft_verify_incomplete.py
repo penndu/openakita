@@ -39,7 +39,8 @@ def _trace_with_accept(success: bool = True) -> list[dict]:
                     "tool_use_id": "call-1",
                     "is_error": not success,
                     "result_content": (
-                        "✅ 已验收 planner 的交付" if success
+                        "✅ 已验收 planner 的交付"
+                        if success
                         else "❌ org_accept_deliverable 失败：找不到任务链"
                     ),
                 },
@@ -73,27 +74,43 @@ def _trace_without_accept() -> list[dict]:
 
 class TestIsSoftVerifyIncomplete:
     def test_returns_true_when_verify_incomplete_with_accepted_child(self):
-        assert is_soft_verify_incomplete(
-            "verify_incomplete", _trace_with_accept(success=True),
-        ) is True
+        assert (
+            is_soft_verify_incomplete(
+                "verify_incomplete",
+                _trace_with_accept(success=True),
+            )
+            is True
+        )
 
     def test_returns_false_when_accept_was_error(self):
         # accept_deliverable 失败不应当触发软完成
-        assert is_soft_verify_incomplete(
-            "verify_incomplete", _trace_with_accept(success=False),
-        ) is False
+        assert (
+            is_soft_verify_incomplete(
+                "verify_incomplete",
+                _trace_with_accept(success=False),
+            )
+            is False
+        )
 
     def test_returns_false_when_no_accept_deliverable(self):
-        assert is_soft_verify_incomplete(
-            "verify_incomplete", _trace_without_accept(),
-        ) is False
+        assert (
+            is_soft_verify_incomplete(
+                "verify_incomplete",
+                _trace_without_accept(),
+            )
+            is False
+        )
 
     def test_returns_false_for_other_exit_reasons(self):
         # 其它 exit_reason 即使存在 accept_deliverable 也不应被识别为软完成
         for reason in ("normal", "ask_user", "max_iterations", "loop_terminated"):
-            assert is_soft_verify_incomplete(
-                reason, _trace_with_accept(success=True),
-            ) is False, f"reason={reason!r} 不应被识别为软完成"
+            assert (
+                is_soft_verify_incomplete(
+                    reason,
+                    _trace_with_accept(success=True),
+                )
+                is False
+            ), f"reason={reason!r} 不应被识别为软完成"
 
     def test_returns_false_for_empty_trace(self):
         assert is_soft_verify_incomplete("verify_incomplete", None) is False
@@ -101,12 +118,20 @@ class TestIsSoftVerifyIncomplete:
 
     def test_handles_malformed_trace_gracefully(self):
         # 异常路径不应抛出
-        assert is_soft_verify_incomplete(
-            "verify_incomplete", [{"not": "a dict structure"}],  # type: ignore[list-item]
-        ) is False
-        assert is_soft_verify_incomplete(
-            "verify_incomplete", "not a list",  # type: ignore[arg-type]
-        ) is False
+        assert (
+            is_soft_verify_incomplete(
+                "verify_incomplete",
+                [{"not": "a dict structure"}],  # type: ignore[list-item]
+            )
+            is False
+        )
+        assert (
+            is_soft_verify_incomplete(
+                "verify_incomplete",
+                "not a list",  # type: ignore[arg-type]
+            )
+            is False
+        )
 
 
 class TestSummarizeRootCauseDowngrade:
@@ -140,7 +165,9 @@ class TestSoftVerifyContract:
         ],
     )
     def test_helper_matches_summarize_downgrade(
-        self, trace_factory, expected_soft: bool,
+        self,
+        trace_factory,
+        expected_soft: bool,
     ):
         trace = trace_factory()
         helper_result = is_soft_verify_incomplete("verify_incomplete", trace)
@@ -151,4 +178,3 @@ class TestSoftVerifyContract:
             f"helper={helper_result} 与 summarize 降级={downgraded} 不一致，"
             f"会导致 runtime 分支判定与诊断卡片根因不匹配"
         )
-

@@ -193,9 +193,7 @@ class AgentFactory:
         )
 
         if can_share:
-            await agent.initialize(
-                start_scheduler=False, lightweight=True, share_from=share_target
-            )
+            await agent.initialize(start_scheduler=False, lightweight=True, share_from=share_target)
         else:
             await agent.initialize(start_scheduler=False, lightweight=True)
         agent.configure_runtime_environment(profile)
@@ -490,14 +488,16 @@ class AgentFactory:
                 memory_md_path.write_text(seed, encoding="utf-8")
                 logger.info(
                     "[Memory] Seeded isolated MEMORY.md for %s at %s",
-                    profile.id, memory_md_path,
+                    profile.id,
+                    memory_md_path,
                 )
             except Exception as e:
                 logger.warning(
                     "[Memory] Failed to seed MEMORY.md for %s (%s); falling "
                     "back to global path. This may temporarily cross-pollinate "
                     "global memory.",
-                    profile.id, e,
+                    profile.id,
+                    e,
                 )
                 memory_md_path = settings.memory_path
 
@@ -740,7 +740,8 @@ class AgentInstancePool:
             session_entries = [
                 e
                 for e in self._pool.values()
-                if e.session_id == session_id and hasattr(e.agent, "brain")
+                if e.session_id == session_id
+                and hasattr(e.agent, "brain")
                 and e.runtime_config_version >= current_version
             ]
             if session_entries:

@@ -34,9 +34,7 @@ _SELF_DELEGATE_MARKERS = (
     "不能把任务委派给自己",
     "不能给自己委派任务",
 )
-_NON_DIRECT_MARKERS = (
-    "不是你的直属下级",
-)
+_NON_DIRECT_MARKERS = ("不是你的直属下级",)
 _TARGET_NOT_EXIST_MARKERS = (
     "目标节点",
     "可用节点",
@@ -91,7 +89,7 @@ def _extract_evidence(react_trace: list[dict]) -> list[dict]:
         iteration = int(iter_trace.get("iteration", 0) or 0)
         calls = iter_trace.get("tool_calls") or []
         results_by_id: dict[str, dict] = {}
-        for result in (iter_trace.get("tool_results") or []):
+        for result in iter_trace.get("tool_results") or []:
             if isinstance(result, dict):
                 rid = result.get("tool_use_id") or result.get("id") or ""
                 if rid:
@@ -110,18 +108,21 @@ def _extract_evidence(react_trace: list[dict]) -> list[dict]:
             # （args_summary 只截关键字段，无法判断 LLM 是否漏传 task_chain_id 等）。
             try:
                 import json as _json
+
                 args_raw = _json.dumps(args, ensure_ascii=False, default=str)
             except Exception:
                 args_raw = str(args)
             if len(args_raw) > 1024:
                 args_raw = args_raw[:1024] + "…"
-            evidence.append({
-                "iter": iteration,
-                "tool": str(call.get("name") or ""),
-                "args_summary": _summarize_args(args),
-                "args_raw_truncated": args_raw,
-                "error": result_content[:EVIDENCE_ERROR_MAX],
-            })
+            evidence.append(
+                {
+                    "iter": iteration,
+                    "tool": str(call.get("name") or ""),
+                    "args_summary": _summarize_args(args),
+                    "args_raw_truncated": args_raw,
+                    "error": result_content[:EVIDENCE_ERROR_MAX],
+                }
+            )
     return evidence
 
 
@@ -140,7 +141,7 @@ def _has_successful_chain_relay(react_trace: list[dict]) -> bool:
             continue
         calls = iter_trace.get("tool_calls") or []
         results_by_id: dict[str, dict] = {}
-        for r in (iter_trace.get("tool_results") or []):
+        for r in iter_trace.get("tool_results") or []:
             if isinstance(r, dict):
                 rid = r.get("tool_use_id") or r.get("id") or ""
                 if rid:
@@ -179,7 +180,7 @@ def _has_accepted_child_signal(react_trace: list[dict]) -> bool:
             continue
         calls = iter_trace.get("tool_calls") or []
         results_by_id: dict[str, dict] = {}
-        for r in (iter_trace.get("tool_results") or []):
+        for r in iter_trace.get("tool_results") or []:
             if isinstance(r, dict):
                 rid = r.get("tool_use_id") or r.get("id") or ""
                 if rid:
@@ -227,20 +228,15 @@ def _classify_delegate_subtype(evidence: list[dict]) -> str | None:
     if len(delegate_fails) < 3:
         return None
     self_delegation = sum(
-        1 for e in delegate_fails
-        if any(m in e["error"] for m in _SELF_DELEGATE_MARKERS)
+        1 for e in delegate_fails if any(m in e["error"] for m in _SELF_DELEGATE_MARKERS)
     )
     if self_delegation >= 3:
         return "org_delegate_self"
-    non_direct = sum(
-        1 for e in delegate_fails
-        if any(m in e["error"] for m in _NON_DIRECT_MARKERS)
-    )
+    non_direct = sum(1 for e in delegate_fails if any(m in e["error"] for m in _NON_DIRECT_MARKERS))
     if non_direct >= 3:
         return "non_direct_subordinate"
     target_miss = sum(
-        1 for e in delegate_fails
-        if all(m in e["error"] for m in _TARGET_NOT_EXIST_MARKERS)
+        1 for e in delegate_fails if all(m in e["error"] for m in _TARGET_NOT_EXIST_MARKERS)
     )
     if target_miss >= 3:
         return "delegate_target_not_exist"
@@ -416,7 +412,10 @@ def summarize(
         evidence = _extract_evidence(trace)
         total_iterations = len(trace)
         root_cause, fmt = _pick_root_cause(
-            safe_reason, evidence, total_iterations, react_trace=trace,
+            safe_reason,
+            evidence,
+            total_iterations,
+            react_trace=trace,
         )
         template = _DIAGNOSIS_TEMPLATES.get(root_cause) or _DIAGNOSIS_TEMPLATES["unknown"]
         headline = template["headline"].format(**fmt)
@@ -425,12 +424,14 @@ def summarize(
         if len(evidence) > MAX_EVIDENCE_ITEMS:
             trimmed = evidence[:MAX_EVIDENCE_ITEMS]
             omitted = len(evidence) - MAX_EVIDENCE_ITEMS
-            trimmed.append({
-                "iter": 0,
-                "tool": "…",
-                "args_summary": "",
-                "error": f"（还有 {omitted} 条失败记录未展示，请查看后端日志）",
-            })
+            trimmed.append(
+                {
+                    "iter": 0,
+                    "tool": "…",
+                    "args_summary": "",
+                    "error": f"（还有 {omitted} 条失败记录未展示，请查看后端日志）",
+                }
+            )
             evidence = trimmed
 
         return {
@@ -499,4 +500,3 @@ def format_human_summary(diagnosis: dict[str, Any]) -> str:
         for sline in suggestion.splitlines():
             lines.append(f"> {sline}" if sline else ">")
     return "\n".join(lines)
-

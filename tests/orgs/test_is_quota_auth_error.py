@@ -22,21 +22,15 @@ class TestWithErrorCategories:
         assert OrgRuntime._is_quota_auth_error(err) is True
 
     def test_mixed_categories_with_quota(self):
-        err = AllEndpointsFailedError(
-            "fail", error_categories={"transient", "quota"}
-        )
+        err = AllEndpointsFailedError("fail", error_categories={"transient", "quota"})
         assert OrgRuntime._is_quota_auth_error(err) is True
 
     def test_structural_category_not_detected(self):
-        err = AllEndpointsFailedError(
-            "fail", error_categories={"structural"}
-        )
+        err = AllEndpointsFailedError("fail", error_categories={"structural"})
         assert OrgRuntime._is_quota_auth_error(err) is False
 
     def test_transient_category_not_detected(self):
-        err = AllEndpointsFailedError(
-            "fail", error_categories={"transient"}
-        )
+        err = AllEndpointsFailedError("fail", error_categories={"transient"})
         assert OrgRuntime._is_quota_auth_error(err) is False
 
     def test_empty_categories_falls_through_to_string_match(self):
@@ -82,9 +76,7 @@ class TestWithoutErrorCategories:
         assert OrgRuntime._is_quota_auth_error(err) is False
 
     def test_structural_error_not_matched(self):
-        err = AllEndpointsFailedError(
-            "invalid request: max_tokens too large", is_structural=True
-        )
+        err = AllEndpointsFailedError("invalid request: max_tokens too large", is_structural=True)
         assert OrgRuntime._is_quota_auth_error(err) is False
 
 

@@ -308,9 +308,7 @@ class SkillStoreClient:
 
         # When git is not available, try GitHub ZIP download as fallback
         if git_exe is None:
-            return await SkillStoreClient._install_via_zip_fallback(
-                repo_url, skill_name, skill_dir
-            )
+            return await SkillStoreClient._install_via_zip_fallback(repo_url, skill_name, skill_dir)
 
         extra_kwargs: dict = {}
         if sys.platform == "win32":
@@ -334,9 +332,7 @@ class SkillStoreClient:
             shutil.rmtree(str(tmp_parent), ignore_errors=True)
 
     @staticmethod
-    async def _install_via_zip_fallback(
-        repo_url: str, skill_name: str, skill_dir: Path
-    ) -> bool:
+    async def _install_via_zip_fallback(repo_url: str, skill_name: str, skill_dir: Path) -> bool:
         """Download repo as ZIP from GitHub Archive API when git is unavailable.
 
         Mirrors the fallback logic in setup_center/bridge.py._download_github_zip.

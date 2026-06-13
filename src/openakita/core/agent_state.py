@@ -157,9 +157,7 @@ class TaskState:
     # ``core/abort_scope.py``).  ``cancel_event`` is kept as a property below
     # delegating to ``abort_root.event`` — preserves the 11+ existing read
     # call sites (``task.cancel_event.wait() / .is_set()``) zero-change.
-    abort_root: AbortScope = field(
-        default_factory=lambda: AbortScope(name="root")
-    )
+    abort_root: AbortScope = field(default_factory=lambda: AbortScope(name="root"))
 
     # Settle 机制（v1.27.14, plan: conversation concurrency v1.28, S1.5）
     # ``settled_event`` 由 reasoning_engine 在任意出口路径（正常完成 / cancel /

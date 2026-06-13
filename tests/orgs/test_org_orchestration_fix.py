@@ -54,7 +54,9 @@ def mock_runtime_full(mock_runtime):
 class TestChainParentPropagation:
     @pytest.mark.asyncio
     async def test_delegate_creates_child_chain_under_caller(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         # caller (CTO) 已经在 chain X 下处理任务
@@ -63,14 +65,12 @@ class TestChainParentPropagation:
         # CTO 把任务派给 dev
         result = await handler._handle_org_delegate_task(
             {"to_node": "node_dev", "task": "实现登录"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         assert "任务已分配" in result
         # 应至少存在一条以 chain_X 为父的子 chain
-        children = [
-            c for c, p in mock_runtime_full._chain_parent.items()
-            if p == "chain_X"
-        ]
+        children = [c for c, p in mock_runtime_full._chain_parent.items() if p == "chain_X"]
         assert len(children) == 1
         new_chain = children[0]
         assert new_chain != "chain_X"
@@ -79,29 +79,34 @@ class TestChainParentPropagation:
 
     @pytest.mark.asyncio
     async def test_delegate_root_with_no_chain_creates_top_level_chain(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         mock_runtime_full.get_current_chain_id = MagicMock(return_value=None)
         await handler._handle_org_delegate_task(
             {"to_node": "node_cto", "task": "做技术规划"},
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         # 顶层 chain 的 parent 应为 None
-        assert any(
-            p is None for p in mock_runtime_full._chain_parent.values()
-        )
+        assert any(p is None for p in mock_runtime_full._chain_parent.values())
 
     @pytest.mark.asyncio
     async def test_delegate_flag_off_falls_back_to_legacy(
-        self, mock_runtime_full, persisted_org, monkeypatch,
+        self,
+        mock_runtime_full,
+        persisted_org,
+        monkeypatch,
     ):
         monkeypatch.setattr(settings, "org_chain_parent_enforced", False)
         handler = OrgToolHandler(mock_runtime_full)
         mock_runtime_full.get_current_chain_id = MagicMock(return_value="chain_X")
         await handler._handle_org_delegate_task(
             {"to_node": "node_dev", "task": "测试"},
-            persisted_org.id, "node_cto",
+            persisted_org.id,
+            "node_cto",
         )
         # 旧行为：复用 caller chain，不应在 _chain_parent 里挂新条目
         assert all(p is None for p in mock_runtime_full._chain_parent.values())
@@ -115,7 +120,10 @@ class TestChainParentPropagation:
 class TestSubmitChainOverride:
     @pytest.mark.asyncio
     async def test_submit_overrides_wrong_chain_id_from_llm(
-        self, mock_runtime_full, persisted_org, caplog,
+        self,
+        mock_runtime_full,
+        persisted_org,
+        caplog,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         # caller (dev) 的 incoming chain 是 chain_X
@@ -132,13 +140,12 @@ class TestSubmitChainOverride:
                     "task_chain_id": "chain_WRONG_NEW",
                     "deliverable": "我做完了" * 50,  # >200 字
                 },
-                persisted_org.id, "node_dev",
+                persisted_org.id,
+                "node_dev",
             )
 
         # 应有 warning 提示 chain_id mismatch
-        assert any(
-            "chain_id mismatch" in rec.message for rec in caplog.records
-        )
+        assert any("chain_id mismatch" in rec.message for rec in caplog.records)
         # _link_project_task 应该用 caller current chain（X），而不是 LLM 的 WRONG
         assert handler._link_project_task.called
         called_chain = handler._link_project_task.call_args.args[1]
@@ -167,7 +174,10 @@ class TestAcceptanceChainResolution:
         assert "[任务链: 2026-05-10T0…]" in prompt
 
     def test_accept_resolves_unique_short_chain_for_delivered_task(
-        self, mock_runtime_full, org_dir, persisted_org,
+        self,
+        mock_runtime_full,
+        org_dir,
+        persisted_org,
     ):
         store = ProjectStore(org_dir)
         project = store.create_project(
@@ -207,7 +217,10 @@ class TestAcceptanceChainResolution:
         assert resolved == full_chain
 
     def test_accept_short_chain_reports_ambiguous_candidates(
-        self, mock_runtime_full, org_dir, persisted_org,
+        self,
+        mock_runtime_full,
+        org_dir,
+        persisted_org,
     ):
         store = ProjectStore(org_dir)
         project = store.create_project(
@@ -239,7 +252,9 @@ class TestAcceptanceChainResolution:
 
     @pytest.mark.asyncio
     async def test_submit_uses_current_chain_when_llm_omits(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         mock_runtime_full.get_current_chain_id = MagicMock(return_value="chain_X")
@@ -249,7 +264,8 @@ class TestAcceptanceChainResolution:
 
         await handler._handle_org_submit_deliverable(
             {"deliverable": "x" * 250},
-            persisted_org.id, "node_dev",
+            persisted_org.id,
+            "node_dev",
         )
         called_chain = handler._link_project_task.call_args.args[1]
         assert called_chain == "chain_X"
@@ -263,7 +279,9 @@ class TestAcceptanceChainResolution:
 class TestQuestionTaskGuard:
     @pytest.mark.asyncio
     async def test_block_question_with_task_intent_from_coordinator(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         # CEO 是有下属的协调者；CTO/dev 是它的下属
@@ -273,14 +291,17 @@ class TestQuestionTaskGuard:
                 "msg_type": "question",
                 "content": "请撰写一份服务器选型方案，下午前给我",
             },
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "拦截" in result
         assert "org_delegate_task" in result
 
     @pytest.mark.asyncio
     async def test_allow_pure_question_without_task_intent(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         result = await handler._handle_org_send_message(
@@ -289,13 +310,16 @@ class TestQuestionTaskGuard:
                 "msg_type": "question",
                 "content": "你最近忙吗？",
             },
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "拦截" not in result
 
     @pytest.mark.asyncio
     async def test_allow_leaf_node_question_with_task_intent(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         # node_dev 是叶子节点，没下属——guard 不应触发
@@ -305,13 +329,17 @@ class TestQuestionTaskGuard:
                 "msg_type": "question",
                 "content": "请撰写一份测试计划给我",
             },
-            persisted_org.id, "node_dev",
+            persisted_org.id,
+            "node_dev",
         )
         assert "拦截" not in result
 
     @pytest.mark.asyncio
     async def test_flag_off_disables_guard(
-        self, mock_runtime_full, persisted_org, monkeypatch,
+        self,
+        mock_runtime_full,
+        persisted_org,
+        monkeypatch,
     ):
         monkeypatch.setattr(settings, "org_question_task_guard", False)
         handler = OrgToolHandler(mock_runtime_full)
@@ -321,7 +349,8 @@ class TestQuestionTaskGuard:
                 "msg_type": "question",
                 "content": "请撰写一份服务器选型方案",
             },
-            persisted_org.id, "node_ceo",
+            persisted_org.id,
+            "node_ceo",
         )
         assert "拦截" not in result
 
@@ -338,7 +367,9 @@ class TestSupervisorPollWhitelist:
 
     def test_poll_friendly_never_terminates(self, monkeypatch):
         monkeypatch.setattr(
-            settings, "org_supervisor_poll_whitelist", True,
+            settings,
+            "org_supervisor_poll_whitelist",
+            True,
         )
         sup = RuntimeSupervisor(enabled=True)
         # 让同一个 poll 工具签名重复 10 次（超过 normal terminate 阈值，
@@ -353,10 +384,13 @@ class TestSupervisorPollWhitelist:
             assert out.prompt_injection == ""
 
     def test_poll_friendly_extreme_repeats_still_capped_at_nudge(
-        self, monkeypatch,
+        self,
+        monkeypatch,
     ):
         monkeypatch.setattr(
-            settings, "org_supervisor_poll_whitelist", True,
+            settings,
+            "org_supervisor_poll_whitelist",
+            True,
         )
         sup = RuntimeSupervisor(enabled=True)
         # 远远超过 poll 翻倍阈值
@@ -377,7 +411,9 @@ class TestSupervisorPollWhitelist:
 
     def test_flag_off_disables_whitelist(self, monkeypatch):
         monkeypatch.setattr(
-            settings, "org_supervisor_poll_whitelist", False,
+            settings,
+            "org_supervisor_poll_whitelist",
+            False,
         )
         sup = RuntimeSupervisor(enabled=True)
         for _ in range(8):
@@ -396,7 +432,9 @@ class TestSupervisorPollWhitelist:
 class TestWaitForDeliverable:
     @pytest.mark.asyncio
     async def test_wait_returns_when_chain_closes(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         mock_runtime_full.get_current_chain_id = MagicMock(return_value="parent_X")
@@ -417,7 +455,9 @@ class TestWaitForDeliverable:
 
         closer = asyncio.create_task(_close_one())
         result = await handler._handle_org_wait_for_deliverable(
-            {"timeout": 5}, persisted_org.id, "node_cto",
+            {"timeout": 5},
+            persisted_org.id,
+            "node_cto",
         )
         await closer
         assert "child_A" in result
@@ -425,7 +465,9 @@ class TestWaitForDeliverable:
 
     @pytest.mark.asyncio
     async def test_wait_returns_on_inbox_event(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         mock_runtime_full.get_current_chain_id = MagicMock(return_value="parent_X")
@@ -443,14 +485,18 @@ class TestWaitForDeliverable:
 
         pusher = asyncio.create_task(_push_inbox())
         result = await handler._handle_org_wait_for_deliverable(
-            {"timeout": 5}, persisted_org.id, "node_cto",
+            {"timeout": 5},
+            persisted_org.id,
+            "node_cto",
         )
         await pusher
         assert "新消息" in result
 
     @pytest.mark.asyncio
     async def test_wait_timeout_returns_useful_hint(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         mock_runtime_full.get_current_chain_id = MagicMock(return_value="parent_X")
@@ -459,14 +505,18 @@ class TestWaitForDeliverable:
         mock_runtime_full._chain_events["child_A"] = asyncio.Event()
 
         result = await handler._handle_org_wait_for_deliverable(
-            {"timeout": 1}, persisted_org.id, "node_cto",
+            {"timeout": 1},
+            persisted_org.id,
+            "node_cto",
         )
         assert "等待超时" in result
         assert "org_list_delegated_tasks" in result
 
     @pytest.mark.asyncio
     async def test_wait_returns_immediately_when_no_open_chains(
-        self, mock_runtime_full, persisted_org,
+        self,
+        mock_runtime_full,
+        persisted_org,
     ):
         handler = OrgToolHandler(mock_runtime_full)
         mock_runtime_full.get_current_chain_id = MagicMock(return_value="parent_X")
@@ -474,18 +524,25 @@ class TestWaitForDeliverable:
         mock_runtime_full._chain_parent["child_A"] = "parent_X"
 
         result = await handler._handle_org_wait_for_deliverable(
-            {"timeout": 5}, persisted_org.id, "node_cto",
+            {"timeout": 5},
+            persisted_org.id,
+            "node_cto",
         )
         assert "没有需要等待" in result
 
     @pytest.mark.asyncio
     async def test_wait_disabled_when_flag_off(
-        self, mock_runtime_full, persisted_org, monkeypatch,
+        self,
+        mock_runtime_full,
+        persisted_org,
+        monkeypatch,
     ):
         monkeypatch.setattr(settings, "org_wait_primitive_enabled", False)
         handler = OrgToolHandler(mock_runtime_full)
         result = await handler._handle_org_wait_for_deliverable(
-            {"timeout": 5}, persisted_org.id, "node_cto",
+            {"timeout": 5},
+            persisted_org.id,
+            "node_cto",
         )
         assert "已禁用" in result
 

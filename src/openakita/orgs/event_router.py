@@ -67,7 +67,11 @@ def summarize_org_event(event: str, data: dict[str, Any]) -> str | None:
         return f"{node} 任务超时"
     if event == "org:command_stuck_warning":
         idle_secs = data.get("idle_secs")
-        return "组织一段时间无新进展，仍在等待收口" if not idle_secs else f"组织 {round(float(idle_secs))} 秒无新进展，仍在等待收口"
+        return (
+            "组织一段时间无新进展，仍在等待收口"
+            if not idle_secs
+            else f"组织 {round(float(idle_secs))} 秒无新进展，仍在等待收口"
+        )
     return None
 
 

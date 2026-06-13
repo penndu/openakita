@@ -45,14 +45,7 @@ def _definitions_dir() -> Path:
 
 
 def _desktop_handler_path() -> Path:
-    return (
-        _project_root()
-        / "src"
-        / "openakita"
-        / "tools"
-        / "handlers"
-        / "desktop.py"
-    )
+    return _project_root() / "src" / "openakita" / "tools" / "handlers" / "desktop.py"
 
 
 def _extract_tool_names_from_file(path: Path) -> set[str]:
@@ -109,8 +102,7 @@ def _extract_desktop_tools() -> set[str]:
                         return {
                             elt.value
                             for elt in node.value.elts
-                            if isinstance(elt, ast.Constant)
-                            and isinstance(elt.value, str)
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
                         }
     return set()
 
@@ -136,8 +128,7 @@ class TestRegistryCompleteness:
 
     def test_definitions_dir_exists(self) -> None:
         assert _definitions_dir().exists(), (
-            f"expected definitions dir at {_definitions_dir()} — "
-            "test setup broken"
+            f"expected definitions dir at {_definitions_dir()} — test setup broken"
         )
 
     def test_discovered_tools_nonempty(self) -> None:
@@ -195,10 +186,7 @@ class TestBehaviorContracts:
         assert DEFAULT_BEHAVIOR == "block"
 
     def test_unknown_tool_resolves_to_default(self) -> None:
-        assert (
-            get_tool_interrupt_behavior("definitely_not_a_real_tool_xyz")
-            == "block"
-        )
+        assert get_tool_interrupt_behavior("definitely_not_a_real_tool_xyz") == "block"
 
     def test_known_read_only_tools_are_cancel(self) -> None:
         """Spot-check: anything read-only must be 'cancel' to keep
@@ -237,9 +225,7 @@ class TestBehaviorContracts:
         """No typos in the registry values."""
         for n in known_tools():
             v = get_tool_interrupt_behavior(n)
-            assert v in ("cancel", "block"), (
-                f"{n} -> {v!r}; must be 'cancel' or 'block'"
-            )
+            assert v in ("cancel", "block"), f"{n} -> {v!r}; must be 'cancel' or 'block'"
 
 
 class TestMcpAnnotationOverride:
@@ -285,16 +271,11 @@ class TestMcpAnnotationOverride:
         )
 
     def test_none_annotation_falls_through_to_default(self) -> None:
-        assert (
-            get_tool_interrupt_behavior("unknown_x", mcp_annotations=None) == "block"
-        )
+        assert get_tool_interrupt_behavior("unknown_x", mcp_annotations=None) == "block"
 
     def test_missing_key_falls_through(self) -> None:
         assert (
-            get_tool_interrupt_behavior(
-                "unknown_x", mcp_annotations={"other": "stuff"}
-            )
-            == "block"
+            get_tool_interrupt_behavior("unknown_x", mcp_annotations={"other": "stuff"}) == "block"
         )
 
 
@@ -314,9 +295,7 @@ class TestHelperFunctions:
         assert has_any_block_tool(["unknown_tool_xyz"])
 
     def test_partition_orders_preserved(self) -> None:
-        block, cancel = partition_by_behavior(
-            ["read_file", "write_file", "grep", "run_shell"]
-        )
+        block, cancel = partition_by_behavior(["read_file", "write_file", "grep", "run_shell"])
         assert block == ["write_file", "run_shell"]
         assert cancel == ["read_file", "grep"]
 
@@ -327,18 +306,14 @@ class TestHelperFunctions:
         n = warn_unclassified_tools(["read_file", "unknown_a", "unknown_b"])
         assert n == 2
         assert any(
-            "unknown_a" in rec.message
-            for rec in caplog.records
-            if rec.levelno == logging.WARNING
+            "unknown_a" in rec.message for rec in caplog.records if rec.levelno == logging.WARNING
         )
 
     def test_warn_unclassified_empty_input(self) -> None:
         assert warn_unclassified_tools([]) == 0
 
     def test_warn_unclassified_all_known(self) -> None:
-        assert (
-            warn_unclassified_tools(["read_file", "write_file", "grep"]) == 0
-        )
+        assert warn_unclassified_tools(["read_file", "write_file", "grep"]) == 0
 
     def test_type_annotation_runtime(self) -> None:
         """Sanity: InterruptBehavior is a Literal usable in static analysis,

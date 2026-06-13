@@ -99,7 +99,8 @@ async def run_tests():
 
         result = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "ceo",
+                org.id,
+                "ceo",
                 "请搜索一下2025年全球AI市场的最新发展趋势，用1-2句话总结关键发现，"
                 "然后把结果写入组织黑板（org_write_blackboard）。",
             ),
@@ -129,7 +130,8 @@ async def run_tests():
 
         result2 = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "ceo",
+                org.id,
+                "ceo",
                 "请使用 org_send_message 给高级研究员（researcher）分配一个任务：让他搜索 "
                 "'大语言模型在企业应用中的最新案例'，并将结果写入黑板。不要自己做，只委派。",
             ),
@@ -157,7 +159,8 @@ async def run_tests():
 
         result3 = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "researcher",
+                org.id,
+                "researcher",
                 "搜索 'AI Agent 在2025年的技术突破' 并用2-3句话总结，然后写入黑板。",
             ),
             timeout=120.0,
@@ -177,7 +180,8 @@ async def run_tests():
 
         result4 = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "analyst",
+                org.id,
+                "analyst",
                 "请用 org_read_blackboard 读取组织黑板上的信息，然后总结团队目前的调研成果。",
             ),
             timeout=120.0,
@@ -197,7 +201,8 @@ async def run_tests():
 
         result5 = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "analyst",
+                org.id,
+                "analyst",
                 "你需要搜索功能来做更深入的分析，请使用 org_request_tools 向上级申请 research 工具类目，"
                 "原因是'需要独立搜索能力以提高分析质量'。",
             ),
@@ -227,7 +232,8 @@ async def run_tests():
         grant_result = await runtime.handle_org_tool(
             "org_grant_tools",
             {"node_id": "analyst", "tools": ["research"]},
-            org.id, "ceo",
+            org.id,
+            "ceo",
         )
         print(f"\n授权结果: {grant_result}")
 
@@ -237,7 +243,8 @@ async def run_tests():
 
         result6 = await asyncio.wait_for(
             runtime.send_command(
-                org.id, "analyst",
+                org.id,
+                "analyst",
                 "你现在有搜索工具了！请搜索 'AI 2025 predictions' 并用一句话总结。",
             ),
             timeout=120.0,
@@ -268,10 +275,10 @@ async def run_tests():
     finally:
         await runtime.shutdown()
         import shutil
+
         if DATA_DIR.exists():
             shutil.rmtree(DATA_DIR, ignore_errors=True)
 
 
 if __name__ == "__main__":
     asyncio.run(run_tests())
-

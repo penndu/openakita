@@ -18,7 +18,9 @@ def blackboard(org_dir: Path, persisted_org) -> OrgBlackboard:
 
 class TestWriteRead:
     def test_write_and_read_org(self, blackboard: OrgBlackboard):
-        entry = blackboard.write_org("决定使用Python", "node_ceo", MemoryType.DECISION, tags=["tech"])
+        entry = blackboard.write_org(
+            "决定使用Python", "node_ceo", MemoryType.DECISION, tags=["tech"]
+        )
         assert entry.id.startswith("mem_")
         assert entry.scope == MemoryScope.ORG
 
@@ -174,4 +176,3 @@ class TestEviction:
             blackboard.write_org(f"mem_{i}", "n1", importance=i / (MAX_ORG_MEMORIES + 10))
         entries = blackboard.read_org(limit=999)
         assert len(entries) <= MAX_ORG_MEMORIES
-

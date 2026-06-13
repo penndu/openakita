@@ -763,7 +763,15 @@ class UserProfileManager:
 
         summary = f"已收集 {collected}/{total} 项用户信息\n\n"
 
-        for category in ["basic", "tech", "communication", "habits", "business", "personal", "persona"]:
+        for category in [
+            "basic",
+            "tech",
+            "communication",
+            "habits",
+            "business",
+            "personal",
+            "persona",
+        ]:
             category_items = [item for item in self.items.values() if item.category == category]
             summary += f"**{category.title()}**:\n"
             for item in category_items:

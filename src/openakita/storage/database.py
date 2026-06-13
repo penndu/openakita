@@ -289,9 +289,7 @@ class Database:
         }
         for column, ddl in required_columns.items():
             if column not in existing:
-                await self._connection.execute(
-                    f"ALTER TABLE token_usage ADD COLUMN {column} {ddl}"
-                )
+                await self._connection.execute(f"ALTER TABLE token_usage ADD COLUMN {column} {ddl}")
         await self._connection.executescript("""
             CREATE INDEX IF NOT EXISTS idx_token_usage_ts ON token_usage(timestamp);
             CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id);

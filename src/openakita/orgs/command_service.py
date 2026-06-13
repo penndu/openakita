@@ -33,7 +33,9 @@ def _log_task_exception(task: asyncio.Task) -> None:  # type: ignore[type-arg]
     if exc is not None:
         logger.error(
             "[CommandService] fire-and-forget task %s raised: %s",
-            task.get_name(), exc, exc_info=exc,
+            task.get_name(),
+            exc,
+            exc_info=exc,
         )
 
 
@@ -44,8 +46,12 @@ def _log_future_exception(future: Future) -> None:  # type: ignore[type-arg]
     exc = future.exception()
     if exc is not None:
         logger.error(
-            "[CommandService] cross-thread future raised: %s", exc, exc_info=exc,
+            "[CommandService] cross-thread future raised: %s",
+            exc,
+            exc_info=exc,
         )
+
+
 _service_instance: OrgCommandService | None = None
 
 
@@ -331,30 +337,34 @@ class OrgCommandService:
             "output_scope": cmd.get("output_scope"),
         }
         if live:
-            result.update({
-                "root_node_id": live.get("root_node_id") or result["root_node_id"],
-                "tracker_state": live.get("tracker_state"),
-                "root_chain_id": live.get("root_chain_id", ""),
-                "open_chains": live.get("open_chains", []),
-                "open_chain_count": live.get("open_chain_count", 0),
-                "open_subtree_chains": live.get("open_subtree_chains", []),
-                "blockers": live.get("blockers", []),
-                "blocker_summary": live.get("blocker_summary", ""),
-                "busy_nodes": live.get("busy_nodes", []),
-                "pending_mailbox": live.get("pending_mailbox", []),
-                "root_status": live.get("root_status", ""),
-                "last_progress_elapsed_s": live.get("last_progress_elapsed_s"),
-                "warned_stuck": live.get("warned_stuck", False),
-                "stopped_by_watchdog": live.get("auto_stopped", False),
-                "cancelled_by_user": live.get("user_cancelled", False),
-            })
+            result.update(
+                {
+                    "root_node_id": live.get("root_node_id") or result["root_node_id"],
+                    "tracker_state": live.get("tracker_state"),
+                    "root_chain_id": live.get("root_chain_id", ""),
+                    "open_chains": live.get("open_chains", []),
+                    "open_chain_count": live.get("open_chain_count", 0),
+                    "open_subtree_chains": live.get("open_subtree_chains", []),
+                    "blockers": live.get("blockers", []),
+                    "blocker_summary": live.get("blocker_summary", ""),
+                    "busy_nodes": live.get("busy_nodes", []),
+                    "pending_mailbox": live.get("pending_mailbox", []),
+                    "root_status": live.get("root_status", ""),
+                    "last_progress_elapsed_s": live.get("last_progress_elapsed_s"),
+                    "warned_stuck": live.get("warned_stuck", False),
+                    "stopped_by_watchdog": live.get("auto_stopped", False),
+                    "cancelled_by_user": live.get("user_cancelled", False),
+                }
+            )
         elif isinstance(cmd.get("result"), dict):
             command_result = cmd["result"]
-            result.update({
-                "warning": command_result.get("warning"),
-                "stopped_by_watchdog": bool(command_result.get("stopped_by_watchdog")),
-                "cancelled_by_user": bool(command_result.get("cancelled_by_user")),
-            })
+            result.update(
+                {
+                    "warning": command_result.get("warning"),
+                    "stopped_by_watchdog": bool(command_result.get("stopped_by_watchdog")),
+                    "cancelled_by_user": bool(command_result.get("cancelled_by_user")),
+                }
+            )
         return result
 
     async def cancel(self, org_id: str, command_id: str) -> dict[str, Any] | None:
@@ -372,6 +382,7 @@ class OrgCommandService:
         )
         try:
             from openakita.api.routes.websocket import broadcast_event
+
             await broadcast_event(
                 "org:command_cancelled",
                 {
@@ -390,7 +401,9 @@ class OrgCommandService:
         # are fine because the IM messages carry the cancel kind and
         # platforms typically dedupe by command_id in the body.
         await self._dispatch_forwards(
-            org_id, command_id, "cancelled",
+            org_id,
+            command_id,
+            "cancelled",
             "用户在指挥台触发了强制取消，运行的子节点会优雅停止。",
         )
         return {
@@ -459,7 +472,8 @@ class OrgCommandService:
             if cmd and cmd.get("org_id") == org_id:
                 return cmd
         running = [
-            cmd for cmd in self._commands.values()
+            cmd
+            for cmd in self._commands.values()
             if cmd.get("org_id") == org_id and cmd.get("status") == "running"
         ]
         if len(running) == 1:
@@ -502,23 +516,31 @@ class OrgCommandService:
                 self._bridge_persist_result(request.org_id, request.target_node_id, result)
                 await self._push_root_task_complete(request, root_node_id, result)
                 await self._broadcast_done(request.org_id, command_id, result=result)
-                await self.publish_summary(command_id, {
-                    "type": "org_command_done",
-                    "org_id": request.org_id,
-                    "command_id": command_id,
-                    "result": result,
-                })
+                await self.publish_summary(
+                    command_id,
+                    {
+                        "type": "org_command_done",
+                        "org_id": request.org_id,
+                        "command_id": command_id,
+                        "result": result,
+                    },
+                )
                 # Forward final result / cancellation to linked IM channels.
                 # The dispatcher inspects ``forward_to`` on the command record;
                 # absence is a no-op so existing callers see zero overhead.
                 result_text = ""
                 if isinstance(result, dict):
                     result_text = str(result.get("result") or "")
-                forward_kind = "cancelled" if (
-                    isinstance(result, dict) and result.get("cancelled_by_user")
-                ) else "done"
+                forward_kind = (
+                    "cancelled"
+                    if (isinstance(result, dict) and result.get("cancelled_by_user"))
+                    else "done"
+                )
                 await self._dispatch_forwards(
-                    request.org_id, command_id, forward_kind, result_text,
+                    request.org_id,
+                    command_id,
+                    forward_kind,
+                    result_text,
                 )
             except Exception as exc:
                 self._update_command_state(
@@ -528,16 +550,24 @@ class OrgCommandService:
                     error=str(exc),
                     finished_at=time.time(),
                 )
-                self._bridge_persist_result(request.org_id, request.target_node_id, {"error": str(exc)})
+                self._bridge_persist_result(
+                    request.org_id, request.target_node_id, {"error": str(exc)}
+                )
                 await self._broadcast_done(request.org_id, command_id, error=str(exc))
-                await self.publish_summary(command_id, {
-                    "type": "org_command_done",
-                    "org_id": request.org_id,
-                    "command_id": command_id,
-                    "error": str(exc),
-                })
+                await self.publish_summary(
+                    command_id,
+                    {
+                        "type": "org_command_done",
+                        "org_id": request.org_id,
+                        "command_id": command_id,
+                        "error": str(exc),
+                    },
+                )
                 await self._dispatch_forwards(
-                    request.org_id, command_id, "error", str(exc),
+                    request.org_id,
+                    command_id,
+                    "error",
+                    str(exc),
                 )
             finally:
                 with self._lock:
@@ -563,6 +593,7 @@ class OrgCommandService:
     ) -> None:
         try:
             from openakita.api.routes.websocket import broadcast_event
+
             payload = {"org_id": org_id, "command_id": command_id}
             if error:
                 payload["error"] = error
@@ -596,17 +627,18 @@ class OrgCommandService:
 
         try:
             from openakita.main import get_message_gateway
+
             gateway = get_message_gateway()
         except Exception:
             logger.debug(
-                "[OrgCmd] channel gateway unavailable; skipping IM forwards "
-                "for command=%s", command_id,
+                "[OrgCmd] channel gateway unavailable; skipping IM forwards for command=%s",
+                command_id,
             )
             return
         if gateway is None:
             logger.debug(
-                "[OrgCmd] no global gateway bound; skipping IM forwards "
-                "for command=%s", command_id,
+                "[OrgCmd] no global gateway bound; skipping IM forwards for command=%s",
+                command_id,
             )
             return
 
@@ -647,16 +679,21 @@ class OrgCommandService:
             except Exception as exc:
                 logger.warning(
                     "[OrgCmd] forward to %s/%s failed for command %s: %s",
-                    channel, chat_id, command_id, exc,
+                    channel,
+                    chat_id,
+                    command_id,
+                    exc,
                 )
                 ok = False
-            delivered.append({
-                "channel": channel,
-                "chat_id": chat_id,
-                "kind": kind,
-                "ok": bool(ok),
-                "ts": time.time(),
-            })
+            delivered.append(
+                {
+                    "channel": channel,
+                    "chat_id": chat_id,
+                    "kind": kind,
+                    "ok": bool(ok),
+                    "ts": time.time(),
+                }
+            )
 
         if delivered:
             with self._lock:
@@ -761,12 +798,14 @@ class OrgCommandService:
             elif result:
                 result_text = str(result)[:1200]
             sections.append(
-                "\n".join([
-                    f"- 上一条命令: {last_cmd.get('command_id')}",
-                    f"- 状态: {last_cmd.get('status')} / {last_cmd.get('phase')}",
-                    f"- 是否用户终止: {bool(last_cmd.get('cancel_requested_by_user'))}",
-                    f"- 阶段性结果: {result_text or '（无）'}",
-                ])
+                "\n".join(
+                    [
+                        f"- 上一条命令: {last_cmd.get('command_id')}",
+                        f"- 状态: {last_cmd.get('status')} / {last_cmd.get('phase')}",
+                        f"- 是否用户终止: {bool(last_cmd.get('cancel_requested_by_user'))}",
+                        f"- 阶段性结果: {result_text or '（无）'}",
+                    ]
+                )
             )
 
         try:
@@ -781,8 +820,10 @@ class OrgCommandService:
             store = self._runtime.get_project_store(org_id)
             tasks = store.all_tasks()
             unfinished = [
-                t for t in tasks
-                if str(t.get("status") or "") in {"todo", "in_progress", "delivered", "rejected", "blocked"}
+                t
+                for t in tasks
+                if str(t.get("status") or "")
+                in {"todo", "in_progress", "delivered", "rejected", "blocked"}
             ][:12]
             if unfinished:
                 lines = []
@@ -806,16 +847,21 @@ class OrgCommandService:
             f"{content}"
         )
 
-    def _find_recent_previous_command(self, org_id: str, root_node_id: str) -> dict[str, Any] | None:
+    def _find_recent_previous_command(
+        self, org_id: str, root_node_id: str
+    ) -> dict[str, Any] | None:
         candidates = [
-            cmd for cmd in self._commands.values()
+            cmd
+            for cmd in self._commands.values()
             if cmd.get("org_id") == org_id
             and cmd.get("root_node_id") == root_node_id
             and cmd.get("status") != "running"
         ]
         if not candidates:
             return None
-        candidates.sort(key=lambda c: float(c.get("finished_at") or c.get("updated_at") or 0), reverse=True)
+        candidates.sort(
+            key=lambda c: float(c.get("finished_at") or c.get("updated_at") or 0), reverse=True
+        )
         return candidates[0]
 
     def _mirror_command_to_distributed_surfaces(
@@ -986,4 +1032,3 @@ class OrgCommandService:
             sm.mark_dirty()
         except Exception as exc:
             logger.warning("[OrgCmd] failed to persist result to session: %s", exc)
-

@@ -233,9 +233,7 @@ class WebAccessConfig:
         the same condition that :meth:`verify_password` checks before
         comparing.
         """
-        return bool(self._data.get("password_hash")) and bool(
-            self._data.get("password_salt")
-        )
+        return bool(self._data.get("password_hash")) and bool(self._data.get("password_salt"))
 
     def change_password(self, new_password: str) -> None:
         hash_hex, salt_hex = _hash_password(new_password)

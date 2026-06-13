@@ -145,8 +145,7 @@ class TestTimeout:
 
         error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
         assert not error_records, (
-            "单端点超时不应当作 ERROR 报告，"
-            f"实际看到: {[r.getMessage() for r in error_records]}"
+            f"单端点超时不应当作 ERROR 报告，实际看到: {[r.getMessage() for r in error_records]}"
         )
         info_messages = " ".join(
             r.getMessage()
@@ -186,10 +185,15 @@ class TestRetrospectStorage:
     def test_save_and_load(self, tmp_path):
         storage = RetrospectStorage(storage_dir=tmp_path / "retrospect")
         record = RetrospectRecord(
-            task_id="t1", session_id="s1", description="Test",
-            duration_seconds=10.0, iterations=2,
-            model_switched=False, initial_model="gpt-4",
-            final_model="gpt-4", retrospect_result="All good",
+            task_id="t1",
+            session_id="s1",
+            description="Test",
+            duration_seconds=10.0,
+            iterations=2,
+            model_switched=False,
+            initial_model="gpt-4",
+            final_model="gpt-4",
+            retrospect_result="All good",
         )
         saved = storage.save(record)
         assert saved is True
@@ -198,8 +202,11 @@ class TestRetrospectStorage:
 class TestDataclasses:
     def test_tool_call_record(self):
         r = ToolCallRecord(
-            name="read_file", input_summary="path=/test",
-            output_summary="content", duration_ms=100, success=True,
+            name="read_file",
+            input_summary="path=/test",
+            output_summary="content",
+            duration_ms=100,
+            success=True,
         )
         assert r.name == "read_file"
 
@@ -212,4 +219,3 @@ class TestDataclasses:
         m = TaskMetrics(task_id="t", description="d")
         summary = m.to_summary()
         assert isinstance(summary, str)
-

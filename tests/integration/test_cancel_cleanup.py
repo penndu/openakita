@@ -195,9 +195,7 @@ class TestOrphanToolUseRepair:
         msgs = [
             {
                 "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "id": "t", "name": "shell", "input": {}}
-                ],
+                "content": [{"type": "tool_use", "id": "t", "name": "shell", "input": {}}],
             },
         ]
         synthesize_tool_results_for_orphans(msgs)
@@ -242,9 +240,7 @@ class TestOrphanToolUseRepair:
         msgs = [
             {
                 "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "id": "x", "name": "n", "input": {}}
-                ],
+                "content": [{"type": "tool_use", "id": "x", "name": "n", "input": {}}],
             },
         ]
         assert synthesize_tool_results_for_orphans(msgs) == 1
@@ -302,9 +298,7 @@ class TestWorkingMessagesPersistence:
         # backdate 25h
         long_ago = time.time() - 90_000
         os.utime(p, (long_ago, long_ago))
-        loaded = load_persisted_working_messages(
-            "conv-y", base_dir=base_dir, ttl_seconds=86_400
-        )
+        loaded = load_persisted_working_messages("conv-y", base_dir=base_dir, ttl_seconds=86_400)
         assert loaded is None
         # expired file must be cleaned
         assert not Path(p).exists()

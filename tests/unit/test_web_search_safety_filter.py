@@ -94,6 +94,7 @@ async def test_web_search_attempt_timeout_is_soft_guidance(monkeypatch):
     catches that and returns guidance text encouraging the model to
     continue with partial evidence rather than spin retries.
     """
+
     async def fake_run_web_search(**kwargs):
         raise NetworkUnreachableError(
             "stub provider unreachable (simulated timeout)",
@@ -103,9 +104,7 @@ async def test_web_search_attempt_timeout_is_soft_guidance(monkeypatch):
     monkeypatch.setattr(web_search_runtime, "run_web_search", fake_run_web_search)
     # The handler imports run_web_search by name at module load, so patch the
     # already-bound symbol there too.
-    monkeypatch.setattr(
-        "openakita.tools.handlers.web_search.run_web_search", fake_run_web_search
-    )
+    monkeypatch.setattr("openakita.tools.handlers.web_search.run_web_search", fake_run_web_search)
 
     result = await WebSearchHandler()._web_search(
         {"query": "slow source", "provider": "stub", "timeout_seconds": 0.01}
@@ -133,9 +132,7 @@ async def test_web_search_no_provider_available_raises_config_hint(monkeypatch):
             attempted=[],
         )
 
-    monkeypatch.setattr(
-        "openakita.tools.handlers.web_search.run_web_search", fake_run_web_search
-    )
+    monkeypatch.setattr("openakita.tools.handlers.web_search.run_web_search", fake_run_web_search)
 
     with pytest.raises(ToolConfigError) as excinfo:
         await WebSearchHandler()._web_search({"query": "anything"})

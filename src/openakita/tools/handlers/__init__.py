@@ -121,9 +121,7 @@ class SystemHandlerRegistry:
         # works but is opaque (cookbook §4.21). The check is the same data
         # source as the CI completeness gate, so dev WARN ↔ CI red are aligned.
         if tool_names:
-            unclassified = [
-                t for t in tool_names if t not in self._tool_classes
-            ]
+            unclassified = [t for t in tool_names if t not in self._tool_classes]
             for tool in unclassified:
                 logger.warning(
                     "[Policy] Tool %r in handler %r has no explicit "
@@ -155,9 +153,7 @@ class SystemHandlerRegistry:
         entry — never accidentally relax an already-strict label.
         """
         owner = getattr(handler, "__self__", None)
-        handler_attr = (
-            getattr(owner, "TOOL_CLASSES", None) if owner is not None else None
-        )
+        handler_attr = getattr(owner, "TOOL_CLASSES", None) if owner is not None else None
 
         if not register_param and not handler_attr:
             return
@@ -175,9 +171,7 @@ class SystemHandlerRegistry:
             for tool, klass in handler_attr.items():
                 attr_entry = (klass, DecisionSource.EXPLICIT_HANDLER_ATTR)
                 existing = new_entries.get(tool)
-                new_entries[tool] = (
-                    most_strict([existing, attr_entry]) if existing else attr_entry
-                )
+                new_entries[tool] = most_strict([existing, attr_entry]) if existing else attr_entry
 
         # Filter out tools that don't actually belong to this handler — likely
         # a typo or stale entry. Storing them anyway would cause a silent
@@ -196,13 +190,9 @@ class SystemHandlerRegistry:
 
         for tool, entry in new_entries.items():
             existing = self._tool_classes.get(tool)
-            self._tool_classes[tool] = (
-                most_strict([existing, entry]) if existing else entry
-            )
+            self._tool_classes[tool] = most_strict([existing, entry]) if existing else entry
 
-    def get_tool_class(
-        self, tool_name: str
-    ) -> tuple[ApprovalClass, DecisionSource] | None:
+    def get_tool_class(self, tool_name: str) -> tuple[ApprovalClass, DecisionSource] | None:
         """ApprovalClassifier explicit_lookup callback."""
         return self._tool_classes.get(tool_name)
 
@@ -219,9 +209,7 @@ class SystemHandlerRegistry:
         if handler_name in self._handlers:
             del self._handlers[handler_name]
             removed_tools = {
-                tool
-                for tool, mapped in self._tool_to_handler.items()
-                if mapped == handler_name
+                tool for tool, mapped in self._tool_to_handler.items() if mapped == handler_name
             }
             self._tool_to_handler = {
                 k: v for k, v in self._tool_to_handler.items() if v != handler_name

@@ -151,7 +151,9 @@ def _parse_range(
             e = datetime.fromisoformat(end)
             return s.strftime("%Y-%m-%d %H:%M:%S"), e.strftime("%Y-%m-%d %H:%M:%S")
         except (ValueError, TypeError):
-            logger.warning(f"[TokenStats] Invalid time range: start={start!r}, end={end!r}, falling back to default")
+            logger.warning(
+                f"[TokenStats] Invalid time range: start={start!r}, end={end!r}, falling back to default"
+            )
 
     now_utc = datetime.now(UTC).replace(tzinfo=None)
 

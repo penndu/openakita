@@ -65,7 +65,9 @@ class ColoredConsoleHandler(logging.StreamHandler):
         if sys.platform == "win32":
             try:
                 if hasattr(output_stream, "reconfigure"):
-                    output_stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+                    output_stream.reconfigure(
+                        encoding="utf-8", errors="replace", line_buffering=True
+                    )
             except (OSError, ValueError):
                 # pythonw.exe can run with sys.stdout attached to a closed file.
                 # In that mode logs still go to file/session handlers; the console

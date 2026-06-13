@@ -109,7 +109,11 @@ class ChainTimelineBuilder:
 
     @staticmethod
     def _entry_chars(entry: dict) -> int:
-        n = len(entry.get("content", "")) + len(entry.get("result", "")) + len(entry.get("description", ""))
+        n = (
+            len(entry.get("content", ""))
+            + len(entry.get("result", ""))
+            + len(entry.get("description", ""))
+        )
         args = entry.get("args")
         if isinstance(args, dict) and args:
             try:
@@ -139,7 +143,7 @@ class ChainTimelineBuilder:
             cur = entries[-1].get("content", "")
             if len(cur) >= _THINKING_CAP:
                 return
-            addition = (cur + content)[:_THINKING_CAP][len(cur):]
+            addition = (cur + content)[:_THINKING_CAP][len(cur) :]
             if addition and self._charge(len(addition)):
                 entries[-1]["content"] = cur + addition
             return
@@ -162,7 +166,10 @@ class ChainTimelineBuilder:
         try:
             etype = event.get("type", "")
             if etype == "iteration_start":
-                group: dict = {"iteration": event.get("iteration", len(self._groups) + 1), "entries": []}
+                group: dict = {
+                    "iteration": event.get("iteration", len(self._groups) + 1),
+                    "entries": [],
+                }
                 if self._pending_compressed is not None:
                     group["entries"].append(self._pending_compressed)
                     self._pending_compressed = None

@@ -125,4 +125,6 @@ def test_update_session_ui_state_does_not_create_empty_session(tmp_path):
 
     assert resp.status_code == 200
     assert resp.json() == {"ok": False, "reason": "session_not_found"}
-    assert manager.get_session("desktop", "missing", "desktop_user", create_if_missing=False) is None
+    assert (
+        manager.get_session("desktop", "missing", "desktop_user", create_if_missing=False) is None
+    )

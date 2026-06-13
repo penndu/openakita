@@ -248,11 +248,7 @@ async def list_skills(request: Request):
         try:
             from openakita.skills.runtime_registry import read_skill_runtime_registry
 
-            runtime_state = (
-                read_skill_runtime_registry()
-                .get("skills", {})
-                .get(str(sid), {})
-            )
+            runtime_state = read_skill_runtime_registry().get("skills", {}).get(str(sid), {})
             if not isinstance(runtime_state, dict):
                 runtime_state = {}
         except Exception:
@@ -317,6 +313,7 @@ def _compact(text: str, limit: int) -> str:
 
 def _compute_skill_list_hash(ids: set[str]) -> str:
     import hashlib
+
     return hashlib.sha256(",".join(sorted(ids)).encode()).hexdigest()[:16]
 
 
@@ -364,9 +361,7 @@ async def organize_skills(request: Request):
             external_skills, _ = await _load_external_skills_for_organize()
         except Exception as e:
             logger.warning("Failed to load skills for AI organize: %s", e)
-            raise HTTPException(
-                status_code=500, detail="技能列表读取失败，无法生成整理请求"
-            ) from e
+            raise HTTPException(status_code=500, detail="技能列表读取失败，无法生成整理请求") from e
         skill_items = [
             {
                 "id": s.skill_id,
@@ -395,7 +390,8 @@ async def organize_skills(request: Request):
 
     unclassified = [s for s in skill_items if s["id"] not in existing_bindings]
     pre_bound = {
-        sid: cat for sid, cat in existing_bindings.items()
+        sid: cat
+        for sid, cat in existing_bindings.items()
         if sid in known_ids and cat in existing_cat_names
     }
 
@@ -427,17 +423,17 @@ async def organize_skills(request: Request):
 
     existing_hint = ""
     if existing_cat_names:
-        existing_hint = (
-            f"\n已有分类供参考（可复用）: {', '.join(sorted(existing_cat_names))}\n"
-        )
+        existing_hint = f"\n已有分类供参考（可复用）: {', '.join(sorted(existing_cat_names))}\n"
 
-    phase1_prompt = "\n".join([
-        f"共{len(unclassified)}个待分类技能:",
-        *names_lines,
-        existing_hint,
-        "生成4-12个中文分类（可复用已有分类），返回严格JSON。",
-        '{"categories":[{"name":"X","description":"Y"}]}',
-    ])
+    phase1_prompt = "\n".join(
+        [
+            f"共{len(unclassified)}个待分类技能:",
+            *names_lines,
+            existing_hint,
+            "生成4-12个中文分类（可复用已有分类），返回严格JSON。",
+            '{"categories":[{"name":"X","description":"Y"}]}',
+        ]
+    )
 
     try:
         phase1_resp = await agent.brain.think_lightweight(
@@ -484,18 +480,18 @@ async def organize_skills(request: Request):
     ]
 
     async def _classify_batch(batch: list[dict]) -> dict[str, str]:
-        lines = "\n".join(
-            f"- {s['id']}|{s['name']}|{_compact(s['desc'], 30)}" for s in batch
+        lines = "\n".join(f"- {s['id']}|{s['name']}|{_compact(s['desc'], 30)}" for s in batch)
+        prompt = "\n".join(
+            [
+                f"可选分类: {cat_list_str}",
+                f"技能({len(batch)}个):",
+                lines,
+                "",
+                "为每个技能选择最合适的分类，返回严格JSON。",
+                "bindings的key必须是上方id，value必须是上方可选分类之一，不要凭空创造。",
+                '{"bindings":{"skill_id":"category_name"}}',
+            ]
         )
-        prompt = "\n".join([
-            f"可选分类: {cat_list_str}",
-            f"技能({len(batch)}个):",
-            lines,
-            "",
-            "为每个技能选择最合适的分类，返回严格JSON。",
-            "bindings的key必须是上方id，value必须是上方可选分类之一，不要凭空创造。",
-            '{"bindings":{"skill_id":"category_name"}}',
-        ])
         resp = await agent.brain.think_lightweight(
             prompt,
             system="技能分类助手。只返回JSON对象，无其他文本。",
@@ -741,7 +737,9 @@ async def install_skill(request: Request):
         return {"error": "url is required"}
     category_raw = body.get("category")
     category = (
-        str(category_raw).strip() if isinstance(category_raw, str) and category_raw.strip() else None
+        str(category_raw).strip()
+        if isinstance(category_raw, str) and category_raw.strip()
+        else None
     )
 
     try:
@@ -863,6 +861,7 @@ async def install_skill(request: Request):
 
     # 自动翻译（可选，不阻塞成功返回）—— 后台执行，避免拖慢安装路径
     try:
+
         async def _bg_translate(req=request, src_url=url):
             try:
                 await _auto_translate_new_skills(req, src_url)
@@ -993,8 +992,7 @@ async def reload_skills(request: Request):
                     "skipped_count": len(issues),
                     "skipped_skills": issues,
                     "warning": (
-                        f"已刷新可用技能，但有 {len(issues)} 个技能未加载。"
-                        "其他技能可正常使用。"
+                        f"已刷新可用技能，但有 {len(issues)} 个技能未加载。其他技能可正常使用。"
                     ),
                 }
             )
@@ -1191,4 +1189,3 @@ try:
     register_on_change(_on_skills_changed_api)
 except Exception:
     pass
-
