@@ -16,6 +16,7 @@
     "smoke:routes": "node tests/smoke/hash-routes.mjs",
     "lint": "eslint \"src/**/*.{ts,tsx,js,jsx}\" --max-warnings=9999",
     "lint:hooks": "eslint --rule \"react-hooks/rules-of-hooks: error\" --no-eslintrc --config eslint.config.js \"src/**/*.{ts,tsx}\"",
+    "audit:tauri-lifecycle": "uv run --no-sync python ../../tools/audit_tauri_lifecycle.py",
     "tauri": "tauri",
     "cap:sync": "npx cap sync",
     "cap:android": "npx cap open android",

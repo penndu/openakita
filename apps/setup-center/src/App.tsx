@@ -694,6 +694,8 @@ function MainApp() {
   const [venvStatus, setVenvStatus] = useState<string>("");
   const [installLiveLog, setInstallLiveLog] = useState<string>("");
   const [installProgress, setInstallProgress] = useState<{ stage: string; percent: number } | null>(null);
+  const [pipInstallPolling, setPipInstallPolling] = useState(false);
+  const [pipInstallId, setPipInstallId] = useState("default");
   const [indexUrl, setIndexUrl] = useState<string>("https://mirrors.aliyun.com/pypi/simple/");
   const [pipIndexPresetId] = useState<"official" | "tuna" | "ustc" | "aliyun" | "custom">("aliyun");
   const [customIndexUrl, setCustomIndexUrl] = useState<string>("");
@@ -1307,35 +1309,54 @@ function MainApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWorkspaceId, venvDir]);
 
-  // streaming pip logs (install step)
+  // Tauri-local pip install progress is polled from Rust state. The worker
+  // thread never holds a Tauri AppHandle, avoiding late event-loop proxy clones
+  // during shutdown.
   useEffect(() => {
-    let unlisten: null | (() => void) = null;
-    (async () => {
-      unlisten = await listen("pip_install_event", (ev) => {
-        const p = ev.payload as any;
-        if (!p || typeof p !== "object") return;
-        if (p.kind === "stage") {
-          const stage = String(p.stage || "");
-          const percent = Number(p.percent || 0);
-          if (stage) setInstallProgress({ stage, percent: Math.max(0, Math.min(100, percent)) });
-          return;
+    if (!pipInstallPolling || !IS_TAURI) return;
+    let cancelled = false;
+    let cursor = 0;
+    const poll = async () => {
+      try {
+        const p = await invoke<{
+          cursor: number;
+          done: boolean;
+          failed: boolean;
+          stage?: string | null;
+          percent?: number | null;
+          chunks?: string[];
+          missed?: boolean;
+        }>("pip_install_progress", { installId: pipInstallId, cursor });
+        if (cancelled) return;
+        cursor = Number(p.cursor || cursor);
+        if (p.stage) {
+          setInstallProgress({
+            stage: String(p.stage),
+            percent: Math.max(0, Math.min(100, Number(p.percent || 0))),
+          });
         }
-        if (p.kind === "line") {
-          const text = String(p.text || "");
-          if (!text) return;
+        const chunks = Array.isArray(p.chunks) ? p.chunks.join("") : "";
+        if (chunks) {
           setInstallLiveLog((prev) => {
-            const next = prev + text;
-            // keep tail to avoid huge memory usage
+            const next = prev + (p.missed ? "\n[log truncated]\n" : "") + chunks;
             const max = 80_000;
             return next.length > max ? next.slice(next.length - max) : next;
           });
         }
-      });
-    })();
-    return () => {
-      if (unlisten) unlisten();
+        if (p.done) setPipInstallPolling(false);
+      } catch {
+        // Keep polling while install is in progress; startup can briefly race.
+      }
     };
-  }, []);
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [pipInstallPolling, pipInstallId]);
 
   // tray quit failed: service still running
   useEffect(() => {
@@ -3678,17 +3699,39 @@ function MainApp() {
           logTask("检查后端环境", "running", "创建 venv...");
           updateTask("backend-check", { detail: "创建 venv..." });
           const detectedPy = await invoke<Array<{ command: string[]; version: string }>>("detect_python");
-          if (detectedPy.length > 0) {
-            await invoke<string>("create_venv", { pythonCommand: detectedPy[0].command, venvDir: effectiveVenv });
+          const pythonCandidate = detectedPy.find((p: any) =>
+            Array.isArray(p.command) && p.command.length > 0 && p.isUsable !== false
+          );
+          if (pythonCandidate) {
+            const installId = `onboarding-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            setPipInstallId(installId);
+            setInstallLiveLog("");
+            setInstallProgress({ stage: "创建 venv...", percent: 0 });
+            setPipInstallPolling(true);
+            await invoke<string>("create_venv", {
+              pythonCommand: pythonCandidate.command,
+              venvDir: effectiveVenv,
+              installId,
+            });
             updateTask("backend-check", { detail: "安装 openakita..." });
             logTask("检查后端环境", "running", "安装 openakita...");
-            await invoke<string>("pip_install", { venvDir: effectiveVenv, packageSpec: "openakita" });
+            setInstallProgress({ stage: "安装 openakita...", percent: 0 });
+            try {
+              await invoke<string>("pip_install", {
+                venvDir: effectiveVenv,
+                packageSpec: "openakita",
+                installId,
+              });
+            } finally {
+              setPipInstallPolling(false);
+            }
             log("[OK] 已自动安装后端环境");
           } else {
             log("[!] 未检测到 Python 3.11+，无法自动创建后端环境");
             log(`  已检查路径: bundled=${backendInfo.bundledChecked} venv=${backendInfo.venvChecked}`);
             updateTask("backend-check", { status: "error", detail: "未找到 Python 3.11+" });
             logTask("检查后端环境", "error", "未找到 Python 3.11+");
+            hasErr = true;
           }
         } else {
           log(backendInfo.bundled ? "[OK] 使用内置后端" : "[OK] 使用 venv 后端");
@@ -3698,9 +3741,27 @@ function MainApp() {
           logTask("检查后端环境", "done");
         }
       } catch (e) {
+        setPipInstallPolling(false);
         log(`[!] 后端环境检查失败: ${String(e)}`);
         updateTask("backend-check", { status: "error", detail: String(e).slice(0, 120) });
         logTask("检查后端环境", "error", String(e));
+        if (String(e).length > 200) {
+          log("--- 详细错误信息 ---");
+          log(String(e));
+        }
+        hasErr = true;
+      }
+
+      if (hasErr) {
+        if (obAutostart) {
+          updateTask("autostart", { status: "skipped", detail: "后端环境检查失败" });
+          logTask(t("onboarding.autostart.taskLabel"), "skipped", "后端环境检查失败");
+        }
+        updateTask("service-start", { status: "skipped", detail: "后端环境检查失败" });
+        logTask("启动后端服务", "skipped", "后端环境检查失败");
+        updateTask("http-wait", { status: "skipped", detail: "后端环境检查失败" });
+        logTask("等待 HTTP 服务就绪", "skipped", "后端环境检查失败");
+        throw new Error("后端环境检查失败，已跳过后续启动步骤");
       }
 
       // ── STEP: autostart ──
@@ -4406,6 +4467,7 @@ function MainApp() {
         );
 
       case "ob-progress": {
+        const installLogLines = installLiveLog ? installLiveLog.split(/\r?\n/) : [];
         const taskStatusIcon = (status: TaskStatus) => {
           switch (status) {
             case "done": return <span style={{ color: "#22c55e", fontSize: 18 }}>&#x2714;</span>;
@@ -4464,6 +4526,30 @@ function MainApp() {
                 ))}
               </div>
 
+              {installProgress && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, color: "#475569", fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {installProgress.stage}
+                    </span>
+                    <span style={{ fontSize: 12, color: "#64748b", flexShrink: 0 }}>
+                      {Math.max(0, Math.min(100, Math.round(installProgress.percent)))}%
+                    </span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.max(0, Math.min(100, installProgress.percent))}%`,
+                        borderRadius: 999,
+                        background: "#2563eb",
+                        transition: "width 160ms ease",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* ── 实时日志窗口 ── */}
               <div style={{
                 flex: 1, minHeight: 120, maxHeight: 200,
@@ -4474,7 +4560,7 @@ function MainApp() {
               }}
                 ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}
               >
-                {obDetailLog.length === 0 && (
+                {obDetailLog.length === 0 && installLogLines.length === 0 && (
                   <div style={{ color: "#64748b" }}>{t("onboarding.progress.waitingStart")}</div>
                 )}
                 {obDetailLog.map((line, i) => (
@@ -4484,6 +4570,24 @@ function MainApp() {
                          : line.includes("---") ? "#64748b"
                          : "#cbd5e1",
                   }}>{line}</div>
+                ))}
+                {installLogLines.length > 0 && (
+                  <div style={{ color: "#94a3b8", marginTop: obDetailLog.length > 0 ? 8 : 0 }}>
+                    --- runtime install log ---
+                  </div>
+                )}
+                {installLogLines.slice(-220).map((line, i) => (
+                  <div key={`pip-${i}`} style={{
+                    color: line.includes("ERROR") || line.includes("failed") || line.includes("失败")
+                      ? "#fca5a5"
+                      : line.startsWith("===") || line.startsWith("[")
+                        ? "#93c5fd"
+                        : "#cbd5e1",
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                  }}>
+                    {line || " "}
+                  </div>
                 ))}
                 {obInstalling && (
                   <div style={{ color: "#60a5fa" }}>

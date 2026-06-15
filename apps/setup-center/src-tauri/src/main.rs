@@ -10,13 +10,13 @@ use base64::Engine as _;
 use dirs_next::home_dir;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::Emitter;
@@ -39,6 +39,37 @@ static MANAGED_CHILD: Lazy<Mutex<Option<ManagedProcess>>> = Lazy::new(|| Mutex::
 /// Rust 自动启动后端时置 true，启动完成（成功/失败）后置 false。
 /// 前端可查询该标记以显示"正在自动启动服务"并禁用启动/重启按钮。
 static AUTO_START_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UiLifecycle {
+    Starting = 0,
+    Running = 1,
+    Quiescing = 2,
+    Exited = 3,
+}
+
+static UI_LIFECYCLE: AtomicU8 = AtomicU8::new(UiLifecycle::Starting as u8);
+
+fn set_ui_lifecycle(state: UiLifecycle) {
+    UI_LIFECYCLE.store(state as u8, Ordering::SeqCst);
+}
+
+fn ui_accepts_tauri_ops() -> bool {
+    matches!(
+        UI_LIFECYCLE.load(Ordering::SeqCst),
+        x if x == UiLifecycle::Starting as u8 || x == UiLifecycle::Running as u8
+    )
+}
+
+fn emit_if_ui_live<S: Serialize + Clone>(app: &tauri::AppHandle, event: &str, payload: S) {
+    if !ui_accepts_tauri_ops() {
+        return;
+    }
+    if let Err(e) = app.emit(event, payload) {
+        log_to_file(&format!("[ui] emit {event} failed: {e}"));
+    }
+}
 
 /// Set to true from the Tauri RunEvent::Exit handler so detached background
 /// loops (the 5s heartbeat in particular, but any future long-lived worker
@@ -97,6 +128,207 @@ static SERVICE_START_LAST_AT: Lazy<Mutex<HashMap<String, u64>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 const OPENAKITA_ROOT_MARKER: &str = ".openakita-root";
 
+const PIP_INSTALL_LOG_MAX_CHUNKS: usize = 512;
+const PIP_INSTALL_DEFAULT_ID: &str = "default";
+const PIP_INSTALL_KEEPALIVE_SECS: u64 = 30;
+const PIP_INSTALL_TOTAL_TIMEOUT_SECS: u64 = 2 * 60 * 60;
+const PIP_INSTALL_READER_DRAIN_GRACE_MS: u64 = 2_000;
+const PIP_INSTALL_RUNNING_STALE_MS: u64 = 20 * 60 * 1_000;
+
+#[derive(Default)]
+struct PipInstallProgressState {
+    cursor: u64,
+    done: bool,
+    failed: bool,
+    updated_at_ms: u64,
+    stage: Option<String>,
+    percent: Option<u8>,
+    chunks: VecDeque<(u64, String)>,
+}
+
+impl PipInstallProgressState {
+    fn touch(&mut self) {
+        self.updated_at_ms = now_ms();
+    }
+
+    fn push_chunk(&mut self, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        self.cursor = self.cursor.saturating_add(1);
+        let cursor = self.cursor;
+        self.chunks.push_back((cursor, text));
+        while self.chunks.len() > PIP_INSTALL_LOG_MAX_CHUNKS {
+            self.chunks.pop_front();
+        }
+        self.touch();
+    }
+}
+
+static PIP_INSTALL_PROGRESS: Lazy<Mutex<HashMap<String, PipInstallProgressState>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PipInstallProgressSnapshot {
+    cursor: u64,
+    done: bool,
+    failed: bool,
+    stage: Option<String>,
+    percent: Option<u8>,
+    chunks: Vec<String>,
+    missed: bool,
+}
+
+fn pip_install_log_path() -> PathBuf {
+    runtime_logs_dir().join("pip-install.log")
+}
+
+fn append_pip_install_log(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let path = pip_install_log_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(text.as_bytes()));
+}
+
+fn pip_install_reset_progress(install_id: &str, label: &str, truncate_log: bool) {
+    let mut all = PIP_INSTALL_PROGRESS.lock().unwrap();
+    let mut state = PipInstallProgressState::default();
+    state.touch();
+    all.insert(install_id.to_string(), state);
+    drop(all);
+
+    let header = format!(
+        "\n=== {label} started at {} pid={} ===\n",
+        now_epoch_secs(),
+        std::process::id()
+    );
+    if truncate_log {
+        let path = pip_install_log_path();
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .and_then(|mut f| f.write_all(header.as_bytes()));
+    } else {
+        append_pip_install_log(&header);
+    }
+}
+
+fn pip_install_set_stage(install_id: &str, stage: &str, percent: u8) {
+    let mut all = PIP_INSTALL_PROGRESS.lock().unwrap();
+    let state = all.entry(install_id.to_string()).or_default();
+    state.stage = Some(stage.to_string());
+    state.percent = Some(percent.min(100));
+    state.touch();
+    drop(all);
+    append_pip_install_log(&format!("\n[stage] {stage} ({percent}%)\n"));
+}
+
+fn pip_install_append_line(install_id: &str, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let mut all = PIP_INSTALL_PROGRESS.lock().unwrap();
+    let state = all.entry(install_id.to_string()).or_default();
+    state.push_chunk(text.to_string());
+    drop(all);
+    append_pip_install_log(text);
+}
+
+fn pip_install_finish_progress(install_id: &str, failed: bool) {
+    let mut all = PIP_INSTALL_PROGRESS.lock().unwrap();
+    let state = all.entry(install_id.to_string()).or_default();
+    state.done = true;
+    state.failed = failed;
+    state.touch();
+    drop(all);
+    append_pip_install_log(&format!(
+        "\n=== install progress {} at {} ===\n",
+        if failed { "failed" } else { "finished" },
+        now_epoch_secs()
+    ));
+}
+
+fn pip_install_is_running() -> bool {
+    let Ok(mut all) = PIP_INSTALL_PROGRESS.lock() else {
+        return false;
+    };
+    let now = now_ms();
+    all.values_mut().any(|state| {
+        if state.done {
+            return false;
+        }
+        if state.updated_at_ms > 0
+            && now.saturating_sub(state.updated_at_ms) > PIP_INSTALL_RUNNING_STALE_MS
+        {
+            state.failed = true;
+            state.done = true;
+            state.push_chunk(
+                "\n[install] progress state expired after 20 minutes without updates\n".to_string(),
+            );
+            return false;
+        }
+        true
+    })
+}
+
+#[tauri::command]
+fn pip_install_progress(
+    install_id: Option<String>,
+    cursor: Option<u64>,
+) -> PipInstallProgressSnapshot {
+    let install_id = install_id.unwrap_or_else(|| PIP_INSTALL_DEFAULT_ID.to_string());
+    let since = cursor.unwrap_or(0);
+    let all = PIP_INSTALL_PROGRESS.lock().unwrap();
+    let Some(state) = all.get(&install_id) else {
+        return PipInstallProgressSnapshot {
+            cursor: 0,
+            done: false,
+            failed: false,
+            stage: None,
+            percent: None,
+            chunks: Vec::new(),
+            missed: false,
+        };
+    };
+    let effective_since = if since > state.cursor { 0 } else { since };
+    let first_available = state
+        .chunks
+        .front()
+        .map(|(c, _)| *c)
+        .unwrap_or(state.cursor);
+    let missed = since > state.cursor
+        || (effective_since > 0 && first_available > effective_since.saturating_add(1));
+    let chunks = state
+        .chunks
+        .iter()
+        .filter(|(c, _)| *c > effective_since)
+        .map(|(_, text)| text.clone())
+        .collect::<Vec<_>>();
+    PipInstallProgressSnapshot {
+        cursor: state.cursor,
+        done: state.done,
+        failed: state.failed,
+        stage: state.stage.clone(),
+        percent: state.percent,
+        chunks,
+        missed,
+    }
+}
+
 fn now_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -137,7 +369,10 @@ fn set_startup_recovery_notice(payload: serde_json::Value) {
 
 #[tauri::command]
 fn take_startup_recovery_notice() -> Option<serde_json::Value> {
-    STARTUP_RECOVERY_NOTICE.lock().ok().and_then(|mut guard| guard.take())
+    STARTUP_RECOVERY_NOTICE
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take())
 }
 
 /// 前端在调用 `@tauri-apps/plugin-process` 的 `relaunch()`（更新后重启）**之前**
@@ -181,7 +416,11 @@ fn clear_frontend_session_marker() {
     let should_remove = fs::read_to_string(&marker_path)
         .ok()
         .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-        .and_then(|json| json.get("pid").and_then(|v| v.as_u64()).map(|pid| pid as u32))
+        .and_then(|json| {
+            json.get("pid")
+                .and_then(|v| v.as_u64())
+                .map(|pid| pid as u32)
+        })
         .map(|pid| pid == std::process::id())
         .unwrap_or(true);
     if should_remove {
@@ -515,7 +754,8 @@ fn collect_machine_info() -> String {
     #[cfg(target_os = "windows")]
     {
         if let Some(s) = run_capture_diag("cmd", &["/c", "ver"]) {
-            lines.push(format!("windows_ver: {}", s.replace(['\r', '\n'], " "))); // single line
+            lines.push(format!("windows_ver: {}", s.replace(['\r', '\n'], " ")));
+            // single line
         }
         // Detailed product / display version / build.UBR via registry. Read
         // through PowerShell to keep this snapshot path self-contained without
@@ -1661,7 +1901,10 @@ fn wheelhouse_has_locked_deps(wheel_path: &Path) -> bool {
     let Ok(entries) = fs::read_dir(&wheelhouse) else {
         return false;
     };
-    let target = wheel_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let target = wheel_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
     entries.flatten().any(|entry| {
         let path = entry.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -2013,11 +2256,7 @@ fn venv_is_real_isolated(venv_dir: &Path, py: &Path, log_path: &Path) -> bool {
         return false;
     }
     if let Some(home) = pyvenv_cfg_home_is_disallowed(venv_dir) {
-        if let Ok(mut log) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-        {
+        if let Ok(mut log) = OpenOptions::new().create(true).append(true).open(log_path) {
             let _ = writeln!(
                 log,
                 "venv {} rejected: pyvenv.cfg home={} matches BAD_BASE_PYTHON_MARKERS",
@@ -2155,11 +2394,7 @@ fn ensure_venv(venv_dir: &Path, python_version: &str, log_path: &Path) -> Result
     // 自己 remove_dir_all 一刀更稳。
     if venv_dir.exists() {
         if let Err(e) = fs::remove_dir_all(venv_dir) {
-            if let Ok(mut log) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_path)
-            {
+            if let Ok(mut log) = OpenOptions::new().create(true).append(true).open(log_path) {
                 let _ = writeln!(
                     log,
                     "warning: pre-clean of {} failed: {} (will fall back to `uv venv --clear`)",
@@ -2235,7 +2470,13 @@ fn ensure_app_venv(
         .as_ref()
         .map(|m| runtime_manifest_mismatch(m, bootstrap, pip_index).is_none())
         .unwrap_or(false);
-    if manifest_ok && health_check_python(&app_py, &app_runtime_health_code(&app_venv_dir()), &log_path) {
+    if manifest_ok
+        && health_check_python(
+            &app_py,
+            &app_runtime_health_code(&app_venv_dir()),
+            &log_path,
+        )
+    {
         log_to_file(&format!(
             "[runtime] ensure_app_venv reused existing env in {}ms",
             started.elapsed().as_millis()
@@ -2279,7 +2520,8 @@ fn ensure_app_venv(
     cmd.args(["--reinstall-package", "openakita"]);
     // `uv pip install` does not support pip's `--prefer-binary` flag.
     // Keep binary preference on Python-side `pip install` calls only.
-    if bootstrap_declares_complete_wheelhouse(bootstrap) && wheelhouse_has_locked_deps(&wheel_path) {
+    if bootstrap_declares_complete_wheelhouse(bootstrap) && wheelhouse_has_locked_deps(&wheel_path)
+    {
         let wheelhouse = bootstrap_wheelhouse_dir();
         log_to_file(&format!(
             "[runtime] app wheel install using bundled wheelhouse: {}",
@@ -2311,7 +2553,11 @@ fn ensure_app_venv(
         "[runtime] app wheel install finished in {}ms",
         install_started.elapsed().as_millis()
     ));
-    if health_check_python(&app_py, &app_runtime_health_code(&app_venv_dir()), &log_path) {
+    if health_check_python(
+        &app_py,
+        &app_runtime_health_code(&app_venv_dir()),
+        &log_path,
+    ) {
         log_to_file(&format!(
             "[runtime] ensure_app_venv ready in {}ms",
             started.elapsed().as_millis()
@@ -2509,7 +2755,8 @@ fn prepend_path(cmd: &mut Command, dir: &Path) {
     // 已经把 anaconda/pyenv/homebrew 等污染段剔除并写回 cmd；如果这里仍然
     // 读父进程 PATH，会把过滤掉的段又带回来，让 §2 的 PATH 过滤白做。
     // 找不到再回退到父进程 PATH，与原行为兼容。
-    let current = cmd_get_env_path(cmd).unwrap_or_else(|| std::env::var_os("PATH").unwrap_or_default());
+    let current =
+        cmd_get_env_path(cmd).unwrap_or_else(|| std::env::var_os("PATH").unwrap_or_default());
     let mut paths = vec![dir.to_path_buf()];
     paths.extend(std::env::split_paths(&current));
     if let Ok(joined) = std::env::join_paths(paths) {
@@ -2802,7 +3049,9 @@ fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
         let target: PathBuf = if path.is_dir() {
             path.to_path_buf()
         } else {
-            path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.to_path_buf())
+            path.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| path.to_path_buf())
         };
         std::process::Command::new("xdg-open")
             .arg(&target)
@@ -3350,7 +3599,7 @@ fn check_backend_availability(venv_dir: String) -> BackendAvailability {
     };
     let venv_py = venv_pythonw_path(&venv_dir);
     let bundled = bundled_exe.exists();
-    let venv_ready = venv_py.exists();
+    let venv_ready = legacy_venv_has_openakita_backend(&venv_dir);
     let exe_path = if bundled {
         bundled_exe.to_string_lossy().to_string()
     } else if venv_ready {
@@ -3372,6 +3621,26 @@ fn check_backend_availability(venv_dir: String) -> BackendAvailability {
         bundled_checked: bundled_exe.to_string_lossy().to_string(),
         venv_checked: venv_py.to_string_lossy().to_string(),
     }
+}
+
+fn legacy_venv_has_openakita_backend(venv_dir: &str) -> bool {
+    let py = venv_python_path(venv_dir);
+    if !py.exists() {
+        return false;
+    }
+
+    let mut cmd = Command::new(&py);
+    apply_no_window(&mut cmd);
+    strip_harmful_python_env(&mut cmd);
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.args([
+        "-c",
+        "import openakita; import openakita.main; import openakita.setup_center.bridge",
+    ]);
+    cmd.output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 /// 强制删除目录：先尝试 Rust remove_dir_all，失败时在 Windows 上回退到 cmd /c rd /s /q
@@ -5230,37 +5499,12 @@ fn write_crash_log(message: &str, show_dialog: bool) -> PathBuf {
 }
 
 fn show_main_window(app: &tauri::AppHandle, reason: &str, open_status: bool) {
-    let app_handle = app.clone();
-    let reason = reason.to_string();
-
-    // Windows WebView2/tao can crash if show/focus runs re-entrantly from a
-    // single-instance or tray callback while the hidden window state is changing.
-    // Keep the delay off-thread, but marshal the actual window operations back to
-    // Tauri's main event loop; WebView/window APIs are not safe to poke directly
-    // from an arbitrary worker thread.
-    #[cfg(target_os = "windows")]
-    {
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            let app_for_ui = app_handle.clone();
-            let reason_for_log = reason.clone();
-            if let Err(e) = app_handle.run_on_main_thread(move || {
-                show_main_window_now(&app_for_ui, &reason, open_status);
-            }) {
-                log_to_file(&format!(
-                    "[window] run_on_main_thread failed ({reason_for_log}): {e}"
-                ));
-            }
-        });
+    if !ui_accepts_tauri_ops() {
+        log_to_file(&format!(
+            "[window] ignored show_main_window during shutdown ({reason})"
+        ));
+        return;
     }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        show_main_window_now(&app_handle, &reason, open_status);
-    }
-}
-
-fn show_main_window_now(app: &tauri::AppHandle, reason: &str, open_status: bool) {
     if let Some(w) = app.get_webview_window("main") {
         if let Err(e) = w.show() {
             log_to_file(&format!("[window] show failed ({reason}): {e}"));
@@ -5273,7 +5517,7 @@ fn show_main_window_now(app: &tauri::AppHandle, reason: &str, open_status: bool)
         log_to_file(&format!("[window] main window not found ({reason})"));
     }
     if open_status {
-        let _ = app.emit("open_status", serde_json::json!({}));
+        emit_if_ui_live(app, "open_status", serde_json::json!({}));
     }
 }
 
@@ -5501,7 +5745,7 @@ fn main() {
             // ── 首次运行检测 (NSIS 安装后自动启动时传入 --first-run) ──
             let is_first_run_arg = std::env::args().any(|a| a == "--first-run");
             let launch_mode = if is_first_run_arg { "first-run" } else { "normal" };
-            app.emit("app-launch-mode", launch_mode).ok();
+            emit_if_ui_live(app.handle(), "app-launch-mode", launch_mode);
             let app_version = app.package_info().version.to_string();
 
             if let Some(payload) = detect_previous_frontend_crash() {
@@ -5531,7 +5775,7 @@ fn main() {
                     let payload: serde_json::Value =
                         serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
                     set_startup_recovery_notice(payload.clone());
-                    app.emit("app-restarted-from-crash", payload).ok();
+                    emit_if_ui_live(app.handle(), "app-restarted-from-crash", payload);
                 }
                 let _ = fs::remove_file(&marker_path);
             }
@@ -5717,7 +5961,24 @@ fn main() {
                         if SHUTDOWN.load(Ordering::SeqCst) {
                             return;
                         }
-                        if AUTO_START_IN_PROGRESS.load(Ordering::SeqCst) {
+                        if AUTO_START_IN_PROGRESS.load(Ordering::SeqCst) || pip_install_is_running() {
+                            continue;
+                        }
+                        let venv_dir = openakita_root_dir().join("venv");
+                        let bundled_exe = if cfg!(windows) {
+                            bundled_backend_dir().join("openakita-server.exe")
+                        } else {
+                            bundled_backend_dir().join("openakita-server")
+                        };
+                        let venv_dir_str = venv_dir.to_string_lossy().to_string();
+                        if !bundled_exe.exists() && !legacy_venv_has_openakita_backend(&venv_dir_str)
+                        {
+                            let now = now_epoch_secs();
+                            if now.saturating_sub(last_starting_log_at) >= 30 {
+                                log_to_file("[heartbeat] backend environment is not installed; skip auto-spawn");
+                                last_starting_log_at = now;
+                            }
+                            consecutive_failures = 0;
                             continue;
                         }
                         let check_result = startup_version_check(&ws_id, &app_version_for_hb, port);
@@ -5728,12 +5989,8 @@ fn main() {
                         }
                         AUTO_START_IN_PROGRESS.store(true, Ordering::SeqCst);
                         AUTO_START_STARTED_AT_MS.store(now_ms(), Ordering::SeqCst);
-                        let venv_dir = openakita_root_dir()
-                            .join("venv")
-                            .to_string_lossy()
-                            .to_string();
                         let ws_clone = ws_id.clone();
-                        match openakita_service_start_impl(venv_dir, ws_clone) {
+                        match openakita_service_start_impl(venv_dir_str, ws_clone) {
                             Ok(status) => log_to_file(&format!(
                                 "[heartbeat] auto-spawn returned: running={}, pid={:?} (note: pid may be existing process if dedupe-skip)",
                                 status.running, status.pid
@@ -5759,7 +6016,9 @@ fn main() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 // 默认行为：关闭窗口 -> 隐藏到托盘/菜单栏常驻（用户从托盘 Quit 退出）
                 api.prevent_close();
-                let _ = window.hide();
+                if ui_accepts_tauri_ops() {
+                    let _ = window.hide();
+                }
             }
             _ => {}
         })
@@ -5788,6 +6047,7 @@ fn main() {
             install_bundled_python,
             create_venv,
             pip_install,
+            pip_install_progress,
             pip_uninstall,
             autostart_is_enabled,
             autostart_set_enabled,
@@ -5875,6 +6135,9 @@ fn main() {
     };
 
     app.run(|_app_handle, event| {
+        if matches!(UI_LIFECYCLE.load(Ordering::SeqCst), x if x == UiLifecycle::Starting as u8) {
+            set_ui_lifecycle(UiLifecycle::Running);
+        }
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen {
             has_visible_windows,
@@ -5889,6 +6152,7 @@ fn main() {
             }
         }
         if let tauri::RunEvent::Exit = event {
+            set_ui_lifecycle(UiLifecycle::Quiescing);
             // Signal shutdown to detached background loops (heartbeat etc.)
             // BEFORE doing anything else in this handler. The runtime is
             // about to be dropped; any worker thread that wakes up after
@@ -5934,6 +6198,7 @@ fn main() {
                 remove_heartbeat_file(&ent.workspace_id);
             }
             kill_openakita_orphans();
+            set_ui_lifecycle(UiLifecycle::Exited);
         }
     });
 }
@@ -5971,15 +6236,28 @@ fn build_service_status(
     pid: Option<u32>,
     pid_file_str: String,
 ) -> ServiceStatus {
-    let (heartbeat_phase, heartbeat_http_ready, heartbeat_im_ready, heartbeat_ready, heartbeat_stale, heartbeat_age_secs) =
-        if let Some(hb) = read_heartbeat_file(workspace_id) {
-            let now = now_epoch_secs() as f64;
-            let age = now - hb.timestamp;
-            let stale = age > 30.0; // 超过 30 秒无心跳视为过期
-            (hb.phase, hb.http_ready, hb.im_ready, hb.ready, Some(stale), Some(age))
-        } else {
-            (String::new(), false, false, false, None, None)
-        };
+    let (
+        heartbeat_phase,
+        heartbeat_http_ready,
+        heartbeat_im_ready,
+        heartbeat_ready,
+        heartbeat_stale,
+        heartbeat_age_secs,
+    ) = if let Some(hb) = read_heartbeat_file(workspace_id) {
+        let now = now_epoch_secs() as f64;
+        let age = now - hb.timestamp;
+        let stale = age > 30.0; // 超过 30 秒无心跳视为过期
+        (
+            hb.phase,
+            hb.http_ready,
+            hb.im_ready,
+            hb.ready,
+            Some(stale),
+            Some(age),
+        )
+    } else {
+        (String::new(), false, false, false, None, None)
+    };
     ServiceStatus {
         running,
         pid,
@@ -6383,6 +6661,10 @@ fn openakita_service_start_impl(
         "[service_start] called: ws={}, venv={}",
         workspace_id, venv_dir
     ));
+    if pip_install_is_running() {
+        log_to_file("[service_start] rejected: pip install is still running");
+        return Err("后端环境仍在安装中，请稍候再启动后端".to_string());
+    }
     // ── 进程级互斥：同一 workspace 在 SERVICE_START_DEDUPE_MS 窗口内拒绝重复 spawn。
     // 解决 autostart.log 里 27s 内 5 次 spawn pid 的现场表现：前端在 health
     // check 还没响应时反复 invoke，下游 try_acquire_start_lock 的文件锁有
@@ -6529,6 +6811,10 @@ fn openakita_service_start_impl(
             bundled_name,
             backend_exe.to_string_lossy(),
         ));
+    }
+    if backend_exe == venv_pythonw_path(&venv_dir) && !legacy_venv_has_openakita_backend(&venv_dir) {
+        log_to_file("[service_start] rejected: legacy venv backend is not installed yet");
+        return Err("后端环境尚未安装完成，请先等待 openakita 安装结束".to_string());
     }
 
     let log_dir = ws_dir.join("logs");
@@ -7134,16 +7420,18 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                         "\u{9000}\u{51fa}\u{5931}\u{8d25}\u{ff1a}\u{540e}\u{53f0}\u{670d}\u{52a1}\u{4ecd}\u{5728}\u{8fd0}\u{884c}\u{3002}\n\n\u{8bf7}\u{5148}\u{5728}\u{201c}\u{72b6}\u{6001}\u{9762}\u{677f}\u{201d}\u{70b9}\u{51fb}\u{201c}\u{505c}\u{6b62}\u{670d}\u{52a1}\u{201d}\u{ff0c}\u{786e}\u{8ba4}\u{72b6}\u{6001}\u{53d8}\u{4e3a}\u{201c}\u{672a}\u{8fd0}\u{884c}\u{201d}\u{540e}\u{518d}\u{9000}\u{51fa}\u{3002}\n\n\u{4ecd}\u{5728}\u{8fd0}\u{884c}\u{7684}\u{8fdb}\u{7a0b}\u{ff1a}{}",
                         detail.join("; ")
                     );
-                    let _ = app.emit("open_status", serde_json::json!({}));
-                    let _ = app.emit("quit_failed", serde_json::json!({ "message": msg }));
+                    emit_if_ui_live(app, "open_status", serde_json::json!({}));
+                    emit_if_ui_live(app, "quit_failed", serde_json::json!({ "message": msg }));
                 }
             }
             "show" => {
                 show_main_window(app, "tray-show", false);
             }
             "hide" => {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
+                if ui_accepts_tauri_ops() {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.hide();
+                    }
                 }
             }
             "open_web" => {
@@ -8173,28 +8461,71 @@ async fn install_bundled_python(
 }
 
 #[tauri::command]
-async fn create_venv(python_command: Vec<String>, venv_dir: String) -> Result<String, String> {
+async fn create_venv(
+    python_command: Vec<String>,
+    venv_dir: String,
+    install_id: Option<String>,
+) -> Result<String, String> {
     spawn_blocking_result(move || {
+        let install_id = install_id.unwrap_or_else(|| PIP_INSTALL_DEFAULT_ID.to_string());
+        let install_id_ref = install_id.as_str();
+        pip_install_reset_progress(install_id_ref, "create venv", true);
+        let result: Result<String, String> = (|| {
         let venv = PathBuf::from(venv_dir);
-        if venv.exists() {
-            return Ok(venv.to_string_lossy().to_string());
+        let mut log = String::new();
+        let emit_line = |text: &str| {
+            pip_install_append_line(install_id_ref, text);
+        };
+
+        if !venv.exists() {
+            pip_install_set_stage(install_id_ref, "创建 venv", 10);
+            let mut c = if let Some(bundled_py) = bundled_internal_python_path() {
+                let mut cmd = Command::new(&bundled_py);
+                apply_bundled_python_env(&mut cmd, &bundled_backend_dir().join("_internal"));
+                cmd
+            } else {
+                command_from_python_command(&python_command)?
+            };
+            apply_no_window(&mut c);
+            c.args(["-m", "venv", "--clear"]).arg(&venv);
+            let status = run_streaming_command(
+                c,
+                "create venv",
+                Some(&mut log),
+                Some(&emit_line),
+                std::time::Duration::from_secs(PIP_INSTALL_TOTAL_TIMEOUT_SECS),
+            )?;
+            if !status.success() {
+                return Err(format!("venv creation failed: {status}\n\n{log}"));
+            }
+        } else {
+            pip_install_set_stage(install_id_ref, "复用已有 venv", 10);
+            emit_line(&format!("venv already exists: {}\n", venv.display()));
         }
-        let _ = python_command; // API 兼容保留，实际统一使用安装包内置 Python
-        let bundled_py = bundled_internal_python_path()
-            .ok_or_else(|| "安装包内置 Python 不可用，请重新安装 OpenAkita".to_string())?;
-        let mut c = Command::new(&bundled_py);
-        apply_no_window(&mut c);
-        apply_bundled_python_env(&mut c, &bundled_backend_dir().join("_internal"));
-        c.args(["-m", "venv"])
-            .arg(&venv)
-            .status()
-            .map_err(|e| format!("failed to create venv: {e}"))?
-            .success()
-            .then_some(())
-            .ok_or_else(|| "venv creation failed".to_string())?;
+
+        pip_install_set_stage(install_id_ref, "准备 pip", 20);
+        let py = venv_python_path(venv.to_string_lossy().as_ref());
+        ensure_pip_available(&py, None, Some(&mut log), Some(&emit_line))?;
         Ok(venv.to_string_lossy().to_string())
+        })();
+        if result.is_err() {
+            pip_install_finish_progress(install_id_ref, true);
+        }
+        result
     })
     .await
+}
+
+fn command_from_python_command(python_command: &[String]) -> Result<Command, String> {
+    let Some(program) = python_command.first() else {
+        return Err("未检测到 Python 3.11+，无法创建 venv".to_string());
+    };
+    let mut cmd = Command::new(program);
+    if python_command.len() > 1 {
+        cmd.args(&python_command[1..]);
+    }
+    strip_harmful_python_env(&mut cmd);
+    Ok(cmd)
 }
 
 fn venv_python_path(venv_dir: &str) -> PathBuf {
@@ -8256,160 +8587,278 @@ fn venv_pythonw_path(venv_dir: &str) -> PathBuf {
     }
 }
 
+fn append_stream_output(
+    log: &mut Option<&mut String>,
+    emit_line: Option<&dyn Fn(&str)>,
+    text: &str,
+) {
+    if text.is_empty() {
+        return;
+    }
+    if let Some(emit_line) = emit_line {
+        emit_line(text);
+    }
+    if let Some(log) = log.as_mut() {
+        (**log).push_str(text);
+    }
+}
+
+fn join_reader_thread(handle: std::thread::JoinHandle<()>) {
+    let started = Instant::now();
+    loop {
+        if handle.is_finished() {
+            let _ = handle.join();
+            return;
+        }
+        if started.elapsed()
+            >= std::time::Duration::from_millis(PIP_INSTALL_READER_DRAIN_GRACE_MS)
+        {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+fn run_streaming_command(
+    mut cmd: Command,
+    header: &str,
+    mut log: Option<&mut String>,
+    emit_line: Option<&dyn Fn(&str)>,
+    total_timeout: std::time::Duration,
+) -> Result<std::process::ExitStatus, String> {
+    use std::io::Read as _;
+    use std::process::Stdio;
+    use std::sync::mpsc;
+    use std::thread;
+
+    append_stream_output(&mut log, emit_line, &format!("\n=== {header} ===\n"));
+
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("{header} failed to start: {e}"))?;
+    let child_pid = child.id();
+    append_stream_output(
+        &mut log,
+        emit_line,
+        &format!("[{header}] spawned pid={child_pid}\n"),
+    );
+
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("{header} stdout pipe missing"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("{header} stderr pipe missing"))?;
+
+    let (tx, rx) = mpsc::channel::<String>();
+    let tx1 = tx.clone();
+    let h1 = thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut pending: Vec<u8> = Vec::new();
+        loop {
+            match stdout.read(&mut buf) {
+                Ok(0) => {
+                    if !pending.is_empty() {
+                        let _ = tx1.send(String::from_utf8_lossy(&pending).to_string());
+                    }
+                    break;
+                }
+                Ok(n) => {
+                    pending.extend_from_slice(&buf[..n]);
+                    let s = take_valid_utf8_prefix(&mut pending);
+                    if !s.is_empty() {
+                        let _ = tx1.send(s);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    let tx2 = tx.clone();
+    let h2 = thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut pending: Vec<u8> = Vec::new();
+        loop {
+            match stderr.read(&mut buf) {
+                Ok(0) => {
+                    if !pending.is_empty() {
+                        let _ = tx2.send(String::from_utf8_lossy(&pending).to_string());
+                    }
+                    break;
+                }
+                Ok(n) => {
+                    pending.extend_from_slice(&buf[..n]);
+                    let s = take_valid_utf8_prefix(&mut pending);
+                    if !s.is_empty() {
+                        let _ = tx2.send(s);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    drop(tx);
+
+    let started_at = Instant::now();
+    let mut last_progress_at = Instant::now();
+    let keepalive_interval = std::time::Duration::from_secs(PIP_INSTALL_KEEPALIVE_SECS);
+    let mut timed_out = false;
+    loop {
+        match rx.recv_timeout(std::time::Duration::from_millis(120)) {
+            Ok(chunk) => {
+                last_progress_at = Instant::now();
+                append_stream_output(&mut log, emit_line, &chunk);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        }
+
+        if let Ok(Some(_)) = child.try_wait() {
+            break;
+        }
+
+        if last_progress_at.elapsed() >= keepalive_interval {
+            append_stream_output(
+                &mut log,
+                emit_line,
+                &format!(
+                    "[{header}] still running for {}s; waiting for subprocess output\n",
+                    started_at.elapsed().as_secs()
+                ),
+            );
+            last_progress_at = Instant::now();
+        }
+
+        if started_at.elapsed() >= total_timeout {
+            timed_out = true;
+            append_stream_output(
+                &mut log,
+                emit_line,
+                &format!(
+                    "\n[{header}] exceeded total timeout of {}s; killing pid {child_pid}\n",
+                    total_timeout.as_secs()
+                ),
+            );
+            let _ = child.kill();
+            break;
+        }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("{header} wait failed: {e}"))?;
+    join_reader_thread(h1);
+    join_reader_thread(h2);
+
+    while let Ok(chunk) = rx.try_recv() {
+        append_stream_output(&mut log, emit_line, &chunk);
+    }
+    append_stream_output(
+        &mut log,
+        emit_line,
+        &format!("\n[{header}] exited with {status}\n\n"),
+    );
+
+    if timed_out {
+        Err(format!(
+            "{header} exceeded total timeout of {}s; killed pid {child_pid}",
+            total_timeout.as_secs()
+        ))
+    } else {
+        Ok(status)
+    }
+}
+
+fn ensure_pip_available(
+    py: &Path,
+    pythonpath: Option<&str>,
+    mut log: Option<&mut String>,
+    emit_line: Option<&dyn Fn(&str)>,
+) -> Result<(), String> {
+    if !py.exists() {
+        return Err(format!("python executable not found: {}", py.display()));
+    }
+
+    let mut check = Command::new(py);
+    apply_no_window(&mut check);
+    strip_harmful_python_env(&mut check);
+    check.env("PYTHONUTF8", "1");
+    check.env("PYTHONIOENCODING", "utf-8");
+    if let Some(pp) = pythonpath {
+        check.env("PYTHONPATH", pp);
+    }
+    check.args(["-m", "pip", "--version"]);
+    if check
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    let mut ensure = Command::new(py);
+    apply_no_window(&mut ensure);
+    strip_harmful_python_env(&mut ensure);
+    ensure.env("PYTHONUTF8", "1");
+    ensure.env("PYTHONIOENCODING", "utf-8");
+    if let Some(pp) = pythonpath {
+        ensure.env("PYTHONPATH", pp);
+    }
+    ensure.args(["-m", "ensurepip", "--upgrade"]);
+    let status = run_streaming_command(
+        ensure,
+        "seed pip (ensurepip)",
+        log.as_mut().map(|s| &mut **s),
+        emit_line,
+        std::time::Duration::from_secs(PIP_INSTALL_TOTAL_TIMEOUT_SECS),
+    )?;
+    if !status.success() {
+        return Err(format!("ensurepip failed for {}", py.display()));
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 async fn pip_install(
-    app: tauri::AppHandle,
     venv_dir: String,
     package_spec: String,
     index_url: Option<String>,
+    install_id: Option<String>,
 ) -> Result<String, String> {
     spawn_blocking_result(move || {
+        let install_id = install_id.unwrap_or_else(|| PIP_INSTALL_DEFAULT_ID.to_string());
+        let install_id_ref = install_id.as_str();
+        pip_install_set_stage(install_id_ref, "安装 openakita（pip）", 30);
+        pip_install_append_line(
+            install_id_ref,
+            &format!("\n=== pip install started at {} ===\n", now_epoch_secs()),
+        );
+        let result: Result<String, String> = (|| {
         let (py, pythonpath) = resolve_python(&venv_dir)?;
 
         let mut log = String::new();
 
-        #[derive(Serialize, Clone)]
-        #[serde(rename_all = "camelCase")]
-        struct PipInstallEvent {
-            kind: String, // "stage" | "line"
-            stage: Option<String>,
-            percent: Option<u8>,
-            text: Option<String>,
-        }
-
         let emit_stage = |stage: &str, percent: u8| {
-            let _ = app.emit(
-                "pip_install_event",
-                PipInstallEvent {
-                    kind: "stage".into(),
-                    stage: Some(stage.into()),
-                    percent: Some(percent),
-                    text: None,
-                },
-            );
+            pip_install_set_stage(install_id_ref, stage, percent);
         };
         let emit_line = |text: &str| {
-            let _ = app.emit(
-                "pip_install_event",
-                PipInstallEvent {
-                    kind: "line".into(),
-                    stage: None,
-                    percent: None,
-                    text: Some(text.into()),
-                },
-            );
+            pip_install_append_line(install_id_ref, text);
         };
 
-        fn run_streaming(
-            mut cmd: Command,
-            header: &str,
-            log: &mut String,
-            emit_line: &dyn Fn(&str),
-        ) -> Result<std::process::ExitStatus, String> {
-            use std::io::Read as _;
-            use std::process::Stdio;
-            use std::sync::mpsc;
-            use std::thread;
-
-            emit_line(&format!("\n=== {header} ===\n"));
-            log.push_str(&format!("=== {header} ===\n"));
-
-            cmd.stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-
-            let mut child = cmd.spawn().map_err(|e| format!("{header} failed to start: {e}"))?;
-            let mut stdout = child
-                .stdout
-                .take()
-                .ok_or_else(|| format!("{header} stdout pipe missing"))?;
-            let mut stderr = child
-                .stderr
-                .take()
-                .ok_or_else(|| format!("{header} stderr pipe missing"))?;
-
-            let (tx, rx) = mpsc::channel::<(bool, String)>();
-            let tx1 = tx.clone();
-            let h1 = thread::spawn(move || {
-                let mut buf = [0u8; 4096];
-                // Same UTF-8-boundary carryover as the chat stream: a 4 KiB
-                // read can split a multi-byte char (Chinese pip error text,
-                // progress glyphs) so we hold the incomplete tail back.
-                let mut pending: Vec<u8> = Vec::new();
-                loop {
-                    match stdout.read(&mut buf) {
-                        Ok(0) => {
-                            if !pending.is_empty() {
-                                let _ = tx1.send((false, String::from_utf8_lossy(&pending).to_string()));
-                            }
-                            break;
-                        }
-                        Ok(n) => {
-                            pending.extend_from_slice(&buf[..n]);
-                            let s = take_valid_utf8_prefix(&mut pending);
-                            if !s.is_empty() {
-                                let _ = tx1.send((false, s));
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-            let tx2 = tx.clone();
-            let h2 = thread::spawn(move || {
-                let mut buf = [0u8; 4096];
-                let mut pending: Vec<u8> = Vec::new();
-                loop {
-                    match stderr.read(&mut buf) {
-                        Ok(0) => {
-                            if !pending.is_empty() {
-                                let _ = tx2.send((true, String::from_utf8_lossy(&pending).to_string()));
-                            }
-                            break;
-                        }
-                        Ok(n) => {
-                            pending.extend_from_slice(&buf[..n]);
-                            let s = take_valid_utf8_prefix(&mut pending);
-                            if !s.is_empty() {
-                                let _ = tx2.send((true, s));
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-            drop(tx);
-
-            // Drain output while process runs
-            loop {
-                match rx.recv_timeout(std::time::Duration::from_millis(120)) {
-                    Ok((_is_err, chunk)) => {
-                        emit_line(&chunk);
-                        log.push_str(&chunk);
-                    }
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        if let Ok(Some(_)) = child.try_wait() {
-                            break;
-                        }
-                    }
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                }
-            }
-
-            let status = child
-                .wait()
-                .map_err(|e| format!("{header} wait failed: {e}"))?;
-            let _ = h1.join();
-            let _ = h2.join();
-
-            // Drain remaining buffered chunks
-            while let Ok((_is_err, chunk)) = rx.try_recv() {
-                emit_line(&chunk);
-                log.push_str(&chunk);
-            }
-            log.push_str("\n\n");
-            Ok(status)
-        }
+        emit_stage("准备 pip", 20);
+        ensure_pip_available(
+            &py,
+            pythonpath.as_deref(),
+            Some(&mut log),
+            Some(&emit_line),
+        )?;
 
         // 国内镜像兜底：前端未传 index_url 时默认使用阿里云
         let effective_index = index_url.as_deref()
@@ -8428,12 +8877,36 @@ async fn pip_install(
         if let Some(ref pp) = pythonpath {
             up.env("PYTHONPATH", pp);
         }
-        up.args(["-m", "pip", "install", "-U", "pip", "setuptools", "wheel"]);
+        up.args([
+            "-m",
+            "pip",
+            "install",
+            "-U",
+            "pip",
+            "setuptools",
+            "wheel",
+            "--disable-pip-version-check",
+            "--prefer-binary",
+            "--timeout",
+            "120",
+            "--retries",
+            "8",
+            "--resume-retries",
+            "8",
+            "--progress-bar",
+            "off",
+        ]);
         up.args(["-i", effective_index]);
         if !effective_host.is_empty() {
             up.args(["--trusted-host", effective_host]);
         }
-        let _ = run_streaming(up, "pip upgrade (best-effort)", &mut log, &emit_line);
+        let _ = run_streaming_command(
+            up,
+            "pip upgrade (best-effort)",
+            Some(&mut log),
+            Some(&emit_line),
+            std::time::Duration::from_secs(PIP_INSTALL_TOTAL_TIMEOUT_SECS),
+        );
 
         emit_stage("安装 openakita（pip）", 70);
         let mut c = Command::new(&py);
@@ -8444,18 +8917,41 @@ async fn pip_install(
         if let Some(ref pp) = pythonpath {
             c.env("PYTHONPATH", pp);
         }
-        c.args(["-m", "pip", "install", "-U", &package_spec]);
+        c.args([
+            "-m",
+            "pip",
+            "install",
+            "-U",
+            &package_spec,
+            "--disable-pip-version-check",
+            "--prefer-binary",
+            "--timeout",
+            "120",
+            "--retries",
+            "8",
+            "--resume-retries",
+            "8",
+            "--progress-bar",
+            "off",
+        ]);
         c.args(["-i", effective_index]);
         if !effective_host.is_empty() {
             c.args(["--trusted-host", effective_host]);
         }
-        let status = run_streaming(c, "pip install", &mut log, &emit_line)?;
+        let status = run_streaming_command(
+            c,
+            "pip install",
+            Some(&mut log),
+            Some(&emit_line),
+            std::time::Duration::from_secs(PIP_INSTALL_TOTAL_TIMEOUT_SECS),
+        )?;
         if !status.success() {
             let tail = if log.len() > 6000 {
                 &log[log.len() - 6000..]
             } else {
                 &log
             };
+            pip_install_finish_progress(install_id_ref, true);
             return Err(format!("pip install failed: {status}\n\n--- output tail ---\n{tail}"));
         }
 
@@ -8478,6 +8974,7 @@ async fn pip_install(
         if !v.status.success() {
             let stdout = String::from_utf8_lossy(&v.stdout).to_string();
             let stderr = String::from_utf8_lossy(&v.stderr).to_string();
+            pip_install_finish_progress(install_id_ref, true);
             return Err(format!(
                 "openakita 已安装，但缺少 Setup Center 所需模块（openakita.setup_center.bridge）。\n这通常意味着你安装的 openakita 版本过旧或来源不包含该模块。\nstdout:\n{}\nstderr:\n{}",
                 stdout, stderr
@@ -8493,8 +8990,14 @@ async fn pip_install(
             emit_line(&format!("openakita version: {ver}\n"));
         }
         emit_stage("完成", 100);
+        pip_install_finish_progress(install_id_ref, false);
 
         Ok(log)
+        })();
+        if result.is_err() {
+            pip_install_finish_progress(install_id_ref, true);
+        }
+        result
     })
     .await
 }
@@ -9370,8 +9873,7 @@ async fn backend_fetch(
         // legitimately needs >90s of silence we surface it as a stream
         // error — frontend's recovery polling will still rebuild state from
         // backend session history.
-        const CHUNK_INACTIVITY_TIMEOUT: std::time::Duration =
-            std::time::Duration::from_secs(90);
+        const CHUNK_INACTIVITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
         // Carries the incomplete tail of a multi-byte UTF-8 sequence whose
         // bytes were split across two `response.chunk()` reads, so it can be
         // completed by the next chunk instead of being mangled into U+FFFD.
@@ -9388,16 +9890,11 @@ async fn backend_fetch(
             // when the future is wrapped). The copy is cheap — chunks are
             // typically a few KB of SSE payload that we'd be converting to
             // String::from_utf8_lossy anyway.
-            let timed: Result<
-                reqwest::Result<Option<Vec<u8>>>,
-                tokio::time::error::Elapsed,
-            > = tokio::time::timeout(CHUNK_INACTIVITY_TIMEOUT, async {
-                response
-                    .chunk()
-                    .await
-                    .map(|opt| opt.map(|b| b.to_vec()))
-            })
-            .await;
+            let timed: Result<reqwest::Result<Option<Vec<u8>>>, tokio::time::error::Elapsed> =
+                tokio::time::timeout(CHUNK_INACTIVITY_TIMEOUT, async {
+                    response.chunk().await.map(|opt| opt.map(|b| b.to_vec()))
+                })
+                .await;
             let chunk_res = match timed {
                 Ok(r) => r,
                 Err(_) => {
@@ -9416,8 +9913,7 @@ async fn backend_fetch(
                 Ok(Some(chunk)) => {
                     pending.extend_from_slice(&chunk);
                     let text = take_valid_utf8_prefix(&mut pending);
-                    if !text.is_empty()
-                        && on_event.send(BackendFetchEvent::Chunk { text }).is_err()
+                    if !text.is_empty() && on_event.send(BackendFetchEvent::Chunk { text }).is_err()
                     {
                         break;
                     }
@@ -10060,7 +10556,10 @@ fn export_diagnostic_bundle(
                 port,
                 is_backend_http_healthy(Some(port)),
                 pid_data.as_ref().map(|p| p.pid),
-                pid_data.as_ref().map(|p| is_pid_file_valid(p)).unwrap_or(false)
+                pid_data
+                    .as_ref()
+                    .map(|p| is_pid_file_valid(p))
+                    .unwrap_or(false)
             )
             .as_bytes(),
         )
@@ -10463,7 +10962,13 @@ fn build_feedback_zip(
             .join("EBWebView")
             .join("Crashpad")
             .join("reports");
-        zip_add_dir_capped(&mut zw, &crashpad, "webview2_crashpad", opts, 6 * 1024 * 1024);
+        zip_add_dir_capped(
+            &mut zw,
+            &crashpad,
+            "webview2_crashpad",
+            opts,
+            6 * 1024 * 1024,
+        );
     }
 
     // ── Windows Error Reporting metadata + system event log ──
@@ -10608,7 +11113,11 @@ fn collect_windows_crash_artifacts(
                     if sz > wer_dump_budget {
                         continue;
                     }
-                    let fname = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let fname = p
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     let zip_name = format!("wer/{root_name}-{dir_name}-{fname}");
                     if zw.start_file(&zip_name, opts).is_ok() {
                         let _ = zw.write_all(&fs::read(&p).unwrap_or_default());
@@ -11005,6 +11514,97 @@ mod tests {
         assert!(!result.venv_ready);
         assert!(!result.venv_checked.is_empty());
         assert!(!result.bundled_checked.is_empty());
+    }
+
+    #[test]
+    fn test_check_backend_availability_rejects_empty_venv() {
+        let temp = std::env::temp_dir().join(format!(
+            "openakita-empty-venv-test-{}",
+            std::process::id()
+        ));
+        if temp.exists() {
+            let _ = fs::remove_dir_all(&temp);
+        }
+        let status = Command::new("uv")
+            .args(["venv", temp.to_string_lossy().as_ref(), "--python", "3.11"])
+            .status();
+        let Ok(status) = status else {
+            eprintln!("skipping empty venv availability test: uv not available");
+            return;
+        };
+        if !status.success() {
+            eprintln!("skipping empty venv availability test: uv venv failed");
+            let _ = fs::remove_dir_all(&temp);
+            return;
+        }
+
+        let result = check_backend_availability(temp.to_string_lossy().to_string());
+        assert!(
+            !result.venv_ready,
+            "empty venv with only python.exe must not be treated as backend-ready"
+        );
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_ensure_pip_available_seeds_uv_venv_without_pip() {
+        let temp = std::env::temp_dir().join(format!(
+            "openakita-pip-seed-test-{}",
+            std::process::id()
+        ));
+        if temp.exists() {
+            let _ = fs::remove_dir_all(&temp);
+        }
+        let status = Command::new("uv")
+            .args(["venv", temp.to_string_lossy().as_ref(), "--python", "3.11"])
+            .status();
+        let Ok(status) = status else {
+            eprintln!("skipping pip seed test: uv not available");
+            return;
+        };
+        if !status.success() {
+            eprintln!("skipping pip seed test: uv venv failed");
+            let _ = fs::remove_dir_all(&temp);
+            return;
+        }
+
+        let py = venv_python_path(temp.to_string_lossy().as_ref());
+        ensure_pip_available(&py, None, None, None)
+            .expect("ensure_pip_available should seed pip");
+
+        let status = Command::new(&py)
+            .args(["-m", "pip", "--version"])
+            .status()
+            .expect("pip --version should run after ensure_pip_available");
+        assert!(status.success());
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_pip_install_progress_reused_id_with_stale_cursor_returns_fresh_chunks() {
+        let install_id = format!("test-progress-{}-{}", std::process::id(), now_epoch_secs());
+        pip_install_reset_progress(&install_id, "test old progress", false);
+        pip_install_append_line(&install_id, "old chunk 1\n");
+        pip_install_append_line(&install_id, "old chunk 2\n");
+        let old_cursor = pip_install_progress(Some(install_id.clone()), None).cursor;
+        assert!(old_cursor >= 2);
+        pip_install_finish_progress(&install_id, true);
+
+        pip_install_reset_progress(&install_id, "test new progress", false);
+        pip_install_append_line(&install_id, "fresh chunk\n");
+        let snapshot = pip_install_progress(Some(install_id.clone()), Some(old_cursor));
+
+        assert!(
+            snapshot.missed,
+            "a stale cursor from a previous run must be reported as missed"
+        );
+        assert!(
+            snapshot.chunks.join("").contains("fresh chunk"),
+            "fresh chunks must still be delivered when the previous cursor is beyond the new run"
+        );
+        assert!(!snapshot.done);
+
+        pip_install_finish_progress(&install_id, false);
     }
 
     #[test]
