@@ -505,6 +505,18 @@
       "disableAll": "Disable all",
       "disableAllTitle": "Disable all skills in this category",
       "disabledAll": "Disabled all skills in category \"{{name}}\"",
+      "massStarting": "Starting...",
+      "massWorking": "Updating skills...",
+      "massSyncing": "Syncing list...",
+      "massStage": {
+        "starting": "Starting...",
+        "scanning": "Scanning category skills...",
+        "allowlist": "Updating enabled skill list...",
+        "propagating": "Reloading skill runtime...",
+        "syncing": "Syncing list...",
+        "done": "Done",
+        "working": "Updating skills..."
+      },
       "noSkillsInCategory": "No actionable skills found in category \"{{name}}\"",
       "allSystemSkills": "All {{count}} skills in \"{{name}}\" are system skills and cannot be toggled",
       "delete": "Delete",

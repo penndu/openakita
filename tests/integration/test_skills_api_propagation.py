@@ -391,6 +391,68 @@ class TestConfigSkillsRoute:
 
 
 # ---------------------------------------------------------------------------
+# /api/skill-categories/{name}/enable?stream=1
+# ---------------------------------------------------------------------------
+
+
+class TestSkillCategoryMassActionProgress:
+    async def test_enable_category_streams_progress_and_keeps_json_contract(
+        self, app_with_fake_agent, client, monkeypatch, tmp_path: Path
+    ):
+        """Category mass actions can stream progress without breaking the JSON endpoint."""
+        _, agent = app_with_fake_agent
+        skills_json = tmp_path / "data" / "skills.json"
+        skills_json.write_text(
+            json.dumps({"version": 1, "external_allowlist": []}),
+            encoding="utf-8",
+        )
+
+        async def fake_scan(name: str):
+            assert name == "Dev"
+            return {"alpha", "beta"}, 0
+
+        monkeypatch.setattr(
+            "openakita.api.routes.skill_categories._scan_external_ids_in_category",
+            fake_scan,
+        )
+
+        json_resp = await client.post("/api/skill-categories/Dev/enable", json={})
+        assert json_resp.status_code == 200
+        assert json_resp.json()["added"] == 2
+
+        agent.propagate_skill_change.reset_mock()
+        skills_json.write_text(
+            json.dumps({"version": 1, "external_allowlist": []}),
+            encoding="utf-8",
+        )
+
+        stream_resp = await client.post("/api/skill-categories/Dev/enable?stream=1", json={})
+
+        assert stream_resp.status_code == 200
+        assert "text/event-stream" in stream_resp.headers["content-type"]
+        frames = []
+        for block in stream_resp.text.split("\n\n"):
+            if not block.startswith("data: "):
+                continue
+            frames.append(json.loads(block.removeprefix("data: ")))
+
+        assert [f["stage"] for f in frames] == [
+            "starting",
+            "scanning",
+            "allowlist",
+            "propagating",
+            "done",
+        ]
+        assert frames[-1]["finished"] is True
+        assert frames[-1]["percent"] == 100
+        assert frames[-1]["result"]["added"] == 2
+        agent.propagate_skill_change.assert_called_once()
+        call = agent.propagate_skill_change.call_args
+        assert call.args[0] == "category_enable"
+        assert call.kwargs.get("rescan") is True
+
+
+# ---------------------------------------------------------------------------
 # 跨层缓存失效：notify_skills_changed 清空 GET /api/skills 缓存
 # ---------------------------------------------------------------------------
 
