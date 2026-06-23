@@ -2836,19 +2836,33 @@ class Agent:
 
         clear_all_skill_caches()
 
-        if rescan:
-            try:
-                self.skill_loader.load_all(settings.project_root)
-            except Exception as e:
-                logger.warning("propagate_skill_change: load_all failed: %s", e)
-
+        external_allowlist = None
+        effective = None
+        agent_skills: set[str] = set()
         try:
             from ..skills.allowlist_io import read_allowlist
             from ..skills.preset_utils import collect_preset_referenced_skills
 
             _, external_allowlist = read_allowlist()
-            effective = self.skill_loader.compute_effective_allowlist(external_allowlist)
             agent_skills = collect_preset_referenced_skills()
+            if external_allowlist is not None:
+                effective = self.skill_loader.compute_effective_allowlist(external_allowlist)
+        except Exception as e:
+            logger.warning("propagate_skill_change: allowlist pre-read failed: %s", e)
+
+        if rescan:
+            try:
+                load_filter = self.skill_loader.build_preparse_allowlist_filter(
+                    effective,
+                    agent_referenced_skills=agent_skills,
+                )
+                self.skill_loader.load_all(settings.project_root, load_filter=load_filter)
+            except Exception as e:
+                logger.warning("propagate_skill_change: load_all failed: %s", e)
+
+        try:
+            if effective is None:
+                effective = self.skill_loader.compute_effective_allowlist(external_allowlist)
             self.skill_loader.prune_external_by_allowlist(
                 effective, agent_referenced_skills=agent_skills
             )
