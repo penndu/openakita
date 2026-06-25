@@ -19,6 +19,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from openakita.core.confirmation_state import ConfirmationDecision, get_confirmation_store
+from openakita.core.context_stats import get_context_snapshot, merge_context_snapshot_into_usage
 from openakita.core.engine_bridge import engine_stream, is_dual_loop, to_engine
 from openakita.core.security_actions import execute_controlled_action
 from openakita.core.trusted_paths import grant_session_trust
@@ -1352,29 +1353,8 @@ async def _stream_chat(
                             _usage_data["usage_source"] = (
                                 "mixed" if len(usage_sources) > 1 else next(iter(usage_sources))
                             )
-                ctx_mgr = getattr(actual_agent, "context_manager", None) or getattr(
-                    re, "_context_manager", None
-                )
-                if ctx_mgr and hasattr(ctx_mgr, "get_max_context_tokens"):
-                    _max_ctx = ctx_mgr.get_max_context_tokens()
-                    _msgs = getattr(re, "_last_working_messages", None) or getattr(
-                        getattr(actual_agent, "_context", None), "messages", []
-                    )
-                    _cur_ctx = ctx_mgr.estimate_messages_tokens(_msgs) if _msgs else 0
-                    if _usage_data is None:
-                        _usage_data = {}
-                    _usage_data["context_tokens"] = _cur_ctx
-                    _usage_data["context_limit"] = _max_ctx
-                    _usage_data["history_context_tokens"] = _cur_ctx
-                    _usage_data["history_context_limit"] = _max_ctx
-                # 透出 ContextPressure 摘要 — 供前端"上下文健康度"展示。
-                # 已由 reasoning_engine 在每轮 token 异常检测时同步刷新，
-                # 此处直接读取，零额外计算。
-                _last_pressure = getattr(re, "_last_context_pressure", None)
-                if _last_pressure:
-                    if _usage_data is None:
-                        _usage_data = {}
-                    _usage_data["context_pressure"] = dict(_last_pressure)
+            _snapshot = get_context_snapshot(actual_agent)
+            _usage_data = merge_context_snapshot_into_usage(_usage_data, _snapshot)
         except Exception:
             pass
 

@@ -2879,6 +2879,156 @@ button.btnApplyRestart:hover {
   color: var(--text);
 }
 
+/* ─── Conversation Outline (会话大纲) —— 常驻迷你导航，默认折叠为短条，悬浮展开 ─── */
+
+.chatOutline {
+  position: absolute;
+  right: 34px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: auto;
+  max-height: 26vh;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  box-shadow: none;
+  z-index: 8;
+  transition: background 0.18s ease, box-shadow 0.18s ease, width 0.18s ease,
+    border-color 0.18s ease, padding 0.18s ease;
+}
+
+/* 折叠态：文字隐藏，仅显示短条 */
+.chatOutlineText {
+  display: none;
+}
+
+.chatOutlineList {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* 折叠态条目：仅一个右对齐的细短条，无边框无背景 */
+.chatOutlineItem {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  width: 100%;
+  text-align: left;
+  padding: 1px 2px;
+  border: none !important;
+  border-radius: 7px;
+  background: transparent !important;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.45;
+  transition: background 0.12s, color 0.12s;
+}
+
+/* 折叠态的短条指示器 —— 浅、细、精致 */
+.chatOutlineBar {
+  display: block;
+  width: 15px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.15;
+  transition: width 0.14s ease, background 0.14s ease, opacity 0.14s ease;
+}
+
+.chatOutlineItem:hover .chatOutlineBar {
+  width: 18px;
+  opacity: 0.4;
+}
+
+.chatOutlineItemActive .chatOutlineBar {
+  width: 20px;
+  background: var(--brand);
+  opacity: 0.7;
+}
+
+/* ── 悬浮展开态 ── */
+.chatOutline:hover {
+  width: 232px;
+  max-width: 38%;
+  padding: 8px 6px;
+  background: var(--panel);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border-color: var(--line);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+
+.chatOutline:hover .chatOutlineList {
+  overflow-y: auto;
+  gap: 1px;
+}
+
+.chatOutline:hover .chatOutlineBar {
+  display: none;
+}
+
+.chatOutline:hover .chatOutlineText {
+  display: block;
+}
+
+/* 展开态条目：纯文字行，无填充胶囊；左侧细竖条标记当前项 */
+.chatOutline:hover .chatOutlineItem {
+  position: relative;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 6px 10px;
+  border-radius: 7px;
+}
+
+.chatOutline:hover .chatOutlineItem::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  width: 2px;
+  height: 14px;
+  border-radius: 1px;
+  background: var(--brand);
+  transition: transform 0.14s ease;
+}
+
+.chatOutline:hover .chatOutlineItem:hover {
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--text);
+}
+
+.chatOutline:hover .chatOutlineItemActive {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.chatOutline:hover .chatOutlineItemActive::before {
+  transform: translateY(-50%) scaleY(1);
+}
+
+.chatOutlineText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .chatOutline:hover {
+    width: 200px;
+  }
+}
+
 /* ─── Floating Todo Bar (above input) ─── */
 
 .floatingTodoBar {
@@ -3292,12 +3442,132 @@ button.btnApplyRestart:hover {
   display: flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
 }
 
 .chatInputToolbarRight {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.chatContextUsage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 9px;
+  background: rgba(148, 163, 184, 0.09);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.chatContextUsage:hover {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.25);
+}
+
+.chatContextUsageText {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted2);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.chatContextUsageText.chatContextUsageWarn {
+  color: #d97706;
+}
+
+.chatContextUsageText.chatContextUsageDanger {
+  color: #dc2626;
+}
+
+.chatContextLimitEditable {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  padding: 0 2px;
+  margin: 0;
+  border-bottom: 1px dashed transparent;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.chatContextLimitEditable:hover {
+  border-bottom-color: currentColor;
+  background: rgba(148, 163, 184, 0.14);
+  border-radius: 3px;
+}
+
+.chatContextLimitEditable:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.chatContextBar {
+  width: 72px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.chatContextBarFill {
+  height: 100%;
+  border-radius: inherit;
+  width: 0%;
+  background: linear-gradient(90deg, #94a3b8, #64748b);
+  transition: width 0.3s ease, filter 0.15s ease;
+}
+
+.chatContextUsage:hover .chatContextBarFill {
+  filter: brightness(1.06);
+}
+
+.chatContextBarFill.chatContextBarFillWarn {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.chatContextBarFill.chatContextBarFillDanger {
+  background: linear-gradient(90deg, #f87171, #dc2626);
+}
+
+.chatContextEditBody {
+  display: grid;
+  gap: 10px;
+}
+
+.chatContextEditHint {
+  font-size: 12px;
+  color: var(--muted2);
+}
+
+@media (max-width: 768px) {
+  .chatContextUsage {
+    gap: 6px;
+    margin-left: 4px;
+    padding: 2px 6px;
+  }
+
+  .chatContextUsageText {
+    max-width: 155px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chatContextBar {
+    width: 48px;
+  }
 }
 
 .chatInputIconBtn {
@@ -5756,162 +6026,6 @@ body > div[id*="sm-" i] {
 [data-expand-flash] {
   animation: openakitaExpandFlash 1.4s ease-out;
   border-radius: var(--radius, 12px);
-}
-
-/* ─────────────────────────────────────────────────────────────────────
-   Web search provider panel (config → tools-and-skills → web-search)
-   ───────────────────────────────────────────────────────────────────── */
-.wsProviderGrid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-@media (min-width: 720px) {
-  .wsProviderGrid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-.wsProviderCard {
-  border: 1px solid var(--line, rgba(17, 24, 39, 0.10));
-  border-radius: var(--radius, 12px);
-  padding: 12px 14px;
-  background: var(--panel, rgba(255, 255, 255, 0.88));
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.wsProviderCard:hover {
-  border-color: rgba(37, 99, 235, 0.35);
-}
-
-.wsProviderCard[data-active="true"] {
-  border-color: rgba(37, 99, 235, 0.55);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.10);
-}
-
-.wsProviderCard[data-available="false"] .wsProviderTitle {
-  opacity: 0.85;
-}
-
-.wsProviderHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.wsProviderTitle {
-  font-weight: 600;
-  font-size: 0.95em;
-  color: var(--text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.wsProviderBadges {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.wsBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 0.72em;
-  font-weight: 600;
-  border: 1px solid transparent;
-}
-
-.wsBadge-active {
-  background: rgba(37, 99, 235, 0.10);
-  color: #1d4ed8;
-  border-color: rgba(37, 99, 235, 0.30);
-}
-
-.wsBadge-available {
-  background: rgba(16, 185, 129, 0.10);
-  color: #047857;
-  border-color: rgba(16, 185, 129, 0.30);
-}
-
-.wsBadge-unconfigured {
-  background: rgba(148, 163, 184, 0.12);
-  color: #64748b;
-  border-color: rgba(148, 163, 184, 0.30);
-}
-
-.wsBadge-recommended {
-  background: rgba(245, 158, 11, 0.10);
-  color: #b45309;
-  border-color: rgba(245, 158, 11, 0.30);
-}
-
-.wsProviderActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.wsProviderTestResult {
-  font-size: 0.82em;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: rgba(148, 163, 184, 0.08);
-  border: 1px solid rgba(148, 163, 184, 0.20);
-  white-space: pre-wrap;
-}
-
-.wsProviderTestResult[data-state="ok"] {
-  background: rgba(16, 185, 129, 0.08);
-  border-color: rgba(16, 185, 129, 0.30);
-  color: #047857;
-}
-
-.wsProviderTestResult[data-state="error"] {
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.28);
-  color: #b91c1c;
-}
-
-[data-theme="dark"] .wsProviderCard {
-  background: rgba(15, 23, 42, 0.55);
-}
-
-[data-theme="dark"] .wsBadge-active {
-  background: rgba(37, 99, 235, 0.20);
-  color: #93c5fd;
-}
-
-[data-theme="dark"] .wsBadge-available {
-  background: rgba(16, 185, 129, 0.20);
-  color: #6ee7b7;
-}
-
-[data-theme="dark"] .wsBadge-unconfigured {
-  background: rgba(148, 163, 184, 0.20);
-  color: #cbd5e1;
-}
-
-[data-theme="dark"] .wsBadge-recommended {
-  background: rgba(245, 158, 11, 0.20);
-  color: #fcd34d;
-}
-
-[data-theme="dark"] .wsProviderTestResult[data-state="ok"] {
-  color: #6ee7b7;
-}
-
-[data-theme="dark"] .wsProviderTestResult[data-state="error"] {
-  color: #fca5a5;
 }
 
 /* ─────────────────────────────────────────────────────────────────────

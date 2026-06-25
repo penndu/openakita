@@ -1022,6 +1022,164 @@ class UpdateSettingsRequest(BaseModel):
     settings: dict
 
 
+class ContextLengthRequest(BaseModel):
+    endpoint: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    endpoint_type: str = "endpoints"
+    context_length: int = Field(
+        validation_alias=AliasChoices("context_length", "context_limit", "contextLimit")
+    )
+    expected_version: str | None = None
+
+
+def _runtime_current_endpoint_name(request: Request) -> str:
+    agent = getattr(request.app.state, "agent", None)
+    actual = getattr(agent, "_local_agent", agent) if agent else None
+    brain = getattr(actual, "_brain", None) or getattr(actual, "brain", None)
+    if brain is None:
+        re = getattr(actual, "reasoning_engine", None)
+        ctx_mgr = getattr(actual, "context_manager", None) or getattr(re, "_context_manager", None)
+        brain = getattr(ctx_mgr, "_brain", None)
+    if brain is None or not hasattr(brain, "get_current_model_info"):
+        return ""
+    try:
+        info = brain.get_current_model_info()
+    except Exception:
+        return ""
+    if not isinstance(info, dict):
+        return ""
+    return str(info.get("name") or info.get("endpoint_name") or "").strip()
+
+
+def _select_context_endpoint(
+    request: Request,
+    endpoints: list[dict],
+    *,
+    endpoint: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict | None:
+    endpoint = (endpoint or "").strip()
+    provider = (provider or "").strip()
+    model = (model or "").strip()
+    if endpoint:
+        return next((ep for ep in endpoints if str(ep.get("name") or "") == endpoint), None)
+    if provider or model:
+        for ep in endpoints:
+            if provider and str(ep.get("provider") or "") != provider:
+                continue
+            if model and str(ep.get("model") or "") != model:
+                continue
+            return ep
+    runtime_name = _runtime_current_endpoint_name(request)
+    if runtime_name:
+        found = next((ep for ep in endpoints if str(ep.get("name") or "") == runtime_name), None)
+        if found:
+            return found
+    return next((ep for ep in endpoints if ep.get("enabled", True) is not False), None)
+
+
+def _context_length_payload(endpoint: dict) -> dict[str, Any]:
+    from openakita.config import settings
+    from openakita.llm.types import DEFAULT_CONTEXT_WINDOW
+
+    raw_window = int(endpoint.get("context_window") or 0)
+    if raw_window <= 0:
+        raw_window = int(DEFAULT_CONTEXT_WINDOW)
+    global_cap = int(settings.context_max_window or 0)
+    effective_window = min(raw_window, global_cap) if global_cap > 0 else raw_window
+    output_reserve = int(endpoint.get("max_tokens") or 4096)
+    output_reserve = min(output_reserve, max(effective_window // 3, 0))
+    context_limit = int((effective_window - output_reserve) * 0.95)
+    if context_limit < 1024:
+        context_limit = max(int(effective_window * 0.5), 1024)
+
+    return {
+        "endpoint": endpoint.get("name"),
+        "endpoint_name": endpoint.get("name"),
+        "provider": endpoint.get("provider"),
+        "model": endpoint.get("model"),
+        "context_length": raw_window,
+        "context_window": raw_window,
+        "context_limit": context_limit,
+        "effective_context_window": effective_window,
+        "global_context_max_window": global_cap,
+        "output_reserve": output_reserve,
+    }
+
+
+@router.get("/api/config/context-length")
+async def get_context_length(
+    request: Request,
+    endpoint: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    endpoint_type: str = "endpoints",
+):
+    """Return endpoint-level context window and effective runtime limit."""
+    mgr = _get_endpoint_manager()
+    try:
+        endpoints = mgr.list_endpoints(endpoint_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    selected = _select_context_endpoint(
+        request,
+        endpoints,
+        endpoint=endpoint,
+        provider=provider,
+        model=model,
+    )
+    if selected is None:
+        raise HTTPException(status_code=404, detail="context endpoint not found")
+    return _context_length_payload(selected)
+
+
+@router.put("/api/config/context-length")
+async def update_context_length(body: ContextLengthRequest, request: Request):
+    """Update an endpoint's context_window and hot-reload the running LLM config."""
+    if body.context_length < 1000:
+        raise HTTPException(status_code=400, detail="context_length must be >= 1000")
+
+    mgr = _get_endpoint_manager()
+    try:
+        endpoints = mgr.list_endpoints(body.endpoint_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    selected = _select_context_endpoint(
+        request,
+        endpoints,
+        endpoint=body.endpoint,
+        provider=body.provider,
+        model=body.model,
+    )
+    if selected is None:
+        raise HTTPException(status_code=404, detail="context endpoint not found")
+
+    updated = dict(selected)
+    updated["context_window"] = int(body.context_length)
+    try:
+        saved = mgr.save_endpoint(
+            updated,
+            api_key=None,
+            endpoint_type=body.endpoint_type,
+            expected_version=body.expected_version,
+            original_name=str(selected.get("name") or ""),
+        )
+    except Exception as e:
+        logger.error("[Config API] context-length update failed: %s", e, exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+    reload_result = _trigger_reload(request)
+    return {
+        "status": "ok",
+        **_context_length_payload(saved),
+        "endpoint_config": saved,
+        "version": mgr.get_version(),
+        "reload": reload_result,
+    }
+
+
 @router.post("/api/config/toggle-endpoint")
 async def toggle_endpoint(body: ToggleEndpointRequest, request: Request):
     """Toggle an endpoint's enabled/disabled state via EndpointManager."""

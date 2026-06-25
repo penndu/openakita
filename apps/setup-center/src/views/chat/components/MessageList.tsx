@@ -108,6 +108,8 @@ export interface MessageListProps {
   onLoadOlder?: () => void;
   hasMoreBefore?: boolean;
   loadingOlder?: boolean;
+  /** Reports the user message currently anchored near the top of the viewport (drives the outline active state). */
+  onActiveUserMessageChange?: (msgId: string | null) => void;
 }
 
 function applySearchHighlights(container: HTMLElement, query: string) {
@@ -159,6 +161,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
     onLoadOlder,
     hasMoreBefore = false,
     loadingOlder = false,
+    onActiveUserMessageChange,
   },
   ref,
 ) {
@@ -415,6 +418,45 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
       el.removeEventListener("touchmove", disarm);
     };
   }, [recordScrollMetrics, computeAtBottom, onAtBottomChange, setScrolledUpState]);
+
+  // Track which user message is anchored near the top of the viewport so the
+  // conversation outline can highlight the question the reader is currently on.
+  useEffect(() => {
+    const el = scrollerElRef.current;
+    if (!el || !onActiveUserMessageChange) return;
+    const userIds = messages.filter((m) => m.role === "user").map((m) => m.id);
+    if (userIds.length === 0) {
+      onActiveUserMessageChange(null);
+      return;
+    }
+    let raf = 0;
+    const compute = () => {
+      raf = 0;
+      // When scrolled to the bottom, the last question often cannot reach the
+      // top anchor line (there isn't enough content below it), so the top-anchor
+      // scan would lock onto the previous question. Force the last one instead.
+      if (el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_PX) {
+        onActiveUserMessageChange(userIds[userIds.length - 1]);
+        return;
+      }
+      const threshold = el.getBoundingClientRect().top + 100;
+      let active: string | null = userIds[0];
+      for (const id of userIds) {
+        const node = itemRefs.current.get(id);
+        if (!node) continue;
+        if (node.getBoundingClientRect().top <= threshold) active = id;
+        else break;
+      }
+      onActiveUserMessageChange(active);
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(compute); };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    compute();
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [messages, onActiveUserMessageChange]);
 
   useLayoutEffect(() => {
     // Follow the bottom while armed (or for a one-shot forced snap). When not

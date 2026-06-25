@@ -7,6 +7,9 @@ import { useTranslation } from "react-i18next";
 import { setLanguage } from "../i18n";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ProviderIcon } from "../components/ProviderIcon";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { setThemePref } from "../theme";
@@ -37,6 +40,7 @@ import type {
   PlanApprovalEvent,
   OrgTimelineEntry,
   MessagePart,
+  EnvMap,
 } from "../types";
 import { genId, timeAgo } from "../utils";
 import { notifyError, notifyInfo } from "../utils/notify";
@@ -108,6 +112,9 @@ export function ChatView({
   multiAgentEnabled = false,
   currentWorkspaceId,
   feedbackModalOpen = false,
+  envDraft = {},
+  setEnvDraft,
+  saveEnvKeys,
 }: {
   serviceRunning: boolean;
   endpoints: EndpointSummary[];
@@ -117,6 +124,9 @@ export function ChatView({
   multiAgentEnabled?: boolean;
   currentWorkspaceId?: string | null;
   feedbackModalOpen?: boolean;
+  envDraft?: EnvMap;
+  setEnvDraft?: (updater: (prev: EnvMap) => EnvMap) => void;
+  saveEnvKeys?: (keys: string[]) => Promise<{ restartRequired?: boolean; hotReloadable?: boolean } | unknown>;
 }) {
   // multiAgentEnabled is currently observed by App but not consumed inside ChatView
   // (single-agent only); accept the prop for forward compat to avoid runtime warnings.
@@ -308,6 +318,8 @@ export function ChatView({
   const msgSearchRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<MessageListHandle>(null);
   const isMessageListAtBottomRef = useRef(true);
+  // 会话大纲（Conversation outline）：右侧常驻迷你导航，悬浮展开，列出所有用户提问并支持点击跳转
+  const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [lightbox, setLightbox] = useState<{ url: string; downloadUrl: string; name: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
@@ -609,7 +621,10 @@ export function ChatView({
   // ── 上下文占用追踪 ──
   const [contextTokens, setContextTokens] = useState(0);
   const [contextLimit, setContextLimit] = useState(0);
-  const [contextTooltipVisible, setContextTooltipVisible] = useState(false);
+  const [contextEditOpen, setContextEditOpen] = useState(false);
+  const [editingContextLimit, setEditingContextLimit] = useState("");
+  const [contextSaving, setContextSaving] = useState(false);
+  const contextStatsReqSeqRef = useRef(0);
 
   // ── 长闲置回归检测 (6.7) ──
   const lastActivityRef = useRef(Date.now());
@@ -1023,21 +1038,100 @@ export function ChatView({
     }
   }, []);
 
-  // Fetch initial context size on mount / when service starts
-  useEffect(() => {
+  const refreshContextStats = useCallback(async (conversationId?: string | null) => {
     if (!serviceRunning) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await safeFetch(`${apiBaseUrl}/api/stats/tokens/context`);
-        const data = await res.json();
-        if (cancelled) return;
-        if (typeof data.context_tokens === "number") setContextTokens(data.context_tokens);
-        if (typeof data.context_limit === "number") setContextLimit(data.context_limit);
-      } catch { /* ignore */ }
-    })();
-    return () => { cancelled = true; };
-  }, [serviceRunning, apiBaseUrl]);
+    const reqSeq = ++contextStatsReqSeqRef.current;
+    try {
+      const params = new URLSearchParams();
+      if (conversationId) params.set("conversation_id", conversationId);
+      const query = params.toString();
+      const res = await safeFetch(
+        `${apiBaseUrl}/api/stats/tokens/context${query ? `?${query}` : ""}`,
+      );
+      const data = await res.json();
+      if (reqSeq !== contextStatsReqSeqRef.current) return;
+      if (typeof data.context_tokens === "number" && Number.isFinite(data.context_tokens)) {
+        setContextTokens(Math.max(0, data.context_tokens));
+      }
+      if (typeof data.context_limit === "number" && Number.isFinite(data.context_limit) && data.context_limit > 0) {
+        setContextLimit(data.context_limit);
+      }
+    } catch {
+      // ignore context stat refresh errors
+    }
+  }, [apiBaseUrl, serviceRunning]);
+
+  // Fetch context stats when current conversation changes.
+  useEffect(() => {
+    if (!visible) return;
+    void refreshContextStats(activeConvId);
+  }, [activeConvId, visible, refreshContextStats]);
+
+  const formatContextTokens = useCallback((n: number): string => {
+    if (!Number.isFinite(n) || n <= 0) return "0";
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return String(n);
+  }, []);
+
+  const openContextEditor = useCallback(() => {
+    const draftLimit = Number(envDraft.CONTEXT_MAX_WINDOW || "0");
+    const preferredLimit = contextLimit > 0 ? contextLimit : (Number.isFinite(draftLimit) ? draftLimit : 0);
+    setEditingContextLimit(String(Math.max(preferredLimit, 1000)));
+    setContextEditOpen(true);
+  }, [contextLimit, envDraft]);
+
+  const saveContextLimit = useCallback(async () => {
+    const parsed = Number(editingContextLimit);
+    const nextLimit = Number.isFinite(parsed) ? Math.round(parsed) : 0;
+    if (nextLimit < 1000) {
+      notifyError(t("chat.contextEditInvalid", "上下文长度至少为 1000 tokens"));
+      return;
+    }
+
+    setContextSaving(true);
+    const nextValue = String(nextLimit);
+    let restartRequired = false;
+
+    try {
+      if (setEnvDraft) {
+        setEnvDraft((prev) => ({ ...prev, CONTEXT_MAX_WINDOW: nextValue }));
+      }
+
+      if (saveEnvKeys) {
+        try {
+          const result = await saveEnvKeys(["CONTEXT_MAX_WINDOW"]);
+          if (result && typeof result === "object" && "restartRequired" in result) {
+            restartRequired = Boolean((result as { restartRequired?: boolean }).restartRequired);
+          }
+        } catch (err) {
+          logger.warn("Chat", "saveEnvKeys failed before direct env write", { error: String(err) });
+        }
+      }
+
+      const envRes = await safeFetch(`${apiBaseUrl}/api/config/env`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries: { CONTEXT_MAX_WINDOW: nextValue }, delete_keys: [] }),
+      });
+      if (!envRes.ok) throw new Error(`HTTP ${envRes.status}`);
+      const envData = await envRes.json().catch(() => ({}));
+      restartRequired = restartRequired || Boolean(envData.restart_required);
+
+      setContextLimit(nextLimit);
+      setContextEditOpen(false);
+      notifyInfo(t("chat.contextEditSaved", "上下文长度已更新"));
+      if (restartRequired) {
+        notifyInfo(t("chat.contextEditRestartHint", "该配置在当前版本可能需要重启服务后完全生效"));
+      }
+      await refreshContextStats(activeConvId);
+    } catch (err) {
+      logger.error("Chat", "Failed to save context length", { error: String(err) });
+      notifyError(t("chat.contextEditFailed", "保存上下文长度失败，请稍后重试"));
+    } finally {
+      setContextSaving(false);
+    }
+  }, [editingContextLimit, setEnvDraft, saveEnvKeys, apiBaseUrl, t, refreshContextStats, activeConvId]);
 
   useEffect(() => {
     if (!visible) return;
@@ -3606,8 +3700,10 @@ export function ChatView({
                   // Fix-13：后端同时下发新旧字段，优先读取语义更清晰的新名字。
                   const ctxTokens = event.usage.history_context_tokens ?? event.usage.context_tokens;
                   const ctxLimit = event.usage.history_context_limit ?? event.usage.context_limit;
-                  if (typeof ctxTokens === "number") setContextTokens(ctxTokens);
-                  if (typeof ctxLimit === "number") setContextLimit(ctxLimit);
+                  if (isTargetConversationActive()) {
+                    if (typeof ctxTokens === "number") setContextTokens(Math.max(0, ctxTokens));
+                    if (typeof ctxLimit === "number" && ctxLimit > 0) setContextLimit(ctxLimit);
+                  }
                   const isEstimatedUsage = Boolean(event.usage.usage_estimated);
                   const inTokens = isEstimatedUsage ? event.usage.input_tokens : (event.usage.billable_input_tokens ?? event.usage.input_tokens);
                   const outTokens = isEstimatedUsage ? event.usage.output_tokens : (event.usage.billable_output_tokens ?? event.usage.output_tokens);
@@ -4816,6 +4912,19 @@ export function ChatView({
     return `calc(${textUnits}em + 82px)`;
   }, [quickStartItems]);
 
+  // 会话大纲条目：当前会话中所有用户提问（question），保留原始索引用于跳转
+  const outlineItems = useMemo(
+    () =>
+      messages.reduce<{ id: string; index: number; text: string }[]>((acc, m, i) => {
+        if (m.role === "user") {
+          const text = (m.content || "").replace(/\s+/g, " ").trim();
+          if (text) acc.push({ id: m.id, index: i, text });
+        }
+        return acc;
+      }, []),
+    [messages],
+  );
+
   // ── 未启动服务提示 ──
   if (!serviceRunning) {
     return (
@@ -4963,7 +5072,7 @@ export function ChatView({
       )}
 
       {/* 主聊天区 */}
-      <div className="flex min-w-0 flex-1 flex-col" onMouseDown={() => { if (sidebarOpen && !sidebarPinned) setSidebarOpen(false); }}>
+      <div className="flex min-w-0 flex-1 flex-col" style={{ position: "relative" }} onMouseDown={() => { if (sidebarOpen && !sidebarPinned) setSidebarOpen(false); }}>
         {/* Chat top bar */}
         <div className="chatTopBar">
           <button onClick={newConversation} className="chatTopBarBtn" aria-label={t("chat.newConversation", "新建会话")}>
@@ -5175,6 +5284,7 @@ export function ChatView({
               setInputValue(msg);
             }}
             onAtBottomChange={(atBottom) => { isMessageListAtBottomRef.current = atBottom; }}
+            onActiveUserMessageChange={outlineItems.length > 0 ? setActiveOutlineId : undefined}
             onAskAnswer={handleAskAnswer}
             onRetry={handleRegenerate}
             onEdit={handleEditMessage}
@@ -5186,6 +5296,29 @@ export function ChatView({
           </ErrorBoundary>
           )}
         </div>
+
+        {/* 会话大纲 —— 右侧常驻迷你导航，默认折叠为短条，悬浮展开为文字列，点击跳转到对应聊天记录 */}
+        {outlineItems.length > 0 && (
+          <div className="chatOutline" aria-label={t("chat.outline", "会话大纲")}>
+            <div className="chatOutlineList">
+              {outlineItems.map((item) => (
+                <button
+                  key={item.id}
+                  data-slot="outline"
+                  className={`chatOutlineItem ${item.id === activeOutlineId ? "chatOutlineItemActive" : ""}`}
+                  title={item.text}
+                  onClick={() => {
+                    setActiveOutlineId(item.id);
+                    messageListRef.current?.scrollToIndex(item.index, "start");
+                  }}
+                >
+                  <span className="chatOutlineBar" />
+                  <span className="chatOutlineText">{item.text}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Sub-agent progress cards */}
         {displaySubAgentTasks.length > 0 && (
@@ -5837,42 +5970,43 @@ export function ChatView({
                     </TooltipContent>
                   </Tooltip>
                 )}
-              </div>
-
-              <div className="chatInputToolbarRight">
-                {/* Context usage ring — only show when we have real usage data */}
-                {contextLimit > 0 && contextTokens > 0 && (() => {
-                  const pct = Math.min(contextTokens / contextLimit, 1);
-                  const pctLabel = (pct * 100).toFixed(1);
-                  const fmtK = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
-                  const r = 9; const sw = 2; const circ = 2 * Math.PI * r;
-                  const offset = circ * (1 - pct);
-                  const color = pct > 0.95 ? "#ef4444" : pct > 0.8 ? "#f59e0b" : pct > 0.5 ? "#3b82f6" : "#999";
+                {/* Context usage bar */}
+                {contextLimit > 0 && (() => {
+                  const usagePercent = Math.min((contextTokens / contextLimit) * 100, 100);
+                  const remaining = Math.max(0, contextLimit - contextTokens);
+                  const toneClass = usagePercent > 80 ? "chatContextUsageDanger" : usagePercent > 60 ? "chatContextUsageWarn" : "";
+                  const fillClass = usagePercent > 80 ? "chatContextBarFillDanger" : usagePercent > 60 ? "chatContextBarFillWarn" : "";
                   return (
-                    <div
-                      style={{ position: "relative", display: "inline-flex", alignItems: "center", cursor: "default", marginRight: 4 }}
-                      onMouseEnter={() => setContextTooltipVisible(true)}
-                      onMouseLeave={() => setContextTooltipVisible(false)}
-                    >
-                      <svg width={22} height={22} viewBox="0 0 22 22">
-                        <circle cx={11} cy={11} r={r} fill="none" stroke="var(--line)" strokeWidth={sw} />
-                        <circle cx={11} cy={11} r={r} fill="none" stroke={color} strokeWidth={sw}
-                          strokeDasharray={circ} strokeDashoffset={offset}
-                          strokeLinecap="round" transform="rotate(-90 11 11)" style={{ transition: "stroke-dashoffset 0.4s ease" }} />
-                      </svg>
-                      {contextTooltipVisible && (
-                        <div style={{
-                          position: "absolute", bottom: "calc(100% + 6px)", right: 0,
-                          background: "rgba(0,0,0,0.82)", color: "#fff", fontSize: 11, fontWeight: 500,
-                          padding: "4px 8px", borderRadius: 6, whiteSpace: "nowrap", pointerEvents: "none",
-                          zIndex: 100,
-                        }}>
-                          {pctLabel}% · {fmtK(contextTokens)} / {fmtK(contextLimit)} context used
-                        </div>
-                      )}
+                    <div className="chatContextUsage">
+                      <span className={`chatContextUsageText ${toneClass}`}>
+                        {formatContextTokens(contextTokens)} /
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="chatContextLimitEditable"
+                              onClick={openContextEditor}
+                              disabled={contextSaving}
+                            >
+                              {formatContextTokens(contextLimit)}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            {t("chat.contextClickToEdit", "点击编辑上下文长度")}
+                          </TooltipContent>
+                        </Tooltip>
+                        {" · "}
+                        {t("chat.contextRemaining", "剩余 {{remaining}}", { remaining: formatContextTokens(remaining) })}
+                      </span>
+                      <div className="chatContextBar">
+                        <div className={`chatContextBarFill ${fillClass}`} style={{ width: `${usagePercent}%` }} />
+                      </div>
                     </div>
                   );
                 })()}
+              </div>
+
+              <div className="chatInputToolbarRight">
                 {isCurrentConvStreaming || orgCommandPending ? (
                   (hasInputText || pendingAttachments.length > 0) && !orgCommandPending ? (
                     <button
@@ -5996,6 +6130,44 @@ export function ChatView({
         showInFolder={showInFolder}
         t={(k, d) => t(k, d ?? "")}
       />}
+      <Dialog open={contextEditOpen} onOpenChange={(open) => { if (!contextSaving) setContextEditOpen(open); }}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>{t("chat.contextEditTitle", "编辑上下文长度")}</DialogTitle>
+            <DialogDescription>
+              {t("chat.contextEditDesc", "设置当前聊天使用的最大上下文长度（tokens）。")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="chatContextEditBody">
+            <Input
+              type="number"
+              value={editingContextLimit}
+              min={1000}
+              step={1000}
+              inputMode="numeric"
+              placeholder={t("chat.contextEditPlaceholder", "例如：256000")}
+              onChange={(e) => setEditingContextLimit(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void saveContextLimit();
+                }
+              }}
+            />
+            <div className="chatContextEditHint">
+              {t("chat.contextEditHint", "推荐使用 64000~512000 之间的值，保存后会立即应用。")}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setContextEditOpen(false)} disabled={contextSaving}>
+              {t("chat.contextEditCancel", "取消")}
+            </Button>
+            <Button onClick={() => void saveContextLimit()} disabled={contextSaving}>
+              {contextSaving ? t("common.saving", "保存中...") : t("chat.contextEditSave", "保存")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
 
       {/* Keyboard shortcuts panel */}

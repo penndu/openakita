@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Query, Request
 
 from openakita.config import settings
+from openakita.core.context_stats import get_context_snapshot
 from openakita.storage.database import Database
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,16 @@ async def _reset_db() -> None:
     cached connection to reset.
     """
     return None
+
+
+def _get_existing_agent(request: Request, conversation_id: str | None):
+    """Get an existing conversation agent from pool if available."""
+    pool = getattr(request.app.state, "agent_pool", None)
+    if pool is not None and conversation_id:
+        agent = pool.get_existing(conversation_id)
+        if agent is not None:
+            return agent
+    return getattr(request.app.state, "agent", None)
 
 
 async def _close_db(db: Database | None) -> None:
@@ -402,39 +413,18 @@ async def pricing_overview(request: Request):
 
 
 @router.get("/context")
-async def context(request: Request):
+async def context(request: Request, conversation_id: str | None = Query(default=None)):
     """Return the current session's context token usage and limit."""
-    agent = getattr(request.app.state, "agent", None)
+    agent = _get_existing_agent(request, conversation_id)
     actual = getattr(agent, "_local_agent", agent) if agent else None
     if actual is None:
         return {"error": "agent not available"}
 
     try:
-        # Prefer pre-computed summary (survives cleanup of large buffers)
-        cached = getattr(actual, "_last_usage_summary", None)
-        if cached and "context_tokens" in cached and "context_limit" in cached:
-            ctx = cached["context_tokens"]
-            limit = cached["context_limit"]
-            return {
-                "context_tokens": ctx,
-                "context_limit": limit,
-                "percent": round(ctx / limit * 100, 1) if limit else 0,
-            }
-
-        re = getattr(actual, "reasoning_engine", None)
-        ctx_mgr = getattr(actual, "context_manager", None) or getattr(re, "_context_manager", None)
-        if ctx_mgr and hasattr(ctx_mgr, "get_max_context_tokens"):
-            max_ctx = ctx_mgr.get_max_context_tokens()
-            messages = getattr(re, "_last_working_messages", None) or getattr(
-                getattr(actual, "_context", None), "messages", []
-            )
-            cur_ctx = ctx_mgr.estimate_messages_tokens(messages) if messages else 0
-            return {
-                "context_tokens": cur_ctx,
-                "context_limit": max_ctx,
-                "percent": round(cur_ctx / max_ctx * 100, 1) if max_ctx else 0,
-            }
+        snapshot = get_context_snapshot(actual, conversation_id=conversation_id)
+        if snapshot is not None:
+            return snapshot.to_dict()
     except Exception as e:
         logger.warning(f"[TokenStats] Failed to get context size: {e}")
 
-    return {"context_tokens": 0, "context_limit": 0, "percent": 0}
+    return {"context_tokens": 0, "context_limit": 0, "remaining_tokens": 0, "percent": 0}

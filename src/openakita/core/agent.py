@@ -7485,18 +7485,11 @@ class Agent:
                 "mixed" if len(usage_sources) > 1 else next(iter(usage_sources))
             )
         try:
-            re = self.reasoning_engine
-            ctx_mgr = getattr(self, "context_manager", None) or getattr(
-                re, "_context_manager", None
-            )
-            if ctx_mgr and hasattr(ctx_mgr, "get_max_context_tokens"):
-                msgs = getattr(re, "_last_working_messages", None) or []
-                ctx_tokens = ctx_mgr.estimate_messages_tokens(msgs) if msgs else 0
-                ctx_limit = ctx_mgr.get_max_context_tokens()
-                summary["context_tokens"] = ctx_tokens
-                summary["context_limit"] = ctx_limit
-                summary["history_context_tokens"] = ctx_tokens
-                summary["history_context_limit"] = ctx_limit
+            from .context_stats import get_context_snapshot
+
+            snapshot = get_context_snapshot(self)
+            if snapshot is not None:
+                summary.update(snapshot.to_dict())
         except Exception:
             pass
         return summary

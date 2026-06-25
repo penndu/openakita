@@ -52,6 +52,7 @@ from .cancel_cleanup import (
 )
 from .context_manager import ContextManager
 from .context_manager import _CancelledError as _CtxCancelledError
+from .context_stats import update_context_snapshot
 from .errors import UserCancelledError
 from .loop_budget_guard import LoopBudgetGuard
 from .resource_budget import BudgetAction, ResourceBudget, create_budget_from_settings
@@ -1329,6 +1330,7 @@ class ReasoningEngine:
         # api/routes/chat.py 在组装 done event 时读取并塞进 usage.context_pressure，
         # 给前端"上下文健康度"展示用，避免重新计算。
         self._last_context_pressure: dict | None = None
+        self._last_context_usage_snapshot = None
 
         # 上一次推理的退出原因：normal / ask_user / loop_terminated / max_iterations / verify_incomplete
         # _finalize_session 据此决定是否自动关闭 Plan；OrgRuntime 据此区分
@@ -2409,6 +2411,12 @@ class ReasoningEngine:
             _ctx_compressed_info: dict | None = None
             if len(working_messages) > 2:
                 working_messages = self._context_manager.pre_request_cleanup(working_messages)
+                update_context_snapshot(
+                    self,
+                    conversation_id,
+                    working_messages,
+                    source="pre_compress",
+                )
                 _before_tokens = self._context_manager.estimate_messages_tokens(working_messages)
                 try:
                     working_messages = await self._context_manager.compress_if_needed(
@@ -2465,6 +2473,21 @@ class ReasoningEngine:
                         "before_tokens": _before_tokens,
                         "after_tokens": _after_tokens,
                     }
+                    _ctx_snapshot = update_context_snapshot(
+                        self,
+                        conversation_id,
+                        working_messages,
+                        source="post_compress",
+                    )
+                    if _ctx_snapshot is not None:
+                        _ctx_compressed_info.update(
+                            {
+                                "context_tokens": _ctx_snapshot.context_tokens,
+                                "context_limit": _ctx_snapshot.context_limit,
+                                "remaining_tokens": _ctx_snapshot.remaining_tokens,
+                                "percent": _ctx_snapshot.percent,
+                            }
+                        )
                     await _emit_progress(
                         f"📦 上下文压缩: {_before_tokens // 1000}k → {_after_tokens // 1000}k tokens"
                     )
@@ -2665,6 +2688,13 @@ class ReasoningEngine:
                 },
                 "context_compressed": _ctx_compressed_info,
             }
+            update_context_snapshot(
+                self,
+                conversation_id,
+                working_messages,
+                usage={"input_tokens": _in_tokens, "output_tokens": _out_tokens},
+                source="llm_iteration",
+            )
             tool_names_for_log = [tc.get("name", "?") for tc in (decision.tool_calls or [])]
             logger.info(
                 f"[ReAct] Iter {iteration + 1} — decision={_iter_trace['decision_type']}, "
