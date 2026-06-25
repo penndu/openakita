@@ -931,6 +931,29 @@ class OrgCommandService:
             "cancelled",
             "用户在指挥台对该任务强制取消，正在执行的子节点应该停止。",
         )
+        # Category 5 (exploratory v21, 2026-06): the cancel path must ALSO
+        # emit a terminal ``command_done`` event AND clear any hanging
+        # node_status, matching the done / error / timeout paths. On the
+        # force-cancel fallback the supervisor task is hard-cancelled before
+        # ``_reflect_supervisor_outcome`` runs, so the cooperative-drain emit
+        # never fires — a real multi-layer cancel left only ``agent_run_cancelled``
+        # in events.jsonl, no ``command_done`` and no busy-node reset. We emit
+        # here as an idempotent fallback: when the cooperative drain DID reflect
+        # the outcome, ``emit_command_done``'s per-command guard dedupes this to
+        # a no-op; otherwise this is the only terminal event the cancel produces.
+        emit_done = getattr(self._runtime, "emit_command_done", None)
+        if callable(emit_done):
+            try:
+                await emit_done(
+                    org_id,
+                    command_id,
+                    status="cancelled",
+                    result=(self._commands.get(command_id) or {}).get("result"),
+                )
+            except Exception:  # noqa: BLE001 -- terminal emit must not break cancel
+                logger.debug(
+                    "[OrgCmd] emit_command_done on cancel failed", exc_info=True
+                )
         return {
             "ok": True,
             "command_id": command_id,

@@ -53,7 +53,7 @@ import json
 import logging
 import time
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -577,6 +577,65 @@ async def test_cancel_response_includes_supervisor_root_when_no_runtime_tracker(
     )
 
     # Drain so pytest doesn't see an orphan task warning.
+    task = svc._inflight_tasks.get(cid)
+    if task is not None:
+        try:
+            await asyncio.wait_for(task, timeout=2.0)
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_cancel_emits_terminal_command_done_event() -> None:
+    """Exploratory v21 (2026-06): the cancel path must emit ``command_done``.
+
+    A real multi-layer cancel left only ``agent_run_cancelled`` in
+    events.jsonl — no ``command_done`` and no busy-node convergence reset —
+    because the force-cancel fallback hard-cancels the supervisor task before
+    ``_reflect_supervisor_outcome`` (which emits the terminal event) can run.
+    Category 5 requires ALL terminal paths (done / error / cancel / timeout) to
+    produce ``command_done`` + clean up hanging node_status. ``cancel`` now
+    emits it as an idempotent fallback; here we pin that ``emit_command_done``
+    is invoked with ``status="cancelled"``.
+    """
+    from openakita.agent.supervisor_brain import PassThroughSupervisorBrain
+
+    rt = _make_runtime()
+    rt.emit_command_done = AsyncMock(return_value=None)
+
+    deliver = _SlowDeliverIgnoringCancelEvent(slow_seconds=30.0)
+
+    def _factory(*, org_id: str, command_id: str, root_node_id: str, task: str,
+                 executor: Any = None, brain: Any = None, stream: Any = None,
+                 checkpointer: Any = None, cancel_token: Any = None) -> Any:
+        token = cancel_token or CancellationToken()
+        return Supervisor(
+            command_id=command_id,
+            org_id=org_id,
+            root_node_id=root_node_id,
+            task=task,
+            brain=PassThroughSupervisorBrain(root_node_id=root_node_id),
+            deliver=deliver,
+            stream=StreamBus(strict=False),
+            checkpointer=MemoryCheckpointer(),
+            cancel_token=token,
+        )
+
+    svc = OrgCommandService(rt, supervisor_factory=_factory)
+    res = await svc.submit(OrgCommandRequest(org_id="o1", content="cancel done"))
+    cid = res["command_id"]
+    await asyncio.wait_for(deliver.entered.wait(), timeout=2.0)
+
+    cancel_res = await svc.cancel(org_id="o1", command_id=cid, reason="user_cancel")
+    assert cancel_res is not None and cancel_res["ok"] is True
+
+    # The terminal command_done emit fired exactly once, with cancelled status.
+    rt.emit_command_done.assert_awaited()
+    call = rt.emit_command_done.await_args
+    assert call.args[0] == "o1"
+    assert call.args[1] == cid
+    assert call.kwargs.get("status") == "cancelled"
+
     task = svc._inflight_tasks.get(cid)
     if task is not None:
         try:
