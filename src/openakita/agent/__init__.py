@@ -11,6 +11,8 @@ from :mod:`openakita.agent.facade` once the rewrite slices land.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .audit import AuditLogger, get_audit_logger, reset_audit_logger
 from .brain import Brain, SupervisorBrain
 from .brain import Context as BrainContext
@@ -129,8 +131,15 @@ from .persona import (
     persist_trait_to_memory,
 )
 from .ralph import RalphLoop, StopHook, Task, TaskResult, TaskStatus
-from .reasoning import Checkpoint, DecisionType, ReasoningEngine
-from .reasoning import Decision as ReasoningDecision
+
+# NOTE: ``.reasoning`` is intentionally NOT eagerly imported here -- it is
+# exposed lazily via ``__getattr__`` (bottom of this module). Eagerly importing
+# it re-introduces an import cycle whenever ``openakita.core._reasoning_engine_legacy``
+# is imported BEFORE ``openakita.agent`` (e.g. a unit test that imports the legacy
+# module directly). See the ``__getattr__`` docstring below for the full chain.
+if TYPE_CHECKING:
+    from .reasoning import Checkpoint, DecisionType, ReasoningEngine
+    from .reasoning import Decision as ReasoningDecision
 from .resource_budget import (
     BudgetAction,
     BudgetConfig,
@@ -419,3 +428,43 @@ __all__ = [
     "truncate_tool_result",
     "validate_no_fabricated_numbers",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Lazy re-export of the reasoning symbols (PEP 562) -- breaks an import cycle.
+#
+# Root cause (2026-06): a unit test importing
+# ``openakita.core._reasoning_engine_legacy`` DIRECTLY, before
+# ``openakita.agent`` is in ``sys.modules``, triggered:
+#
+#   _reasoning_engine_legacy (line ``from .errors import UserCancelledError``)
+#     -> core.errors.__getattr__("UserCancelledError")   [PEP 562 shim]
+#     -> ``from openakita.agent.errors import UserCancelledError``
+#     -> runs THIS ``openakita/agent/__init__`` for the first time
+#     -> (old) eager ``from .reasoning import Checkpoint, ...``
+#     -> agent.reasoning ``from openakita.core._reasoning_engine_legacy import Checkpoint``
+#     -> legacy module is only PARTIALLY initialised (still on its own import
+#        line above) -> ``ImportError: cannot import name 'Checkpoint'``.
+#
+# The legacy module was fine in production only because something imported
+# ``openakita.agent`` first; pytest collection order made the legacy module the
+# entry point and exposed the latent cycle. Deferring the ``.reasoning`` import
+# to first attribute access means ``agent/__init__`` no longer re-enters the
+# half-built legacy module, so the cycle cannot form regardless of import order.
+_LAZY_REASONING_EXPORTS = {
+    "Checkpoint": "Checkpoint",
+    "DecisionType": "DecisionType",
+    "ReasoningEngine": "ReasoningEngine",
+    "ReasoningDecision": "Decision",
+}
+
+
+def __getattr__(name: str):  # PEP 562 module-level lazy attribute access
+    target = _LAZY_REASONING_EXPORTS.get(name)
+    if target is not None:
+        from . import reasoning as _reasoning
+
+        value = getattr(_reasoning, target)
+        globals()[name] = value  # cache so __getattr__ runs at most once per name
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
