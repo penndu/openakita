@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import lru_cache
 from pathlib import Path
@@ -60,6 +61,72 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ._runtime_agent_host import NodeToolHost
+
+# ── Retrieval-result sanitizer (exploratory v23 reliability fix) ───────────
+# Root cause of the偶发 ``data-analyst 任务失败`` (read from real events): a
+# ``web_search`` for "《凡人修仙传》B站播放量" returned duckduckgo entries whose
+# snippets were explicit AI-porn / 同人 H漫 text (口交/肉棒/性爱…). Those snippets
+# were spliced into the NEXT LLM prompt verbatim, and the cloud model
+# (dashscope deepseek-r1) rejected the whole request with HTTP 400
+# ``data_inspection_failed`` (内容安全审核未通过) -> all endpoints failed -> the
+# node raised -> task failed. Stripping the explicit ENTRIES from retrieval
+# results before they reach the LLM removes the moderation trigger AND
+# improves relevance (the off-topic NSFW hits are exactly the "无关内容" the
+# P1.2 browser-relevance item flagged). Conservative term list so we drop the
+# offending result line, not legitimate on-topic content.
+_RETRIEVAL_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "web_search",
+        "search",
+        "web_fetch",
+        "fetch",
+        "browse",
+        "browser",
+        "browser_navigate",
+        "browser_search",
+        "read_url",
+        "open_url",
+    }
+)
+
+# Explicit adult/porn markers. Deliberately narrow (overt sexual terms only) so
+# we never strip ordinary 玄幻/修仙 vocabulary. Matching is case-insensitive.
+_NSFW_TERMS: tuple[str, ...] = (
+    "口交", "深喉", "肉棒", "性爱", "做爱", "乳交", "巨乳", "内射", "射精",
+    "淫荡", "淫趴", "骑上去", "插入", "高潮", "情色", "色情", "裸体", "脱光",
+    "H漫", "h漫", "成人动漫", "黄漫", "无码", "포르노",
+    "porn", "xxx", "nsfw", "hentai", "blowjob", "cum", "nude", "sex video",
+)
+_NSFW_RE = re.compile("|".join(re.escape(t) for t in _NSFW_TERMS), re.IGNORECASE)
+
+
+def _sanitize_retrieval_result(tool_name: str, text: str) -> tuple[str, int]:
+    """Drop explicit-adult lines from a retrieval tool result.
+
+    Returns ``(clean_text, dropped_lines)``. No-op (returns the text and 0)
+    for non-retrieval tools or text without any flagged line, so the common
+    path stays byte-for-byte unchanged.
+    """
+
+    if tool_name not in _RETRIEVAL_TOOL_NAMES or not text:
+        return text, 0
+    if not _NSFW_RE.search(text):
+        return text, 0
+    kept: list[str] = []
+    dropped = 0
+    for line in text.split("\n"):
+        if _NSFW_RE.search(line):
+            dropped += 1
+            continue
+        kept.append(line)
+    if dropped == 0:
+        return text, 0
+    clean = "\n".join(kept).strip()
+    clean += (
+        f"\n\n[已自动过滤 {dropped} 条与任务无关的成人/不相关检索结果。"
+        "如需该领域数据请改用更精确的检索词。]"
+    )
+    return clean, dropped
 
 # ── Org-node write sandbox (isolation guard) ──────────────────────────────
 # Org node agents share the desktop Agent's FileTool, whose ``_resolve_path``
@@ -459,7 +526,7 @@ def resolve_node_tools(
 
     flat = _flatten_external_tools(external_tools)
     if enable_file_tools:
-        flat.update({"write_file", "read_file", "edit_file", "list_directory"})
+        flat.update({"write_file", "read_file", "edit_file", "append_file", "list_directory"})
 
     # Lazy import: tools/definitions/ imports a large module graph
     # (browser / mcp / web_fetch) we do not want at orgs_v2 import time.
@@ -825,6 +892,21 @@ async def execute_node_tool(
         return (f"[tool {tool_name} failed: {exc}]", True)
 
     text = result if isinstance(result, str) else str(result)
+    # Reliability (v23): strip explicit-adult entries from retrieval results
+    # BEFORE they re-enter the LLM prompt, so a noisy duckduckgo hit can't trip
+    # the cloud model's content-moderation gate (data_inspection_failed) and
+    # fail the whole node. Also improves relevance for the org content team.
+    text, _nsfw_dropped = _sanitize_retrieval_result(tool_name, text)
+    if _nsfw_dropped:
+        _LOGGER.info(
+            "[node-tool] sanitized %d adult/irrelevant line(s) from %s result "
+            "(org=%s node=%s cmd=%s)",
+            _nsfw_dropped,
+            tool_name,
+            org_id,
+            node_id,
+            command_id,
+        )
     # UI 留痕: carry a bounded preview of the tool RESULT (not just the char
     # count) so the command center can let the user expand "返回 N 字" into an
     # actual content summary. Collapse whitespace + cap so the event stays
