@@ -106,6 +106,30 @@ def _get_command_service(request: Request):
     return svc
 
 
+def _coerce_attachment_info(raw: Any) -> Any | None:
+    """Normalize setup-center attachment JSON to the ChatRequest attachment shape."""
+    if not isinstance(raw, dict):
+        return None
+    name = str(raw.get("name") or raw.get("filename") or "").strip()
+    if not name:
+        return None
+    try:
+        from openakita.api.schemas import AttachmentInfo
+
+        return AttachmentInfo(
+            type=str(raw.get("type") or "file"),
+            name=name,
+            url=raw.get("url"),
+            local_path=raw.get("local_path") or raw.get("localPath"),
+            upload_id=raw.get("upload_id") or raw.get("uploadId"),
+            size=raw.get("size"),
+            mime_type=raw.get("mime_type") or raw.get("mimeType"),
+        )
+    except Exception:
+        logger.debug("[OrgAPI] failed to normalize attachment: %r", raw, exc_info=True)
+        return None
+
+
 def _require_org_running(rt, org_id: str):
     """校验组织处于可接受外部指令的状态。
 
@@ -682,10 +706,26 @@ async def send_command(request: Request, org_id: str):
     """
     svc = _get_command_service(request)
     body = await request.json()
-    content = body.get("content", "")
+    content = str(body.get("content") or "")
+    user_facing_content = content
     target_node = body.get("target_node_id")
     if not content:
         raise HTTPException(400, "content is required")
+    attachments: list[Any] = []
+    raw_attachments = body.get("attachments") or []
+    if isinstance(raw_attachments, list):
+        attachments = [
+            att
+            for att in (_coerce_attachment_info(item) for item in raw_attachments[:20])
+            if att is not None
+        ]
+    if attachments:
+        try:
+            from openakita.api.routes.chat import _enrich_org_content_with_attachments
+
+            content = _enrich_org_content_with_attachments(content, attachments)
+        except Exception:
+            logger.warning("[OrgAPI] failed to enrich org command attachments", exc_info=True)
     source = OrgCommandSource(
         channel=str(body.get("source_channel") or "desktop"),
         chat_id=str(body.get("source_chat_id") or svc.bridge_session_chat_id(org_id, target_node)),
@@ -709,6 +749,7 @@ async def send_command(request: Request, org_id: str):
             OrgCommandRequest(
                 org_id=org_id,
                 content=content,
+                user_facing_content=user_facing_content,
                 target_node_id=target_node,
                 source=source,
                 origin_surface=OrgCommandSurface.ORG_CONSOLE,
@@ -716,6 +757,19 @@ async def send_command(request: Request, org_id: str):
                 replace_existing=bool(body.get("replace_existing")),
                 continue_previous=bool(body.get("continue_previous")),
                 forward_to=forward_targets,
+                input_attachments=[
+                    {
+                        "type": getattr(att, "type", "file"),
+                        "name": getattr(att, "name", ""),
+                        "url": getattr(att, "url", None),
+                        "local_path": getattr(att, "local_path", None),
+                        "upload_id": getattr(att, "upload_id", None),
+                        "size": getattr(att, "size", None),
+                        "mime_type": getattr(att, "mime_type", None),
+                        "uploadStatus": "uploaded",
+                    }
+                    for att in attachments
+                ],
             )
         )
     except OrgCommandConflict as exc:

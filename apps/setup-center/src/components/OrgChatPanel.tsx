@@ -5,14 +5,16 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, ShieldAlert, Copy as IconCopy } from "lucide-react";
+import { Loader2, ShieldAlert, Copy as IconCopy, Paperclip } from "lucide-react";
 import { toast } from "sonner";
 import { safeFetch } from "../providers";
 import { copyToClipboard } from "../utils/clipboard";
 import { onWsEvent } from "../platform";
 import { useMdModules } from "../views/chat/hooks/useMdModules";
+import { AttachmentPreview } from "../views/chat/components/AttachmentPreview";
 import { FileAttachmentCard } from "./FileAttachmentCard";
 import type { FileAttachment } from "./FileAttachmentCard";
+import type { ChatAttachment } from "../types";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -31,6 +33,7 @@ interface ChatMsg {
   timestamp: number;
   streaming?: boolean;
   attachments?: FileAttachment[];
+  inputAttachments?: ChatAttachment[];
   /**
    * P11: 内容种类的细粒度标记，用于让样式（bubble 颜色 / class 名）跟"语义"
    * 解耦。例如 role="system" 同时被用于真正的错误通知（红色合理）和
@@ -339,9 +342,12 @@ function saveToLocalStorage(cid: string, msgs: ChatMsg[]): void {
       : msgs;
     const slim = windowed
       .filter(m => !m.streaming)
-      .map(({ id, role, content, timestamp, attachments, kind }) => {
+      .map(({ id, role, content, timestamp, attachments, inputAttachments, kind }) => {
         const o: Record<string, unknown> = { id, role, content, timestamp };
         if (attachments && attachments.length > 0) o.attachments = attachments;
+        if (inputAttachments && inputAttachments.length > 0) {
+          o.inputAttachments = cleanInputAttachments(inputAttachments);
+        }
         if (kind) o.kind = kind;
         return o;
       });
@@ -357,11 +363,88 @@ function loadFromLocalStorage(cid: string): ChatMsg[] {
   } catch { return []; }
 }
 
+function normalizeInputAttachments(raw: unknown): ChatAttachment[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ChatAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const name = String(obj.name || obj.filename || "").trim();
+    if (!name) continue;
+    const typeRaw = String(obj.type || "file");
+    const type: ChatAttachment["type"] =
+      typeRaw === "image" || typeRaw === "video" || typeRaw === "voice" || typeRaw === "document"
+        ? typeRaw
+        : "file";
+    const url = typeof obj.url === "string" ? obj.url : undefined;
+    const previewUrl = typeof obj.previewUrl === "string" ? obj.previewUrl : undefined;
+    out.push({
+      type,
+      name,
+      url,
+      localPath: typeof obj.localPath === "string" ? obj.localPath : typeof obj.local_path === "string" ? obj.local_path : undefined,
+      uploadId: typeof obj.uploadId === "string" ? obj.uploadId : typeof obj.upload_id === "string" ? obj.upload_id : undefined,
+      previewUrl: type === "image" ? (previewUrl && !previewUrl.startsWith("blob:") ? previewUrl : url) : undefined,
+      size: typeof obj.size === "number" ? obj.size : undefined,
+      mimeType: typeof obj.mimeType === "string" ? obj.mimeType : typeof obj.mime_type === "string" ? obj.mime_type : undefined,
+      uploadStatus: obj.uploadStatus === "failed" ? "failed" : obj.uploadStatus === "uploading" ? "uploading" : "uploaded",
+      uploadError: typeof obj.uploadError === "string" ? obj.uploadError : undefined,
+    });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function cleanInputAttachments(atts: ChatAttachment[]): ChatAttachment[] {
+  return atts.map((att) => ({
+    type: att.type,
+    name: att.name,
+    url: att.url,
+    localPath: att.localPath,
+    uploadId: att.uploadId,
+    previewUrl: att.type === "image"
+      ? (att.previewUrl && !att.previewUrl.startsWith("blob:") ? att.previewUrl : att.url)
+      : undefined,
+    size: att.size,
+    mimeType: att.mimeType,
+    uploadStatus: att.uploadStatus || "uploaded",
+    uploadError: att.uploadError,
+  }));
+}
+
+function toOrgCommandAttachments(atts: ChatAttachment[]): Record<string, unknown>[] {
+  return cleanInputAttachments(atts).map((att) => ({
+    type: att.type,
+    name: att.name,
+    url: att.url,
+    local_path: att.localPath,
+    upload_id: att.uploadId,
+    size: att.size,
+    mime_type: att.mimeType,
+  }));
+}
+
+function toPersistedMessage(m: ChatMsg): Record<string, unknown> {
+  const out: Record<string, unknown> = { role: m.role, content: m.content };
+  if (m.inputAttachments && m.inputAttachments.length > 0) {
+    out.input_attachments = cleanInputAttachments(m.inputAttachments);
+  }
+  return out;
+}
+
+function attachmentTypeFor(file: File): ChatAttachment["type"] {
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type.startsWith("audio/")) return "voice";
+  if (file.type === "application/pdf") return "document";
+  return "file";
+}
+
 export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, title, onClose, nodeNames }: OrgChatPanelProps) {
   const { t } = useTranslation();
   const md = useMdModules();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
+  const [inputAttachments, setInputAttachments] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [canContinuePrevious, setCanContinuePrevious] = useState(false);
@@ -379,6 +462,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   const [forwardTargets, setForwardTargets] = useState<ForwardTargetOption[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const nodeNamesRef = useRef(nodeNames);
   nodeNamesRef.current = nodeNames;
@@ -462,12 +546,18 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         ]);
         const data = await res.json();
         if (cancelled) return;
-        const histMsgs: ChatMsg[] = (data.messages || []).map((m: any) => ({
-          id: m.id || genId(),
-          role: m.role || "assistant",
-          content: m.content || "",
-          timestamp: m.timestamp || Date.now(),
-        }));
+        const histMsgs: ChatMsg[] = (data.messages || []).map((m: any) => {
+          const inputAtts = normalizeInputAttachments(
+            m.input_attachments || m.inputAttachments || (m.role === "user" ? m.attachments : undefined),
+          );
+          return {
+            id: m.id || genId(),
+            role: m.role || "assistant",
+            content: m.content || "",
+            timestamp: m.timestamp || Date.now(),
+            inputAttachments: inputAtts,
+          };
+        });
         const merged = [...activityMsgs, ...histMsgs].sort(
           (a, b) => (a.timestamp || 0) - (b.timestamp || 0),
         );
@@ -539,12 +629,18 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           : Promise.resolve({ items: [] });
         const [histData, actData] = await Promise.all([histPromise, activityPromise]);
         if (!mountedRef.current) return;
-        const histMsgs: ChatMsg[] = (histData.messages || []).map((m: any) => ({
-          id: m.id || genId(),
-          role: m.role || "assistant",
-          content: m.content || "",
-          timestamp: m.timestamp || Date.now(),
-        }));
+        const histMsgs: ChatMsg[] = (histData.messages || []).map((m: any) => {
+          const inputAtts = normalizeInputAttachments(
+            m.input_attachments || m.inputAttachments || (m.role === "user" ? m.attachments : undefined),
+          );
+          return {
+            id: m.id || genId(),
+            role: m.role || "assistant",
+            content: m.content || "",
+            timestamp: m.timestamp || Date.now(),
+            inputAttachments: inputAtts,
+          };
+        });
         const nameFmt2 = (id: string) => nodeNamesRef.current?.[id] || id;
         const actMsgs: ChatMsg[] = activityItemsToMessages(
           (Array.isArray(actData?.items) ? actData.items : []) as ActivityItem[],
@@ -697,7 +793,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   // Push messages to backend session (explicit params to avoid stale-ref bugs)
   const persistToBackend = useCallback(async (
     base: string, cid: string,
-    msgs: { role: string; content: string }[],
+    msgs: Record<string, unknown>[],
     replace = false,
   ) => {
     const url = `${base}/api/sessions/${encodeURIComponent(cid)}/messages`;
@@ -716,6 +812,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
 
   const handleClear = useCallback(async () => {
     setMessages([]);
+    setInputAttachments([]);
     _pendingCmds.delete(convId);
     setPendingCmdId(null);
     setCanContinuePrevious(false);
@@ -755,17 +852,103 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
     }
   }, [apiBaseUrl, orgId, pendingCmdId]);
 
+  const uploadFile = useCallback(async (file: Blob, filename: string): Promise<{
+    url: string;
+    localPath?: string;
+    uploadId?: string;
+    size?: number;
+    mimeType?: string;
+  }> => {
+    const form = new FormData();
+    form.append("file", file, filename);
+    const res = await safeFetch(`${apiBaseUrl}/api/upload`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(15 * 60 * 1000),
+    });
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    const data = await res.json();
+    return {
+      url: data.url as string,
+      localPath: data.local_path as string | undefined,
+      uploadId: data.upload_id as string | undefined,
+      size: data.size as number | undefined,
+      mimeType: (data.mime_type || data.content_type) as string | undefined,
+    };
+  }, [apiBaseUrl]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      const uploadId = genId();
+      const type = attachmentTypeFor(file);
+      const att: ChatAttachment = {
+        type,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+        uploadStatus: "uploading",
+        _uploadId: uploadId,
+      };
+      setInputAttachments(prev => [...prev, att]);
+      uploadFile(file, file.name)
+        .then((uploaded) => {
+          const url = `${apiBaseUrl}${uploaded.url}`;
+          setInputAttachments(prev => prev.map(a => a._uploadId === uploadId
+            ? {
+              ...a,
+              url,
+              localPath: uploaded.localPath,
+              uploadId: uploaded.uploadId,
+              previewUrl: type === "image" ? url : undefined,
+              size: uploaded.size ?? a.size,
+              mimeType: uploaded.mimeType ?? a.mimeType,
+              uploadStatus: "uploaded",
+              uploadError: undefined,
+            }
+            : a));
+        })
+        .catch((err) => {
+          toast.error(`文件上传失败: ${file.name}`);
+          setInputAttachments(prev => prev.map(a => a._uploadId === uploadId
+            ? { ...a, uploadStatus: "failed", uploadError: String(err) }
+            : a));
+        });
+    }
+    e.target.value = "";
+  }, [apiBaseUrl, uploadFile]);
+
   const handleSend = useCallback(async (opts?: { continuePrevious?: boolean; text?: string }) => {
     const text = (opts?.text ?? input).trim();
-    if (!text || sending) return;
+    const attachmentsToSend = opts?.continuePrevious ? [] : inputAttachments;
+    if ((!text && attachmentsToSend.length === 0) || sending) return;
+    const pendingUploads = attachmentsToSend.filter(a => a.uploadStatus === "uploading" || (!a.url && !a.localPath));
+    if (pendingUploads.length > 0) {
+      toast.error(t("chat.uploadStillRunning", "附件还在上传，请稍等一下"));
+      return;
+    }
+    if (attachmentsToSend.some(a => a.uploadStatus === "failed")) {
+      toast.error(t("chat.uploadFailedRetry", "有附件上传失败，请重新选择或稍后重试"));
+      return;
+    }
 
-    const userMsg: ChatMsg = { id: genId(), role: "user", content: text, timestamp: Date.now() };
+    const commandText = text || t("org.chat.attachmentsOnlyCommand", "请处理这些附件。");
+    const displayAttachments = cleanInputAttachments(attachmentsToSend);
+    const userMsg: ChatMsg = {
+      id: genId(),
+      role: "user",
+      content: text,
+      inputAttachments: displayAttachments.length > 0 ? displayAttachments : undefined,
+      timestamp: Date.now(),
+    };
     const placeholderId = genId();
     const placeholder: ChatMsg = {
       id: placeholderId, role: "assistant", content: t("org.chat.thinking"), timestamp: Date.now(), streaming: true,
     };
     setMessages(prev => [...prev, userMsg, placeholder]);
     setInput("");
+    setInputAttachments([]);
     setCanContinuePrevious(false);
     setSending(true);
 
@@ -1119,7 +1302,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         const hasUser = existing.some(m => m.id === userMsg.id);
         const toSave = hasUser ? [...existing, msg] : [...existing, userMsg, msg];
         saveToLocalStorage(convId, toSave);
-        persistToBackend(apiBaseUrl, convId, toSave.map(m => ({ role: m.role, content: m.content })), true);
+        persistToBackend(apiBaseUrl, convId, toSave.map(toPersistedMessage), true);
       }
     };
 
@@ -1159,9 +1342,10 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: text,
+          content: commandText,
           target_node_id: nodeId || undefined,
           continue_previous: !!opts?.continuePrevious,
+          attachments: toOrgCommandAttachments(attachmentsToSend),
           forward_to: forwardTargets.map(ft => ({
             channel: ft.channel,
             chat_id: ft.chat_id,
@@ -1250,11 +1434,11 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       if (mountedRef.current) {
         const all = messagesRef.current.filter(m => !m.streaming);
         if (all.length > 0) {
-          persistToBackend(apiBaseUrl, convId, all.map(m => ({ role: m.role, content: m.content })), true);
+          persistToBackend(apiBaseUrl, convId, all.map(toPersistedMessage), true);
         }
       }
     }
-  }, [input, sending, orgId, nodeId, apiBaseUrl, convId, persistToBackend, forwardTargets]);
+  }, [input, inputAttachments, sending, orgId, nodeId, apiBaseUrl, convId, persistToBackend, forwardTargets, t]);
 
   const handleContinuePrevious = useCallback(() => {
     handleSend({
@@ -1354,13 +1538,20 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           >
             <div className={`ocp-msg-bubble ${m.role !== "user" ? "chatMdContent" : ""}`}>
               {m.role === "user" ? (
-                m.content
+                m.content || (m.inputAttachments && m.inputAttachments.length > 0 ? t("org.chat.attachmentsOnlyCommand", "请处理这些附件。") : "")
               ) : md ? (
                 <md.ReactMarkdown remarkPlugins={md.remarkPlugins} rehypePlugins={md.rehypePlugins}>
                   {m.content}
                 </md.ReactMarkdown>
               ) : (
                 m.content
+              )}
+              {m.inputAttachments && m.inputAttachments.length > 0 && (
+                <div className="ocp-input-attachments ocp-msg-input-attachments">
+                  {m.inputAttachments.map((att, i) => (
+                    <AttachmentPreview key={`${att.name}-${i}`} att={att} />
+                  ))}
+                </div>
               )}
               {m.streaming && <span className="ocp-typing">●</span>}
               {m.attachments && m.attachments.length > 0 && (
@@ -1446,7 +1637,39 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         </div>
       )}
 
+      {inputAttachments.length > 0 && (
+        <div className="ocp-input-attachments ocp-composer-attachments">
+          {inputAttachments.map((att, i) => (
+            <AttachmentPreview
+              key={att._uploadId || `${att.name}-${i}`}
+              att={att}
+              onRemove={() => {
+                setInputAttachments(prev => prev.filter((_, ix) => ix !== i));
+              }}
+            />
+          ))}
+        </div>
+      )}
+
       <div className={`ocp-input-area ${compact ? "ocp-compact" : ""}`}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          onChange={handleFileSelect}
+          style={{ display: "none" }}
+        />
+        <button
+          data-slot="ocp"
+          type="button"
+          className="ocp-attach"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={sending}
+          title={t("common.attach", "添加附件")}
+          aria-label={t("common.attach", "添加附件")}
+        >
+          <Paperclip size={16} />
+        </button>
         <textarea
           ref={inputRef}
           value={input}
@@ -1472,7 +1695,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         <button
           data-slot="ocp"
           onClick={() => handleSend()}
-          disabled={sending || !input.trim()}
+          disabled={sending || (!input.trim() && inputAttachments.length === 0)}
           className={`ocp-send ${sending ? "ocp-send-busy" : ""}`}
         >
           {sending ? (
@@ -1733,6 +1956,34 @@ const CHAT_CSS = `
   flex-shrink: 0;
 }
 .ocp-compact { padding: 8px 10px; }
+.ocp-input-attachments {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.ocp-msg-input-attachments {
+  margin-top: 8px; justify-content: flex-end;
+}
+.ocp-composer-attachments {
+  padding: 10px 12px 0 12px;
+  border-top: 1px solid var(--line, rgba(51,65,85,0.5));
+  background: var(--bg-app);
+  flex-shrink: 0;
+}
+.ocp-composer-attachments + .ocp-input-area { border-top: none; }
+.ocp-attach {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  border: 1px solid var(--line, rgba(100,116,139,0.3));
+  background: transparent;
+  color: var(--muted, #64748b);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.ocp-attach:not(:disabled):hover {
+  background: rgba(99,102,241,0.10);
+  border-color: rgba(99,102,241,0.45);
+  color: var(--primary, #6366f1);
+}
+.ocp-attach:disabled { opacity: 0.35; cursor: not-allowed; }
 .ocp-textarea {
   flex: 1; resize: none; border: 1px solid var(--line, rgba(100,116,139,0.2));
   border-radius: 10px; padding: 10px 14px;

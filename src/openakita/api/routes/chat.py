@@ -1924,6 +1924,17 @@ def _enrich_org_content_with_attachments(content: str, attachments: list | None)
     for att in attachments:
         local_path = getattr(att, "local_path", None) or ""
         if not local_path:
+            url = getattr(att, "url", None) or ""
+            if url:
+                try:
+                    from openakita.api.routes.upload import resolve_upload_path
+
+                    resolved = resolve_upload_path(url)
+                    if resolved:
+                        local_path = str(resolved)
+                except Exception:
+                    logger.debug("[OrgAttach] failed to resolve upload URL %s", url, exc_info=True)
+        if not local_path:
             continue
         fpath = Path(local_path)
         if not fpath.exists():

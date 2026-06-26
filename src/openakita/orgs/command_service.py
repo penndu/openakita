@@ -160,6 +160,10 @@ class OrgCommandRequest:
     continue_previous: bool = False
     forward_to: list[ForwardTarget] = field(default_factory=list)
     """Extra IM destinations to mirror final result / cancellation to."""
+    user_facing_content: str | None = None
+    """Optional content to persist/render when run content contains hidden attachment text."""
+    input_attachments: list[dict[str, Any]] = field(default_factory=list)
+    """User-uploaded attachments shown in the command console history."""
 
 
 def set_command_service(service: OrgCommandService | None) -> None:
@@ -221,6 +225,7 @@ class OrgCommandService:
         content = (request.content or "").strip()
         if not content:
             raise OrgCommandError("content is required")
+        user_facing_content = (request.user_facing_content or content).strip()
 
         org = self._require_org_running(request.org_id)
         if request.target_node_id and not org.get_node(request.target_node_id):
@@ -274,16 +279,22 @@ class OrgCommandService:
             }
             self._running_by_root[root_key] = command_id
 
-        self._bridge_persist_user_message(request.org_id, request.target_node_id, content)
+        self._bridge_persist_user_message(
+            request.org_id,
+            request.target_node_id,
+            user_facing_content,
+            input_attachments=request.input_attachments,
+        )
         self._mirror_command_to_distributed_surfaces(
             request,
             command_id=command_id,
             root_node_id=root_node_id,
-            user_facing_content=content,
+            user_facing_content=user_facing_content,
         )
         run_request = OrgCommandRequest(
             org_id=request.org_id,
             content=run_content,
+            user_facing_content=user_facing_content,
             target_node_id=request.target_node_id,
             source=request.source,
             origin_surface=request.origin_surface,
@@ -291,6 +302,7 @@ class OrgCommandService:
             replace_existing=request.replace_existing,
             continue_previous=request.continue_previous,
             forward_to=list(request.forward_to),
+            input_attachments=list(request.input_attachments),
         )
         self._schedule_run(
             run_request,
@@ -713,10 +725,11 @@ class OrgCommandService:
             if not self._runtime._has_active_delegations(request.org_id, root_node_id):
                 inbox = self._runtime.get_inbox(request.org_id)
                 result_text = (result or {}).get("result", "")
+                task_preview = (request.user_facing_content or request.content)[:60]
                 inbox.push_task_complete(
                     request.org_id,
                     root_node_id,
-                    request.content[:60],
+                    task_preview,
                     result_text[:300] if result_text else "命令已完成",
                 )
         except Exception:
@@ -985,6 +998,8 @@ class OrgCommandService:
         org_id: str,
         target_node_id: str | None,
         content: str,
+        *,
+        input_attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         sm = self._session_manager
         if not sm:
@@ -998,7 +1013,10 @@ class OrgCommandService:
                 create_if_missing=True,
             )
             if session:
-                session.add_message("user", content)
+                meta: dict[str, Any] = {}
+                if input_attachments:
+                    meta["input_attachments"] = list(input_attachments)
+                session.add_message("user", content, **meta)
                 sm.mark_dirty()
         except Exception as exc:
             logger.warning("[OrgCmd] failed to persist user message to session: %s", exc)
