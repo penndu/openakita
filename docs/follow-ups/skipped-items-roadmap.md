@@ -348,6 +348,108 @@ ORGS_SUPERVISOR_BRAIN_MODE=llm
 
 ---
 
+## C. Upstream `core/agent.py` merge follow-ups (Batch C)
+
+| Field | Value |
+|-------|-------|
+| Status | **Deferred.** Safe subset (#1/#8/#9/#13) ported in the same wave; the items below are higher-risk behaviour ports kept for a future PR. |
+| Trigger merge | `git merge origin/main` (long-overdue upstream sync). Local kept the ADR-0003 split (`core/agent.py` → `openakita.agent` subpackage + `core/_agent_legacy.py`); upstream's fixes that landed on the *monolithic* `agent.py` / `reasoning_engine.py` could not be cherry-picked verbatim. |
+| Compat shims added | `core/agent.py`, `core/reasoning_engine.py`, `core/tool_executor.py` (thin re-exports), plus `core/identity.py` now re-exports the hash helpers. These keep `from openakita.core.agent import Agent` (and friends) resolving for legacy code and upstream tests. |
+| Owner | Core/agent maintainers. |
+| Cross-ref | Audit transcripts (deep analysis 2026-06-26). RCA v11 §4.4 (single-hop delegation), `docs/architecture/conversation_concurrency.md`. |
+
+### Why this matters / how the decision was made
+
+A per-commit audit of the 14 upstream `core/agent.py` fixes found three
+classes of outcome:
+
+1. **Already equivalent** locally (most `llm/`, `tool_interrupt_behavior`,
+   `agent_state` primitives, `double_texting`, `conversation_lifecycle`,
+   `context_stats`, serve-before-agent ordering) — nothing to do.
+2. **Safe subset** — self-contained fixes whose capability already existed
+   locally and only needed one or two lines of wiring or a defensive
+   branch. **Ported now** (see "Ported in this wave" below).
+3. **Batch C (this section)** — behaviour that the local refactor relocated
+   or never ported; porting touches the hot reasoning loop, the agent
+   prompt chain, or needs a new shared module. **Deferred** with skipped
+   tests pinned to each item.
+
+### Ported in this wave (safe subset — NOT deferred)
+
+| # | Upstream | What | Local landing |
+|---|----------|------|---------------|
+| #1 | `86914fc2` | #581 Windows responses-format crashes: soft-hint list branch, plugin-context list injection, `safe_urlparse` migration | `_agent_legacy.py` soft-hint, `_reasoning_engine_legacy.py` plugin inject, `_context_manager_legacy.py` + `agent/skill_manager.py` urlparse |
+| #8 | `4dcef3b9` | `Agent.initialize` single-flight lock + `_initialize_unlocked` split | `_agent_legacy.py` `__init__` + `initialize` |
+| #9 | `78b5639b` | Skip disabled external skills before SKILL.md parse (preparse allowlist filter) | `_agent_legacy.py::propagate_skill_change`, `agent/skill_manager.py::load_installed_skills` |
+| #13 | `09f55110` | Context progress bar: `_extract_usage_summary` via `get_context_snapshot` | `_agent_legacy.py::_extract_usage_summary` |
+
+### Deferred items — analysis
+
+#### C.1 — Conversation concurrency v1.28 (preempt / interrupt-downgrade / steer done-drain / cancel-resume)
+
+| Dimension | Assessment |
+|-----------|------------|
+| Upstream commits | `dfa0b2c1` (S1+), `127681c6` (desktop STEER default + QUEUE timeout), `99d20042` (S4 INTERRUPT→QUEUE downgrade), `796c81f0` (S4 MCP-aware + block-tool extension), `9af8257c` (steer done-drain, + deps `4b8f4a2f` / `a8304a0f`), `#608` cancel-resume wiring |
+| Type | Single-conversation single-flight; double-texting (REJECT/QUEUE/INTERRUPT/STEER); preempt + settle/abandon; timeout decoupling; tool-interrupt semantics |
+| Problem solved | `#572` (`completed → reasoning` crash on double-send), half-written files when block tools are cancelled, 6s QUEUE false-timeouts, steered follow-ups dropped at final-answer, cancelled turn re-doing tool work (`#608`) |
+| Merge value | **High** for IM/CLI + INTERRUPT paths and `#572` regression safety |
+| Local vs upstream | **Desktop HTTP path (STEER default + long QUEUE timeout) is locally superior / cleaner** — lifted to `conversation_lifecycle.py` + `chat.py` by design (`docs/architecture/conversation_concurrency.md`). Infra is all present (`TaskState.settled/abandoned/in_flight_tools`, `tool_interrupt_behavior.has_any_block_in_flight`, `double_texting.py`, config keys). **Missing**: the agent-layer orchestrator `_preempt_or_queue_prev_task` / `_append_preempt_marker`, reasoning `mark_settled()` + `abandoned` checks, INTERRUPT actually cancelling the old task, QUEUE block-extension, telemetry wiring, `warn_unclassified_tools` startup call |
+| Equivalent impl? | Partial (HTTP/lifecycle layer only). No agent-layer equivalent for IM/CLI or INTERRUPT cancel |
+| Recommended merge | **Do NOT restore the monolith.** Add a shared `core/preempt_protocol.py` (extract upstream `_preempt_or_queue_prev_task` as pure async logic), call it from both the legacy agent (`chat_with_session*`) and the HTTP INTERRUPT path; add `mark_settled()`/`abandoned` to `_reasoning_engine_legacy`; wire `warn_unclassified_tools` at startup. Priority order: preempt module → reasoning settle/abandon → INTERRUPT downgrade + block extension → metrics |
+
+#### C.2 — Custom-agent identity / first-person voice / profile identity export
+
+| Dimension | Assessment |
+|-----------|------------|
+| Upstream commits | `150ee738` (SOUL `{{agent_name}}` + builder `agent_voice` + `Agent._resolve_agent_voice`), `664debe3` (profile identity export + `_prepare_prompt_identity_dir` + `identity_dir`), `1a3c3911` (placeholders across all prompt paths + `sync_templates=False` + content-safety voice + bundled fallback) |
+| Type | Multi-agent identity isolation + prompt personalization (first-person voice) + cache-key/identity-dir correctness + profile identity-file round-trip |
+| Problem solved | After renaming a profile, chat still says "OpenAkita"; custom profile SOUL/AGENT not taking effect (reads global identity); identity files lost on import/export |
+| Merge value | **High** for multi-agent / custom-profile UX |
+| Local vs upstream | Not superior — this is a bug-fix direction. **Capability layer is already merged**: `prompt/builder.py::_resolve_agent_voice` (module-level), assembler `agent_voice`/`identity_dir` params, `identity_resolver`, SOUL `{{agent_name}}` templates, and `agent/identity.py` already has `_file_hash`/`_load_hashes`/`_save_hashes`/`_HASH_FILE`. **Missing**: Agent never threads `agent_voice`/`identity_dir` into the sync/async prompt build + cache key + fast-reply + `reason_stream`; `agent/identity.py::get_system_prompt` still hardcodes "OpenAkita" (no `agent_voice` param), and lacks `_resolve_bundled_identity_template` + `sync_templates` |
+| Equivalent impl? | No end-to-end equivalent. `identity_resolver` passes `sync_templates=False` but `Identity.__init__` has no such param (latent TypeError if that path runs) |
+| Recommended merge | Low–medium risk: port `_resolve_agent_voice` + `_prepare_prompt_identity_dir` into `_agent_legacy.py`, wire 4 call sites + extend cache key; port the `agent/identity.py` delta from `1a3c3911` (agent_voice param, `_apply_agent_name_placeholder`, `_resolve_bundled_identity_template`, `sync_templates`); parameterize the reasoning content-safety minimal prompt |
+
+#### C.3 — Image-turn fast-reply gating + vision-unavailable notice
+
+| Dimension | Assessment |
+|-----------|------------|
+| Upstream commit | `5e30851f` |
+| Type | Bugfix / UX |
+| Problem solved | Image/media turns must NOT take the lightweight `think_lightweight` fast path ("chats back without seeing the image"); when no vision endpoint is configured, inject an explicit notice (with filenames/paths) so the model tells the user it cannot read images |
+| Merge value | **High** for desktop/IM image flows |
+| Local vs upstream | **Mostly missing.** Local `_has_pending_image_attachments` only gates the CHAT-intent downgrade, not fast-reply. No `_format_vision_unavailable_notice` / `_has_pending_media_or_attachments` / `_allows_lightweight_fast_reply` |
+| Equivalent impl? | No |
+| Recommended merge | Add notice/gating helpers to `runtime/desktop/attachments.py`; set `_current_turn_has_media_attachments` after reading pending attachments; gate the two fast-reply sites; align desktop + IM degraded-image copy. Needs an image regression test → its own PR |
+
+### Skipped tests (pinned to Batch C) and unlock conditions
+
+All skips carry `reason="… see docs/follow-ups/skipped-items-roadmap.md (Batch C)"`.
+Re-enable each when its linked item ships.
+
+| Test (file::class / test) | Blocking item | Unlock when |
+|---------------------------|---------------|-------------|
+| `tests/integration/test_conversation_concurrency.py::TestPreemptOrQueueHelper` / `TestPreemptMarker` / `TestPreemptHelperKeyResolution` / `TestQueueTimeoutCancelsOldTask` / `TestPartialTextOnPreempt` | C.1 | `_preempt_or_queue_prev_task` + `_append_preempt_marker` land |
+| `tests/integration/test_interrupt_downgrade.py::TestToolExecutorBeginEndWiring` / `TestPreemptDowngradeWhenBlockToolInFlight` / `TestNoDowngradeWhenAllCancelSafe` / `TestUnknownToolDowngrade` / `TestOtherPoliciesUnaffected` / `TestQueueTimeoutBlockExtension` + `TestMcpSubToolEncoding::test_readonly_mcp_does_not_downgrade_interrupt` | C.1 | preempt orchestration + INTERRUPT downgrade land |
+| `tests/integration/test_cancel_resume_wiring.py` (module) | C.1 (`#608`) | `ReasoningEngine._resume_eligible` / `_maybe_*_resume_*` wiring lands |
+| `tests/unit/test_steer_done_drain.py::TestDrainSteerBeforeFinishBehaviour` / `TestDrainSteerCeilingTermination` / `TestReasonStreamWiringContract` / `TestExecuteTaskWiringContract` / `TestExecuteTaskDoneDrainEndToEnd` | C.1 (`9af8257c`) | `_drain_steer_before_finish` + wiring land (keeps `TestBuildUserInsertMessage` active) |
+| `tests/unit/test_reason_stream_state_race.py::TestReasonStreamRaceGuard` / `TestS5AAuditFixes` / `TestIllegalReasoningEntryAlerts` / `TestAllReasoningTransitionsGuarded` / `TestContentSafetyMinimalPromptIdentity` | C.1 + C.2 | `_reason_stream_impl` race-guard + content-safety `agent_voice` land (keeps `TestTerminalToReasoningContract` active) |
+| `tests/unit/test_profile_identity_prompt.py` (module) | C.2 | `Agent._prepare_prompt_identity_dir` + Identity `sync_templates` land |
+| `tests/unit/test_identity.py::TestSyncIdentityFileBundledFallback` + `TestIdentityLoading::test_get_system_prompt_does_not_inject_openakita_self_identity` / `test_get_system_prompt_replaces_agent_name_placeholder` | C.2 | `agent/identity.py` `agent_voice` + `_resolve_bundled_identity_template` land |
+| `tests/component/test_prompt_compiler.py::TestAgentResolveVoice` | C.2 | `Agent._resolve_agent_voice` lands (builder side already green via `TestBuildSystemPrompt`) |
+
+### DO NOT do yet
+
+- Do **NOT** delete the `core/agent.py` / `core/reasoning_engine.py` /
+  `core/tool_executor.py` compat shims — legacy imports and upstream tests
+  depend on them until the test suite is migrated to `openakita.agent.*`.
+- Do **NOT** restore upstream's monolithic `_preempt_or_queue_prev_task`
+  into `_agent_legacy.py`; build the shared `preempt_protocol` module
+  instead (keeps the lifecycle/agent boundary the merge established).
+- Do **NOT** un-skip a Batch C test without landing its blocking item — the
+  skip reason names the exact item.
+
+---
+
 ## How AI agents should use this file
 
 When you (Claude / GPT / any other agent or human developer) are about
@@ -363,6 +465,9 @@ linked RCA section FIRST:
 | `core/_agent_legacy.py::_effective_tools` or `core/_brain_legacy.py::_convert_tools_to_llm` | §A.5 + `_skip_items_rca_v11.md` §1 |
 | `runtime/supervisor_factory.py`, `runtime/llm_supervisor_brain.py`, `orgs/command_service.py` (submit path) | §B.1 RC-5 编排大脑 |
 | `api/server.py` (shutdown handlers), `plugins/manager.py` (unload), `channels/gateway.py` (stop) | §B.2 Phase A Shutdown |
+| `core/_agent_legacy.py` (chat_with_session / preempt), `core/_reasoning_engine_legacy.py` (reason loop), `core/agent.py`/`reasoning_engine.py`/`tool_executor.py` shims | §C (Batch C — `core/agent.py` merge follow-ups) |
+| `agent/identity.py`, `prompt/builder.py` (`agent_voice`), `core/identity.py` shim | §C.2 |
+| `runtime/desktop/attachments.py` (vision gating / notice) | §C.3 |
 
 Before acting, read the relevant section here AND the linked RCA
 section. Skipped items have explicit "DO NOT do yet" notes when
