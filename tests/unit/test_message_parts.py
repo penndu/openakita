@@ -6,8 +6,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from openakita.api.message_parts import (
+    append_progress_event,
     build_message_parts,
     normalize_chat_todo,
+    normalize_progress_events,
+    project_progress_events_to_todo,
     serialize_plan_to_chat_todo,
 )
 from openakita.api.routes.chat import (
@@ -135,6 +138,59 @@ def test_chat_save_todo_snapshot_helpers_preserve_streamed_plan():
     assert meta["todo"]["steps"][1]["result"] == "built"
 
 
+def test_progress_event_journal_projects_latest_todo_state():
+    events = append_progress_event([], {"type": "todo_created", "plan": _plan()})
+    events = append_progress_event(
+        events,
+        {
+            "type": "todo_step_updated",
+            "step_id": "s2",
+            "status": "completed",
+            "result": "built",
+        },
+    )
+    events = append_progress_event(events, {"type": "todo_completed"})
+
+    assert [e["seq"] for e in events] == [1, 2, 3]
+    assert events[0]["plan"]["taskSummary"] == "Ship the feature"
+    todo = project_progress_events_to_todo(events)
+    assert todo["status"] == "completed"
+    assert todo["steps"][1]["status"] == "completed"
+    assert todo["steps"][1]["result"] == "built"
+
+
+def test_build_message_parts_inlines_progress_event_journal_on_plan_part():
+    events = normalize_progress_events(
+        [
+            {"type": "todo_created", "plan": _plan()},
+            {"type": "todo_completed"},
+        ]
+    )
+
+    parts = build_message_parts(
+        {"role": "assistant", "content": "done", "progress_events": events}
+    )
+
+    plan = next(p for p in parts if p["kind"] == "plan")
+    assert plan["todo"]["status"] == "completed"
+    assert [e["type"] for e in plan["progressEvents"]] == ["todo_created", "todo_completed"]
+
+
+def test_attach_todo_meta_persists_progress_event_journal():
+    events = normalize_progress_events(
+        [
+            {"type": "todo_created", "plan": _plan()},
+            {"type": "todo_completed"},
+        ]
+    )
+
+    meta = {}
+    _attach_todo_snapshot_meta(meta, conversation_id="conv1", todo_snapshot=None, progress_events=events)
+
+    assert [e["type"] for e in meta["progress_events"]] == ["todo_created", "todo_completed"]
+    assert meta["todo"]["status"] == "completed"
+
+
 def test_extract_artifact_events_from_tool_and_delegation_results():
     direct = _extract_artifact_events(
         {
@@ -191,6 +247,34 @@ def test_history_exposes_plan_snapshot_and_parts(tmp_path):
     assert assistant["todo"]["taskSummary"] == "Ship the feature"
     assert [p["kind"] for p in assistant["parts"]] == ["plan", "text"]
     assert "active_todo" in body
+
+
+def test_history_exposes_progress_event_journal_and_projected_plan(tmp_path):
+    events = normalize_progress_events(
+        [
+            {"type": "todo_created", "plan": _plan()},
+            {
+                "type": "todo_step_updated",
+                "stepId": "s2",
+                "status": "completed",
+                "result": "built",
+            },
+            {"type": "todo_completed"},
+        ]
+    )
+    client = _history_client(tmp_path, progress_events=events)
+    body = client.get("/api/sessions/conv1/history").json()
+    assistant = body["messages"][-1]
+
+    assert [e["type"] for e in assistant["progress_events"]] == [
+        "todo_created",
+        "todo_step_updated",
+        "todo_completed",
+    ]
+    assert assistant["todo"]["status"] == "completed"
+    assert assistant["todo"]["steps"][1]["result"] == "built"
+    plan = next(p for p in assistant["parts"] if p["kind"] == "plan")
+    assert plan["progressEvents"][1]["stepId"] == "s2"
 
 
 def test_history_exposes_sources_mcp_and_parts(tmp_path):

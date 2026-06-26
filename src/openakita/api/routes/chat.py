@@ -107,37 +107,25 @@ def _format_controlled_action_result(
 
 
 def _observe_todo_snapshot_event(current: dict | None, event: dict) -> dict | None:
-    """Update a chat todo snapshot from one SSE event."""
-    event_type = event.get("type", "")
-    if event_type == "todo_created":
-        plan = event.get("plan")
-        if isinstance(plan, dict):
-            import copy as _copy
+    """Fold one progress event into the latest todo snapshot.
 
-            return _copy.deepcopy(plan)
-        return current
-    if not isinstance(current, dict):
-        return current
-    if event_type == "todo_step_updated":
-        step_id = event.get("stepId") or event.get("step_id")
-        step_idx = event.get("stepIdx")
-        new_status = event.get("status")
-        new_result = event.get("result")
-        steps = current.get("steps") or []
-        for i, step in enumerate(steps):
-            if (step_id and step.get("id") == step_id) or (
-                isinstance(step_idx, int) and i == step_idx
-            ):
-                if new_status:
-                    step["status"] = new_status
-                if new_result is not None:
-                    step["result"] = new_result
-                break
-    elif event_type == "todo_completed":
-        current["status"] = "completed"
-    elif event_type == "todo_cancelled":
-        current["status"] = "cancelled"
-    return current
+    Kept as a compatibility wrapper for tests and older call sites; the
+    persisted source of truth is now the progress-event journal.
+    """
+    from ..message_parts import append_progress_event, project_progress_events_to_todo
+
+    journal: list[dict] = []
+    if isinstance(current, dict):
+        journal = append_progress_event(journal, {"type": "todo_created", "plan": current})
+    journal = append_progress_event(journal, event)
+    return project_progress_events_to_todo(journal) or current
+
+
+def _observe_progress_event_journal(current: list[dict] | None, event: dict) -> list[dict]:
+    """Append a progress SSE event to this turn's persisted event journal."""
+    from ..message_parts import append_progress_event
+
+    return append_progress_event(current, event)
 
 
 def _attach_todo_snapshot_meta(
@@ -145,13 +133,19 @@ def _attach_todo_snapshot_meta(
     *,
     conversation_id: str,
     todo_snapshot: dict | None,
+    progress_events: list[dict] | None = None,
 ) -> None:
-    """Attach the best available todo snapshot to assistant metadata."""
+    """Attach progress journal and latest todo projection to assistant metadata."""
     try:
-        from ..message_parts import serialize_plan_to_chat_todo
+        from ..message_parts import (
+            normalize_progress_events,
+            project_progress_events_to_todo,
+            serialize_plan_to_chat_todo,
+        )
 
-        snapshot = None
-        if isinstance(todo_snapshot, dict):
+        journal = normalize_progress_events(progress_events)
+        snapshot = project_progress_events_to_todo(journal)
+        if snapshot is None and isinstance(todo_snapshot, dict):
             snapshot = serialize_plan_to_chat_todo(todo_snapshot)
         if not (snapshot and snapshot.get("steps")):
             from ...tools.handlers.plan import get_todo_handler_for_session, has_active_todo
@@ -160,6 +154,12 @@ def _attach_todo_snapshot_meta(
                 handler = get_todo_handler_for_session(conversation_id)
                 plan = handler.get_plan_for(conversation_id) if handler else None
                 snapshot = serialize_plan_to_chat_todo(plan)
+                if snapshot and not journal:
+                    journal = normalize_progress_events(
+                        [{"type": "todo_created", "plan": snapshot, "restored": True}]
+                    )
+        if journal:
+            meta["progress_events"] = journal
         if snapshot and snapshot.get("steps"):
             meta["todo"] = snapshot
     except Exception:
@@ -950,6 +950,7 @@ def _schedule_background_save(
     todo_snapshot: dict | None = None,
     collected_sources: list | None = None,
     collected_mcp_calls: list | None = None,
+    progress_events: list[dict] | None = None,
 ) -> None:
     """Register a background callback so that when a long-running agent task
     finally completes after the SSE stream has closed, the result is still
@@ -966,11 +967,13 @@ def _schedule_background_save(
         bg_sources = list(collected_sources or [])
         bg_mcp_calls = list(collected_mcp_calls or [])
         bg_todo_snapshot = todo_snapshot
+        bg_progress_events = list(progress_events or [])
         try:
             while not agent_queue.empty():
                 ev = agent_queue.get_nowait()
                 if ev is None or ev.get("type") == "__agent_error__":
                     break
+                bg_progress_events = _observe_progress_event_journal(bg_progress_events, ev)
                 bg_todo_snapshot = _observe_todo_snapshot_event(bg_todo_snapshot, ev)
                 _append_unique_artifacts(bg_artifacts, _extract_artifact_events(ev))
                 _source_used = _extract_source_used(ev)
@@ -1000,6 +1003,7 @@ def _schedule_background_save(
                     meta,
                     conversation_id=conversation_id,
                     todo_snapshot=bg_todo_snapshot,
+                    progress_events=bg_progress_events,
                 )
                 session.add_message("assistant", bg_reply, **meta)
                 if session_manager:
@@ -1062,6 +1066,11 @@ async def _stream_chat(
     # ``auto_close_todo`` unregisters the plan before the assistant message is
     # saved, so a save-time registry lookup would miss completed plans (#615).
     _last_todo_snapshot: dict | None = None
+    # Persisted causal progress event journal for this assistant turn. The
+    # final ``todo`` card is a projection of this journal; keeping the events
+    # lets history/reload recover progress as first-class data instead of only
+    # the folded snapshot.
+    _progress_events: list[dict] = []
     # Server-side mirror of the browser's reasoning-chain assembly. Built from
     # the same SSE events so the persisted history can restore the causal
     # timeline (thinking / narration / tool args / results, in order) instead of
@@ -1438,6 +1447,7 @@ async def _stream_chat(
             # Same for plan state: once the frontend disconnects we still drain
             # the agent queue and save history, so todo events must be observed
             # before the wire-output branch can skip the rest of the loop.
+            _progress_events = _observe_progress_event_journal(_progress_events, event)
             _last_todo_snapshot = _observe_todo_snapshot_event(_last_todo_snapshot, event)
             _new_artifacts = _append_unique_artifacts(
                 _collected_artifacts,
@@ -1667,6 +1677,7 @@ async def _stream_chat(
                     _msg_meta,
                     conversation_id=conversation_id,
                     todo_snapshot=_last_todo_snapshot,
+                    progress_events=_progress_events,
                 )
                 if _agent_errored:
                     _msg_meta["is_truncated"] = True
@@ -1749,6 +1760,7 @@ async def _stream_chat(
                         _last_todo_snapshot,
                         _collected_sources,
                         _collected_mcp_calls,
+                        _progress_events,
                     )
 
         # Drain remaining queue events to accumulate _full_reply for deferred save
@@ -1758,6 +1770,7 @@ async def _stream_chat(
                     ev = _agent_queue.get_nowait()
                     if ev is None or ev.get("type") == "__agent_error__":
                         break
+                    _progress_events = _observe_progress_event_journal(_progress_events, ev)
                     _last_todo_snapshot = _observe_todo_snapshot_event(_last_todo_snapshot, ev)
                     _append_unique_artifacts(_collected_artifacts, _extract_artifact_events(ev))
                     _source_used = _extract_source_used(ev)
@@ -1790,6 +1803,7 @@ async def _stream_chat(
                         _deferred_meta,
                         conversation_id=conversation_id,
                         todo_snapshot=_last_todo_snapshot,
+                        progress_events=_progress_events,
                     )
                     session.add_message("assistant", _deferred_text, **_deferred_meta)
                     if session_manager:

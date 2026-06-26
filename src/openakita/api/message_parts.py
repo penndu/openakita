@@ -22,7 +22,15 @@ persisted itself — it cannot bloat ``sessions.json`` and is never trimmed.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
+
+PROGRESS_EVENT_TYPES = {
+    "todo_created",
+    "todo_step_updated",
+    "todo_completed",
+    "todo_cancelled",
+}
 
 
 def serialize_plan_to_chat_todo(plan: dict | None) -> dict | None:
@@ -54,7 +62,112 @@ def serialize_plan_to_chat_todo(plan: dict | None) -> dict | None:
     }
 
 
-def build_message_parts(msg: dict, *, todo: dict | None = None) -> list[dict]:
+def normalize_progress_event(event: dict | None, *, seq: int | None = None) -> dict | None:
+    """Normalize a live progress SSE event into the persisted event journal shape.
+
+    The journal intentionally stores small, self-contained events instead of
+    only the folded final plan snapshot. History can project the latest state
+    from these events while still keeping the causal progress trail available
+    for future replay/timeline UI.
+    """
+    if not isinstance(event, dict):
+        return None
+    event_type = event.get("type")
+    if event_type not in PROGRESS_EVENT_TYPES:
+        return None
+
+    out: dict[str, Any] = {"type": event_type}
+    if seq is not None:
+        out["seq"] = seq
+
+    if event_type == "todo_created":
+        plan = serialize_plan_to_chat_todo(event.get("plan"))
+        if not (plan and plan.get("steps")):
+            return None
+        out["plan"] = plan
+    elif event_type == "todo_step_updated":
+        step_id = event.get("stepId") or event.get("step_id")
+        if step_id:
+            out["stepId"] = step_id
+        step_idx = event.get("stepIdx")
+        if isinstance(step_idx, int):
+            out["stepIdx"] = step_idx
+        status = event.get("status")
+        if status:
+            out["status"] = status
+        if "result" in event:
+            out["result"] = event.get("result")
+    return out
+
+
+def normalize_progress_events(events: Any) -> list[dict]:
+    """Return a sanitized progress-event journal with stable sequence numbers."""
+    if not isinstance(events, list):
+        return []
+    out: list[dict] = []
+    for raw in events:
+        item = normalize_progress_event(raw, seq=len(out) + 1)
+        if item is not None:
+            out.append(item)
+    return out
+
+
+def append_progress_event(events: list[dict] | None, event: dict | None) -> list[dict]:
+    """Append one normalized progress event to a journal copy."""
+    out = list(events or [])
+    item = normalize_progress_event(event, seq=len(out) + 1)
+    if item is not None:
+        out.append(item)
+    return out
+
+
+def project_progress_events_to_todo(events: Any) -> dict | None:
+    """Fold a persisted progress-event journal into the latest ChatTodo state."""
+    todo: dict | None = None
+    for event in normalize_progress_events(events):
+        event_type = event.get("type")
+        if event_type == "todo_created":
+            plan = serialize_plan_to_chat_todo(event.get("plan"))
+            todo = copy.deepcopy(plan) if plan else todo
+            continue
+        if not isinstance(todo, dict):
+            continue
+        if event_type == "todo_step_updated":
+            step_id = event.get("stepId")
+            step_idx = event.get("stepIdx")
+            steps = todo.get("steps") or []
+            for i, step in enumerate(steps):
+                if (step_id and step.get("id") == step_id) or (
+                    isinstance(step_idx, int) and i == step_idx
+                ):
+                    if event.get("status"):
+                        step["status"] = event["status"]
+                    if "result" in event:
+                        step["result"] = event.get("result")
+                    break
+            if steps and all(
+                step.get("status") in {"completed", "skipped", "failed", "cancelled"}
+                for step in steps
+            ):
+                if any(step.get("status") == "failed" for step in steps):
+                    todo["status"] = "failed"
+                elif any(step.get("status") == "cancelled" for step in steps):
+                    todo["status"] = "cancelled"
+                else:
+                    todo["status"] = "completed"
+        elif event_type == "todo_completed":
+            todo["status"] = "completed"
+        elif event_type == "todo_cancelled":
+            todo["status"] = "cancelled"
+    return todo
+
+
+def build_message_parts(
+    msg: dict,
+    *,
+    todo: dict | None = None,
+    progress_events: list[dict] | None = None,
+) -> list[dict]:
     """Build the ordered parts projection for one stored assistant message.
 
     ``todo`` overrides ``msg['todo']`` (used to attach a live in-flight plan
@@ -75,10 +188,22 @@ def build_message_parts(msg: dict, *, todo: dict | None = None) -> list[dict]:
     if msg.get("mcp_calls"):
         parts.append({"kind": "mcp", "id": "mcp"})
 
-    plan = todo if todo is not None else msg.get("todo")
+    events = (
+        normalize_progress_events(progress_events)
+        if progress_events is not None
+        else normalize_progress_events(msg.get("progress_events"))
+    )
+    plan = (
+        todo
+        if todo is not None
+        else project_progress_events_to_todo(events) or msg.get("todo")
+    )
     plan_todo = serialize_plan_to_chat_todo(plan) if isinstance(plan, dict) else plan
     if isinstance(plan_todo, dict) and plan_todo.get("steps"):
-        parts.append({"kind": "plan", "id": f"plan:{plan_todo.get('id', '')}", "todo": plan_todo})
+        part = {"kind": "plan", "id": f"plan:{plan_todo.get('id', '')}", "todo": plan_todo}
+        if events:
+            part["progressEvents"] = events
+        parts.append(part)
 
     content = msg.get("content")
     if isinstance(content, str) and content.strip():

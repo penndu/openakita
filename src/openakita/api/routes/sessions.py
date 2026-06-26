@@ -318,16 +318,30 @@ def _history_entry(session, conversation_id: str, original_idx: int, msg: dict) 
     if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
         entry["usage"] = usage
 
-    # Plan snapshot + ordered parts projection — lets rich cards (plan,
-    # answered ask_user, attachments) re-display losslessly after reload /
-    # multi-window switch. ``parts`` is derived, never stored, so it cannot
+    # Progress event journal + ordered parts projection — lets rich cards
+    # (plan, answered ask_user, attachments) re-display losslessly after reload
+    # / multi-window switch. ``parts`` is derived, never stored, so it cannot
     # bloat sessions.json. See openakita.api.message_parts.
-    from openakita.api.message_parts import build_message_parts, normalize_chat_todo
+    from openakita.api.message_parts import (
+        build_message_parts,
+        normalize_chat_todo,
+        normalize_progress_events,
+        project_progress_events_to_todo,
+    )
 
-    todo_norm = normalize_chat_todo(msg.get("todo")) if msg.get("todo") else None
+    progress_events = normalize_progress_events(msg.get("progress_events"))
+    if progress_events:
+        entry["progress_events"] = progress_events
+    todo_norm = project_progress_events_to_todo(progress_events) or (
+        normalize_chat_todo(msg.get("todo")) if msg.get("todo") else None
+    )
     if todo_norm and todo_norm.get("steps"):
         entry["todo"] = todo_norm
-    parts = build_message_parts({**msg, "content": content}, todo=todo_norm)
+    parts = build_message_parts(
+        {**msg, "content": content},
+        todo=todo_norm,
+        progress_events=progress_events,
+    )
     if parts:
         entry["parts"] = parts
     return entry

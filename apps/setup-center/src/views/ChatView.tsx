@@ -23,6 +23,7 @@ import type {
   ConversationStatus,
   ChatToolCall,
   ChatTodo,
+  ChatProgressEvent,
   ChatTodoStep,
   ChatAskUser,
   ChatAttachment,
@@ -847,7 +848,7 @@ export function ChatView({
   const hydrateSeqRef = useRef(0);
 
   const mapBackendHistoryToMessages = useCallback(
-    (rows: { id: string; index?: number; role: string; content: string; timestamp: number; chain_summary?: ChainSummaryItem[]; chain_timeline?: ChainTimelineGroup[]; artifacts?: ChatArtifact[]; sources?: ChatSource[]; mcp_calls?: ChatMcpCall[]; attachments?: ChatAttachment[]; org_timeline?: OrgTimelineEntry[]; ask_user?: ChatAskUser; todo?: ChatTodo; parts?: MessagePart[]; usage?: ChatMessage["usage"] }[]): ChatMessage[] => {
+    (rows: { id: string; index?: number; role: string; content: string; timestamp: number; chain_summary?: ChainSummaryItem[]; chain_timeline?: ChainTimelineGroup[]; artifacts?: ChatArtifact[]; sources?: ChatSource[]; mcp_calls?: ChatMcpCall[]; attachments?: ChatAttachment[]; org_timeline?: OrgTimelineEntry[]; ask_user?: ChatAskUser; todo?: ChatTodo; progress_events?: ChatProgressEvent[]; parts?: MessagePart[]; usage?: ChatMessage["usage"] }[]): ChatMessage[] => {
       return rows.map((m) => ({
         id: m.id,
         ...(typeof m.index === "number" ? { historyIndex: m.index } : {}),
@@ -867,6 +868,7 @@ export function ChatView({
         ...(m.attachments?.length ? { attachments: m.attachments } : {}),
         ...(m.org_timeline?.length ? { orgTimeline: m.org_timeline } : {}),
         ...(m.todo?.steps?.length ? { todo: m.todo } : {}),
+        ...(m.progress_events?.length ? { progressEvents: m.progress_events } : {}),
         ...(m.ask_user ? { askUser: m.ask_user, content: "" } : {}),
         ...(m.parts?.length ? { parts: m.parts } : {}),
         ...(m.usage ? { usage: m.usage } : {}),
@@ -919,6 +921,7 @@ export function ChatView({
       score +
       (msg.todo?.steps?.length ? 1000 + msg.todo.steps.length : 0) +
       (msg.parts?.length ? 100 + msg.parts.length : 0) +
+      (msg.progressEvents?.length ? 10 + msg.progressEvents.length : 0) +
       (msg.thinkingChain?.length ? 50 + msg.thinkingChain.length : 0) +
       (msg.artifacts?.length ? 20 + msg.artifacts.length : 0) +
       (msg.askUser ? 10 : 0) +
@@ -2873,6 +2876,7 @@ export function ChatView({
         return null;
       };
       let currentPlan: ChatTodo | null = null;
+      let currentProgressEvents: ChatProgressEvent[] = [];
       let currentAsk: ChatAskUser | null = null;
       let currentAgent: string | null = null;
       let currentArtifacts: ChatArtifact[] = [];
@@ -3510,9 +3514,13 @@ export function ChatView({
               }
               case "todo_created":
                 currentPlan = event.plan;
+                currentProgressEvents = [
+                  ...currentProgressEvents,
+                  { type: "todo_created", seq: currentProgressEvents.length + 1, plan: event.plan },
+                ];
                 updateMessages((prev) => prev.map((m) =>
                   m.id === assistantMsg.id
-                    ? { ...m, todo: { ...currentPlan! } }
+                    ? { ...m, todo: { ...currentPlan! }, progressEvents: [...currentProgressEvents] }
                     : m.todo && m.todo.status !== "completed" && m.todo.status !== "failed" && m.todo.status !== "cancelled"
                     ? { ...m, todo: { ...m.todo, status: "completed" as const } }
                     : m
@@ -3520,8 +3528,19 @@ export function ChatView({
                 break;
               case "todo_step_updated":
                 if (currentPlan) {
+                  const stepId = event.step_id || event.stepId;
+                  currentProgressEvents = [
+                    ...currentProgressEvents,
+                    {
+                      type: "todo_step_updated",
+                      seq: currentProgressEvents.length + 1,
+                      ...(stepId ? { stepId } : {}),
+                      ...(event.stepIdx != null ? { stepIdx: event.stepIdx } : {}),
+                      status: event.status as ChatTodoStep["status"],
+                      ...(event.result !== undefined ? { result: event.result } : {}),
+                    },
+                  ];
                   const newSteps: ChatTodoStep[] = currentPlan.steps.map((s) => {
-                    const stepId = event.step_id || event.stepId;
                     const matched = stepId
                       ? s.id === stepId
                       : event.stepIdx != null && currentPlan!.steps.indexOf(s) === event.stepIdx;
@@ -3532,23 +3551,31 @@ export function ChatView({
                   const allDone = newSteps.every((s) => s.status === "completed" || s.status === "skipped" || s.status === "failed");
                   currentPlan = { ...currentPlan, steps: newSteps, ...(allDone ? { status: "completed" as const } : {}) } as ChatTodo;
                   updateMessages((prev) => prev.map((m) =>
-                    m.id === assistantMsg.id ? { ...m, todo: { ...currentPlan! } } : m
+                    m.id === assistantMsg.id ? { ...m, todo: { ...currentPlan! }, progressEvents: [...currentProgressEvents] } : m
                   ));
                 }
                 break;
               case "todo_completed":
                 if (currentPlan) {
+                  currentProgressEvents = [
+                    ...currentProgressEvents,
+                    { type: "todo_completed", seq: currentProgressEvents.length + 1 },
+                  ];
                   currentPlan = { ...currentPlan, status: "completed" } as ChatTodo;
                   updateMessages((prev) => prev.map((m) =>
-                    m.id === assistantMsg.id ? { ...m, todo: { ...currentPlan! } } : m
+                    m.id === assistantMsg.id ? { ...m, todo: { ...currentPlan! }, progressEvents: [...currentProgressEvents] } : m
                   ));
                 }
                 break;
               case "todo_cancelled":
                 if (currentPlan) {
+                  currentProgressEvents = [
+                    ...currentProgressEvents,
+                    { type: "todo_cancelled", seq: currentProgressEvents.length + 1 },
+                  ];
                   currentPlan = { ...currentPlan, status: "cancelled" } as ChatTodo;
                   updateMessages((prev) => prev.map((m) =>
-                    m.id === assistantMsg.id ? { ...m, todo: { ...currentPlan! } } : m
+                    m.id === assistantMsg.id ? { ...m, todo: { ...currentPlan! }, progressEvents: [...currentProgressEvents] } : m
                   ));
                 }
                 break;
@@ -3925,6 +3952,7 @@ export function ChatView({
                     agentName: currentAgent,
                     toolCalls: currentToolCalls.length > 0 ? [...currentToolCalls] : null,
                     todo: currentPlan ? { ...currentPlan } : null,
+                    progressEvents: currentProgressEvents.length > 0 ? [...currentProgressEvents] : null,
                     askUser: currentAsk,
                     errorInfo: currentError,
                     artifacts: currentArtifacts.length > 0 ? [...currentArtifacts] : null,

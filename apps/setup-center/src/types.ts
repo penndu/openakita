@@ -223,6 +223,7 @@ export type ChatMessage = {
   agentName?: string | null;
   toolCalls?: ChatToolCall[] | null;
   todo?: ChatTodo | null;
+  progressEvents?: ChatProgressEvent[] | null;
   askUser?: ChatAskUser | null;
   attachments?: ChatAttachment[] | null;
   artifacts?: ChatArtifact[] | null;
@@ -292,7 +293,7 @@ export type MessagePart =
   | { kind: "org_timeline"; id: string }
   | { kind: "sources"; id: string }
   | { kind: "mcp"; id: string }
-  | { kind: "plan"; id: string; todo?: ChatTodo }
+  | { kind: "plan"; id: string; todo?: ChatTodo; progressEvents?: ChatProgressEvent[] }
   | { kind: "text"; id: string }
   | { kind: "tools"; id: string }
   | { kind: "attachment"; id: string; artifact?: ChatArtifact }
@@ -422,6 +423,19 @@ export type ChatTodoStep = {
   status: "pending" | "in_progress" | "completed" | "skipped" | "failed" | "cancelled";
   result?: string | null;
 };
+
+export type ChatProgressEvent =
+  | { type: "todo_created"; seq?: number; plan: ChatTodo }
+  | {
+      type: "todo_step_updated";
+      seq?: number;
+      stepId?: string;
+      stepIdx?: number;
+      status?: ChatTodoStep["status"];
+      result?: string | null;
+    }
+  | { type: "todo_completed"; seq?: number }
+  | { type: "todo_cancelled"; seq?: number };
 
 export type PlanApprovalEvent = {
   conversation_id: string;
