@@ -74,14 +74,30 @@ export function TemplatePickerDialog({
     setError(null);
     try {
       const resp = await listTemplates(apiBase);
-      setTemplates(resp);
-      if (resp.length > 0 && selectedId === null) {
-        setSelectedId(resp[0].id);
+      // P2 去重：磁盘上可能残留旧 slug 的同名模板（如 ``content-ops`` 与
+      // 历史 ``content_ops``/``内容运营团队`` 各一份），导致列表里"内容运营
+      // 团队"出现两次。按显示名去重，优先保留 ASCII slug（连字符）的内置
+      // 条目，避免用户看到重复模板。
+      const byName = new Map<string, TemplateWire>();
+      for (const tpl of resp) {
+        const label = (tpl.name || tpl.display_name || tpl.id || "").trim();
+        const existing = byName.get(label);
+        if (!existing) {
+          byName.set(label, tpl);
+          continue;
+        }
+        // Prefer the hyphen-case built-in slug over legacy variants.
+        const prefer = /^[a-z0-9-]+$/.test(tpl.id) && !/^[a-z0-9-]+$/.test(existing.id);
+        if (prefer) byName.set(label, tpl);
+      }
+      const deduped = [...byName.values()];
+      setTemplates(deduped);
+      if (deduped.length > 0 && selectedId === null) {
+        setSelectedId(deduped[0].id);
       }
     } catch (e) {
-      // v2 disabled returns 404 with a friendly detail — surface it.
       const msg = e instanceof Error ? e.message : String(e);
-      setError(`无法加载 v2 模板：${msg}（v2 灰度未启用时是正常的）`);
+      setError(`无法加载组织模板：${msg}（灰度未启用时是正常的）`);
     } finally {
       setLoading(false);
     }
@@ -119,11 +135,11 @@ export function TemplatePickerDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        {children ?? <Button variant="outline">新建 v2 组织</Button>}
+        {children ?? <Button variant="outline">新建组织</Button>}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[560px]" data-testid="v2-template-dialog">
         <DialogHeader>
-          <DialogTitle>选择 v2 组织模板</DialogTitle>
+          <DialogTitle>选择组织模板</DialogTitle>
           <DialogDescription>
             从内置模板克隆一份新的组织。点选模板，输入组织名称后即可创建。
           </DialogDescription>
