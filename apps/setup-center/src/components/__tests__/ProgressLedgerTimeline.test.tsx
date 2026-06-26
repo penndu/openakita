@@ -112,6 +112,50 @@ describe("ProgressLedgerTimeline", () => {
     expect(screen.queryByText("newNode")).toBeNull();
   });
 
+  // v21 time-ordered flow: a node that activates twice (with a terminal in
+  // between) must render as TWO separate steps in chronological order, NOT be
+  // folded back into one pinned segment.
+  it("renders each node activation as its own time-ordered step", () => {
+    const mk = (
+      id: string,
+      node: string,
+      phase: ProgressLedgerEvent["phase"],
+      ts: string,
+      instruction: string,
+    ): ProgressLedgerEvent => ({
+      id,
+      ts,
+      is_request_satisfied: false,
+      is_in_loop: false,
+      is_progress_being_made: true,
+      next_speaker: node,
+      instruction_or_question: instruction,
+      nodeId: node,
+      phase,
+      commandId: "cmd_1",
+    });
+    const events: ProgressLedgerEvent[] = [
+      mk("1", "editor", "start", "1000", "主编启动并派单"),
+      mk("2", "editor", "done", "1100", "主编完成首轮派发"),
+      mk("3", "planner", "start", "1200", "策划编辑开工"),
+      mk("4", "planner", "done", "1300", "策划编辑产出"),
+      // editor acts AGAIN later -> must be a NEW step at the bottom.
+      mk("5", "editor", "start", "1400", "主编再次整合"),
+      mk("6", "editor", "done", "1500", "主编最终汇报"),
+    ];
+    render(<ProgressLedgerTimeline events={events} running={false} />);
+    const entries = screen.getAllByTestId("progress-ledger-entry");
+    // 3 activations: editor(1) -> planner -> editor(2) == 3 steps, NOT 2.
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toHaveTextContent("editor");
+    expect(entries[1]).toHaveTextContent("planner");
+    expect(entries[2]).toHaveTextContent("editor");
+    // The last editor step carries its later content, proving it is a distinct
+    // bottom step rather than the first editor segment.
+    fireEvent.click(screen.getAllByText("editor")[1]);
+    expect(screen.getAllByText("主编最终汇报").length).toBeGreaterThan(0);
+  });
+
   it("always keeps command-less (global) entries regardless of scoping", () => {
     const events: ProgressLedgerEvent[] = [
       { ...ev("g", { next_speaker: "globalNode", is_progress_being_made: true }), ts: "500" },

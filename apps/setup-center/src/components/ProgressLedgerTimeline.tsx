@@ -80,8 +80,6 @@ interface Segment {
   status: SegStatus;
   satisfied: boolean;
   ts: string;
-  /** Number of dispatch rounds folded into this node segment (图3). */
-  rounds: number;
   /** Monotonic order index of the most recent update (drives "active"). */
   lastSeq: number;
 }
@@ -119,24 +117,31 @@ function fmtTs(ts: string): string {
 }
 
 /**
- * Render the v2 live-process feed as a connected, conversational timeline.
+ * Render the v2 live-process feed as a TIME-ORDERED task flow.
  *
- * Redesign (exploratory testing v12): the previous version rendered one big
- * shadcn Card per ledger entry with English badges and "(尚未指定)/(无指令)"
- * placeholders, sitting in a detached strip above the chat — the "大白块 +
- * 割裂 + 英文" the user reported. This version:
+ * Redesign (exploratory testing v21): the previous version grouped ALL of a
+ * node's rounds into ONE stable segment keyed on ``node:<id>`` — so when the
+ * root主编 acted, was coordinated away, then acted again, its second turn was
+ * folded back into the SAME top segment. The user lost the sense of flow (the
+ * 主编 row stayed pinned at the top; to see a later 主编 output you had to
+ * scroll back up). This version makes each node ACTIVATION a distinct,
+ * time-ordered step appended in chronological order, so the feed reads as
+ * 主编 → 协调 → 下级 → 产出 → 再协调 → 上级 → 再主编 …:
  *
- *  * groups consecutive events by node into ONE segment (a node's whole turn
- *    is a single bubble, not N cards),
- *  * shows each node's actual content lines (not just an action verb),
- *  * auto-collapses every COMPLETED node to a one-line summary (click to
- *    expand) and keeps only the active node expanded with a live pulse,
- *  * is fully Chinese, and
- *  * renders NOTHING when there are no meaningful events, so the old
- *    "暂无进度记录…" banner never sits permanently above a finished task.
+ *  * each ``phase==="start"`` (a node activation / re-dispatch / rework
+ *    re-run) opens a NEW step at its chronological position — a node that
+ *    acts twice shows up as two steps, the later one further down,
+ *  * incremental updates WITHIN one activation (tool calls, deltas, review
+ *    trace lines) refresh in place on that step (no hundreds of rows),
+ *  * the running step stays expanded with a live pulse; a completed step
+ *    collapses to a one-line summary BUT stays at its original time position,
+ *  * coordinator / supervisor ledger turns (no ``nodeId``) keep the legacy
+ *    consecutive-by-speaker merge so they don't spam one row per token,
+ *  * is fully Chinese, and renders NOTHING when there are no meaningful events.
  *
- * It is meant to live INSIDE the message scroll column (not a bounded strip),
- * so the command center reads as a single conversation that scrolls as one.
+ * It lives INSIDE the message scroll column so the command center reads as a
+ * single conversation that scrolls as one (the parent auto-scrolls to bottom
+ * on new events).
  */
 export function ProgressLedgerTimeline({
   events,
@@ -185,13 +190,18 @@ export function ProgressLedgerTimeline({
         (e.instruction_or_question && e.instruction_or_question.trim()) ||
         e.is_request_satisfied,
     );
-    // 图3 convergence: group by a STABLE key. When an event carries a
-    // ``nodeId`` we key on the node so all its rounds collapse into ONE
-    // segment regardless of interleaving (no more N parallel "进行中" rows for
-    // the same node). Supervisor ledger turns (no nodeId) fall back to the
-    // legacy consecutive-by-speaker behaviour via a per-run synthetic key.
+    // v21 TIME-ORDERED FLOW: each node ACTIVATION is its own step, appended in
+    // chronological order. We no longer key on a stable ``node:<id>`` (which
+    // folded every round of a node into one pinned segment). Instead we track
+    // the node's CURRENTLY-OPEN step in ``openByNode``; a ``start`` phase, or
+    // activity arriving after that step already reached a terminal status,
+    // opens a BRAND-NEW step (so 主编's 2nd turn lands below, not back on top).
+    // ``order`` is first-seen order = chronological (events are ts-sorted), so
+    // steps render in the exact sequence they happened. Coordinator / ledger
+    // turns (no nodeId) keep the legacy consecutive-by-speaker merge.
     const byKey = new Map<string, Segment>();
     const order: string[] = [];
+    const openByNode = new Map<string, string>();
     let seq = 0;
     let consecutiveKey = "";
     let consecutiveNode = "";
@@ -205,7 +215,19 @@ export function ProgressLedgerTimeline({
       // Resolve the grouping key.
       let groupKey: string;
       if (rawId) {
-        groupKey = `node:${rawId}`;
+        const openKey = openByNode.get(rawId);
+        const openSeg = openKey ? byKey.get(openKey) : undefined;
+        // Open a new step on activation, when no step is open, or when the
+        // node's current step already finished (a fresh round = a fresh step).
+        const needNew = phase === "start" || !openSeg || TERMINAL.has(openSeg.status);
+        if (needNew) {
+          groupKey = `node:${rawId}#${seq}`;
+          openByNode.set(rawId, groupKey);
+        } else {
+          groupKey = openKey!;
+        }
+        consecutiveKey = "";
+        consecutiveNode = "";
       } else {
         // Legacy ledger turn: merge consecutive same-speaker entries.
         if (consecutiveNode === node && consecutiveKey) {
@@ -215,13 +237,6 @@ export function ProgressLedgerTimeline({
           consecutiveKey = groupKey;
           consecutiveNode = node;
         }
-      }
-      if (!rawId) {
-        consecutiveNode = node;
-        consecutiveKey = groupKey;
-      } else {
-        consecutiveKey = "";
-        consecutiveNode = "";
       }
 
       let seg = byKey.get(groupKey);
@@ -233,7 +248,6 @@ export function ProgressLedgerTimeline({
           status: "running",
           satisfied: false,
           ts: e.ts,
-          rounds: 1,
           lastSeq: seq,
         };
         byKey.set(groupKey, seg);
@@ -242,28 +256,25 @@ export function ProgressLedgerTimeline({
       seg.lastSeq = seq;
       seg.ts = e.ts || seg.ts;
 
-      // A new dispatch round after a terminal state: open a fresh round in the
-      // SAME segment instead of a parallel one, and clear the terminal latch.
-      if (phase === "start" && TERMINAL.has(seg.status)) {
-        seg.rounds += 1;
-        seg.status = "running";
-        seg.satisfied = false;
-        seg.lines.push(`— 第 ${seg.rounds} 轮 —`);
-      }
       if (line && !seg.lines.includes(line)) seg.lines.push(line);
 
       // Status convergence. Terminal phases win and latch; non-terminal events
-      // never downgrade a terminal status (except via the new-round reset).
+      // never downgrade a terminal status. A terminal phase also closes the
+      // node's open step so the NEXT activity for that node opens a new step.
       if (phase === "done") {
         seg.status = "done";
         seg.satisfied = true;
+        if (rawId) openByNode.delete(rawId);
       } else if (phase === "incomplete") {
         seg.status = "incomplete";
+        if (rawId) openByNode.delete(rawId);
       } else if (phase === "failed") {
         seg.status = "failed";
+        if (rawId) openByNode.delete(rawId);
       } else if (e.is_request_satisfied) {
         seg.status = "done";
         seg.satisfied = true;
+        if (rawId) openByNode.delete(rawId);
       } else if (!TERMINAL.has(seg.status)) {
         if (e.is_in_loop) seg.status = "loop";
         else if (!e.is_progress_being_made) seg.status = "stall";
@@ -289,9 +300,10 @@ export function ProgressLedgerTimeline({
 
   if (segments.length === 0) return null;
 
-  // 图3: "active" is the still-running segment that was updated most recently
-  // (by seq), not merely the last in render order — interleaved nodes mean the
-  // newest activity isn't always the last node first seen.
+  // v21 time-ordered flow: EVERY still-running step stays expanded (parallel
+  // dispatch means several steps can be live at once), and the most-recent
+  // running step additionally carries the pulse. Completed steps collapse to a
+  // one-line summary at their original chronological position.
   const activeKey = (() => {
     let best: Segment | null = null;
     for (const s of segments) {
@@ -303,10 +315,11 @@ export function ProgressLedgerTimeline({
   return (
     <div className="plt-feed" data-testid={rest["data-testid"] ?? "progress-ledger-timeline"}>
       {segments.map((seg) => {
-        const isActive = running && seg.key === activeKey && seg.status === "running";
-        // Active node stays open; completed nodes collapse to one line unless
-        // the user explicitly expanded them.
-        const open = openKeys[seg.key] ?? isActive;
+        const isRunning = running && seg.status === "running";
+        const isActive = isRunning && seg.key === activeKey;
+        // Any running step stays open; completed steps collapse to one line
+        // unless the user explicitly expanded them.
+        const open = openKeys[seg.key] ?? isRunning;
         const summary = seg.lines[seg.lines.length - 1] || STATUS_LABEL[seg.status];
         return (
           <div
