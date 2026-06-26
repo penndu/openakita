@@ -11,6 +11,7 @@ ValueError + broadcast empty), 404 (command not found), and 409
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 from fastapi import FastAPI
@@ -152,6 +153,65 @@ def test_b38_submit_command_400_on_command_error(
     mint_app.state.org_command_service.submit = _async_raise(err)
     resp = mint_client.post("/api/v2/orgs/o1/command", json={"content": "hi"})
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# B38 input attachments (upstream e2874585 port): the command console may
+# attach files. Text-file contents are inlined into the *execution* content
+# while the console-facing text stays clean, and structured attachment
+# metadata rides along on ``input_attachments`` for history rebuild.
+# ---------------------------------------------------------------------------
+
+
+def test_b38_submit_command_attachments_field_accepted(
+    mint_app: FastAPI, mint_client: TestClient
+) -> None:
+    mint_app.state.org_command_service.submit = _async_return(
+        {"command_id": "cmd_b", "org_id": "o1", "status": "running"}
+    )
+    resp = mint_client.post(
+        "/api/v2/orgs/o1/command",
+        json={"content": "hi", "attachments": []},
+    )
+    assert resp.status_code == 200
+
+
+def test_b38_submit_command_enriches_and_splits_attachment_text(
+    mint_app: FastAPI, mint_client: TestClient, tmp_path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _capture(request: Any) -> dict[str, Any]:
+        captured["req"] = request
+        return {"command_id": "cmd_a", "org_id": "o1", "status": "running"}
+
+    mint_app.state.org_command_service.submit = MagicMock(side_effect=_capture)
+
+    doc = tmp_path / "notes.txt"
+    doc.write_text("SECRET-FILE-BODY", encoding="utf-8")
+
+    resp = mint_client.post(
+        "/api/v2/orgs/o1/command",
+        json={
+            "content": "please review",
+            "attachments": [
+                {"type": "file", "name": "notes.txt", "local_path": str(doc)},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+
+    req = captured["req"]
+    # Execution content is enriched with the inlined file body...
+    assert "SECRET-FILE-BODY" in req.content
+    assert "notes.txt" in req.content
+    # ...while the console-facing text is the original, unpolluted input.
+    assert req.user_facing_content == "please review"
+    assert "SECRET-FILE-BODY" not in (req.user_facing_content or "")
+    # Structured attachment metadata is preserved for history rendering.
+    assert len(req.input_attachments) == 1
+    assert req.input_attachments[0]["name"] == "notes.txt"
+    assert req.input_attachments[0]["local_path"] == str(doc)
 
 
 # ---------------------------------------------------------------------------

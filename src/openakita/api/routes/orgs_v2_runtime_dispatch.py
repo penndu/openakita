@@ -49,6 +49,35 @@ def _to_dict(obj: Any) -> Any:
     return obj.to_dict() if hasattr(obj, "to_dict") else obj
 
 
+def _coerce_attachment_info(raw: Any) -> Any | None:
+    """Normalize a setup-center attachment JSON to the ChatRequest shape.
+
+    Ported from the v1 ``api/routes/orgs.py`` command endpoint (upstream
+    e2874585). Accepts both snake_case and camelCase keys so the desktop
+    composer payload round-trips without a separate adapter.
+    """
+    if not isinstance(raw, dict):
+        return None
+    name = str(raw.get("name") or raw.get("filename") or "").strip()
+    if not name:
+        return None
+    try:
+        from openakita.api.schemas import AttachmentInfo
+
+        return AttachmentInfo(
+            type=str(raw.get("type") or "file"),
+            name=name,
+            url=raw.get("url"),
+            local_path=raw.get("local_path") or raw.get("localPath"),
+            upload_id=raw.get("upload_id") or raw.get("uploadId"),
+            size=raw.get("size"),
+            mime_type=raw.get("mime_type") or raw.get("mimeType"),
+        )
+    except Exception:
+        logger.debug("[OrgV2] failed to normalize attachment: %r", raw, exc_info=True)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # B34-B37: lifecycle verbs (start / stop / pause / resume)
 # ---------------------------------------------------------------------------
@@ -206,11 +235,45 @@ async def send_command(request: Request, org_id: str, body: CommandSubmit) -> di
         ft = ForwardTarget.from_dict(item) if hasattr(ForwardTarget, "from_dict") else None
         if ft is not None:
             forward.append(ft)
+
+    # Input attachments (upstream e2874585): the composer may attach files.
+    # Inline text-file contents / local paths into the execution ``content``
+    # while keeping the original text as ``user_facing_content`` so the
+    # console history bubble stays clean.
+    user_facing_content = body.content
+    run_content = body.content
+    structured_attachments: list[dict[str, Any]] = []
+    coerced = [
+        att
+        for att in (_coerce_attachment_info(item) for item in (body.attachments or [])[:20])
+        if att is not None
+    ]
+    if coerced:
+        try:
+            from openakita.api.routes.chat import _enrich_org_content_with_attachments
+
+            run_content = _enrich_org_content_with_attachments(body.content, coerced)
+        except Exception:
+            logger.warning("[OrgV2] failed to enrich org command attachments", exc_info=True)
+        structured_attachments = [
+            {
+                "type": getattr(att, "type", "file"),
+                "name": getattr(att, "name", ""),
+                "url": getattr(att, "url", None),
+                "local_path": getattr(att, "local_path", None),
+                "upload_id": getattr(att, "upload_id", None),
+                "size": getattr(att, "size", None),
+                "mime_type": getattr(att, "mime_type", None),
+                "uploadStatus": "uploaded",
+            }
+            for att in coerced
+        ]
+
     try:
         return await svc.submit(
             OrgCommandRequest(
                 org_id=org_id,
-                content=body.content,
+                content=run_content,
                 target_node_id=body.target_node_id,
                 source=source,
                 origin_surface=OrgCommandSurface(body.origin_surface.value),
@@ -222,6 +285,8 @@ async def send_command(request: Request, org_id: str, body: CommandSubmit) -> di
                 replace_existing=body.replace_existing,
                 continue_previous=body.continue_previous,
                 forward_to=forward,
+                user_facing_content=user_facing_content,
+                input_attachments=structured_attachments,
             )
         )
     except OrgCommandConflict as exc:

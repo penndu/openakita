@@ -93,6 +93,16 @@ class CommandSubmit(BaseModel):
         ),
     )
     forward_to: list[dict[str, Any]] = Field(default_factory=list)
+    attachments: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "User-uploaded files from the command console composer. Each item "
+            "is a setup-center attachment descriptor (name / local_path / url / "
+            "upload_id / size / mime_type). Text file contents are inlined into "
+            "the execution prompt while the original text stays in the console "
+            "history; non-text files contribute their local path."
+        ),
+    )
 
     @field_validator("origin_surface", mode="before")
     @classmethod

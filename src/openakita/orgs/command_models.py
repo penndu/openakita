@@ -231,6 +231,11 @@ class OrgCommandRequest:
     replace_existing: bool = False
     continue_previous: bool = False
     forward_to: list[ForwardTarget] = field(default_factory=list)
+    user_facing_content: str | None = None
+    """Original user text to persist/render when ``content`` carries hidden
+    attachment text (inlined file contents). Falls back to ``content``."""
+    input_attachments: list[dict[str, Any]] = field(default_factory=list)
+    """User-uploaded attachments shown in the command-console history bubble."""
 
     def to_dict(self) -> dict[str, Any]:
         """Byte-for-byte parity view of the request.

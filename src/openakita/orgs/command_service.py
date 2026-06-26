@@ -662,24 +662,32 @@ class OrgCommandService:
         try:
             es = self._runtime.get_event_store(request.org_id)
             if es is not None and hasattr(es, "append"):
-                preview = (request.content or "").strip()
+                # Persist the *user-facing* text (the original composer input),
+                # not the attachment-enriched ``content`` that the supervisor
+                # runs on. Otherwise inlined file bodies would pollute the
+                # rebuilt command bubble (upstream e2874585).
+                user_facing = (
+                    request.user_facing_content or request.content or ""
+                ).strip()
+                preview = user_facing
                 source_dict = (
                     request.source.to_dict()
                     if hasattr(request.source, "to_dict")
                     else None
                 )
-                es.append(
-                    {
-                        "type": "user_command",
-                        "org_id": request.org_id,
-                        "command_id": command_id,
-                        "node_id": root_node_id,
-                        "content": request.content,
-                        "content_preview": preview[:500],
-                        "source": source_dict,
-                        "origin_surface": request.origin_surface.value,
-                    }
-                )
+                event_payload: dict[str, Any] = {
+                    "type": "user_command",
+                    "org_id": request.org_id,
+                    "command_id": command_id,
+                    "node_id": root_node_id,
+                    "content": user_facing,
+                    "content_preview": preview[:500],
+                    "source": source_dict,
+                    "origin_surface": request.origin_surface.value,
+                }
+                if request.input_attachments:
+                    event_payload["input_attachments"] = list(request.input_attachments)
+                es.append(event_payload)
         except Exception:  # noqa: BLE001 (observability must never break submit)
             pass
 

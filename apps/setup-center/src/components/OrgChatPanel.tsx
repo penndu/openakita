@@ -34,6 +34,11 @@ interface ChatMsg {
   streaming?: boolean;
   attachments?: FileAttachment[];
   /**
+   * 用户从指挥台 composer 上传的输入附件（上游 e2874585 移植）。区别于
+   * ``attachments``（编排输出交付物），这些渲染在 role="user" 的气泡里。
+   */
+  inputAttachments?: FileAttachment[];
+  /**
    * P11: 内容种类的细粒度标记，用于让样式（bubble 颜色 / class 名）跟"语义"
    * 解耦。例如 role="system" 同时被用于真正的错误通知（红色合理）和
    * IM/桌面/指挥台事件流（应当中性、不要红）。kind="activity" 即一组组织
@@ -41,6 +46,19 @@ interface ChatMsg {
    * 颜色覆盖。
    */
   kind?: "activity" | "final_report";
+}
+
+/** 指挥台 composer 待发送的输入附件（上传中/已上传/失败）。 */
+interface PendingInputFile {
+  _uploadId: string;
+  name: string;
+  size?: number;
+  mimeType?: string;
+  type: string;
+  url?: string;
+  localPath?: string;
+  uploadId?: string;
+  uploadStatus: "uploading" | "uploaded" | "failed";
 }
 
 /** 后端 failure_diagnoser 生成的结构化诊断 payload */
@@ -197,8 +215,28 @@ interface ActivityItem {
   content_preview?: string;
   output_len?: number;
   artifact_path?: string;
+  // 上游 e2874585: user_command 事件携带的用户输入附件元数据。
+  input_attachments?: Array<Record<string, unknown>>;
   // 核心1/核心2: parent-review verdict reason (退回/上报 原因).
   reason?: string;
+}
+
+/** Map a persisted user_command attachment descriptor to a FileAttachment. */
+function toInputFileAttachments(raw: unknown): FileAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: FileAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const a = item as Record<string, unknown>;
+    const name = String(a.name || a.filename || "").trim();
+    if (!name) continue;
+    out.push({
+      filename: name,
+      file_path: String(a.local_path || a.localPath || a.url || ""),
+      file_size: typeof a.size === "number" ? a.size : undefined,
+    });
+  }
+  return out;
 }
 
 // A2 fix: map the raw event-store ``type`` onto the canonical ``kind``
@@ -375,11 +413,13 @@ function activityItemsToMessages(
     const cmdSummaryFull = (cmdItem.content || cmdItem.content_preview || "").trim();
     if (normalizeActivity(cmdItem).kind === "user_command" && cmdSummaryFull) {
       const cmdKey = cmdItem.command_id ? String(cmdItem.command_id) : (key || `${groupTs}`);
+      const reloadedInputAtts = toInputFileAttachments(cmdItem.input_attachments);
       msgs.push({
         id: `user-cmd-${cmdKey}`,
         role: "user",
         content: cmdSummaryFull,
         timestamp: activityTs(cmdItem),
+        inputAttachments: reloadedInputAtts.length > 0 ? reloadedInputAtts : undefined,
       });
     }
     // 图1 fix: the reconstructed flat "🗂 编排过程" system bubble used to be
@@ -568,6 +608,9 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   const md = useMdModules();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
+  // 上游 e2874585: 指挥台 composer 待发送的输入附件（上传后随命令提交）。
+  const [pendingFiles, setPendingFiles] = useState<PendingInputFile[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [canContinuePrevious, setCanContinuePrevious] = useState(false);
@@ -1356,17 +1399,116 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   // a useCallback that recomputes every render, but the ref is
   // updated in a sibling useEffect-like pattern via the JSX closure.
 
+  // ── 输入附件上传（上游 e2874585 移植；与 ChatView.uploadFile 同协议）──
+  const uploadFile = useCallback(async (file: Blob, filename: string): Promise<{
+    url: string; localPath?: string; uploadId?: string; size?: number; mimeType?: string;
+  }> => {
+    const form = new FormData();
+    form.append("file", file, filename);
+    const res = await safeFetch(`${apiBaseUrl}/api/upload`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(15 * 60 * 1000),
+    });
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    const data = await res.json();
+    return {
+      url: data.url as string,
+      localPath: data.local_path as string | undefined,
+      uploadId: data.upload_id as string | undefined,
+      size: data.size as number | undefined,
+      mimeType: (data.mime_type || data.content_type) as string | undefined,
+    };
+  }, [apiBaseUrl]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      const uploadId = genId();
+      const att: PendingInputFile = {
+        _uploadId: uploadId,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+        type: file.type.startsWith("image/")
+          ? "image"
+          : file.type.startsWith("video/")
+            ? "video"
+            : file.type.startsWith("audio/")
+              ? "voice"
+              : file.type === "application/pdf"
+                ? "document"
+                : "file",
+        uploadStatus: "uploading",
+      };
+      setPendingFiles(prev => [...prev, att]);
+      uploadFile(file, file.name)
+        .then(uploaded => {
+          setPendingFiles(prev => prev.map(a => a._uploadId === uploadId
+            ? {
+              ...a,
+              url: `${apiBaseUrl}${uploaded.url}`,
+              localPath: uploaded.localPath,
+              uploadId: uploaded.uploadId,
+              size: uploaded.size ?? a.size,
+              mimeType: uploaded.mimeType ?? a.mimeType,
+              uploadStatus: "uploaded",
+            }
+            : a));
+        })
+        .catch(() => {
+          setPendingFiles(prev => prev.map(a => a._uploadId === uploadId
+            ? { ...a, uploadStatus: "failed" }
+            : a));
+        });
+    }
+    e.target.value = "";
+  }, [uploadFile, apiBaseUrl]);
+
+  const removePendingFile = useCallback((uploadId: string) => {
+    setPendingFiles(prev => prev.filter(a => a._uploadId !== uploadId));
+  }, []);
+
   const handleSend = useCallback(async (opts?: { continuePrevious?: boolean; replaceExisting?: boolean; text?: string }) => {
     const text = (opts?.text ?? input).trim();
     if (!text || sending) return;
 
-    const userMsg: ChatMsg = { id: genId(), role: "user", content: text, timestamp: Date.now() };
+    // Fresh composer submits carry pending input attachments; conflict-dialog
+    // retries (which pass ``opts.text``) intentionally do not re-send files.
+    const isFreshInput = opts?.text === undefined;
+    const filesForSend = isFreshInput
+      ? pendingFiles.filter(f => f.uploadStatus === "uploaded")
+      : [];
+    const attachmentsPayload = filesForSend.map(f => ({
+      type: f.type,
+      name: f.name,
+      url: f.url,
+      local_path: f.localPath,
+      upload_id: f.uploadId,
+      size: f.size,
+      mime_type: f.mimeType,
+    }));
+    const userInputAtts: FileAttachment[] = filesForSend.map(f => ({
+      filename: f.name,
+      file_path: f.localPath || f.url || "",
+      file_size: f.size,
+    }));
+
+    const userMsg: ChatMsg = {
+      id: genId(),
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+      inputAttachments: userInputAtts.length > 0 ? userInputAtts : undefined,
+    };
     const placeholderId = genId();
     const placeholder: ChatMsg = {
       id: placeholderId, role: "assistant", content: t("org.chat.thinking"), timestamp: Date.now(), streaming: true,
     };
     setMessages(prev => [...prev, userMsg, placeholder]);
     setInput("");
+    if (isFreshInput) setPendingFiles([]);
     setCanContinuePrevious(false);
     setSending(true);
 
@@ -1794,6 +1936,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           target_node_id: nodeId || undefined,
           continue_previous: !!opts?.continuePrevious,
           replace_existing: !!opts?.replaceExisting,
+          attachments: attachmentsPayload,
           forward_to: forwardTargets.map(ft => ({
             channel: ft.channel,
             chat_id: ft.chat_id,
@@ -1922,7 +2065,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         }
       }
     }
-  }, [input, sending, orgId, nodeId, apiBaseUrl, convId, persistToBackend, forwardTargets]);
+  }, [input, sending, orgId, nodeId, apiBaseUrl, convId, persistToBackend, forwardTargets, pendingFiles]);
 
   const handleContinuePrevious = useCallback(() => {
     handleSend({
@@ -1953,7 +2096,16 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
     >
       <div className={`ocp-msg-bubble ${m.role !== "user" ? "chatMdContent" : ""}`}>
         {m.role === "user" ? (
-          m.content
+          <>
+            {m.content}
+            {m.inputAttachments && m.inputAttachments.length > 0 && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {m.inputAttachments.map((f, i) => (
+                  <FileAttachmentCard key={f.file_path || `in-${i}`} file={f} apiBaseUrl={apiBaseUrl} inline />
+                ))}
+              </div>
+            )}
+          </>
         ) : md ? (
           <md.ReactMarkdown remarkPlugins={md.remarkPlugins} rehypePlugins={md.rehypePlugins}>
             {m.content}
@@ -2155,7 +2307,51 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         </div>
       )}
 
+      {pendingFiles.length > 0 && (
+        <div className="ocp-pending-files">
+          {pendingFiles.map(f => (
+            <span
+              key={f._uploadId}
+              className={`ocp-pending-chip ocp-pending-${f.uploadStatus}`}
+              title={f.name}
+            >
+              <span className="ocp-pending-name">{f.name}</span>
+              {f.uploadStatus === "uploading" && <span className="ocp-pending-spinner" />}
+              {f.uploadStatus === "failed" && <span className="ocp-pending-err">!</span>}
+              <button
+                type="button"
+                className="ocp-pending-remove"
+                onClick={() => removePendingFile(f._uploadId)}
+                aria-label="移除附件"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className={`ocp-input-area ${compact ? "ocp-compact" : ""}`}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,video/*,audio/*,.pdf,.txt,.md,.py,.js,.ts,.json,.csv,.docx,.xlsx,.pptx"
+          style={{ display: "none" }}
+          onChange={handleFileSelect}
+        />
+        <button
+          data-slot="ocp"
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="ocp-attach"
+          title={t("org.chat.attachFile", "添加附件")}
+          aria-label={t("org.chat.attachFile", "添加附件")}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
         <textarea
           ref={inputRef}
           value={input}
@@ -2596,6 +2792,50 @@ const CHAT_CSS = `
   flex-shrink: 0;
 }
 .ocp-compact { padding: 8px 10px; }
+
+/* 上游 e2874585: 待发送输入附件预览条 + 附件按钮 */
+.ocp-pending-files {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 12px 0;
+  background: var(--bg-app);
+}
+.ocp-pending-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px; border-radius: 8px;
+  border: 1px solid var(--line, rgba(100,116,139,0.3));
+  background: var(--bg-subtle, rgba(100,116,139,0.08));
+  font-size: 12px; color: var(--text);
+}
+.ocp-pending-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ocp-pending-failed { border-color: rgba(239,68,68,0.55); color: #ef4444; }
+.ocp-pending-err { color: #ef4444; font-weight: 700; }
+.ocp-pending-spinner {
+  width: 11px; height: 11px; border: 2px solid rgba(99,102,241,0.3);
+  border-top-color: #6366f1; border-radius: 50%;
+  animation: ocp-spin 0.6s linear infinite; flex-shrink: 0;
+}
+.ocp-pending-remove {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--muted, #64748b); font-size: 15px; line-height: 1;
+  padding: 0 2px; flex-shrink: 0;
+}
+.ocp-pending-remove:hover { color: #ef4444; }
+.ocp-attach {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  border: 1px solid var(--line, rgba(100,116,139,0.3));
+  background: transparent; color: var(--muted, #64748b);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.ocp-attach:hover {
+  background: rgba(99,102,241,0.12);
+  border-color: rgba(99,102,241,0.55);
+  color: #6366f1;
+}
+
 .ocp-textarea {
   flex: 1; resize: none; border: 1px solid var(--line, rgba(100,116,139,0.2));
   border-radius: 10px; padding: 10px 14px;
