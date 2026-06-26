@@ -509,6 +509,7 @@ class TestToolDefinitions:
             "write_file",
             "read_file",
             "edit_file",
+            "append_file",
             "list_directory",
             "grep",
             "glob",
