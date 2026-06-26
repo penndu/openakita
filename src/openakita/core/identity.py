@@ -8,11 +8,24 @@ import Identity``, the lazy attribute exposure in
 ``openakita/core/__init__.py``, and the ``main.py`` boot path —
 until Phase 8 mechanically removes the legacy ``core/`` tree.
 
-Do not add new code here.
+Do not add new code here — only re-export symbols that already live in
+``openakita.agent.identity`` so legacy import paths keep resolving.
 """
 
 from __future__ import annotations
 
-from openakita.agent.identity import Identity
+from openakita.agent.identity import (
+    _HASH_FILE,
+    Identity,
+    _file_hash,
+    _load_hashes,
+    _save_hashes,
+)
 
-__all__ = ["Identity"]
+__all__ = [
+    "Identity",
+    "_HASH_FILE",
+    "_file_hash",
+    "_load_hashes",
+    "_save_hashes",
+]
