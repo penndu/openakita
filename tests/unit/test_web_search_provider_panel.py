@@ -158,7 +158,15 @@ class TestWebSearchHandlerErrorMapping:
         assert any("前往配置" in lb for lb in labels)
         assert any("博查" in lb for lb in labels)  # signup link present
 
-    async def test_explicit_unavailable_provider_maps_to_missing_credential_hint(self) -> None:
+    async def test_explicit_unavailable_provider_with_no_alternative_maps_missing_credential(
+        self,
+    ) -> None:
+        # Reliability fix (2026-06): the agent handler now passes
+        # ``allow_fallback=True``, so an explicitly-configured-but-UNAVAILABLE
+        # provider with NO working alternative falls back to auto-detect and
+        # ends with the generic missing_credential hint (rather than a hard
+        # explicit-provider error). The strict "no fallback" path is reserved
+        # for the dedicated test endpoint.
         from openakita.tools.handlers.web_search import WebSearchHandler
 
         register(_FakeProvider("bocha", available=False))
@@ -168,11 +176,28 @@ class TestWebSearchHandlerErrorMapping:
                 {"query": "test", "provider": "bocha", "timeout_seconds": 1}
             )
 
-        hint = excinfo.value.hint
-        assert hint.error_code == "missing_credential"
-        assert "bocha" in hint.message
-        assert "API Key" in hint.message
-        assert "自动尝试其他源" in hint.message
+        assert excinfo.value.hint.error_code == "missing_credential"
+
+    async def test_explicit_broken_provider_falls_back_to_available_alternative(self) -> None:
+        # The core graceful-degradation behaviour: a configured provider that is
+        # down (e.g. jina 401) must NOT hard-fail when another source works —
+        # the handler falls back and returns real results.
+        from openakita.tools.handlers.web_search import WebSearchHandler
+
+        register(_FakeProvider("jina", order=1, raise_on_search=AuthFailedError("HTTP 401")))
+        register(
+            _FakeProvider(
+                "bocha",
+                order=2,
+                web_results=[SearchResult(title="命中", url="https://ok", snippet="内容")],
+            )
+        )
+
+        text = await WebSearchHandler()._web_search(
+            {"query": "test", "provider": "jina", "timeout_seconds": 1}
+        )
+        assert "命中" in text
+        assert "https://ok" in text
 
     async def test_auth_failed_maps_to_auth_failed(self) -> None:
         register(_FakeProvider("p1", raise_on_search=AuthFailedError("bad key")))

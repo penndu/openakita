@@ -176,6 +176,43 @@ _MID_REASONING_MARKERS: tuple[str, ...] = (
 )
 
 
+# Phrases that PROMISE the deliverable for later instead of containing it. A
+# short, heading-less output built around one of these is a status/placeholder
+# stub, not a deliverable. Real bug (org_34856abd2e8c, data-analyst 27字):
+# "现在我已收集到足够的数据，将整理完整的市场调研报告。" was waved through a
+# lenient parent review and absorbed as a near-empty deliverable. These markers
+# are deliberately specific to "I will produce / am producing the output" so a
+# genuine short factual answer ("已完成关键词优化，核心词为：剑来…") — which
+# contains the result, not a promise — is never rejected.
+_DEFERRED_DELIVERY_MARKERS: tuple[str, ...] = (
+    "将整理",
+    "将撰写",
+    "将编写",
+    "将生成",
+    "将输出",
+    "将提供完整",
+    "将给出完整",
+    "将完成",
+    "稍后整理",
+    "稍后提供",
+    "稍后补充",
+    "稍后给出",
+    "正在整理",
+    "正在编写",
+    "正在撰写",
+    "正在准备",
+    "整理中",
+    "编写中",
+    "撰写中",
+    "准备中",
+    "马上整理",
+    "接下来整理",
+    "接下来撰写",
+    "接下来我会",
+    "接下来将",
+)
+
+
 # Exploratory v21 (2026-06): a node's deliverable text frequently OPENS with
 # a leaked chain-of-thought block — Anthropic-style ``<thinking>…</thinking>``
 # or a ``<think>…</think>`` variant — followed by the real document. The
@@ -285,6 +322,17 @@ def classify_node_output(output: str | None) -> tuple[str, str]:
         announces_next = any(marker in text for marker in _MID_REASONING_MARKERS)
         if starts_reasoning and announces_next:
             return ("incomplete", "mid_reasoning")
+    # Near-empty PROMISE/status stub: a short, heading-less output that merely
+    # promises the deliverable for later ("…将整理完整的报告" / "正在整理中") is
+    # not a deliverable. The executor RECOVERS such a node from its on-disk file
+    # (if it wrote one) BEFORE this verdict reaches a parent review, so this only
+    # bites a node that produced NEITHER a real file NOR real text — exactly the
+    # "看似完成实则空壳" the parent review must not absorb. Length-gated +
+    # heading-gated + marker-gated to avoid touching genuine short answers.
+    if len(text) < 240 and not has_heading and any(
+        marker in text for marker in _DEFERRED_DELIVERY_MARKERS
+    ):
+        return ("incomplete", "deferred_delivery")
     return ("ok", "")
 
 

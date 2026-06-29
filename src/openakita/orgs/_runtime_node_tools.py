@@ -925,6 +925,7 @@ async def execute_node_tool(
     # exception class is hashable so a late import keeps the orgs_v2
     # package import-time light.
     from ._runtime_agent_host import ToolNotAvailable
+    from openakita.tools.tool_hints import ToolConfigError
 
     try:
         if tool_host is not None:
@@ -979,6 +980,44 @@ async def execute_node_tool(
             f"[tool {tool_name} unavailable: {exc.reason}]",
             True,
         )
+    except ToolConfigError as exc:
+        # Reliability fix (2026-06): a tool that needs USER-side configuration
+        # (e.g. web_search with no working provider / an expired jina key) can
+        # NOT be fixed by the node mid-run. The old path let this fall into the
+        # generic ``handler_raised`` branch, which (a)炸节点 as a tool failure and
+        # (b) made the node spin re-calling the same broken tool until it ran out
+        # of budget with near-empty output. Instead we degrade GRACEFULLY: emit a
+        # distinct ``config_unavailable`` failed-event for the blackboard/anomaly
+        # log, but return a NON-error result that tells the node to proceed with
+        # what it has and NOT retry. This mirrors the network-degraded path.
+        hint = getattr(exc, "hint", None)
+        reason_msg = exc.to_llm_text() if hasattr(exc, "to_llm_text") else str(exc)
+        _LOGGER.warning(
+            "[orgs_v2 node tool] %s.%s config-unavailable, degrading: %s",
+            node_id,
+            tool_name,
+            reason_msg,
+        )
+        await _safe_emit(
+            emit,
+            "node_tool_failed",
+            {
+                "org_id": org_id,
+                "node_id": node_id,
+                "command_id": command_id,
+                "tool_name": tool_name,
+                "reason": "config_unavailable",
+                "error_code": getattr(hint, "error_code", "unknown"),
+                "error": reason_msg,
+            },
+        )
+        degraded = (
+            f"[{tool_name} 暂不可用：{reason_msg} "
+            "请基于已掌握的信息继续完成当前任务，不要反复重试该工具；"
+            "如果证据不足，可在产出中明确标注哪些内容尚未联网核实，"
+            "但仍要给出完整、成文的成果，不要只回复一句状态说明。]"
+        )
+        return (degraded, False)
     except Exception as exc:  # noqa: BLE001
         _LOGGER.warning(
             "[orgs_v2 node tool] %s.%s raised: %s",

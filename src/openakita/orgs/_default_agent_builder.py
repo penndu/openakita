@@ -1042,6 +1042,10 @@ class _BrainBackedNodeAgent:
                     "thinking_leak": "下级产出只是思考过程（thinking 泄漏），不是成文成果",
                     "mid_reasoning": "下级停在中途自述/反复检索，未给出完整成果",
                     "empty_output": "下级无有效产出",
+                    "deferred_delivery": (
+                        "下级只回复了一句状态/承诺（如“将整理完整报告”），"
+                        "并未给出真正的成文成果"
+                    ),
                 }.get(gate_reason, f"下级产出未通过完成度硬性校验（{gate_reason}）")
                 return False, f"{human}，请重做并产出完整、成文的成果。"
         role = (self._spec.role or "worker").strip()

@@ -67,3 +67,41 @@ def test_classify_thinking_leak_reason() -> None:
     assert classify_node_output("thinking 略")[1] == "thinking_leak"
     assert classify_node_output("")[1] == "empty_output"
     assert classify_node_output("让我再搜索一下，结果不合适。")[1] == "mid_reasoning"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The real org_34856abd2e8c data-analyst 27字 stub.
+        "现在我已收集到足够的数据，将整理完整的市场调研报告。",
+        "数据已就绪，正在整理中，稍后提供完整报告。",
+        "好的，我马上整理一份详细的方案文档。",
+        "接下来我会撰写完整的活动策划案。",
+    ],
+)
+def test_classify_rejects_deferred_delivery_stub(text: str) -> None:
+    """case id: quality.gate.rejects_deferred_delivery
+
+    A short, heading-less output that only PROMISES the deliverable for later
+    is a near-empty stub and must not be absorbed as a deliverable.
+    """
+
+    status, reason = classify_node_output(text)
+    assert status == "incomplete", f"should reject promise stub: {text!r}"
+    assert reason == "deferred_delivery"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Genuine short factual answer that CONTAINS the result (no promise).
+        "已完成关键词优化，核心词为：剑来、粉丝见面会、线下交流会。",
+        # Mentions a future-ish word but is a real, structured deliverable.
+        "# 调研报告\n\n本报告将分为三部分：1. 背景 2. 数据 3. 结论。\n\n详细内容……",
+    ],
+)
+def test_classify_keeps_real_short_answers(text: str) -> None:
+    """case id: quality.gate.keeps_real_short_answers (no 误伤)."""
+
+    status, _reason = classify_node_output(text)
+    assert status == "ok", f"should accept genuine answer: {text[:40]!r}"

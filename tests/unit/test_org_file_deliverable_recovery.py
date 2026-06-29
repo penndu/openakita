@@ -173,3 +173,69 @@ async def test_execute_node_tool_emits_file_output_registered(
     got = pop_node_file_outputs("org-x", "cmd-1", "writer-a")
     assert len(got) == 1
     assert got[0]["path"].endswith("plan.md")
+
+
+# ---------------------------------------------------------------------------
+# 5) reliability: a ToolConfigError (e.g. web_search no working provider /
+#    jina 401) degrades GRACEFULLY instead of 炸节点 + spinning.
+# ---------------------------------------------------------------------------
+
+
+class _ConfigErrorHandler:
+    TOOLS = ["web_search"]
+
+    def __call__(self, tool_name: str, params: dict[str, Any]) -> str:
+        from openakita.tools.tool_hints import ToolConfigError
+
+        raise ToolConfigError(
+            scope="web_search",
+            error_code="auth_failed",
+            title="搜索源 API Key 无效",
+            message="当前激活的搜索源拒绝了 API Key（401/403）。",
+        )
+
+
+class _ConfigErrorAgent:
+    def __init__(self) -> None:
+        from openakita.tools.handlers import SystemHandlerRegistry
+
+        self.handler_registry = SystemHandlerRegistry()
+        self.handler_registry.register(
+            "web_search", _ConfigErrorHandler(), tool_names=["web_search"]
+        )
+        self._tools: list[dict[str, Any]] = []
+
+    @property
+    def brain(self) -> Any:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_execute_node_tool_degrades_on_config_error() -> None:
+    from openakita.orgs._runtime_agent_host import NodeToolHost
+
+    events: list[tuple[str, dict]] = []
+
+    async def emit(name: str, payload: dict) -> None:
+        events.append((name, dict(payload)))
+
+    host = NodeToolHost(agent=_ConfigErrorAgent(), org_id="org-cfg")
+
+    text, is_err = await execute_node_tool(
+        tool_name="web_search",
+        tool_input={"query": "市场调研"},
+        org_id="org-cfg",
+        node_id="data-analyst",
+        command_id="cmd-cfg",
+        emit=emit,
+        tool_host=host,
+    )
+    # Degraded, NOT a hard error: the node can proceed with what it has.
+    assert is_err is False
+    assert "不要反复重试" in text
+    # Still observable: a config_unavailable failed-event is emitted for the
+    # blackboard/anomaly log (distinct from a generic handler_raised crash).
+    failed = [p for (n, p) in events if n == "node_tool_failed"]
+    assert len(failed) == 1
+    assert failed[0]["reason"] == "config_unavailable"
+    assert failed[0]["error_code"] == "auth_failed"
