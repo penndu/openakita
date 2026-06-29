@@ -39,6 +39,10 @@ interface ProjectTask {
   description: string;
   status: string;
   assignee_node_id: string | null;
+  // P4 阶段B: 层级/派发关系，用于甘特图按父子缩进表达阶段树。
+  delegated_by?: string | null;
+  parent_task_id?: string | null;
+  depth?: number;
   priority: number;
   progress_pct: number;
   created_at: string;
@@ -87,6 +91,57 @@ const STATUS_META: Record<string, { label: string; color: string; order: number 
 };
 
 const COLUMNS = Object.entries(STATUS_META).map(([key, v]) => ({ key, ...v }));
+
+/**
+ * P4 阶段B: order tasks as a TREE for the Gantt (parent → its children,
+ * depth-annotated) so the 派发层级/阶段关系 is visible. Falls back to a flat
+ * status-then-creation order when no parent links exist (older runs). Exported
+ * so it can be unit-tested independently of React rendering.
+ */
+export function orderTasksForGantt<T extends {
+  id: string;
+  status: string;
+  created_at: string;
+  parent_task_id?: string | null;
+}>(tasks: T[]): Array<T & { _depth: number }> {
+  const byCreated = (a: T, b: T) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  const ids = new Set(tasks.map(tk => tk.id));
+  const childrenOf = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const tk of tasks) {
+    const pid = tk.parent_task_id;
+    if (pid && ids.has(pid)) {
+      const arr = childrenOf.get(pid) || [];
+      arr.push(tk);
+      childrenOf.set(pid, arr);
+    } else {
+      roots.push(tk);
+    }
+  }
+  if (childrenOf.size === 0) {
+    return [...tasks]
+      .sort((a, b) => {
+        const oa = STATUS_META[a.status]?.order ?? 9;
+        const ob = STATUS_META[b.status]?.order ?? 9;
+        return oa !== ob ? oa - ob : byCreated(a, b);
+      })
+      .map(tk => ({ ...tk, _depth: 0 }));
+  }
+  const out: Array<T & { _depth: number }> = [];
+  const seen = new Set<string>();
+  const walk = (tk: T, depth: number) => {
+    if (seen.has(tk.id)) return; // guard against cycles
+    seen.add(tk.id);
+    out.push({ ...tk, _depth: depth });
+    for (const k of (childrenOf.get(tk.id) || []).slice().sort(byCreated)) {
+      walk(k, depth + 1);
+    }
+  };
+  for (const r of roots.slice().sort(byCreated)) walk(r, 0);
+  for (const tk of tasks) if (!seen.has(tk.id)) out.push({ ...tk, _depth: 0 });
+  return out;
+}
 
 const PROJECT_TYPE_LABEL: Record<string, string> = { temporary: "org.projectType.temporary", permanent: "org.projectType.permanent" };
 const PROJECT_STATUS_LABEL: Record<string, string> = {
@@ -1094,15 +1149,8 @@ function GanttView({
   cancellingTaskId: string | null;
 }) {
   const { t } = useTranslation();
-  const sorted = useMemo(() =>
-    [...tasks].sort((a, b) => {
-      const oa = STATUS_META[a.status]?.order ?? 9;
-      const ob = STATUS_META[b.status]?.order ?? 9;
-      if (oa !== ob) return oa - ob;
-      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-    }),
-    [tasks]
-  );
+  // P4 阶段B: tree-ordered + depth-annotated rows (see orderTasksForGantt).
+  const sorted = useMemo(() => orderTasksForGantt(tasks), [tasks]);
 
   const timeRange = useMemo(() => {
     if (tasks.length === 0) return { start: new Date(), end: new Date(), days: 7 };
@@ -1127,7 +1175,8 @@ function GanttView({
   const getBarStyle = (task: ProjectTask) => {
     const rangeMs = timeRange.end.getTime() - timeRange.start.getTime();
     if (rangeMs <= 0) return { left: "0%", width: "100%" };
-    const start = new Date(task.created_at).getTime();
+    // P4 阶段B: 时间条起点优先用 started_at(派单/开始时间),回退 created_at。
+    const start = new Date(task.started_at || task.created_at).getTime();
     const now = Date.now();
     const end = task.completed_at ? new Date(task.completed_at).getTime()
       : task.delivered_at ? new Date(task.delivered_at).getTime()
@@ -1151,9 +1200,17 @@ function GanttView({
             const assignee = task.assignee_node_id ? nodeMap.get(task.assignee_node_id) : null;
             const pct = task.progress_pct ?? 0;
             const barStyle = getBarStyle(task);
+            const depth = task._depth || 0;
             return (
               <div key={task.id} className="opb-gantt-row" onClick={() => onTaskClick(task)}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: depth * 18 }}>
+                  {depth > 0 && (
+                    <span
+                      aria-hidden
+                      title={t("org.projectBoard.subtaskOf", { defaultValue: "子任务（由上级拆解派发）" })}
+                      style={{ color: "var(--muted)", fontSize: 12, marginRight: -2, userSelect: "none" }}
+                    >└</span>
+                  )}
                   <OrgAvatar avatarId={(assignee as any)?.avatar || null} size={24} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</div>

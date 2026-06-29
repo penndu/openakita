@@ -3092,6 +3092,7 @@
       "accept": "验收",
       "reject": "打回",
       "redispatch": "重新派发",
+      "subtaskOf": "子任务（由上级拆解派发）",
       "notDispatched": "此任务尚未派发",
       "executingBy": "正在由 <strong>{{name}}</strong> 执行中",
       "pendingReview": "待审阅",

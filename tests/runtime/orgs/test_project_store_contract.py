@@ -170,6 +170,35 @@ def test_task_ids_unique_within_project(backend_spec, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# P4 阶段C: user acceptance auto-stamps completed_at on ACCEPTED, and
+# delivery auto-stamps delivered_at -> the Gantt bar gets a real end.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("backend_spec", BACKENDS)
+def test_accept_and_deliver_stamp_timestamps(backend_spec, tmp_path: Path) -> None:
+    store = _store(backend_spec, tmp_path)
+    try:
+        p = store.create_project(OrgProject(name="A", org_id="o"))
+        task = ProjectTask(title="deliverable")
+        store.add_task(p.id, task)
+        # delivery -> delivered_at populated, completed_at still empty
+        store.update_task(p.id, task.id, {"status": TaskStatus.DELIVERED.value})
+        _t, _p = store.get_task(task.id)
+        assert _t is not None
+        assert _t.delivered_at  # auto-stamped on delivery
+        assert not _t.completed_at  # acceptance not yet done
+        # user 验收 -> ACCEPTED auto-stamps completed_at
+        store.update_task(p.id, task.id, {"status": TaskStatus.ACCEPTED.value})
+        _t2, _ = store.get_task(task.id)
+        assert _t2 is not None
+        assert _t2.status == TaskStatus.ACCEPTED
+        assert _t2.completed_at  # acceptance finish time recorded
+    finally:
+        store.close()
+
+
+# ---------------------------------------------------------------------------
 # 6 / 7 / 8. recalc_progress
 # ---------------------------------------------------------------------------
 

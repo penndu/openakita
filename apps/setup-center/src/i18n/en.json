@@ -3084,6 +3084,7 @@
       "accept": "Accept",
       "reject": "Reject",
       "redispatch": "Redispatch",
+      "subtaskOf": "Subtask (delegated by a parent)",
       "notDispatched": "This task has not been dispatched",
       "executingBy": "Being executed by <strong>{{name}}</strong>",
       "pendingReview": "Pending Review",

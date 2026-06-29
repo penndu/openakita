@@ -1,6 +1,8 @@
 # P4 设计方案：项目页甘特图式拆解 + 用户验收
 
-> 状态：方案 + 可行部分落地（时间戳采集）；完整甘特 UI + 验收交互列为剩余项。
+> 状态：阶段A/B/C 全部落地。项目页 `OrgProjectBoard` 已有甘特时间轴 + 看板 +
+> 任务详情；本轮补齐「派发层级缩进 + started_at 时间条起点」(阶段B) 并确认
+> 「验收/打回」交互 + 后端 ACCEPTED→completed_at 自动落时间 (阶段C)。
 
 ## 1. 目标
 收到用户指令时即把指令拆解为子任务/阶段，并在项目页以**甘特图/时间线**展示：
@@ -41,7 +43,21 @@
   `POST /api/v2/orgs/{id}/tasks/{task_id}/accept` 将 `status→accepted` 并写
   `completed_at`；甘特条目加「验收」按钮，已验收显示紫色（对齐图3）。
 
-## 5. 本轮已落地
-契约 tap 时间戳采集（阶段A）：新命令的每个子任务都会带 `started_at` 与交付
-时间，为后续甘特视图提供真实时间条数据。完整甘特视图（阶段B）与验收交互
-（阶段C）数据已就绪、UI 待实现，列为剩余项。
+## 5. 落地记录
+- **阶段A**：契约 tap 采集 `started_at`（派单时）；交付走 DELIVERED 自动落
+  `delivered_at`，`completed_at` 留给验收。
+- **阶段B（本轮）**：`OrgProjectBoard` 已内置甘特时间轴（`GanttView`）。本轮
+  把任务排序改为**按父子树排列 + 按 `depth` 缩进**（`orderTasksForGantt`，
+  附 vitest 覆盖树序/回退/孤儿/环），让派发层级/阶段一目了然；时间条起点
+  改为优先 `started_at`（回退 `created_at`），终点用 `delivered_at`/
+  `completed_at`；子任务行加 `└` 连接符 + 悬浮说明。
+- **阶段C（本轮确认）**：`GanttView`/`KanbanView`/任务详情在 `delivered`
+  状态下已提供「验收 / 打回」按钮，经 `PUT .../tasks/{id}` 写 `status`；
+  `update_task` 在 ACCEPTED 时自动落 `completed_at`、DELIVERED 时自动落
+  `delivered_at`（新增 `test_accept_and_deliver_stamp_timestamps` 双后端覆盖）。
+  「打回」置 `rejected`，随后「重新派发」按钮触发重做，与现有状态机一致。
+
+## 6. 剩余/可选增强
+- 甘特顶部时间刻度轴（日期标尺）目前用相对时间条，未画绝对刻度；可选增强。
+- 「打回」目前是「置 rejected + 手动重新派发」两步；若要一键「打回即自动重做」
+  可在 accept/reject 端点加可选 `redispatch=true`，列为可选。
