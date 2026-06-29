@@ -1604,6 +1604,141 @@ class OrgRuntime:
                     {"org_id": org_id, "node_id": nid, "status": "idle"},
                 )
 
+    def _resolve_node_department(self, org_id: str, node_id: str | None) -> str:
+        """Best-effort node -> department name (empty when unknown)."""
+        if not node_id:
+            return ""
+        try:
+            org = self.get_org(org_id)
+            node = org.get_node(node_id) if org is not None else None
+            return str(getattr(node, "department", "") or "")
+        except Exception:  # noqa: BLE001
+            return ""
+
+    async def _publish_process_log(
+        self,
+        org_id: str,
+        *,
+        node_id: str | None,
+        content: str,
+        tags: list[str],
+        org_level: bool = False,
+    ) -> None:
+        """P3: write a live process record to the blackboard (node + department
+        tiers, plus org tier for org-significant events) and broadcast
+        ``org:blackboard_update`` so the panel refreshes in real time."""
+        bb_registry = self._contract_blackboard
+        if bb_registry is None:
+            return
+        try:
+            bb = bb_registry.for_org(org_id)
+        except Exception:  # noqa: BLE001
+            return
+        wrote = False
+        if node_id:
+            try:
+                bb.write_node(node_id, content, tags=tags)
+                wrote = True
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("process-log node write failed", exc_info=True)
+            dept = self._resolve_node_department(org_id, node_id)
+            if dept:
+                try:
+                    bb.write_department(dept, content, source_node=node_id, tags=tags)
+                    wrote = True
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("process-log dept write failed", exc_info=True)
+        if org_level or not node_id:
+            try:
+                bb.write_org(content, source_node=node_id or org_id, tags=tags)
+                wrote = True
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("process-log org write failed", exc_info=True)
+        if wrote:
+            await self._broadcast_ws_safe(
+                "org:blackboard_update", {"org_id": org_id, "node_id": node_id or ""}
+            )
+
+    async def _publish_process_event(
+        self,
+        event_name: str,
+        org_id: str,
+        *,
+        node_id: str | None,
+        parent: str | None,
+        child: str | None,
+        preview: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Map an orchestration event to a live, tier-aware blackboard record.
+
+        Completion (``agent_run_finished`` ok) is intentionally left to the
+        existing deliverable-fact path below; here we cover the PROCESS events
+        (派单/审阅/退回/上报/异常) that previously left the blackboard empty
+        mid-run."""
+        reason = str(payload.get("reason") or "").strip()
+        if event_name == "subtask_assigned" and child:
+            who = parent or "上级"
+            snippet = (preview[:60] + "…") if len(preview) > 60 else preview
+            await self._publish_process_log(
+                org_id,
+                node_id=child,
+                content=f"📋 {who} 派单 → {child}：{snippet or '(无摘要)'}",
+                tags=["process", "dispatch"],
+                org_level=True,
+            )
+        elif event_name == "agent_run_started" and node_id:
+            await self._publish_process_log(
+                org_id,
+                node_id=node_id,
+                content=f"▶ 节点 {node_id} 开始执行任务",
+                tags=["process", "started"],
+            )
+        elif event_name == "node_review_passed" and node_id:
+            await self._publish_process_log(
+                org_id,
+                node_id=node_id,
+                content=f"✅ {parent or '上级'} 评审通过：{node_id} 的产出",
+                tags=["process", "review", "passed"],
+            )
+        elif event_name == "node_rework_requested":
+            target = child or node_id
+            await self._publish_process_log(
+                org_id,
+                node_id=target,
+                content=f"↩ {parent or '上级'} 退回重做 {target}：{reason or '产出未达要求'}",
+                tags=["process", "rework"],
+                org_level=True,
+            )
+        elif event_name == "node_review_escalated":
+            target = child or node_id
+            await self._publish_process_log(
+                org_id,
+                node_id=target,
+                content=(
+                    f"⤴ {target} 多次重做仍未通过，已上报上级处理：{reason or '产出未达要求'}"
+                ),
+                tags=["process", "review", "escalated"],
+                org_level=True,
+            )
+        elif event_name == "node_tool_failed" and node_id:
+            tool = str(payload.get("tool_name") or "工具")
+            err = str(payload.get("error") or "").strip()
+            await self._publish_process_log(
+                org_id,
+                node_id=node_id,
+                content=f"⚠ 节点 {node_id} 调用 {tool} 异常：{err or '执行失败'}",
+                tags=["process", "anomaly", "tool"],
+            )
+        elif event_name == "agent_run_failed" and node_id:
+            await self._publish_process_log(
+                org_id,
+                node_id=node_id,
+                content=f"✖ 节点 {node_id} 运行失败：{reason or '未知原因'}",
+                tags=["process", "anomaly", "failed"],
+                org_level=True,
+            )
+
     async def _contract_event_tap(self, event_name: str, payload: dict[str, Any]) -> None:
         ps_registry = self._contract_project_store
         bb_registry = self._contract_blackboard
@@ -1626,6 +1761,22 @@ class OrgRuntime:
         parent_chain_id = payload.get("parent_chain_id") or None
         ev_depth = int(payload.get("depth") or 0)
         try:
+            # P3 (黑板=全组织实时分级日志): publish a live, tier-aware process
+            # record for the orchestration-significant events so the blackboard
+            # panel shows who is doing what (派单/审阅/退回/异常) in real time at
+            # the 组织/部门/节点 tiers -- not just end-of-run completion facts.
+            # test11 root cause: the blackboard only ever logged "节点X完成交付"
+            # at the org tier, so during a run the panel read "暂无记录".
+            if bb_registry is not None:
+                await self._publish_process_event(
+                    event_name,
+                    org_id,
+                    node_id=node_id,
+                    parent=parent,
+                    child=child,
+                    preview=preview,
+                    payload=payload,
+                )
             if event_name == "subtask_assigned" and ps_registry is not None and child:
                 # B5: register the delegated subtask as a project task.
                 ps = ps_registry.for_org(org_id)
