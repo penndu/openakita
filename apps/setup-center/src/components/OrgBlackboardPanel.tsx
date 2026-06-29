@@ -48,6 +48,13 @@ export const OrgBlackboardPanel = forwardRef<OrgBlackboardPanelHandle, OrgBlackb
       }
     }, [apiBaseUrl, orgId]);
 
+    // Auto-load on mount / scope (tab) switch / org switch. Clearing entries
+    // when the org changes avoids briefly showing a previous org's records
+    // before the fresh fetch resolves (the panel otherwise keeps stale data).
+    useEffect(() => {
+      setEntries([]);
+    }, [orgId]);
+
     useEffect(() => {
       fetchData(scope);
     }, [orgId, scope, fetchData]);

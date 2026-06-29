@@ -154,6 +154,41 @@ def test_round_trip_node(backend_spec, tmp_path: Path) -> None:
         backend.close()
 
 
+@pytest.mark.parametrize("backend_spec", BACKENDS)
+def test_node_and_dept_carry_attachments(backend_spec, tmp_path: Path) -> None:
+    """Cross-session replay fix: node/dept tiers accept ``attachments`` so a
+    deliverable record mirrored into the node tier keeps its downloadable file."""
+    _name, factory = backend_spec
+    backend = factory(tmp_path, "org_contract")
+    att = [{"filename": "report.md", "path": "/x/report.md", "size_bytes": 1234}]
+    try:
+        bb = _bb(backend, tmp_path, "org_contract")
+        bb.write_node("node_c", "节点 node_c 完成交付（500 字）", tags=["deliverable"], attachments=att)
+        bb.write_department(
+            "eng", "节点 node_c 完成交付（500 字）", "node_c", tags=["deliverable"], attachments=att
+        )
+        n = bb.read_node("node_c")
+        d = bb.read_department("eng")
+        assert len(n) == 1 and n[0].attachments and n[0].attachments[0]["filename"] == "report.md"
+        assert len(d) == 1 and d[0].attachments and d[0].attachments[0]["size_bytes"] == 1234
+    finally:
+        backend.close()
+
+
+def test_json_node_tier_replays_across_fresh_instances(tmp_path: Path) -> None:
+    """The on-disk JSON backend (production default) replays node-tier records
+    in a brand-new instance over the same dir -- i.e. ``/memory?scope=node``
+    survives a backend restart / new session."""
+    org_dir = tmp_path / "orgs" / "org_x"
+    bb1 = OrgBlackboard(org_dir, "org_x")  # default JSON backend
+    bb1.write_node("data-analyst", "节点 data-analyst 完成交付（800 字）", tags=["deliverable"])
+    # A fresh instance (mimics a new process/session) reads the same disk.
+    bb2 = OrgBlackboard(org_dir, "org_x")
+    rows = bb2.query(scope=MemoryScope.NODE)
+    assert any(r.scope_owner == "data-analyst" for r in rows)
+    assert any("完成交付" in r.content for r in rows)
+
+
 # ---------------------------------------------------------------------------
 # 5 / 6. eviction
 # ---------------------------------------------------------------------------

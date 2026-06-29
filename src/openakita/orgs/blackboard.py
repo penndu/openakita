@@ -380,6 +380,7 @@ class OrgBlackboard:
         memory_type: MemoryType = MemoryType.FACT,
         tags: list[str] | None = None,
         importance: float = 0.5,
+        attachments: list[dict] | None = None,
     ) -> OrgMemoryEntry | None:
         entry = OrgMemoryEntry(
             org_id=self._org_id,
@@ -390,6 +391,7 @@ class OrgBlackboard:
             source_node=source_node,
             tags=tags or [],
             importance=importance,
+            attachments=attachments or [],
         )
         if self._backend.is_duplicate(MemoryScope.DEPARTMENT, dept_name, content):
             logger.debug("[Blackboard] skip duplicate dept entry: %r", content[:50])
@@ -406,6 +408,7 @@ class OrgBlackboard:
         memory_type: MemoryType = MemoryType.FACT,
         tags: list[str] | None = None,
         importance: float = 0.5,
+        attachments: list[dict] | None = None,
     ) -> OrgMemoryEntry:
         entry = OrgMemoryEntry(
             org_id=self._org_id,
@@ -416,6 +419,7 @@ class OrgBlackboard:
             source_node=node_id,
             tags=tags or [],
             importance=importance,
+            attachments=attachments or [],
         )
         self._backend.append(
             MemoryScope.NODE, node_id, entry, max_entries=MAX_NODE_MEMORIES

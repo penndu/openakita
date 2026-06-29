@@ -1961,6 +1961,36 @@ class OrgRuntime:
                             tags=["deliverable"],
                             attachments=attachments,
                         )
+                        # Cross-session replay fix (2026-06): the org-tier
+                        # ``publish`` above is the only durable completion record
+                        # the blackboard kept, so ``/memory?scope=node`` was empty
+                        # after a restart (``memory/nodes/*.jsonl`` never written by
+                        # the deliverable path; only the flaky P3 live process-log
+                        # touched it). Mirror the completion FACT into the NODE and
+                        # DEPARTMENT tiers so every delivery leaves a durable,
+                        # disk-backed node-level record that replays across sessions.
+                        try:
+                            bb = bb_registry.for_org(org_id)
+                            bb.write_node(
+                                node_id,
+                                content,
+                                tags=["deliverable"],
+                                attachments=attachments,
+                            )
+                            dept = self._resolve_node_department(org_id, node_id)
+                            if dept:
+                                bb.write_department(
+                                    dept,
+                                    content,
+                                    source_node=node_id,
+                                    tags=["deliverable"],
+                                    attachments=attachments,
+                                )
+                        except Exception:  # noqa: BLE001
+                            _LOGGER.debug(
+                                "contract: node/dept deliverable mirror failed",
+                                exc_info=True,
+                            )
                         # B6: the command-center timeline renders a file card
                         # only when the update advertises ``memory_type=resource``
                         # + filename + path. Without these fields OrgChatPanel
