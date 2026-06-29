@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>财务自动化</title>
     <link rel="icon" href="./icon.svg" />
+    <!-- OpenAkita 共享 UI Kit（oa-* 组件 + 主题变量）。
+         运行环境的 /api/plugins/_sdk/ui-kit/styles.css 已在 SDK 0.7.0 下线，
+         按 avatar-studio 的自带做法把同一份 Kit 内联到本插件 _assets 下。 -->
+    <link rel="stylesheet" href="./_assets/ui-kit.css" />
     <link rel="stylesheet" href="./_assets/styles.css" />
     <!-- React 18 + Babel standalone bundled locally (offline-safe; React 18.3.1) -->
     <script src="./_assets/react.production.min.js"></script>
@@ -65,12 +69,46 @@
         if (_inIframe) window.parent.postMessage({ __akita_bridge: true, ...message }, "*");
       }
 
+      // ----- 主题同步（跟随 OpenAkita 宿主 / 系统偏好，与共享 UI Kit 一致） -----
+      // 共享 Kit 的 oa-* 暗色规则挂在 [data-theme="dark"] 上；本插件令牌同理。
+      // 宿主在 bridge:init / bridge:theme 里下发当前主题；脱离宿主独立预览时
+      // 回退到系统 prefers-color-scheme。query string ?theme=dark|light 可强制。
+      function applyTheme(theme) {
+        const root = document.documentElement;
+        if (theme === "dark" || theme === "light") {
+          root.setAttribute("data-theme", theme);
+        } else {
+          // 'system' / 未知：移除显式标记，交给 @media prefers-color-scheme
+          root.removeAttribute("data-theme");
+        }
+      }
+      function resolveHostTheme(raw) {
+        const s = String(raw || "").toLowerCase();
+        if (s.includes("dark")) return "dark";
+        if (s.includes("light")) return "light";
+        return "system";
+      }
+      (function initTheme() {
+        try {
+          const sp = new URLSearchParams(window.location.search);
+          const forced = sp.get("theme");
+          if (forced === "dark" || forced === "light") { applyTheme(forced); return; }
+        } catch (_) { /* noop */ }
+        // 默认跟随系统；宿主 bridge:init 到达后再覆盖
+        applyTheme("system");
+      })();
+
       window.addEventListener("message", (event) => {
         const data = event.data;
         if (!data || typeof data !== "object") return;
         if (data.type === "bridge:init") {
           _bridgeCtx = data.ctx || data.payload || {};
           _bridgeConnected = true;
+          const t = _bridgeCtx && _bridgeCtx.theme;
+          if (t) applyTheme(resolveHostTheme(t));
+        } else if (data.type === "bridge:theme") {
+          const t = (data.payload && data.payload.theme) || data.theme;
+          applyTheme(resolveHostTheme(t));
         } else if (data.type === "bridge:handshake-ack") {
           const caps = (data.payload && data.payload.capabilities) || [];
           // The "finance-native" capability is advertised by the
@@ -6153,6 +6191,8 @@
       // 视觉一致；避免引入额外 JS 资源或 emoji。
       const _NAV_ICON_PATHS = {
         orgs: '<path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/>',
+        workspace: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17h7M17.5 14v7"/>',
+        review: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
         consolidation: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
         notes: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
         peer: '<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>',
@@ -6172,30 +6212,43 @@
         );
       }
 
+      // 两区侧边栏：主区（账套工作台，承载分步主线）+ 次区「更多」。
+      // 把整条核心工作流收敛到「账套工作台」一个主入口下，外围 / 低频功能
+      // （合并 / 附注 / 同业 / 高级 AI / 复核 / 设置）下沉到次区，治「找不到主线」。
       function MainNav({ active, navigate }) {
-        const items = [
-          { key: "orgs",            label: "账套",       hash: "#/orgs",            icon: "orgs" },
-          { key: "consolidation",   label: "合并报表",   hash: "#/consolidation",   icon: "consolidation" },
-          { key: "notes-editor",    label: "报表附注",   hash: "#/notes-editor",    icon: "notes" },
-          { key: "peer-comparison", label: "同业对比",   hash: "#/peer-comparison", icon: "peer" },
-          { key: "advanced-ai",     label: "高级AI",     hash: "#/advanced-ai",     icon: "sparkles" },
-          { key: "key-management",  label: "密钥管理",   hash: "#/key-management",  icon: "key" },
-          { key: "ai-settings",     label: "AI 设置",    hash: "#/ai-settings",     icon: "settings" },
+        const primary = [
+          { key: "orgs", label: "账套工作台", hash: "#/orgs", icon: "workspace" },
         ];
+        const more = [
+          { key: "consolidation",   label: "合并报表",  hash: "#/consolidation",   icon: "consolidation" },
+          { key: "notes-editor",    label: "报表附注",  hash: "#/notes-editor",    icon: "notes" },
+          { key: "peer-comparison", label: "同业对比",  hash: "#/peer-comparison", icon: "peer" },
+          { key: "advanced-ai",     label: "高级 AI",   hash: "#/advanced-ai",     icon: "sparkles" },
+          { key: "review-center",   label: "复核中心",  hash: "#/review-center",   icon: "review" },
+          { key: "settings",        label: "设置",      hash: "#/settings",        icon: "settings" },
+        ];
+        const renderItem = (it) => (
+          <button
+            key={it.key}
+            className={`fa-nav-item ${active === it.key ? "active" : ""}`}
+            onClick={() => navigate(it.hash)}
+            data-testid={`nav-${it.key}`}
+          >
+            <span className="fa-nav-item__icon"><NavIcon name={it.icon} /></span>
+            <span className="fa-nav-item__label">{it.label}</span>
+          </button>
+        );
         return (
-          <div className="tabs" style={{ marginBottom: 12 }}>
-            {items.map((it) => (
-              <button
-                key={it.key}
-                className={`tab ${active === it.key ? "active" : ""}`}
-                onClick={() => navigate(it.hash)}
-                data-testid={`nav-${it.key}`}
-              >
-                <NavIcon name={it.icon} />
-                {it.label}
-              </button>
-            ))}
-          </div>
+          <nav className="fa-sidebar" aria-label="主导航">
+            <div className="fa-nav-group">
+              <div className="fa-nav-group__label">主工作流</div>
+              {primary.map(renderItem)}
+            </div>
+            <div className="fa-nav-group">
+              <div className="fa-nav-group__label">更多</div>
+              {more.map(renderItem)}
+            </div>
+          </nav>
         );
       }
 

@@ -1,44 +1,71 @@
-/* finance-auto UI · 极简灰白主题，参考 OpenAkita CSS 变量风格 */
+/* finance-auto UI · 主题令牌（对齐 OpenAkita 共享 UI Kit `_assets/ui-kit.css`）
+ *
+ * 这些变量名同时被本文件的结构类和共享 Kit 的 oa-* 类消费：
+ *   ui-kit.css 里 `--oa-bg: var(--bg, …)` / `--oa-surface: var(--surface, var(--bg-card, …))`
+ *   / `--oa-text` / `--oa-border` / `--oa-primary` 等都会回退到这里定义的同名变量。
+ * 因此只要这里给出与 Kit 一致的取色，oa-* 组件与本插件遗留类就共享同一套配色，
+ * 浅色 / 暗色随 [data-theme] 或系统偏好自动切换（与 avatar-studio 等插件完全一致）。
+ */
 :root {
-  --bg: #f7f8fb;
+  --bg: #f8fafc;
   --bg-card: #ffffff;
-  --bg-soft: #f3f5f9;
-  --bg-hover: #eef1f6;
-  --border: #e5e7ef;
-  --border-strong: #cbd1e0;
-  --text: #1e2434;
-  --text-muted: #6b7280;
-  --text-subtle: #9ca3af;
-  --primary: #0f766e;
-  --primary-hover: #115e59;
-  --primary-soft: rgba(15, 118, 110, 0.10);
-  --warning: #d97706;
-  --danger: #dc2626;
-  --success: #15803d;
-  --link: #1d4ed8;
+  --bg-soft: #f1f5f9;
+  --bg-hover: #eef2f7;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #1e293b;
+  --text-muted: #64748b;
+  --text-subtle: #94a3b8;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: rgba(37, 99, 235, 0.10);
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --success: #16a34a;
+  --link: #2563eb;
   --radius: 8px;
   --radius-lg: 12px;
   --shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
   color-scheme: light;
-  font-family: "Inter", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
 }
 
+/* 暗色令牌：显式 data-theme="dark"（由宿主主题 / 系统偏好同步）优先生效 */
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --bg-card: #1e293b;
+  --bg-soft: #1e293b;
+  --bg-hover: #334155;
+  --border: #334155;
+  --border-strong: #475569;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-soft: rgba(59, 130, 246, 0.18);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  color-scheme: dark;
+}
+
+/* 未显式声明浅色时，跟随系统暗色偏好 */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1117;
-    --bg-card: #161922;
-    --bg-soft: #1c1f2a;
-    --bg-hover: #232734;
-    --border: #2a2f3d;
-    --border-strong: #3a4051;
-    --text: #e6e8ef;
-    --text-muted: #9aa3b2;
-    --text-subtle: #6b7280;
-    --primary: #2dd4bf;
-    --primary-hover: #14b8a6;
-    --primary-soft: rgba(45, 212, 191, 0.15);
+  :root:not([data-theme="light"]) {
+    --bg: #0f172a;
+    --bg-card: #1e293b;
+    --bg-soft: #1e293b;
+    --bg-hover: #334155;
+    --border: #334155;
+    --border-strong: #475569;
+    --text: #f1f5f9;
+    --text-muted: #94a3b8;
+    --text-subtle: #64748b;
+    --primary: #3b82f6;
+    --primary-hover: #2563eb;
+    --primary-soft: rgba(59, 130, 246, 0.18);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
     color-scheme: dark;
   }
 }
@@ -1083,3 +1110,142 @@ pre.mono {
   color: var(--text-muted);
 }
 .sens-legend__item strong { color: var(--text); font-weight: 600; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   UI 重构 · 信息架构（IA）：两区侧边栏 + 账套工作台分步主线（stepper）
+   仅新增结构类；配色全部走上方令牌，与共享 UI Kit oa-* 共享同一套主题。
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* 顶栏下方的主体：左侧导航（两区） + 右侧内容区 */
+.fa-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.fa-sidebar {
+  width: 212px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-card);
+  padding: 14px 10px;
+  overflow-y: auto;
+}
+.fa-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+.fa-nav-group { margin-bottom: 16px; }
+.fa-nav-group__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  padding: 4px 10px 6px;
+}
+.fa-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  margin-bottom: 2px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.fa-nav-item:hover { background: var(--bg-hover); color: var(--text); }
+.fa-nav-item.active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.fa-nav-item__icon { display: inline-flex; flex-shrink: 0; }
+.fa-nav-item__count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .fa-sidebar { width: 56px; padding: 12px 6px; }
+  .fa-nav-group__label { display: none; }
+  .fa-nav-item { justify-content: center; padding: 9px 0; }
+  .fa-nav-item span.fa-nav-item__label, .fa-nav-item__count { display: none; }
+  .fa-content { padding: 16px; }
+}
+
+/* ── 分步主线 stepper（账套工作台核心） ───────────────────────────── */
+.fa-stepper {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.fa-step {
+  flex: 1 1 150px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.fa-step:hover:not(:disabled) { border-color: var(--border-strong); }
+.fa-step:disabled { opacity: 0.5; cursor: not-allowed; }
+.fa-step.active { border-color: var(--primary); background: var(--primary-soft); }
+.fa-step__num {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  background: var(--bg-soft); color: var(--text-muted);
+  flex-shrink: 0;
+}
+.fa-step.active .fa-step__num { background: var(--primary); color: #fff; }
+.fa-step.done .fa-step__num { background: var(--success); color: #fff; }
+.fa-step__body { min-width: 0; }
+.fa-step__title { font-size: 12.5px; font-weight: 600; color: var(--text); line-height: 1.25; }
+.fa-step__hint { font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.3; }
+
+/* 工作台账套选择条 */
+.fa-org-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.fa-org-bar__name { font-size: 16px; font-weight: 700; color: var(--text); }
+.fa-org-bar .spacer { flex: 1 1 auto; }
+
+/* 「全过程可追溯」横条：每个中间表 / 报表步骤的导出·再导入入口 */
+.fa-trace-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-top: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.fa-trace-bar__icon { color: var(--primary); display: inline-flex; flex-shrink: 0; }
+.fa-trace-bar .spacer { flex: 1 1 auto; }
+
+/* 设置 / 复核中心内的二级 tab 复用既有 .tabs/.tab，无需新类 */
