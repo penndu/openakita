@@ -100,6 +100,33 @@ class SupervisorTimeout(Exception):
     node). Documented in ADR-0004 as `org_command_max_seconds`."""
 
 
+# Machine-emitted markers that only appear in a root KICKOFF / 派单 aggregation
+# (the root splitting work + the executor concatenating the raw child replies),
+# never in a genuine integrated final report. Used to keep the kickoff out of the
+# best-effort deliverable when any real output exists (test13 RCA).
+_KICKOFF_MARKERS = (
+    "[dispatched to ",
+    "[dispatch to `",
+    "[from node `",
+    "项目启动指令",
+    "项目正式启动",
+)
+
+
+def _looks_like_kickoff(text: str) -> bool:
+    """Heuristically detect a root kickoff / 派单 dump (not a final deliverable).
+
+    Deterministic and conservative: a message is treated as a kickoff only when
+    it carries the executor's machine dispatch scaffolding (``[dispatched to …]``
+    / ``[from node …]``) or an unmistakable kickoff heading. A real integrated
+    report that merely mentions a node name in prose does not match.
+    """
+    if not text:
+        return False
+    hits = sum(1 for m in _KICKOFF_MARKERS if m in text)
+    return hits >= 1
+
+
 # ---------------------------------------------------------------------------
 # Delegation protocol
 # ---------------------------------------------------------------------------
@@ -241,6 +268,8 @@ class Supervisor:
         force_root_finalization: bool = False,
         root_finalization_min_chars: int = 200,
         root_finalization_char_cap: int = 6000,
+        wall_clock_hard_ceiling_s: float = 0.0,
+        root_finalization_min_budget_s: float = 150.0,
     ) -> None:
         self.command_id = command_id
         self.org_id = org_id
@@ -344,6 +373,18 @@ class Supervisor:
         self._root_finalization_min_chars = max(1, int(root_finalization_min_chars))
         self._root_finalization_char_cap = max(400, int(root_finalization_char_cap))
         self._root_finalized = False
+        # test13 RCA: the forced finalization is a full extra root LLM turn that
+        # can take several minutes. When the run has already burned most of the
+        # outer hard ceiling (e.g. a leaf hung to its node timeout), starting it
+        # anyway guaranteed it would be killed mid-flight by the ceiling and the
+        # deliverable would fall back to the kickoff dump. We therefore:
+        #  * skip the finalization when the remaining hard-ceiling budget is too
+        #    small to plausibly finish it, and
+        #  * time-box the finalization deliver to the remaining budget so it can
+        #    NEVER trip the outer ``asyncio.wait_for`` hard ceiling (which would
+        #    force-kill the whole command with a "hard ceiling exceeded" state).
+        self._wall_clock_hard_ceiling_s = float(wall_clock_hard_ceiling_s or 0.0)
+        self._root_finalization_min_budget_s = max(0.0, float(root_finalization_min_budget_s))
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -696,6 +737,22 @@ class Supervisor:
             return 0.0
         return time.monotonic() - self._start_monotonic
 
+    def _root_finalization_budget_s(self) -> float | None:
+        """Remaining wall-clock budget the forced finalization may consume.
+
+        Returns ``None`` when no outer hard ceiling is configured (unbounded —
+        keep the pre-test13 behaviour). Otherwise returns the seconds left before
+        the outer ``asyncio.wait_for`` hard ceiling would fire, minus a small
+        safety margin, floored at 0. The caller skips the finalization when this
+        is below ``_root_finalization_min_budget_s`` and otherwise time-boxes the
+        deliver to this value so it can never trip the outer ceiling.
+        """
+        if self._wall_clock_hard_ceiling_s <= 0:
+            return None
+        margin = 20.0
+        remaining = self._wall_clock_hard_ceiling_s - self._elapsed_s() - margin
+        return max(0.0, remaining)
+
     def _soft_budget_exceeded(self) -> bool:
         if self._wall_clock_soft_budget_s <= 0:
             return False
@@ -757,6 +814,17 @@ class Supervisor:
             r for r in self.delegation_history
             if getattr(r, "success", False) and str(getattr(r, "message", "") or "").strip()
         ]
+        # test13 RCA: the root's turn-1 output is usually a KICKOFF / 派单 dump
+        # ("# 项目启动指令 … [dispatched to …] … [from node …]"), not a finished
+        # deliverable. When the hard ceiling killed the forced finalization, this
+        # kickoff (being the longest success) became the final PDF + chat bubble.
+        # Prefer any NON-kickoff success; only fall back to a kickoff when it is
+        # the only content we have (so we never return an empty deliverable).
+        non_kickoff = [
+            r for r in successes if not _looks_like_kickoff(str(r.message or ""))
+        ]
+        if non_kickoff:
+            successes = non_kickoff
         chosen: DelegationResult | None = None
         if successes:
             last = successes[-1]
@@ -861,6 +929,29 @@ class Supervisor:
         root = self.task_ledger.root_node_id
         if not root:
             return
+        # Budget gate (test13 RCA): only start the extra root turn when there is
+        # enough remaining hard-ceiling budget for it to plausibly finish. If the
+        # run already burned most of the ceiling, forcing a doomed turn wastes the
+        # remaining time and gets killed mid-flight -> the deliverable falls back
+        # to the kickoff dump. Skipping here lets the loop terminate cleanly with
+        # the best real deliverable instead.
+        finalize_timeout = self._root_finalization_budget_s()
+        if finalize_timeout is not None and finalize_timeout <= self._root_finalization_min_budget_s:
+            self._root_finalized = True  # do not retry within this run
+            await self.stream.emit(
+                "updates",
+                "root_finalization_skipped",
+                {
+                    "speaker": root,
+                    "reason": "insufficient_wall_clock_budget",
+                    "remaining_budget_s": round(finalize_timeout, 1),
+                    "min_budget_s": round(self._root_finalization_min_budget_s, 1),
+                },
+                command_id=self.command_id,
+                org_id=self.org_id,
+                superstep=self.stall_detector.n_turns,
+            )
+            return
         self._root_finalized = True
         self.cancel_token.raise_if_cancelled()
         instruction = self._compose_root_finalization_instruction()
@@ -878,9 +969,34 @@ class Supervisor:
             superstep=self.stall_detector.n_turns,
         )
         try:
-            result = await self.deliver(root, instruction, progress)
+            if finalize_timeout is not None:
+                # Time-box the deliver to the remaining hard-ceiling budget so it
+                # can never trip the outer ``asyncio.wait_for`` ceiling. On
+                # timeout we degrade to the best-effort deliverable rather than
+                # letting the whole command be force-killed as "hard ceiling
+                # exceeded". A cooperative-token cancel (real user cancel /
+                # stop_org) still propagates via CancelledByToken below.
+                result = await asyncio.wait_for(
+                    self.deliver(root, instruction, progress), timeout=finalize_timeout
+                )
+            else:
+                result = await self.deliver(root, instruction, progress)
         except CancelledByToken:
             raise
+        except TimeoutError:
+            await self.stream.emit(
+                "updates",
+                "root_finalization_timeout",
+                {
+                    "speaker": root,
+                    "reason": "finalization_exceeded_remaining_budget",
+                    "budget_s": round(finalize_timeout or 0.0, 1),
+                },
+                command_id=self.command_id,
+                org_id=self.org_id,
+                superstep=self.stall_detector.n_turns,
+            )
+            return
         self.delegation_history.append(result)
         await self.stream.emit(
             "updates",

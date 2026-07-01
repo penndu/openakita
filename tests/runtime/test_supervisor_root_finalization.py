@@ -85,7 +85,9 @@ def _make_deliver() -> tuple[Callable[..., Awaitable[DelegationResult]], list[di
     return deliver, log
 
 
-def _build(brain: _Brain, deliver, *, force: bool) -> Supervisor:
+def _build(
+    brain: _Brain, deliver, *, force: bool, hard_ceiling_s: float = 0.0
+) -> Supervisor:
     return Supervisor(
         command_id="cmd_x",
         org_id="org_1",
@@ -96,6 +98,7 @@ def _build(brain: _Brain, deliver, *, force: bool) -> Supervisor:
         stream=StreamBus(strict=True),
         checkpointer=MemoryCheckpointer(),
         force_root_finalization=force,
+        wall_clock_hard_ceiling_s=hard_ceiling_s,
     )
 
 
@@ -141,3 +144,76 @@ async def test_disabled_by_default_no_extra_turn() -> None:
 
     assert out.outcome is FinalOutcome.DONE
     assert [row["speaker"] for row in log] == ["planner"]
+
+
+async def test_skips_finalization_when_hard_ceiling_budget_insufficient() -> None:
+    # test13 RCA: with an outer hard ceiling almost fully consumed, the forced
+    # finalization would be a doomed extra root turn that the ceiling kills
+    # mid-flight (deliverable then falls back to the kickoff). The budget gate
+    # must SKIP the closing root turn and terminate cleanly on the report output.
+    brain = _Brain([_ledger_json(satisfied=False, speaker="planner"), _ledger_json(satisfied=True)])
+    deliver, log = _make_deliver()
+    # ceiling of 1s -> remaining budget (1 - elapsed - 20 margin) floors at 0,
+    # which is <= the 150s minimum -> skip.
+    sup = _build(brain, deliver, force=True, hard_ceiling_s=1.0)
+
+    out = await sup.run()
+
+    assert out.outcome is FinalOutcome.DONE
+    # No extra ROOT turn was forced (budget too low).
+    assert [row["speaker"] for row in log] == ["planner"]
+
+
+async def test_forces_finalization_when_hard_ceiling_budget_ample() -> None:
+    # With a generous ceiling the budget gate is a no-op: the closing root turn
+    # still fires (regression guard so the gate doesn't over-suppress).
+    brain = _Brain([_ledger_json(satisfied=False, speaker="planner"), _ledger_json(satisfied=True)])
+    deliver, log = _make_deliver()
+    sup = _build(brain, deliver, force=True, hard_ceiling_s=3600.0)
+
+    out = await sup.run()
+
+    assert out.outcome is FinalOutcome.DONE
+    assert [row["speaker"] for row in log] == ["planner", ROOT]
+
+
+def test_best_effort_prefers_non_kickoff_output() -> None:
+    # test13 RCA: the root's turn-1 kickoff dump (dispatch scaffolding) must NOT
+    # be surfaced as the deliverable when a real (non-kickoff) output exists.
+    brain = _Brain([_ledger_json(satisfied=True)])
+    deliver, _log = _make_deliver()
+    sup = _build(brain, deliver, force=False)
+    sup.delegation_history.append(
+        DelegationResult(
+            success=True,
+            speaker=ROOT,
+            message="# 项目启动指令\n请各节点执行\n[dispatched to planner]\n" + LONG,
+        )
+    )
+    sup.delegation_history.append(
+        DelegationResult(
+            success=True,
+            speaker="planner",
+            message="真实整合报告：完整成果 " + LONG,
+        )
+    )
+    out = sup.best_effort_deliverable()
+    assert "真实整合报告" in out
+    assert "项目启动指令" not in out
+
+
+def test_best_effort_falls_back_to_kickoff_when_only_content() -> None:
+    # Safety floor: if the kickoff dump is the ONLY successful output, we must
+    # still return it (never an empty deliverable).
+    brain = _Brain([_ledger_json(satisfied=True)])
+    deliver, _log = _make_deliver()
+    sup = _build(brain, deliver, force=False)
+    sup.delegation_history.append(
+        DelegationResult(
+            success=True,
+            speaker=ROOT,
+            message="# 项目启动指令\n[dispatched to planner]\n" + LONG,
+        )
+    )
+    out = sup.best_effort_deliverable()
+    assert "项目启动指令" in out

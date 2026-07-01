@@ -1318,6 +1318,13 @@ class OrgCommandService:
             ratio = float(getattr(_settings, "orgs_supervisor_soft_ceiling_ratio", 0.8) or 0.0)
             if ceiling > 0 and ratio > 0:
                 kwargs["wall_clock_soft_budget_s"] = float(ceiling) * ratio
+            if ceiling > 0:
+                # test13 RCA: hand the SAME outer hard ceiling to the supervisor
+                # so the forced root finalization can be budget-gated + time-boxed
+                # against it (skip / bound the closing turn instead of getting
+                # force-killed by the outer wait_for and falling back to the
+                # kickoff dump).
+                kwargs["wall_clock_hard_ceiling_s"] = float(ceiling)
         except Exception:  # noqa: BLE001 -- config must never break submit
             logger.debug(
                 "[OrgCmd] convergence budget read failed; using factory defaults",
@@ -1849,6 +1856,23 @@ class OrgCommandService:
                 command_id,
                 ceiling,
             )
+            # Stamp the outcome cache BEFORE firing the token cancel so the
+            # executor's ``cancel_source_provider`` (get_cancel_source) resolves
+            # ``hard_ceiling`` when the propagating CancelledError reaches an
+            # in-flight node run. test13 RCA: the stamp used to happen AFTER the
+            # cancel + a 0.5s grace sleep, so a node cancelled by the ceiling
+            # emitted ``agent_run_cancelled reason=user_cancel`` (the default) --
+            # misattributing a system timeout to the user.
+            prior = self._command_outcomes.get(command_id) or {}
+            prior.update(
+                {
+                    "event": "agent_run_cancelled",
+                    "cancelled_by": "hard_ceiling",
+                    "reason": "supervisor_hard_ceiling_exceeded",
+                    "ts": time.time(),
+                }
+            )
+            self._command_outcomes[command_id] = prior
             try:
                 supervisor.cancel_token.cancel("hard_ceiling")
             except Exception:  # noqa: BLE001 -- defensive, we are already aborting
@@ -1863,19 +1887,6 @@ class OrgCommandService:
             # will not observe it anyway and the slot is still released.
             with suppress(Exception):
                 await asyncio.sleep(0.5)
-            # Stamp the outcome cache so observability has a real
-            # ``cancelled_by`` / ``reason`` instead of a bare
-            # ``status=error`` from the generic except branch.
-            prior = self._command_outcomes.get(command_id) or {}
-            prior.update(
-                {
-                    "event": "agent_run_cancelled",
-                    "cancelled_by": "hard_ceiling",
-                    "reason": "supervisor_hard_ceiling_exceeded",
-                    "ts": time.time(),
-                }
-            )
-            self._command_outcomes[command_id] = prior
             # Best-effort: fabricate a SupervisorOutcome so
             # ``_reflect_supervisor_outcome`` writes a FAILED state
             # consistent with cooperative-cancel paths instead of the

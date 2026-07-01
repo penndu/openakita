@@ -326,6 +326,7 @@ def build_supervisor_for_command(
     progress_ledger_max_retries: int = 10,
     wall_clock_soft_budget_s: float = 0.0,
     force_root_finalization: bool = False,
+    wall_clock_hard_ceiling_s: float = 0.0,
 ) -> Supervisor:
     """Build a fully-wired :class:`Supervisor` for one user command.
 
@@ -435,6 +436,7 @@ def build_supervisor_for_command(
         progress_ledger_max_retries=progress_ledger_max_retries,
         wall_clock_soft_budget_s=wall_clock_soft_budget_s,
         force_root_finalization=force_root_finalization,
+        wall_clock_hard_ceiling_s=wall_clock_hard_ceiling_s,
     )
 
 
