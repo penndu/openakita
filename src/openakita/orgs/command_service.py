@@ -1280,6 +1280,14 @@ class OrgCommandService:
                 node_directory = self._build_node_directory(org_id)
                 if node_directory:
                     kwargs["node_directory"] = node_directory
+                # Task A: on the multi-turn LLM orchestration path, force the
+                # root/主编 to produce the final integrated deliverable before the
+                # command terminates. Deterministic backstop so the final report
+                # + PDF always come from the root's integration (never a report
+                # node's output nor the root's initial kickoff), independent of
+                # the brain's routing. The passthrough single-shot path (root is
+                # the sole speaker) does not need it and never sets this.
+                kwargs["force_root_finalization"] = True
                 # RC-conv: only the real LLM-orchestration path opts into the
                 # tighter convergence budgets + wall-clock soft landing. The
                 # passthrough single-shot path keeps the factory defaults

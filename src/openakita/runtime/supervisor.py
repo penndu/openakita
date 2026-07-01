@@ -238,6 +238,9 @@ class Supervisor:
         deliver_includes_recent_outputs: bool = True,
         recent_output_window: int = 4,
         recent_output_char_cap: int = 2400,
+        force_root_finalization: bool = False,
+        root_finalization_min_chars: int = 200,
+        root_finalization_char_cap: int = 6000,
     ) -> None:
         self.command_id = command_id
         self.org_id = org_id
@@ -328,6 +331,19 @@ class Supervisor:
         self._deliver_includes_recent_outputs = bool(deliver_includes_recent_outputs)
         self._recent_output_window = max(1, int(recent_output_window))
         self._recent_output_char_cap = max(200, int(recent_output_char_cap))
+        # Deterministic root finalization (task A): when the loop converges but
+        # the root/主编 has not itself produced the final integrated deliverable,
+        # force ONE closing delegation to the root so it integrates all upstream
+        # outputs into a user-facing report. This guarantees the final
+        # deliverable / PDF comes from the root's integration, never from a
+        # report node's output or the root's initial kickoff. Off by default so
+        # direct-construction unit tests keep their exact turn/deliverable
+        # semantics; the production LLM-orchestration path opts in via the
+        # factory. See ``supervisor_factory.build_supervisor_for_command``.
+        self._force_root_finalization = bool(force_root_finalization)
+        self._root_finalization_min_chars = max(1, int(root_finalization_min_chars))
+        self._root_finalization_char_cap = max(400, int(root_finalization_char_cap))
+        self._root_finalized = False
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -601,6 +617,7 @@ class Supervisor:
 
             match decision.verdict:
                 case StallVerdict.DONE:
+                    await self._maybe_force_root_finalization(progress)
                     return await self._terminate(
                         FinalOutcome.DONE,
                         progress.is_request_satisfied.reason,
@@ -759,6 +776,125 @@ class Supervisor:
     def best_effort_deliverable(self) -> str:
         """Public accessor for the hard-ceiling fallback in command_service."""
         return self._best_effort_deliverable()
+
+    # ------------------------------------------------------------------
+    # Deterministic root finalization (task A)
+    # ------------------------------------------------------------------
+
+    def _root_already_finalized(self) -> bool:
+        """True when the root has already produced the final integrated result.
+
+        The most-recent *successful* delegation being the root node with a
+        substantial body means the root itself produced the closing deliverable
+        (PassThrough single-shot, or an LLM brain that correctly routed the
+        integration to the root). In that case forcing another root turn would
+        be redundant, so we skip it. Any other shape -- the last speaker is a
+        report node, or the root only ever emitted a short kickoff -- means the
+        integrated deliverable is NOT owned by the root yet.
+        """
+        root = self.task_ledger.root_node_id
+        if not root:
+            return True  # no addressable root -> nothing to force
+        successes = [
+            r
+            for r in self.delegation_history
+            if getattr(r, "success", False) and str(getattr(r, "message", "") or "").strip()
+        ]
+        if not successes:
+            return False
+        last = successes[-1]
+        return (
+            last.speaker == root
+            and len(str(last.message or "")) >= self._root_finalization_min_chars
+        )
+
+    def _compose_root_finalization_instruction(self) -> str:
+        """Build the closing "integrate + report" instruction for the root.
+
+        Inlines every successful upstream output (bounded per item) so the root
+        integrates the real produced content instead of re-delegating or
+        hallucinating missing context. Explicitly forbids further delegation --
+        this is the terminal synthesis step.
+        """
+        blocks: list[str] = []
+        idx = 0
+        for r in self.delegation_history:
+            if not getattr(r, "success", False):
+                continue
+            body = str(getattr(r, "message", "") or "").strip()
+            if not body:
+                continue
+            idx += 1
+            if len(body) > self._root_finalization_char_cap:
+                body = body[: self._root_finalization_char_cap] + "\n…（已截断）"
+            blocks.append(f"[产出 {idx}] 来自节点 {r.speaker!r}：\n{body}")
+        joined = "\n\n".join(blocks) if blocks else "（无上游产出记录）"
+        return (
+            "【最终整合与交付 · 由主编（根节点）亲自完成】\n"
+            "所有下游节点均已完成并交付各自产出（见下方）。现在请你作为主编/根节点，"
+            "亲自完成本次任务的最终整合与面向用户的总结汇报：\n"
+            "1. 通读并整合下方全部上游产出，形成一份完整、连贯、可直接交付给用户的最终成果；\n"
+            "2. 用 write_file 将该最终成果写入一个 .md 文件，并用 deliver_artifacts 交付，"
+            "使其在前端可下载/预览；\n"
+            "3. 在你本次回复的正文中，直接给出这份完整的最终成果与总结汇报"
+            "（包含关键结论、决策摘要与交付物清单），作为交付给用户的最终报告。\n"
+            "注意：这是收尾步骤，不要再向下派发任务（不要 dispatch / delegate），"
+            "直接基于下方已产出的内容整合成稿。\n\n"
+            "=== 上游节点已产出的真实内容（请直接基于这些内容整合，不要假设缺失） ===\n"
+            f"{joined}\n"
+            "=== 以上为可直接使用的上游产出 ==="
+        )
+
+    async def _maybe_force_root_finalization(self, progress: ProgressLedger) -> None:
+        """Force one closing root delegation when the root has not integrated.
+
+        Deterministic backstop for the "final delivery owned by the root"
+        contract: independent of whether the brain routed the integration to
+        the root, this guarantees the root produces the final integrated report
+        exactly once before the command terminates DONE. No-op when disabled,
+        already run, or the root already owns the final deliverable.
+        """
+        if not self._force_root_finalization or self._root_finalized:
+            return
+        if self._root_already_finalized():
+            return
+        root = self.task_ledger.root_node_id
+        if not root:
+            return
+        self._root_finalized = True
+        self.cancel_token.raise_if_cancelled()
+        instruction = self._compose_root_finalization_instruction()
+        await self.stream.emit(
+            "tasks",
+            "delegating",
+            {
+                "speaker": root,
+                "instruction": "最终整合与交付（主编收尾）",
+                "turn": self.stall_detector.n_turns,
+                "root_finalization": True,
+            },
+            command_id=self.command_id,
+            org_id=self.org_id,
+            superstep=self.stall_detector.n_turns,
+        )
+        try:
+            result = await self.deliver(root, instruction, progress)
+        except CancelledByToken:
+            raise
+        self.delegation_history.append(result)
+        await self.stream.emit(
+            "updates",
+            "delegation_result",
+            {
+                "speaker": result.speaker,
+                "success": result.success,
+                "message": result.message,
+                "root_finalization": True,
+            },
+            command_id=self.command_id,
+            org_id=self.org_id,
+            superstep=self.stall_detector.n_turns,
+        )
 
     # ------------------------------------------------------------------
     # Progress ledger acquisition with retry
