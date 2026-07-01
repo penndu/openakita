@@ -51,13 +51,19 @@ def _get_workspace_root(request: Request) -> Path:
 
 
 @router.get("")
-async def serve_file(request: Request, path: str = ""):
+async def serve_file(request: Request, path: str = "", inline: str = ""):
     """
     Serve a file from the workspace directory.
 
     Query parameter `path` can be relative to workspace root or absolute.
     Example: /api/files?path=data/temp/image.png
     Example: /api/files?path=D:/coder/myagent/data/temp/image.png
+
+    Query parameter ``inline`` (``1``/``true``): force an ``inline``
+    ``Content-Disposition`` so the browser renders the file in-page (e.g. a
+    PDF in an ``<iframe>`` for the deliverable preview modal) instead of
+    triggering a download. Defaults off; download flows omit it and keep the
+    historical ``attachment`` disposition for non-media types.
 
     When ``path`` is empty, ``.``, ``./``, or ``/``, the endpoint
     returns a JSON listing of the workspace root instead of a file
@@ -107,7 +113,8 @@ async def serve_file(request: Request, path: str = ""):
 
     content_type = _guess_content_type(full_path)
 
-    is_inline = content_type.startswith(("audio/", "video/", "image/"))
+    force_inline = (inline or "").strip().lower() in ("1", "true", "yes", "on")
+    is_inline = force_inline or content_type.startswith(("audio/", "video/", "image/"))
     return FileResponse(
         path=str(full_path),
         media_type=content_type,
