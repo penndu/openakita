@@ -839,11 +839,25 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           phase = "active";
           break;
         }
-        case "node_tool_failed":
+        case "node_tool_failed": {
           speaker = nameOf(node);
-          note = `⚠ 工具 \`${toolName || "?"}\` 失败${p.reason ? `（${p.reason as string}）` : ""}`;
+          const failReason = (p.reason as string) || "";
+          // test16 "进展缓慢" 收敛: a benign resource cap is NOT a stall. When a
+          // node's web_search hits ``search_budget_reached`` it has gathered
+          // enough and moves straight to composing its deliverable -- flagging
+          // is_progress_being_made=false there made the timeline read "进展缓慢"
+          // at the exact moment the node was most productive (data-analyst 成文期
+          // 被误判). Treat known-benign caps as an informational notice that keeps
+          // progress, so only genuine tool errors surface as a stall.
+          if (failReason === "search_budget_reached") {
+            note = `ℹ 工具 \`${toolName || "?"}\` 检索预算已用尽，转入基于已获取信息成文`;
+            phase = "active";
+            break;
+          }
+          note = `⚠ 工具 \`${toolName || "?"}\` 失败${failReason ? `（${failReason}）` : ""}`;
           progress = false;
           phase = "active";
+        }
           break;
         case "subtask_assigned":
         case "child_dispatch":
