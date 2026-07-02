@@ -1037,7 +1037,18 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
               `${apiBaseUrl}/api/v2/orgs/${encodeURIComponent(orgId)}/commands/${encodeURIComponent(cid)}`,
             );
             const d = await r.json();
-            if (String(d?.status) !== "done") return;
+            // test16 ROOT FIX: a command that hit the wall-clock ceiling ends
+            // up persisted as ``status: "error"`` (outcome=failed / partial=True)
+            // even though the root already produced a full ``final_message`` +
+            // PDF on disk. The reload path used to require ``status === "done"``
+            // and silently dropped these, so after a mid-run hard-refresh (very
+            // likely on a ceiling-length run) the closing 任务完成汇报 receipt
+            // never came back -- exactly the "真机没出现" the always-on listener
+            // (which already accepts "error") could not cover because the WS
+            // command_done had fired during the refresh gap. Accept both so a
+            // partial/ceiling result with a real report still gets its bubble.
+            const st = String(d?.status || "");
+            if (st !== "done" && st !== "error") return;
             const text = extractCommandResultText(
               d.result as Record<string, unknown> | null | undefined,
             );
