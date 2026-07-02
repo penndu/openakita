@@ -234,3 +234,147 @@ async def test_hard_ceiling_disabled_when_setting_is_zero(monkeypatch) -> None:
     assert status["status"] == "done"
     # The cancel token must NOT have been touched on the happy path.
     assert not quick.cancel_token.is_cancelled()
+
+
+# ---------------------------------------------------------------------------
+# test16 semantic root-cause: "delivered but hit the ceiling" is NOT a failure.
+# ``_reflect_supervisor_outcome`` must classify a limit exit by what was
+# actually delivered:
+#   * root produced its substantial integrated report  -> ``done`` (+timeout note)
+#   * only a usable best-effort deliverable survived    -> ``partial`` (NOT error)
+#   * nothing usable was produced                        -> ``error``
+# ---------------------------------------------------------------------------
+
+import time  # noqa: E402
+
+
+def _seed_running_command(svc: OrgCommandService, cid: str, org_id: str = "o1") -> None:
+    """Insert a minimal ``running`` command record so reflection can mutate it."""
+    now = time.time()
+    svc._commands[cid] = {
+        "command_id": cid,
+        "org_id": org_id,
+        "root_node_id": "root1",
+        "status": "running",
+        "phase": "running",
+        "result": None,
+        "error": None,
+        "created_at": now,
+        "updated_at": now,
+        "finished_at": None,
+        "forward_to": [],
+    }
+
+
+def _ceiling_outcome(*, deliverable: str = "", final_message: str = "") -> Any:
+    """A hard-ceiling-shaped FAILED outcome (mirrors the synthetic one the
+    ceiling path fabricates)."""
+    from openakita.runtime.supervisor import FinalOutcome, SupervisorOutcome
+
+    return SupervisorOutcome(
+        outcome=FinalOutcome.FAILED,
+        final_message=final_message or "supervisor hard ceiling exceeded",
+        final_checkpoint_id="cp-ceiling",
+        n_turns=3,
+        n_replans=1,
+        reason="hard_ceiling",
+        deliverable=deliverable,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reflect_complete_delivery_at_ceiling_classified_done(monkeypatch) -> None:
+    """交付完整 + 撞上限 -> ``done`` (root produced its integrated report)."""
+    svc = _make_service(supervisor=_SleepForeverSupervisor())
+    cid = "cmd_complete"
+    _seed_running_command(svc, cid)
+    # Mirror the real hard-ceiling path: it stamps the outcome cache with
+    # ``cancelled_by="hard_ceiling"`` BEFORE reflecting.
+    svc._command_outcomes[cid] = {"cancelled_by": "hard_ceiling"}
+    # Root wrote a substantial, non-kickoff integrated report on disk.
+    monkeypatch.setattr(
+        svc,
+        "_root_disk_deliverable",
+        lambda _c: "# 健身线下分享会最终策划案\n\n" + ("详细执行方案与预算规划。" * 200),
+    )
+
+    svc._reflect_supervisor_outcome(cid, _SleepForeverSupervisor(), _ceiling_outcome())
+
+    cmd = svc._commands[cid]
+    assert cmd["status"] == "done", "a complete delivery must not persist as error"
+    assert cmd["phase"] == "partial"
+    assert cmd["result"]["partial"] is True
+    assert cmd["result"]["outcome"] == "completed_with_timeout"
+    assert cmd["result"]["degraded_reason"] == "wall_clock_ceiling"
+    # Raw supervisor verdict retained for traceability, but not leaked as the
+    # user-facing outcome.
+    assert cmd["result"]["supervisor_outcome"] == "failed"
+    assert cmd["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_reflect_partial_delivery_at_ceiling_classified_partial(monkeypatch) -> None:
+    """部分交付 + 撞上限 -> ``partial`` terminal, explicitly NOT ``error``."""
+    svc = _make_service(supervisor=_SleepForeverSupervisor())
+    cid = "cmd_partial"
+    _seed_running_command(svc, cid)
+    svc._command_outcomes[cid] = {"cancelled_by": "hard_ceiling"}
+    # No clean root integration on disk...
+    monkeypatch.setattr(svc, "_root_disk_deliverable", lambda _c: None)
+    # ...but a usable, substantial, non-kickoff best-effort deliverable survived.
+    salvage = "市场调研与用户痛点分析报告（下游产物）：" + ("关键结论与数据支撑。" * 80)
+
+    svc._reflect_supervisor_outcome(
+        cid, _SleepForeverSupervisor(), _ceiling_outcome(deliverable=salvage, final_message=salvage)
+    )
+
+    cmd = svc._commands[cid]
+    assert cmd["status"] == "partial"
+    assert cmd["status"] != "error"
+    assert cmd["phase"] == "partial"
+    assert cmd["result"]["partial"] is True
+    assert cmd["result"]["outcome"] == "partial_delivery"
+    assert cmd["result"]["degraded_reason"] == "wall_clock_ceiling"
+    assert cmd["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_reflect_no_delivery_at_ceiling_stays_error(monkeypatch) -> None:
+    """无有效交付 -> genuine ``error`` (only path that keeps the failure state)."""
+    svc = _make_service(supervisor=_SleepForeverSupervisor())
+    cid = "cmd_empty"
+    _seed_running_command(svc, cid)
+    monkeypatch.setattr(svc, "_root_disk_deliverable", lambda _c: None)
+
+    svc._reflect_supervisor_outcome(
+        cid, _SleepForeverSupervisor(), _ceiling_outcome(deliverable="", final_message="")
+    )
+
+    cmd = svc._commands[cid]
+    assert cmd["status"] == "error"
+    assert cmd["result"]["partial"] is False
+
+
+@pytest.mark.asyncio
+async def test_reflect_out_of_turns_kickoff_only_stays_error(monkeypatch) -> None:
+    """A kickoff-only 'deliverable' is not a real delivery -> ``error``."""
+    svc = _make_service(supervisor=_SleepForeverSupervisor())
+    cid = "cmd_kickoff"
+    _seed_running_command(svc, cid)
+    monkeypatch.setattr(svc, "_root_disk_deliverable", lambda _c: None)
+    from openakita.runtime.supervisor import FinalOutcome, SupervisorOutcome
+
+    outcome = SupervisorOutcome(
+        outcome=FinalOutcome.OUT_OF_TURNS,
+        final_message="项目启动指令：层级分解……",
+        final_checkpoint_id="cp",
+        n_turns=9,
+        n_replans=0,
+        reason="",
+        deliverable="项目启动指令：层级分解，dispatched to writer",
+    )
+    svc._reflect_supervisor_outcome(cid, _SleepForeverSupervisor(), outcome)
+
+    cmd = svc._commands[cid]
+    assert cmd["status"] == "error"
+    assert cmd["phase"] == "out_of_turns"

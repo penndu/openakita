@@ -1570,7 +1570,7 @@ class OrgCommandService:
         stale = [
             cid
             for cid, cmd in self._commands.items()
-            if (cmd["status"] in ("done", "error") and now - cmd["created_at"] > _CMD_TTL)
+            if (cmd["status"] in ("done", "partial", "error") and now - cmd["created_at"] > _CMD_TTL)
             or (cmd["status"] == "running" and now - cmd["created_at"] > _CMD_TTL * 2)
         ]
         for cid in stale:
@@ -1627,7 +1627,7 @@ class OrgCommandService:
             return None
         if status is not None:
             cmd["status"] = status
-            if phase is None and status in ("done", "error", "cancelled"):
+            if phase is None and status in ("done", "partial", "error", "cancelled"):
                 cmd["phase"] = status
         if phase is not None:
             cmd["phase"] = phase
@@ -1802,6 +1802,28 @@ class OrgCommandService:
                     supervisor_last_checkpoint_id=cancel_cp,
                 )
                 raise
+            except TimeoutError:
+                # test16 clobber fix: the hard ceiling fired.
+                # ``_run_supervisor_with_hard_ceiling`` already ran
+                # ``_reflect_supervisor_outcome`` (classifying the terminal
+                # state as done/partial/error based on what was actually
+                # delivered) BEFORE re-raising this TimeoutError. The old
+                # generic ``except Exception`` below then OVERWROTE that with
+                # ``status="error"`` -- so a command that delivered a full
+                # integrated report + PDF but hit the wall clock was persisted
+                # as a failure (the shared root病根). Preserve the reflected
+                # terminal state; only write a fallback error if reflection
+                # somehow left the command non-terminal (e.g. ceiling disabled
+                # and an inner TimeoutError propagated without reflection).
+                cur = self._commands.get(command_id) or {}
+                if cur.get("status") in (None, "", "running"):
+                    self._update_command_state(
+                        command_id,
+                        status="error",
+                        phase="error",
+                        error="supervisor hard ceiling exceeded",
+                        finished_at=time.time(),
+                    )
             except Exception as exc:  # noqa: BLE001 -- last-resort guardrail
                 logger.exception(
                     "[OrgCmd] supervisor.run raised for cid=%s", command_id
@@ -2095,7 +2117,7 @@ class OrgCommandService:
                 stale_keys.append(key)
                 continue
             status = cmd.get("status")
-            if status in ("done", "error", "cancelled"):
+            if status in ("done", "partial", "error", "cancelled"):
                 # Terminal command still pinning the slot -> definitely
                 # a leak (real running cmds keep status=running).
                 stale_keys.append(key)
@@ -2152,6 +2174,26 @@ class OrgCommandService:
             body = body[:12000] + "\n\n…（内容较长已截断，完整版本见附件文件）"
         return body
 
+    def _degraded_reason(self, command_id: str, outcome_value: str | None) -> str:
+        """Human/machine reason a delivered command hit a limit (test16).
+
+        Surfaced on ``result.degraded_reason`` so the UI can render a precise
+        "触达时限/预算" note on a partial/timeout completion instead of a bare
+        failure. Prefers the outcome cache's ``cancelled_by`` (set to
+        ``hard_ceiling`` by :meth:`_run_supervisor_with_hard_ceiling`) and
+        otherwise maps the supervisor's budget-exit verdict.
+        """
+        from openakita.runtime.supervisor import FinalOutcome
+
+        oc = self._command_outcomes.get(command_id) or {}
+        if oc.get("cancelled_by") == "hard_ceiling":
+            return "wall_clock_ceiling"
+        if outcome_value == FinalOutcome.OUT_OF_TURNS.value:
+            return "turn_budget"
+        if outcome_value == FinalOutcome.REPLAN_BUDGET_EXHAUSTED.value:
+            return "replan_budget"
+        return "limit_reached"
+
     def _reflect_supervisor_outcome(
         self,
         command_id: str,
@@ -2187,50 +2229,79 @@ class OrgCommandService:
             if not final_msg.strip() or _looks_like_kickoff_text(final_msg):
                 final_msg = disk_deliverable
 
-        # RC-conv (优雅降级): OUT_OF_TURNS / REPLAN_BUDGET_EXHAUSTED are budget
-        # exits, not crashes. When the run actually produced a usable
-        # deliverable we surface a "completed-with-partial-result" instead of a
-        # bare ``status=error`` with no output -- the worst UX. Only when there
-        # is genuinely nothing to show do we fall back to the error state.
-        graceful_partial = bool(deliverable.strip())
+        # test16 semantic root-cause: OUT_OF_TURNS / REPLAN_BUDGET_EXHAUSTED /
+        # FAILED (the hard-ceiling synthesises FAILED) are *limit* exits, not
+        # automatic crashes. What decides the terminal state is whether the
+        # command actually DELIVERED, judged on two tiers:
+        #   * ``root_final_present`` -- the ROOT produced a substantial,
+        #     non-kickoff integrated report on disk (``_root_disk_deliverable``).
+        #     That is a *complete* delivery even if a wall-clock/turn limit was
+        #     hit right after: classify as ``done`` with a "触达时限" note.
+        #   * else ``has_usable_deliverable`` -- some usable best-effort output
+        #     survived (a downstream product, salvaged summary) but NOT the
+        #     root's clean integration: a genuine PARTIAL success -> the new
+        #     ``partial`` terminal (delivered, but incomplete / limited), which
+        #     every downstream treats as completed-not-failed.
+        #   * else nothing usable (empty / kickoff-only) -> keep ``error``.
+        # Only this last "no valid delivery" case is a failure; a delivered
+        # command must never persist as ``error`` just because it timed out.
+        root_final_present = bool(disk_deliverable and disk_deliverable.strip())
+        has_usable_deliverable = bool(deliverable.strip()) and not _looks_like_kickoff_text(
+            deliverable
+        )
+        _limit_exits = {
+            FinalOutcome.OUT_OF_TURNS.value,
+            FinalOutcome.REPLAN_BUDGET_EXHAUSTED.value,
+            FinalOutcome.FAILED.value,
+        }
+        degraded_reason: str | None = None
+        result_outcome = outcome_value
         if outcome_value == FinalOutcome.DONE.value:
             status, phase, error = "done", "done", None
         elif outcome_value == FinalOutcome.CANCELLED.value:
             status, phase, error = "cancelled", "cancelled", None
-        elif outcome_value == FinalOutcome.OUT_OF_TURNS.value:
-            if graceful_partial:
+        elif outcome_value in _limit_exits:
+            degraded_reason = self._degraded_reason(command_id, outcome_value)
+            if root_final_present:
+                # 交付完整 + 撞上限 -> completed, with a timeout note.
                 status, phase, error = "done", "partial", None
+                result_outcome = "completed_with_timeout"
+            elif has_usable_deliverable:
+                # 部分交付 + 撞上限 -> partial success (NOT error).
+                status, phase, error = "partial", "partial", None
+                result_outcome = "partial_delivery"
             else:
-                status, phase, error = "error", "out_of_turns", final_msg or outcome_value
-        elif outcome_value == FinalOutcome.REPLAN_BUDGET_EXHAUSTED.value:
-            if graceful_partial:
-                status, phase, error = "done", "partial", None
-            else:
-                status, phase, error = "error", "error", final_msg or outcome_value
-        elif outcome_value == FinalOutcome.FAILED.value:
-            # hard-ceiling / hard failure: still surface a partial deliverable
-            # if the run managed to produce one before being force-cancelled.
-            if graceful_partial:
-                status, phase, error = "done", "partial", None
-            else:
-                status, phase, error = "error", "error", final_msg or outcome_value
+                # 无有效交付 -> genuine failure.
+                status = "error"
+                phase = "out_of_turns" if (
+                    outcome_value == FinalOutcome.OUT_OF_TURNS.value
+                ) else "error"
+                error = final_msg or outcome_value
         else:
             status, phase, error = "done", "done", None
 
         event_ref = f"supervisor_{outcome_value}" if outcome_value else None
+        result_payload: dict[str, Any] = {
+            "final_message": final_msg,
+            "deliverable": deliverable,
+            "partial": (phase == "partial"),
+            "n_turns": n_turns,
+            "n_replans": n_replans,
+            "final_checkpoint_id": final_cp,
+            "outcome": result_outcome,
+        }
+        # Traceability: keep the raw supervisor verdict alongside the honest
+        # classification so debugging can still see "the supervisor said FAILED
+        # but we delivered" without the misleading value leaking to the UI.
+        if result_outcome != outcome_value:
+            result_payload["supervisor_outcome"] = outcome_value
+        if degraded_reason:
+            result_payload["degraded_reason"] = degraded_reason
         self._update_command_state(
             command_id,
             status=status,
             phase=phase,
-            result={
-                "final_message": final_msg,
-                "deliverable": deliverable,
-                "partial": (phase == "partial"),
-                "n_turns": n_turns,
-                "n_replans": n_replans,
-                "final_checkpoint_id": final_cp,
-                "outcome": outcome_value,
-            },
+            result=result_payload,
             error=error,
             event_ref=event_ref,
             finished_at=time.time(),
@@ -2262,7 +2333,11 @@ class OrgCommandService:
                 cmd_for_proj = self._commands.get(command_id) or {}
                 oid_for_done = cmd_for_proj.get("org_id")
                 if oid_for_done:
-                    fin(oid_for_done, command_id, ok=(status == "done"))
+                    # test16: a ``partial`` terminal still DELIVERED (best-effort
+                    # output exists), so it renders the final PDF and marks the
+                    # project task delivered/100% just like ``done`` -- only a
+                    # true ``error`` (no delivery) rejects the task.
+                    fin(oid_for_done, command_id, ok=(status in ("done", "partial")))
         except Exception:  # noqa: BLE001
             pass
 
@@ -2373,13 +2448,16 @@ class OrgCommandService:
             (queue, asyncio.get_running_loop(), surface, target)
         )
         cmd = self._commands.get(command_id)
-        if cmd and cmd.get("status") in {"done", "error"}:
+        if cmd and cmd.get("status") in {"done", "partial", "error"}:
             event: dict[str, Any] = {
                 "type": "org_command_done",
                 "org_id": cmd.get("org_id", ""),
                 "command_id": command_id,
             }
-            if cmd.get("status") == "done":
+            # test16: a ``partial`` terminal DELIVERED a result (best-effort),
+            # so it carries the result payload exactly like ``done`` -- only a
+            # true ``error`` (no delivery) surfaces the error string.
+            if cmd.get("status") in ("done", "partial"):
                 event["result"] = cmd.get("result")
             else:
                 event["error"] = cmd.get("error") or "Command failed"
@@ -2499,6 +2577,7 @@ class OrgCommandService:
             return
         prefix = {
             "done": "✅ 组织任务已完成",
+            "partial": "✅ 组织任务已完成（部分成果，触达时限）",
             "error": "❌ 组织任务失败",
             "cancelled": "🛑 组织任务已被取消",
         }.get(kind, "📣 组织任务更新")
