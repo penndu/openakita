@@ -847,7 +847,12 @@ export function OrgEditorView({
 
   const fetchOrg = useCallback(async (orgId: string) => {
     setLoading(true);
-    setActiveDrawer(null);
+    // NOTE: do NOT close the command-center / inbox drawer here. ``fetchOrg`` is
+    // also the ``org:command_done`` refresh path, and closing the drawer on
+    // completion slammed the 指挥台 shut exactly as the final "任务完成汇报" bubble
+    // rendered -- so the user never saw it (test14 #1 + #2, the real break that
+    // made every prior OrgChatPanel-side fix look ineffective). Drawer closing on
+    // ORG/TAB switch is handled by the ``[viewMode, selectedOrgId]`` reset effect.
     try {
       const res = await safeFetch(`${apiBaseUrl}/api/v2/orgs/${orgId}`);
       const data: OrgFull = await res.json();
@@ -936,6 +941,10 @@ export function OrgEditorView({
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setShowNodeChat(false);
+    // Close the command-center / inbox drawer only on an actual ORG or TAB
+    // switch (this effect's deps), NOT on the ``command_done`` refresh -- so a
+    // finished run keeps the 指挥台 open and the final report bubble stays visible.
+    setActiveDrawer(null);
   }, [viewMode, selectedOrgId]);
 
 
