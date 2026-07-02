@@ -159,6 +159,39 @@ class AgentSpec:
     available_nodes: tuple[tuple[str, str], ...] = ()
 
 
+def _capability_label(node: Any) -> str:
+    """Compose a capability descriptor for a coordinator's dispatch menu.
+
+    A middle node (e.g. 策划编辑) can only delegate WELL if it knows what each
+    of its direct reports is actually good at. Pre-fix the dispatch menu showed
+    only the bare role title (``- writer-a: 文案写手``), so the coordinator had
+    to guess which report fits which sub-task. We now fold each report's
+    ``department`` + ``role_goal`` (the same capability signal the central
+    supervisor already receives via ``NodeDescriptor.capabilities``) into the
+    label so capability-based matching becomes possible. Kept short (goal
+    truncated) so the per-coordinator token budget stays bounded.
+    """
+
+    role = (
+        getattr(node, "role_title", None)
+        or getattr(node, "label", None)
+        or getattr(node, "role", None)
+        or ""
+    )
+    role = role.strip() if isinstance(role, str) else str(role)
+    goal = getattr(node, "role_goal", "") or ""
+    dept = getattr(node, "department", "") or ""
+    notes: list[str] = []
+    if isinstance(dept, str) and dept.strip():
+        notes.append(f"部门:{dept.strip()}")
+    if isinstance(goal, str) and goal.strip():
+        notes.append(f"职责:{goal.strip()[:80]}")
+    if not notes:
+        return role
+    joined = "；".join(notes)
+    return f"{role}（{joined}）" if role else joined
+
+
 @runtime_checkable
 class AgentBuilderProtocol(Protocol):
     """Builds and caches one agent per ``(org_id, node_id)``.
@@ -457,13 +490,7 @@ class ProfileResolver:
             node_id = getattr(node, "id", None) or getattr(node, "node_id", None)
             if not isinstance(node_id, str) or not node_id:
                 continue
-            label = (
-                getattr(node, "role_title", None)
-                or getattr(node, "label", None)
-                or getattr(node, "role", None)
-                or ""
-            )
-            labels[node_id] = label.strip() if isinstance(label, str) else str(label)
+            labels[node_id] = _capability_label(node)
 
         # Direct hierarchy children = downstream targets of this node's
         # hierarchy / escalate edges. Collaborate / consult edges are peer

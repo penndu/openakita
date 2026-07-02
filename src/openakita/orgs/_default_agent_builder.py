@@ -249,8 +249,21 @@ def _dispatch_instructions(*, is_root: bool) -> str:
         "autonomy here — do not bounce every decision back up."
     )
     return (
-        f"{who} To delegate, emit one or more dispatch blocks using EXACTLY "
-        'this XML syntax: <dispatch target="NODE_ID">instruction for that '
+        f"{who} Work like a real team lead, in this order: "
+        "(1) PARSE the task into concrete parts; "
+        "(2) MATCH each part to the report whose capability best fits it — "
+        "read the capability notes (部门/职责) next to each report below and "
+        "pick by capability, not by guessing; "
+        "(3) DO YOURSELF the part that falls under your OWN role/expertise "
+        "(don't reflexively hand everything down — a part you are the right "
+        "specialist for, you complete directly, including calling tools / "
+        "writing files when that produces the deliverable); "
+        "(4) DELEGATE only the parts that genuinely need a different "
+        "specialist among your reports; "
+        "(5) after their results come back, REVIEW them and INTEGRATE into a "
+        "coherent result you hand back UP to your parent (逐级汇报). "
+        "To delegate, emit one or more dispatch blocks using EXACTLY this XML "
+        'syntax: <dispatch target="NODE_ID">instruction for that '
         "node</dispatch>. The target MUST be one of YOUR direct reports "
         "listed below — never a node that is not in that list (no skipping "
         "levels, no inventing links). Emit at most "
@@ -258,11 +271,13 @@ def _dispatch_instructions(*, is_root: bool) -> str:
         "Work in parallel: when several reports' subtasks are independent, "
         "put ALL their dispatch blocks in THIS SAME reply — they run "
         "concurrently. Only split across replies when a later subtask truly "
-        "depends on an earlier report's output. After the dispatch blocks "
-        "the orchestrator appends each report's output to your reply, so "
-        "your own text should (1) state who you delegated what and why, and "
-        "(2) after their results come back, integrate them into a coherent "
-        "result you hand back UP to your parent (逐级汇报). "
+        "depends on an earlier report's output. "
+        "Right-size the delegation: a small/simple task you can fully handle "
+        "yourself should NOT be fanned out just to use the org chart — "
+        "over-delegating trivial work only adds hops and latency. "
+        "After the dispatch blocks the orchestrator appends each report's "
+        "output to your reply, so your own text should (1) state who you "
+        "delegated what and why, and (2) integrate the returned results. "
         "If — and only if — you genuinely cannot decide how to proceed, or "
         "the request falls outside your team's scope, do NOT guess: say so "
         "plainly in your reply so your parent can re-route (逐级上报)."
@@ -310,15 +325,20 @@ def _available_nodes_block(spec: AgentSpec) -> str:
 
     if not spec.available_nodes:
         return ""
-    lines = ["Your DIRECT reports you may delegate to (use the exact id):"]
+    lines = [
+        "Your DIRECT reports you may delegate to (use the exact id; the "
+        "capability notes after each id — 部门/职责 — tell you what that "
+        "report is good at, so match sub-tasks to reports by capability):"
+    ]
     for node_id, label in spec.available_nodes:
         if label:
             lines.append(f"- {node_id}: {label}")
         else:
             lines.append(f"- {node_id}")
     lines.append(
-        "Do NOT invent new node ids. If none of the listed nodes fits "
-        "the user request, do the work yourself instead of dispatching."
+        "Do NOT invent new node ids. If none of the listed reports fits a "
+        "part of the task — or the part is squarely your own specialty — do "
+        "that part yourself instead of dispatching."
     )
     return "\n".join(lines)
 

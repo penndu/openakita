@@ -19,8 +19,10 @@ Pins:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from openakita.orgs._default_agent_builder import _persona_system_prompt
-from openakita.orgs._runtime_agent_pipeline import AgentSpec
+from openakita.orgs._runtime_agent_pipeline import AgentSpec, _capability_label
 
 
 def _spec(**overrides: object) -> AgentSpec:
@@ -110,6 +112,57 @@ def test_nodes_without_labels_still_listed_by_id() -> None:
     prompt = _persona_system_prompt(spec, depth=0)
     assert "- x1" in prompt
     assert "- x2" in prompt
+
+
+def test_capability_label_folds_department_and_goal() -> None:
+    """case id: p-hier.capability_label
+
+    A coordinator can only delegate by capability if the dispatch menu carries
+    each report's capability signal. ``_capability_label`` folds the report's
+    ``department`` + ``role_goal`` into the label (the same signal the central
+    supervisor already gets), truncated to keep the token budget bounded.
+    """
+
+    node = SimpleNamespace(
+        id="writer-a",
+        role_title="文案写手",
+        department="创作组",
+        role_goal="负责活动宣发文案与脚本撰写",
+    )
+    label = _capability_label(node)
+    assert "文案写手" in label
+    assert "部门:创作组" in label
+    assert "职责:负责活动宣发文案与脚本撰写" in label
+
+    # No capability signal -> bare role title (legacy shape).
+    bare = SimpleNamespace(id="x1", role_title="worker", department="", role_goal="")
+    assert _capability_label(bare) == "worker"
+
+
+def test_coordinator_prompt_teaches_capability_match_and_self_execute() -> None:
+    """case id: p-hier.coordinator_prompt
+
+    A node WITH direct reports must be taught to (1) match sub-tasks to reports
+    by capability and (2) do the part that is its OWN specialty itself rather
+    than fanning everything out. Pins the behavioural contract for test15 §2.
+    """
+
+    spec = _spec(
+        node_id="planner",
+        role="planner",
+        available_nodes=(
+            ("writer-a", "文案写手（部门:创作组；职责:活动宣发文案）"),
+            ("writer-b", "文案写手（部门:创作组；职责:脚本与口播）"),
+        ),
+    )
+    prompt = _persona_system_prompt(spec, depth=1)
+    # Capability-based matching is taught, and the enriched labels flow through.
+    assert "capability" in prompt.lower()
+    assert "部门:创作组" in prompt
+    # Self-execution of the coordinator's own part is explicit.
+    assert "DO YOURSELF" in prompt
+    # Don't over-delegate trivial work.
+    assert "over-deleg" in prompt.lower()
 
 
 def test_subagent_depth_skips_block() -> None:
