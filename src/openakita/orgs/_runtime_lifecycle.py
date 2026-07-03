@@ -165,7 +165,20 @@ class OrgLifecycleManager:
         return True
 
     async def stop_org(self, org_id: str, *, reason: str = "stop") -> bool:
-        """Drain via on_stop_org callback, then transition -> STOPPED."""
+        """Force-stop: drain in-flight work, then land the STOPPED terminal.
+
+        test17 issue A: stop is a FORCE operation and is deliberately NOT bound
+        by the normal ``_check_transition`` table. An org that was loaded from
+        disk but never (re)activated in this runtime process (e.g. right after a
+        backend restart) has ``get_org_state() is None``; the strict table has
+        no ``None``/``CREATED`` -> ``STOPPED`` edge, so the old code raised
+        ``IllegalOrgTransition`` ("cannot create-and-transition new org to
+        'STOPPED'") and the stop button failed -- leaving the running command
+        uncancellable. Stopping must ALWAYS be able to cancel in-flight work and
+        land a terminal state; only an already-``DELETED`` org (terminal, gone)
+        is refused. The drain callback runs first and unconditionally, so a
+        running command is cancelled even when the state map is empty.
+        """
 
         if self._on_stop_org is not None:
             try:
@@ -174,10 +187,19 @@ class OrgLifecycleManager:
                 _LOGGER.exception("on_stop_org callback raised (org=%s)", org_id)
         async with self._lock:
             current = self._state.get_org_state(org_id)
-            self._check_transition(current, STATE_STOPPED)
-            ok = await self._state.transition_org_state(org_id, STATE_STOPPED, reason=reason)
+            if current == STATE_DELETED:
+                return False  # terminal / gone -- nothing to stop
+            already_stopped = current == STATE_STOPPED
+            ok = (
+                True
+                if already_stopped
+                else await self._state.transition_org_state(
+                    org_id, STATE_STOPPED, reason=reason
+                )
+            )
             self._recently_stopped[org_id] = time()
-        if ok:
+        # Emit only on a real transition so an idempotent double-stop stays quiet.
+        if ok and not already_stopped:
             await self._emit_lifecycle("org_stopped", org_id, reason=reason)
         return ok
 
