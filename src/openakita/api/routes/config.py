@@ -2317,6 +2317,7 @@ async def security_confirm(body: SecurityConfirmRequest):
     """
     decision = body.normalized_decision()
     logger.info(f"[Security] Confirmation received: {body.confirm_id} -> {decision}")
+    found = False
     try:
         from openakita.core.policy_v2 import apply_resolution
 
@@ -2325,7 +2326,17 @@ async def security_confirm(body: SecurityConfirmRequest):
             logger.warning(f"[Security] No pending confirm found for id={body.confirm_id}")
     except Exception as e:
         logger.warning(f"[Security] Failed to resolve confirmation: {e}")
-    return {"status": "ok", "confirm_id": body.confirm_id, "decision": decision}
+    # ``resolved`` tells the caller whether the confirm_id actually matched a
+    # pending item. It stays ``200 ok`` for backward compatibility (front-end
+    # success-path parsing is unchanged), but a ``resolved: false`` now lets the
+    # UI surface "this confirmation has expired / was already handled" instead
+    # of silently pretending the decision was applied.
+    return {
+        "status": "ok",
+        "confirm_id": body.confirm_id,
+        "decision": decision,
+        "resolved": bool(found),
+    }
 
 
 @router.post("/api/chat/security-confirm/batch")
