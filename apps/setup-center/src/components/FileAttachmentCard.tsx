@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { saveAttachment, showInFolder, openFileWithDefault, IS_TAURI } from "../platform";
 import { getFileTypeIcon } from "../icons";
 import { safeFetch } from "../providers";
@@ -204,7 +205,14 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
     </div>
   );
 
-  const docPreviewModal = docPreviewOpen && (
+  // test17 item 2: render the preview to a body-level portal. A plain
+  // ``position: fixed`` element is clipped to the nearest ancestor that
+  // establishes a containing block (any ``transform``/``filter``/``will-change``
+  // on the blackboard drawer or side panel), which is exactly why the preview
+  // used to be trapped inside the sidebar width. Portaling to ``document.body``
+  // makes it a true full-viewport overlay everywhere (command center / blackboard
+  // / projects) with identical behaviour.
+  const docPreviewModal = docPreviewOpen && createPortal(
     <div
       onClick={() => setDocPreviewOpen(false)}
       style={{
@@ -286,7 +294,8 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 
   if (useMediaTile) {
@@ -361,7 +370,7 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
           </div>
         </div>
         {contextMenu}
-        {previewOpen && (
+        {previewOpen && createPortal(
           <div
             onClick={() => setPreviewOpen(false)}
             style={{
@@ -387,7 +396,8 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
                 onClick={e => e.stopPropagation()}
               />
             )}
-          </div>
+          </div>,
+          document.body,
         )}
       </>
     );
