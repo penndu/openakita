@@ -1,10 +1,23 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { saveAttachment, showInFolder, openFileWithDefault, IS_TAURI } from "../platform";
-import { getFileTypeIcon } from "../icons";
+import { getAccessToken } from "../platform/auth";
+import { getFileTypeIcon, IconDownload } from "../icons";
 import { safeFetch } from "../providers";
 import { useMdModules } from "../views/chat/hooks/useMdModules";
 import { MarkdownContent } from "../views/chat/components/MarkdownContent";
+
+// When the app runs in web/online mode the backend requires auth. A plain
+// <img>/<video>/<iframe> ``src`` cannot send the Authorization header, so the
+// request 401s and the media (notably PDF) renders blank. The auth middleware
+// explicitly accepts a ``?token=`` query param "for tags that can't set
+// headers" -- append it so media tiles and the PDF fallback load. Returns the
+// url unchanged in local Tauri mode (getAccessToken() is null there).
+function withAuthToken(url: string): string {
+  const token = getAccessToken();
+  if (!token) return url;
+  return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+}
 
 export interface FileAttachment {
   filename: string;
@@ -77,17 +90,41 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
   // PDFs need an inline Content-Disposition to render inside an <iframe>;
   // the default (attachment) would trigger a download instead of a preview.
   const inlineUrl = useMemo(() => `${mediaUrl}&inline=1`, [mediaUrl]);
+  // Authed url for <img>/<video> tags (they can't send the bearer header).
+  const authedMediaUrl = useMemo(() => withAuthToken(mediaUrl), [mediaUrl]);
 
   // Doc (md/pdf/text) preview modal state.
   const [docPreviewOpen, setDocPreviewOpen] = useState(false);
   const [docText, setDocText] = useState<string | null>(null);
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
+  // PDF is rendered from an AUTHED blob object URL rather than a bare iframe
+  // src. In online mode the iframe src cannot carry the bearer token, so the
+  // request 401s and the viewer is blank (test18 图1). Fetching via safeFetch
+  // (authenticated) and handing the iframe a ``blob:`` URL renders reliably --
+  // the same self-contained approach the media-strategy plugin uses.
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
 
   const openDocPreview = useCallback(async () => {
     if (!docKind) return;
     setDocPreviewOpen(true);
-    if (docKind === "pdf") return; // rendered via <iframe>, no fetch needed
+    if (docKind === "pdf") {
+      if (pdfBlobUrl) return; // already loaded
+      setDocLoading(true);
+      setDocError(null);
+      try {
+        const res = await safeFetch(inlineUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const pdfBlob = blob.type === "application/pdf" ? blob : new Blob([blob], { type: "application/pdf" });
+        setPdfBlobUrl(URL.createObjectURL(pdfBlob));
+      } catch (e) {
+        setDocError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setDocLoading(false);
+      }
+      return;
+    }
     if (docText !== null) return; // already loaded
     setDocLoading(true);
     setDocError(null);
@@ -100,7 +137,17 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
     } finally {
       setDocLoading(false);
     }
-  }, [docKind, docText, mediaUrl]);
+  }, [docKind, docText, mediaUrl, inlineUrl, pdfBlobUrl]);
+
+  // Revoke the blob URL when the preview closes / the component unmounts so we
+  // don't leak object URLs across repeated previews.
+  useEffect(() => {
+    if (!docPreviewOpen && pdfBlobUrl) {
+      URL.revokeObjectURL(pdfBlobUrl);
+      setPdfBlobUrl(null);
+    }
+  }, [docPreviewOpen, pdfBlobUrl]);
+  useEffect(() => () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); }, [pdfBlobUrl]);
 
   const handleDownload = useCallback(async () => {
     try {
@@ -253,9 +300,7 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
               color: "#0891b2", borderRadius: 5, padding: "4px 8px", cursor: "pointer", fontSize: 12,
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
+            <IconDownload size={12} />
             下载
           </button>
           <button
@@ -269,13 +314,29 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
             }}
           >×</button>
         </div>
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto", background: docKind === "pdf" ? "#525659" : "var(--bg-card, #111827)" }}>
+        <div style={{
+          flex: 1, minHeight: 0, overflow: "auto",
+          // Follow the app theme instead of a hard-coded dark surface. The old
+          // ``var(--bg-card, #111827)`` used an UNDEFINED variable, so it always
+          // fell back to near-black; on the light theme the (dark) --text was
+          // then invisible against it (test18 图2). --panel2 is defined in every
+          // theme and always contrasts with --text.
+          background: docKind === "pdf" ? "#525659" : "var(--panel2)",
+        }}>
           {docKind === "pdf" ? (
-            <iframe
-              src={inlineUrl}
-              title={file.filename}
-              style={{ width: "100%", height: "100%", border: "none" }}
-            />
+            docLoading ? (
+              <div style={{ padding: 24, color: "#e5e7eb", fontSize: 13 }}>正在加载 PDF 预览…</div>
+            ) : docError ? (
+              <div style={{ padding: 24, color: "#fbbf24", fontSize: 13 }}>
+                PDF 预览加载失败（{docError}）。你可以改为下载后查看。
+              </div>
+            ) : pdfBlobUrl ? (
+              <iframe
+                src={pdfBlobUrl}
+                title={file.filename}
+                style={{ width: "100%", height: "100%", border: "none" }}
+              />
+            ) : null
           ) : docLoading ? (
             <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>正在加载预览…</div>
           ) : docError ? (
@@ -283,7 +344,7 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
               预览加载失败（{docError}）。你可以改为下载后查看。
             </div>
           ) : docKind === "markdown" ? (
-            <div className="bb-entry-content" style={{ padding: "16px 20px", fontSize: 14, color: "var(--text)" }}>
+            <div className="chatMdContent file-preview-md" style={{ padding: "18px 22px", fontSize: 14, color: "var(--text)" }}>
               <MarkdownContent content={docText || ""} mdModules={mdModules} />
             </div>
           ) : (
@@ -316,7 +377,7 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
         >
           {mediaKind === "image" ? (
             <img
-              src={mediaUrl}
+              src={authedMediaUrl}
               alt={file.filename}
               loading="lazy"
               onError={() => setMediaError(true)}
@@ -330,7 +391,7 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
             />
           ) : (
             <video
-              src={mediaUrl}
+              src={authedMediaUrl}
               controls
               preload="metadata"
               onError={() => setMediaError(true)}
@@ -363,9 +424,7 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
                 color: "#0891b2", padding: 0, lineHeight: 1, flexShrink: 0,
               }}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
+              <IconDownload size={12} />
             </button>
           </div>
         </div>
@@ -382,14 +441,14 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
           >
             {mediaKind === "image" ? (
               <img
-                src={mediaUrl}
+                src={authedMediaUrl}
                 alt={file.filename}
                 style={{ maxWidth: "95vw", maxHeight: "95vh", borderRadius: 4 }}
                 onClick={e => e.stopPropagation()}
               />
             ) : (
               <video
-                src={mediaUrl}
+                src={authedMediaUrl}
                 controls
                 autoPlay
                 style={{ maxWidth: "95vw", maxHeight: "95vh", borderRadius: 4 }}
@@ -443,9 +502,9 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
             </svg>
           ) : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "#0891b2" }}>
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
+            <span style={{ flexShrink: 0, color: "#0891b2", display: "inline-flex" }}>
+              <IconDownload size={14} />
+            </span>
           )}
         </button>
         {docKind && (
@@ -461,9 +520,7 @@ export function FileAttachmentCard({ file, apiBaseUrl, inline = false }: FileAtt
               color: "#0891b2",
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
+            <IconDownload size={14} />
           </button>
         )}
       </div>

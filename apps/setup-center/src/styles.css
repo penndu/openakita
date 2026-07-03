@@ -1513,6 +1513,32 @@ button.btnApplyRestart:hover {
   font-weight: 700;
 }
 
+/* test18: GFM task lists (``- [ ]`` / ``- [x]``) render as a disabled
+   checkbox inside a list item. Without this the native bullet + checkbox on a
+   dark surface read as a "red X" and the marker doubled up. Hide the list
+   marker for task items, align the checkbox, and tint it with the brand accent
+   so checked items look like a proper tick that follows the theme. */
+.chatMdContent ul.contains-task-list,
+.file-preview-md ul.contains-task-list {
+  list-style: none;
+  padding-left: 4px;
+}
+.chatMdContent li.task-list-item,
+.file-preview-md li.task-list-item {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.chatMdContent li.task-list-item input[type="checkbox"],
+.file-preview-md li.task-list-item input[type="checkbox"] {
+  margin-top: 3px;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--brand, #6366f1);
+  flex-shrink: 0;
+}
+
 /* User bubble overrides — white text on brand background */
 .chatMdContentUser {
   color: #fff;
