@@ -23,6 +23,7 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -32,6 +33,8 @@ from typing import Any
 from ..api.routes.websocket import broadcast_event
 from ..config import settings
 from ..llm.converters.tools import PARSE_ERROR_KEY
+from ..tools.tool_hints import ConfigHint
+from ..tools.tool_result import split_tool_result_payload
 from ..tracing.tracer import get_tracer
 from ._context_manager_legacy import ContextManager
 from ._context_manager_legacy import _CancelledError as _CtxCancelledError
@@ -58,6 +61,8 @@ from .response_handler import (
     strip_internal_trace_markers,
     strip_thinking_tags,
 )
+from .risk_gate_tools import execute_after_riskgate_tool_prompt, prepare_riskgate_tool_prompt
+from .security_confirm_channel import ALLOW_SECURITY_CONFIRM_DECISIONS, register_policy_confirm
 
 # 不产出"最终交付物"的管理类工具集合 —— 用于：
 #   1) ``tools_executed_in_task`` 标记（仅这些工具被调用 → 视为本轮无实质执行）
@@ -101,13 +106,48 @@ _PER_TOOL_NAME_TASK_LIMITS: dict[str, int] = {
 }
 
 
-from ..tools.tool_hints import ConfigHint
 from ._tool_executor_legacy import ToolExecutor
 from .token_tracking import TokenTrackingContext, reset_tracking_context, set_tracking_context
 
 logger = logging.getLogger(__name__)
 
 _SSE_RESULT_PREVIEW_CHARS = 32000
+_TOOL_RESULT_ERROR_PREFIXES = (
+    "❌",
+    "⚠️ 工具执行错误",
+    "错误类型:",
+)
+
+
+def _unpack_tool_result_payload(value: Any) -> tuple[str, ConfigHint | None, dict[str, Any]]:
+    raw_payload, hint = value
+    content, metadata = split_tool_result_payload(raw_payload)
+    text = "" if content is None else str(content)
+    return text, hint, metadata
+
+
+def _make_tool_result_msg(
+    *,
+    tool_use_id: str,
+    content: str,
+    tool_name: str,
+    is_error: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    msg: dict[str, Any] = {
+        "type": "tool_result",
+        "tool_use_id": tool_use_id,
+        "content": content,
+        "is_error": is_error,
+        "tool_name": tool_name,
+    }
+    if metadata:
+        msg["metadata"] = dict(metadata)
+    return msg
+
+
+def _tool_result_looks_error(result_text: Any) -> bool:
+    return str(result_text or "").lstrip().startswith(_TOOL_RESULT_ERROR_PREFIXES)
 
 
 def _unpack_tool_result(value: Any) -> tuple[str, ConfigHint | None]:
@@ -120,10 +160,8 @@ def _unpack_tool_result(value: Any) -> tuple[str, ConfigHint | None]:
     Centralizing the unwrap keeps the 5+ tool-call sites in this file short
     and consistent.
     """
-    if isinstance(value, tuple) and len(value) == 2:
-        text, hint = value
-        return ("" if text is None else str(text)), hint
-    return ("" if value is None else str(value)), None
+    text, hint, _metadata = _unpack_tool_result_payload(value)
+    return text, hint
 
 
 def _build_tool_end_events(
@@ -176,6 +214,107 @@ def _build_tool_end_events(
             }
         )
     return events
+
+
+@dataclass(slots=True)
+class _OpenRiskGateToolConfirmation:
+    prompt_event: dict[str, Any]
+    confirmation_id: str
+    timeout_seconds: float
+    tool_name: str
+    tool_input: dict[str, Any]
+    session_id: str
+    tool_id: str
+
+
+@dataclass(slots=True)
+class _RiskGateToolConfirmationResult:
+    result_text: str
+    hint: ConfigHint | None
+    is_error: bool
+    result_summary: str
+    end_events: list[dict[str, Any]]
+    tool_result: dict[str, Any]
+
+
+def _open_riskgate_tool_confirmation(
+    *,
+    conversation_id: str | None,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    policy_result: Any,
+    tool_id: str,
+    timeout_seconds: float,
+    channel: str,
+    delegate_chain: list[str],
+    root_user_id: str | None,
+) -> _OpenRiskGateToolConfirmation:
+    session_id = conversation_id or ""
+    prompt = prepare_riskgate_tool_prompt(
+        conversation_id=session_id,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        policy_result=policy_result,
+        request_id=tool_id,
+        timeout_seconds=timeout_seconds,
+        channel=channel,
+        delegate_chain=delegate_chain,
+        root_user_id=root_user_id,
+    )
+    return _OpenRiskGateToolConfirmation(
+        prompt_event=prompt.event,
+        confirmation_id=prompt.pending.confirmation_id,
+        timeout_seconds=timeout_seconds,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        session_id=session_id,
+        tool_id=tool_id,
+    )
+
+
+async def _execute_riskgate_tool_confirmation(
+    executor: Any,
+    *,
+    confirmation: _OpenRiskGateToolConfirmation,
+    detect_result_errors: bool,
+    summarize_tool_result: Callable[[str, str], str | None],
+) -> _RiskGateToolConfirmationResult:
+    outcome = await execute_after_riskgate_tool_prompt(
+        executor,
+        confirmation_id=confirmation.confirmation_id,
+        timeout_seconds=confirmation.timeout_seconds,
+        tool_name=confirmation.tool_name,
+        tool_input=confirmation.tool_input,
+        session_id=confirmation.session_id,
+        detect_result_errors=detect_result_errors,
+        unpack_tool_result=_unpack_tool_result_payload,
+        tool_result_looks_error=_tool_result_looks_error,
+    )
+    result_summary = summarize_tool_result(confirmation.tool_name, outcome.result_text) or ""
+    end_events = _build_tool_end_events(
+        tool_name=confirmation.tool_name,
+        tool_id=confirmation.tool_id,
+        result_text=outcome.result_text,
+        hint=outcome.hint,
+        is_error=outcome.is_error,
+        result_summary=result_summary,
+    )
+    return _RiskGateToolConfirmationResult(
+        result_text=outcome.result_text,
+        hint=outcome.hint,
+        is_error=outcome.is_error,
+        result_summary=result_summary,
+        end_events=end_events,
+        tool_result={
+            **_make_tool_result_msg(
+                tool_use_id=confirmation.tool_id,
+                content=outcome.result_text,
+                is_error=outcome.is_error,
+                tool_name=confirmation.tool_name,
+                metadata=outcome.metadata,
+            ),
+        },
+    )
 
 
 _CACHEABLE_READONLY_TOOLS = frozenset({"web_fetch", "web_search", "news_search"})
@@ -4362,57 +4501,63 @@ class ReasoningEngine:
                                     # Don't call cleanup on the leader from
                                     # follower path — leader's caller owns it.
                                 else:
-                                    _bus.store_pending(
-                                        t_id,
-                                        t_name,
-                                        t_args if isinstance(t_args, dict) else {},
-                                        session_id=conversation_id or "",
-                                        needs_sandbox=_needs_sb,
+                                    if _pr.metadata.get("riskgate_required"):
+                                        _tool_args_dict = t_args if isinstance(t_args, dict) else {}
+                                        _risk_confirmation = _open_riskgate_tool_confirmation(
+                                            conversation_id=conversation_id,
+                                            tool_name=t_name,
+                                            tool_input=_tool_args_dict,
+                                            policy_result=_pr,
+                                            tool_id=t_id,
+                                            timeout_seconds=_confirm_timeout,
+                                            channel="im" if _is_im else "desktop",
+                                            delegate_chain=_delegate_chain,
+                                            root_user_id=_root_user_id,
+                                        )
+                                        yield _risk_confirmation.prompt_event
+                                        _risk_result = await _execute_riskgate_tool_confirmation(
+                                            self._tool_executor,
+                                            confirmation=_risk_confirmation,
+                                            detect_result_errors=False,
+                                            summarize_tool_result=self._summarize_tool_result,
+                                        )
+                                        for _evt in _risk_result.end_events:
+                                            yield _evt
+                                        if _risk_result.result_summary:
+                                            yield {
+                                                "type": "chain_text",
+                                                "content": _risk_result.result_summary,
+                                            }
+                                        tool_results_for_msg.append(_risk_result.tool_result)
+                                        _security_confirm_interrupted_ask = True
+                                        break
+                                    _confirm_event = register_policy_confirm(
+                                        confirm_id=t_id,
+                                        conversation_id=conversation_id or "",
+                                        tool_name=t_name,
+                                        tool_args=t_args if isinstance(t_args, dict) else {},
+                                        reason=_pr.reason,
+                                        risk_level=str(_risk),
+                                        needs_sandbox=bool(_needs_sb),
+                                        timeout_seconds=_v2_conf.timeout_seconds,
+                                        default_on_timeout=_v2_conf.default_on_timeout,
+                                        channel="im" if _is_im else "desktop",
+                                        approval_class=_approval_class,
+                                        policy_version=2,
+                                        decision_chain=_pr.to_ui_chain(),
+                                        delegate_chain=_delegate_chain,
+                                        root_user_id=_root_user_id,
+                                        policy_metadata=dict(_pr.metadata or {}),
                                         dedup_key=_dedup_key or None,
                                     )
-                                    _bus.prepare(t_id)
-                                    yield {
-                                        "type": "security_confirm",
-                                        "tool": t_name,
-                                        "args": t_args if isinstance(t_args, dict) else {},
-                                        "id": t_id,
-                                        "reason": _pr.reason,
-                                        "risk_level": _risk,
-                                        "needs_sandbox": _needs_sb,
-                                        "timeout_seconds": _v2_conf.timeout_seconds,
-                                        "default_on_timeout": _v2_conf.default_on_timeout,
-                                        "channel": "im" if _is_im else "desktop",
-                                        "approval_class": _approval_class,
-                                        "policy_version": 2,
-                                        "delegate_chain": _delegate_chain,
-                                        "root_user_id": _root_user_id,
-                                        # C23 P2-2: ship decision_chain so the modal can
-                                        # render "决策依据" — plan C9 requirement that
-                                        # was deferred. Empty list when chain is empty.
-                                        "decision_chain": _pr.to_ui_chain(),
-                                        "options": [
-                                            "allow_once",
-                                            "allow_session",
-                                            "allow_always",
-                                            "deny",
-                                        ]
-                                        + (["sandbox"] if _needs_sb else []),
-                                    }
-                                    # IM 用户响应延迟更高：卡片走 IM 通道 + 用户切回看消息往往
-                                    # >60s。给 IM 多 4 倍时长（最少 180s 兜底），桌面端沿用配置。
+                                    yield _confirm_event
                                     _decision = await _bus.wait_for_resolution(
                                         t_id,
                                         _confirm_timeout,
                                     )
                                     _bus.cleanup(t_id)
                                 _hint: ConfigHint | None = None
-                                if _decision in (
-                                    "allow",
-                                    "allow_once",
-                                    "allow_session",
-                                    "allow_always",
-                                    "sandbox",
-                                ):
+                                if _decision in ALLOW_SECURITY_CONFIRM_DECISIONS:
                                     try:
                                         # C8b-6a: pass v2 PolicyDecisionV2 directly;
                                         # ``execute_tool_with_policy`` only reads ``.metadata``
@@ -4881,53 +5026,71 @@ class ReasoningEngine:
                                 finally:
                                     _bus.deregister_follower(_leader_id)
                             else:
-                                _bus.store_pending(
-                                    tool_id,
-                                    tool_name,
-                                    _tool_args_dict,
-                                    session_id=conversation_id or "",
-                                    needs_sandbox=_needs_sb,
+                                if _pr.metadata.get("riskgate_required"):
+                                    _risk_confirmation = _open_riskgate_tool_confirmation(
+                                        conversation_id=conversation_id,
+                                        tool_name=tool_name,
+                                        tool_input=_tool_args_dict,
+                                        policy_result=_pr,
+                                        tool_id=tool_id,
+                                        timeout_seconds=_confirm_timeout,
+                                        channel="im" if _is_im else "desktop",
+                                        delegate_chain=_delegate_chain,
+                                        root_user_id=_root_user_id,
+                                    )
+                                    yield _risk_confirmation.prompt_event
+                                    _risk_result = await _execute_riskgate_tool_confirmation(
+                                        self._tool_executor,
+                                        confirmation=_risk_confirmation,
+                                        detect_result_errors=False,
+                                        summarize_tool_result=self._summarize_tool_result,
+                                    )
+                                    for _evt in _risk_result.end_events:
+                                        yield _evt
+                                    if _risk_result.result_summary:
+                                        yield {
+                                            "type": "chain_text",
+                                            "content": _risk_result.result_summary,
+                                        }
+                                    result_text = _risk_result.result_text
+                                    _confirm_hint = _risk_result.hint
+                                    _confirm_is_error = _risk_result.is_error
+                                    for _evt in _build_tool_end_events(
+                                        tool_name=tool_name,
+                                        tool_id=tool_id,
+                                        result_text=result_text,
+                                        hint=_confirm_hint,
+                                        is_error=_confirm_is_error,
+                                        result_summary=_risk_result.result_summary,
+                                    ):
+                                        yield _evt
+                                    continue
+                                _confirm_event = register_policy_confirm(
+                                    confirm_id=tool_id,
+                                    conversation_id=conversation_id or "",
+                                    tool_name=tool_name,
+                                    tool_args=_tool_args_dict,
+                                    reason=_pr.reason,
+                                    risk_level=str(_risk),
+                                    needs_sandbox=bool(_needs_sb),
+                                    timeout_seconds=_v2_conf.timeout_seconds,
+                                    default_on_timeout=_v2_conf.default_on_timeout,
+                                    channel="im" if _is_im else "desktop",
+                                    approval_class=_approval_class,
+                                    policy_version=2,
+                                    decision_chain=_pr.to_ui_chain(),
+                                    delegate_chain=_delegate_chain,
+                                    root_user_id=_root_user_id,
+                                    policy_metadata=dict(_pr.metadata or {}),
                                     dedup_key=_dedup_key or None,
                                 )
-                                _bus.prepare(tool_id)
-                                yield {
-                                    "type": "security_confirm",
-                                    "tool": tool_name,
-                                    "args": _tool_args_dict,
-                                    "id": tool_id,
-                                    "reason": _pr.reason,
-                                    "risk_level": _risk,
-                                    "needs_sandbox": _needs_sb,
-                                    "timeout_seconds": _v2_conf.timeout_seconds,
-                                    "default_on_timeout": _v2_conf.default_on_timeout,
-                                    "channel": "im" if _is_im else "desktop",
-                                    "approval_class": _approval_class,
-                                    "policy_version": 2,
-                                    "delegate_chain": _delegate_chain,
-                                    "root_user_id": _root_user_id,
-                                    # C23 P2-2: ship decision_chain (see other call site
-                                    # above for rationale).
-                                    "decision_chain": _pr.to_ui_chain(),
-                                    "options": [
-                                        "allow_once",
-                                        "allow_session",
-                                        "allow_always",
-                                        "deny",
-                                    ]
-                                    + (["sandbox"] if _needs_sb else []),
-                                }
+                                yield _confirm_event
                                 _decision = await _bus.wait_for_resolution(
                                     tool_id,
                                     _confirm_timeout,
                                 )
                                 _bus.cleanup(tool_id)
-                            _confirmed_allowed = _decision in (
-                                "allow",
-                                "allow_once",
-                                "allow_session",
-                                "allow_always",
-                                "sandbox",
-                            )
+                            _confirmed_allowed = _decision in ALLOW_SECURITY_CONFIRM_DECISIONS
                             _confirm_hint: ConfigHint | None = None
                             if _confirmed_allowed:
                                 try:

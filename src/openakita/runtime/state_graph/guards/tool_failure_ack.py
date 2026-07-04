@@ -151,11 +151,9 @@ def successful_tool_names(
     tool_results: list[dict] | None,
 ) -> set[str]:
     """Filter executed tool names down to those whose latest result is not an error."""
-    if not executed_tool_names:
-        return set()
+    executed = set(executed_tool_names or [])
     if not tool_results:
-        return set(executed_tool_names)
-    executed = set(executed_tool_names)
+        return executed
     seen: set[str] = set()
     succeeded: set[str] = set()
     for tr in tool_results:
@@ -164,6 +162,7 @@ def successful_tool_names(
         tn = tr.get("tool_name") or tr.get("name") or ""
         if not tn:
             continue
+        executed.add(tn)
         seen.add(tn)
         if not tr.get("is_error"):
             succeeded.add(tn)

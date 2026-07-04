@@ -16,6 +16,7 @@ Validator types:
 * :class:`PlanValidator` — every step in the active Plan resolved.
 * :class:`ArtifactValidator` — :func:`deliver_artifacts` receipts succeeded.
 * :class:`ToolSuccessValidator` — majority of tool calls did not error.
+* :class:`MutationEffectValidator` — structured mutation effects in tool receipts.
 * :class:`FileValidator` — disk-level existence/size sanity checks.
 * :class:`CompletePlanValidator` — :func:`complete_todo` was actually called.
 * :class:`OrgDelegationValidator` — coordinator nodes whose definition of done
@@ -37,6 +38,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+
+from ..tools.tool_result import successful_tool_effects
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +290,37 @@ class ToolSuccessValidator(BaseValidator):
         )
 
 
+class MutationEffectValidator(BaseValidator):
+    """Verify mutation tools from structured successful effects."""
+
+    @property
+    def name(self) -> str:
+        return "MutationEffectValidator"
+
+    def validate(self, context: ValidationContext) -> ValidatorOutput:
+        for effect in successful_tool_effects(context.tool_results):
+            action = str(effect.get("action") or "")
+            if action in {"delete", "write", "create", "update", "move"}:
+                return ValidatorOutput(
+                    name=self.name,
+                    result=ValidationResult.PASS,
+                    reason=f"tool returned a successful {action} effect",
+                )
+
+        if not successful_tool_effects(context.tool_results):
+            return ValidatorOutput(
+                name=self.name,
+                result=ValidationResult.SKIP,
+                reason="No structured mutation effect",
+            )
+
+        return ValidatorOutput(
+            name=self.name,
+            result=ValidationResult.SKIP,
+            reason="No successful mutation effect",
+        )
+
+
 class CompletePlanValidator(BaseValidator):
     """验证 complete_todo 工具是否被调用"""
 
@@ -478,6 +512,7 @@ _DEFAULT_VALIDATORS: list[BaseValidator] = [
     PlanValidator(),
     ArtifactValidator(),
     ToolSuccessValidator(),
+    MutationEffectValidator(),
     FileValidator(),
     CompletePlanValidator(),
     OrgDelegationValidator(),

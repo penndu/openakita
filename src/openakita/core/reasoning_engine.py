@@ -28,10 +28,16 @@ from openakita.core.cancel_cleanup import (  # noqa: E402
     DEFAULT_TTL_SECONDS,
     RESUME_HINT_FRESHNESS_SECONDS,
 )
+from openakita.core._reasoning_engine_legacy import (  # noqa: E402
+    _execute_riskgate_tool_confirmation,
+    _open_riskgate_tool_confirmation,
+)
 
 __all__ = [
     "ReasoningEngine",
     "settings",
     "DEFAULT_TTL_SECONDS",
     "RESUME_HINT_FRESHNESS_SECONDS",
+    "_execute_riskgate_tool_confirmation",
+    "_open_riskgate_tool_confirmation",
 ]

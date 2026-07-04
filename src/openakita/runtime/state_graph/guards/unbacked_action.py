@@ -38,11 +38,46 @@ from ._verb_tool_map import CLAIMED_TOOL_TO_FRAGMENTS, VERB_TO_TOOL_FRAGMENTS
 from .recap_context import RECAP_NEAR_RE, is_recap_context
 from .tool_failure_ack import successful_tool_names
 
+from ....tools.tool_result import successful_tool_effect_actions
+
 __all__ = [
     "action_claim_re",
+    "claimed_tool_names",
     "extract_unbacked_verbs",
     "guard_unbacked_action_claim",
 ]
+
+# Verb claims are backed by structured ``metadata.effects`` / ``receipts`` action
+# fields when present (main-line PR #694), falling back to tool-name fragments.
+VERB_TO_EFFECT_ACTIONS: dict[str, tuple[str, ...]] = {
+    "删除": ("delete",),
+    "删掉": ("delete",),
+    "清空": ("delete",),
+    "编辑": ("update",),
+    "修改": ("update",),
+    "覆盖": ("write", "update"),
+    "写入": ("write",),
+    "保存": ("write", "create", "update"),
+    "保存到记忆": ("write", "create", "update"),
+    "记住": ("write", "create", "update"),
+    "记录": ("write", "create", "update"),
+    "存入": ("write", "create", "update"),
+    "创建": ("create", "write"),
+    "添加": ("create", "write", "update"),
+    "安排": ("schedule", "create"),
+    "移动": ("move",),
+    "移至": ("move",),
+    "重命名": ("move",),
+    "复制": ("copy", "write"),
+    "发送": ("send", "deliver"),
+    "调度": ("schedule",),
+    "提醒": ("schedule",),
+    "安装": ("install",),
+    "卸载": ("uninstall", "delete"),
+    "读取": ("read",),
+}
+
+_TOOL_LIKE_IDENTIFIER = r"\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b"
 
 
 def action_claim_re() -> re.Pattern[str]:
@@ -76,50 +111,92 @@ def action_claim_re() -> re.Pattern[str]:
     return pat
 
 
+def claimed_tool_names(text: str) -> list[str]:
+    """Extract tool-like names from visible claims that a tool ran."""
+    if not text:
+        return []
+    patterns = (
+        re.compile(
+            rf"{_TOOL_LIKE_IDENTIFIER}.{{0,40}}"
+            r"(?:已调用|已执行|已验证|验证完成|实际调用|执行完成|✅)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:已通过|通过|验证|读取|检查|调用|执行).{0,40}"
+            rf"{_TOOL_LIKE_IDENTIFIER}",
+            re.IGNORECASE,
+        ),
+    )
+    names: list[str] = []
+    for pat in patterns:
+        for match in pat.finditer(text):
+            name = str(match.group(1) or "").lower()
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
 def extract_unbacked_verbs(
     text: str,
     successful_tools: set[str],
+    successful_actions: set[str] | None = None,
+    tool_results: list[dict] | None = None,
 ) -> list[str]:
     """Return action verbs whose claim is not backed by any successful tool call."""
-    import re as _re
-
-    prefix_pat = _re.compile(r"(?:已[经]?|成功|顺利|我已经|我已)(?:帮你?|为你|给你)?")
+    prefix_pat = re.compile(r"(?:已[经]?|成功|顺利|我已经|我已)(?:帮你?|为你|给你)?")
+    effect_actions = set(successful_actions or successful_tool_effect_actions(tool_results))
     unbacked: list[str] = []
 
-    for tool_name, fragments in CLAIMED_TOOL_TO_FRAGMENTS.items():
-        # Detect the issue #424 shape: the model writes a Markdown table saying
-        # "write_file/read_file 已调用" even though no matching tool receipt exists.
-        tool_claim_pat = _re.compile(
-            rf"{_re.escape(tool_name)}.{{0,40}}"
-            r"(?:已调用|已执行|已验证|验证完成|实际调用|执行完成|✅)",
-            _re.IGNORECASE,
-        )
-        reverse_claim_pat = _re.compile(
-            r"(?:已通过|通过|验证|读取|检查|调用|执行).{0,40}"
-            rf"{_re.escape(tool_name)}",
-            _re.IGNORECASE,
-        )
-        if not (tool_claim_pat.search(text) or reverse_claim_pat.search(text)):
+    for tool_name in claimed_tool_names(text):
+        if tool_name in {t.lower() for t in successful_tools}:
             continue
-        if any(any(frag in t for frag in fragments) for t in successful_tools):
-            continue
-        # 历史回溯放行：模型在复述/汇总以前真正发生过的工具调用时
-        # 不应被当成幻觉。
         if is_recap_context(text, tool_name):
             continue
         unbacked.append(f"{tool_name}调用")
 
-    for verb, fragments in VERB_TO_TOOL_FRAGMENTS.items():
-        # Must appear right after an action-claim prefix to count as a real claim
-        # (avoids matching plain narrative like "我会创建..." or "需要修改...").
-        verb_pat = _re.compile(rf"{prefix_pat.pattern}{_re.escape(verb)}")
+    for verb, actions in VERB_TO_EFFECT_ACTIONS.items():
+        verb_pat = re.compile(rf"{prefix_pat.pattern}{re.escape(verb)}")
         if not verb_pat.search(text):
             continue
-        if any(any(frag in t for frag in fragments) for t in successful_tools):
+        if set(actions) & effect_actions:
             continue
         if is_recap_context(text, verb):
             continue
         unbacked.append(verb)
+
+    # Legacy tool-name fragment fallback when no structured effects exist.
+    if not effect_actions:
+        for tool_name, fragments in CLAIMED_TOOL_TO_FRAGMENTS.items():
+            tool_claim_pat = re.compile(
+                rf"{re.escape(tool_name)}.{{0,40}}"
+                r"(?:已调用|已执行|已验证|验证完成|实际调用|执行完成|✅)",
+                re.IGNORECASE,
+            )
+            reverse_claim_pat = re.compile(
+                r"(?:已通过|通过|验证|读取|检查|调用|执行).{0,40}"
+                rf"{re.escape(tool_name)}",
+                re.IGNORECASE,
+            )
+            if not (tool_claim_pat.search(text) or reverse_claim_pat.search(text)):
+                continue
+            if any(any(frag in t for frag in fragments) for t in successful_tools):
+                continue
+            if is_recap_context(text, tool_name):
+                continue
+            unbacked.append(f"{tool_name}调用")
+
+        for verb, fragments in VERB_TO_TOOL_FRAGMENTS.items():
+            if verb in unbacked:
+                continue
+            verb_pat = re.compile(rf"{prefix_pat.pattern}{re.escape(verb)}")
+            if not verb_pat.search(text):
+                continue
+            if any(any(frag in t for frag in fragments) for t in successful_tools):
+                continue
+            if is_recap_context(text, verb):
+                continue
+            unbacked.append(verb)
+
     return unbacked
 
 
@@ -142,13 +219,19 @@ def guard_unbacked_action_claim(
         return text
 
     successful_tools = successful_tool_names(executed_tool_names, tool_results)
+    successful_actions = successful_tool_effect_actions(tool_results)
 
-    if not executed_tool_names:
+    if not executed_tool_names and not successful_actions:
         # 整段回复是历史汇总（含时间戳/回溯副词且无新动作迹象）→ 守卫不应介入，
         # 否则用户问"复述一下你做了什么"会被替换成"没有凭证"。
         if RECAP_NEAR_RE.search(text):
             return text
-        unbacked = extract_unbacked_verbs(text, set())
+        unbacked = extract_unbacked_verbs(
+            text,
+            set(),
+            successful_actions=set(),
+            tool_results=tool_results,
+        )
         verbs_str = "/".join(unbacked[:3]) if unbacked else "外部动作"
         memory_hint = (
             "当前没有检测到长期记忆写入凭证，所以请勿据此认定已写入长期记忆。"
@@ -162,7 +245,12 @@ def guard_unbacked_action_claim(
             + memory_hint
         )
 
-    unbacked = extract_unbacked_verbs(text, successful_tools)
+    unbacked = extract_unbacked_verbs(
+        text,
+        successful_tools,
+        successful_actions=successful_actions,
+        tool_results=tool_results,
+    )
     if not unbacked:
         return text
 

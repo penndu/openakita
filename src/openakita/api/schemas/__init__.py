@@ -215,6 +215,20 @@ class ChatRequest(BaseModel):
     )
 
 
+class ChatAnswerRequest(BaseModel):
+    """Answer to an ask_user event."""
+
+    conversation_id: str | None = None
+    answer: str = ""
+    remember_for_session: bool = Field(
+        False,
+        description=(
+            "If true, persist the user's confirmation as an in-session trust grant "
+            "for the same operation kind (Fix-11)."
+        ),
+    )
+
+
 class ChatControlRequest(BaseModel):
     """Request body for chat control operations (cancel/skip/insert)."""
 
