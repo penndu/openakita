@@ -1391,6 +1391,20 @@ class ReasoningEngine:
             "exit_plan_mode",
         }
     )
+    _RECOVERABLE_RESUME_EXIT_REASONS = frozenset(
+        {
+            "budget_exceeded",
+            "budget_paused",
+            "loop_terminated",
+            "max_iterations",
+            "reason_error",
+            "run_error",
+            "stream_error",
+            "stream_incomplete",
+            "verify_incomplete",
+            "illegal_state",
+        }
+    )
 
     def __init__(
         self,
@@ -2037,6 +2051,7 @@ class ReasoningEngine:
         """
         captured_state_ref: dict[str, Any] = {"state": None}
         _scope_attach: dict[str, Any] = {"parent": None, "attached": False}
+        _run_error: BaseException | None = None
 
         def _on_state_resolved(st: Any) -> None:
             captured_state_ref["state"] = st
@@ -2086,8 +2101,24 @@ class ReasoningEngine:
                 tool_execution_context=tool_execution_context,
                 _on_state_resolved=_on_state_resolved,
             )
+        except BaseException as exc:
+            _run_error = exc
+            raise
         finally:
             st = captured_state_ref.get("state")
+            _exit_reason = getattr(self, "_last_exit_reason", "") or ""
+            if _run_error is not None and _exit_reason in ("", "normal"):
+                _exit_reason = "run_error"
+            self._maybe_persist_recoverable_exit_working_messages(
+                getattr(self, "_last_working_messages", []),
+                st,
+                getattr(st, "current_model", "")
+                or getattr(getattr(self, "_brain", None), "model", ""),
+                exit_reason=_exit_reason,
+                done_seen=True,
+                error_seen=_run_error is not None,
+                detail=(str(_run_error)[:500] if _run_error is not None else ""),
+            )
             if st is not None and not st.settled_event.is_set():
                 try:
                     st.mark_settled()
@@ -2108,7 +2139,7 @@ class ReasoningEngine:
                         st.abort_root.parent = None
 
             # Issue #608: clear stale resume snapshot on non-cancel exit (cancel
-            # exits keep the file the funnel just persisted). Mirrors the
+            # exits keep the file the persist helper just wrote). Mirrors the
             # reason_stream impl finally for the non-stream / IM path.
             self._maybe_clear_resume_state(conversation_id, is_sub_agent, st)
 
@@ -2196,7 +2227,7 @@ class ReasoningEngine:
             state.cancel_reason = ""
             state.cancel_event = asyncio.Event()
 
-        # Issue #608: tag the task so the cancel funnel can skip persisting a
+        # Issue #608: tag the task so resume persistence can skip writing a
         # resumable snapshot for delegated sub-agents (they share the parent
         # conversation_id and would otherwise clobber the parent's resume state).
         state.is_sub_agent = is_sub_agent
@@ -2304,6 +2335,7 @@ class ReasoningEngine:
                 current_model = str(current_info["model"])
         except Exception:
             pass
+        state.current_model = current_model
 
         # ForceToolCall 配置
         im_floor = max(0, int(getattr(settings, "force_tool_call_im_floor", 2)))
@@ -2517,6 +2549,7 @@ class ReasoningEngine:
                 )
                 if switch_result:
                     current_model, working_messages = switch_result
+                    state.current_model = current_model
                     no_tool_call_count = 0
                     tools_executed_in_task = False
                     _supervisor_intervened = False
@@ -2724,6 +2757,7 @@ class ReasoningEngine:
                     continue
                 elif isinstance(retry_result, tuple):
                     current_model, working_messages = retry_result
+                    state.current_model = current_model
                     await _emit_progress("当前模型不可用，正在切换到备用模型...")
                     no_tool_call_count = 0
                     tools_executed_in_task = False
@@ -4032,6 +4066,9 @@ class ReasoningEngine:
         captured_state_ref: dict[str, Any] = {"state": None}
         # v1.28 S3: track sub-agent AbortScope attachment for cleanup in finally
         _scope_attach: dict[str, Any] = {"parent": None, "attached": False}
+        _stream_done_seen = False
+        _stream_error_seen = False
+        _stream_exit_reason = ""
 
         def _on_state_resolved(st: Any) -> None:
             captured_state_ref["state"] = st
@@ -4089,6 +4126,16 @@ class ReasoningEngine:
                 tool_execution_context=tool_execution_context,
                 _on_state_resolved=_on_state_resolved,
             ):
+                _event_type = event.get("type") if isinstance(event, dict) else ""
+                if _event_type == "done":
+                    _stream_done_seen = True
+                elif _event_type == "error":
+                    _stream_error_seen = True
+                    _stream_exit_reason = str(event.get("code") or "stream_error")
+                elif _event_type == "task_checkpoint":
+                    _checkpoint_exit = str(event.get("exit_reason") or "").strip()
+                    if _checkpoint_exit:
+                        _stream_exit_reason = _checkpoint_exit
                 # v1.27.15 (S2 P0-3): record streamed text/thinking into
                 # TaskState so a later cancel/preempt can persist a
                 # ``marker_type="aborted_partial"`` message containing
@@ -4120,6 +4167,20 @@ class ReasoningEngine:
                 yield event
         finally:
             st = captured_state_ref.get("state")
+            _exit_reason = _stream_exit_reason or getattr(self, "_last_exit_reason", "") or ""
+            if not _stream_done_seen and _exit_reason in ("", "normal"):
+                _exit_reason = "stream_incomplete"
+            elif _stream_error_seen and _exit_reason in ("", "normal"):
+                _exit_reason = "stream_error"
+            self._maybe_persist_recoverable_exit_working_messages(
+                getattr(self, "_last_working_messages", []),
+                st,
+                getattr(st, "current_model", "")
+                or getattr(getattr(self, "_brain", None), "model", ""),
+                exit_reason=_exit_reason,
+                done_seen=_stream_done_seen,
+                error_seen=_stream_error_seen,
+            )
             if st is not None and not st.settled_event.is_set():
                 try:
                     st.mark_settled()
@@ -4233,7 +4294,7 @@ class ReasoningEngine:
             state.cancel_reason = ""
             state.cancel_event = asyncio.Event()
 
-        # Issue #608: tag the task so the cancel funnel can skip persisting a
+        # Issue #608: tag the task so resume persistence can skip writing a
         # resumable snapshot for delegated sub-agents (they share the parent
         # conversation_id and would otherwise clobber the parent's resume state).
         state.is_sub_agent = is_sub_agent
@@ -4340,6 +4401,7 @@ class ReasoningEngine:
                     current_model = str(current_info["model"])
             except Exception:
                 pass
+            state.current_model = current_model
 
             # === 与 run() 一致的循环控制变量 ===
             state.original_user_messages = [
@@ -4612,6 +4674,7 @@ class ReasoningEngine:
                     )
                     if switch_result:
                         current_model, working_messages = switch_result
+                        state.current_model = current_model
                         no_tool_call_count = 0
                         tools_executed_in_task = False
                         _supervisor_intervened = False
@@ -4893,6 +4956,7 @@ class ReasoningEngine:
                         continue
                     elif isinstance(retry_result, tuple):
                         current_model, working_messages = retry_result
+                        state.current_model = current_model
                         # PR-G1: 切换模型属于 reasoning restart，前一段 text_delta
                         # 多半是不完整的报错或被截断的回复——必须清前端 buffer，
                         # 否则用户会看到「半截错误信息 + 新模型完整回答」拼成的诡异内容。
@@ -7144,7 +7208,7 @@ class ReasoningEngine:
 
             # Issue #608: on any non-cancel exit, drop a stale resume snapshot so
             # the next turn doesn't reload a finished task's working_messages.
-            # Cancel exits skip this (the funnel just persisted for resume).
+            # Cancel exits skip this (the persist helper just wrote the snapshot).
             self._maybe_clear_resume_state(conversation_id, is_sub_agent, locals().get("state"))
 
     # ==================== Unified Async Generator Interface ====================
@@ -7609,17 +7673,20 @@ class ReasoningEngine:
             return False
         return not str(conversation_id).startswith("_run_")
 
-    def _maybe_persist_cancelled_working_messages(
+    def _maybe_persist_resumable_working_messages(
         self,
         working_messages: list[dict],
         state: "TaskState | None",
         current_model: str,
+        *,
+        exit_reason: str,
+        detail: str = "",
     ) -> None:
-        """取消收尾时持久化完整 working_messages，供下一轮续聊恢复（Issue #608）。
+        """Persist complete working_messages for a future continuation.
 
         key 用 ``state.session_id``（在两个 loop 入口处恒等于 conversation_id）。
         仅当含真实工具块时才落盘，避免无意义旁路文件。任何异常都吞掉——持久化
-        失败不应影响取消收尾本身。
+        失败不应影响当前退出路径本身。
         """
         try:
             conversation_id = getattr(state, "session_id", "") if state else ""
@@ -7628,13 +7695,17 @@ class ReasoningEngine:
                 return
             if not working_messages or not has_tool_blocks(working_messages):
                 return
+            synthetic_count = synthesize_tool_results_for_orphans(working_messages)
             written = persist_working_messages(
                 conversation_id,
                 working_messages,
                 base_dir=settings.data_dir,
                 metadata={
+                    "exit_reason": exit_reason or "",
                     "cancel_reason": (getattr(state, "cancel_reason", "") if state else ""),
                     "model": current_model or "",
+                    "detail": (detail or "")[:500],
+                    "synthetic_tool_results": synthetic_count,
                 },
             )
             # Mark on the state object that this turn just wrote a resume
@@ -7648,7 +7719,50 @@ class ReasoningEngine:
                 except Exception:
                     pass
         except Exception as exc:
-            logger.debug("[CancelResume] persist skipped: %s", exc)
+            logger.debug("[ResumeSnapshot] persist skipped: %s", exc)
+
+    def _maybe_persist_recoverable_exit_working_messages(
+        self,
+        working_messages: list[dict],
+        state: "TaskState | None",
+        current_model: str,
+        *,
+        exit_reason: str,
+        done_seen: bool,
+        error_seen: bool = False,
+        detail: str = "",
+    ) -> None:
+        """Persist a resume snapshot for non-completed exits.
+
+        Normal completed / ask-user / plan-review turns must keep clearing stale
+        snapshots. Error, missing-done, budget/max-iteration and explicit failed
+        checkpoint exits keep the structured tool context so a later "continue"
+        turn does not rebuild from flattened visible history and redo tools.
+        """
+        try:
+            if state is not None and getattr(state, "_resume_persisted", False):
+                return
+
+            normalized = (exit_reason or "").strip()
+            should_persist = (
+                error_seen
+                or not done_seen
+                or normalized in self._RECOVERABLE_RESUME_EXIT_REASONS
+                or bool(getattr(state, "cancelled", False) if state is not None else False)
+            )
+            if not should_persist:
+                return
+            if not normalized:
+                normalized = "stream_error" if error_seen else "stream_incomplete"
+            self._maybe_persist_resumable_working_messages(
+                working_messages,
+                state,
+                current_model,
+                exit_reason=normalized,
+                detail=detail,
+            )
+        except Exception as exc:
+            logger.debug("[ResumeSnapshot] recoverable-exit persist skipped: %s", exc)
 
     def _maybe_clear_resume_state(
         self,
@@ -7658,14 +7772,14 @@ class ReasoningEngine:
     ) -> None:
         """正常（非取消）退出时清除旁路文件，避免下一轮误加载已完成任务的旧状态。
 
-        取消退出时**不清**——funnel 刚 persist 的文件要留给续聊。在 reason_stream
+        取消退出时**不清**——persist helper 刚写入的文件要留给续聊。在 reason_stream
         impl 的 finally 与 run() wrapper 的 finally 集中调用，覆盖所有 return 分支。
         """
         try:
             if not self._resume_eligible(conversation_id, is_sub_agent):
                 return
             # Preserve a snapshot this turn just persisted for resume. We check
-            # an explicit per-turn flag set by the persist funnel rather than
+            # an explicit per-turn flag set by the persist helper rather than
             # re-inferring ``cancelled`` here — bulletproof against any cancel
             # path that doesn't leave ``cancelled`` True at finally time.
             if state is not None and (
@@ -7760,7 +7874,13 @@ class ReasoningEngine:
 
         # Issue #608: persist the (orphan-repaired) working_messages so the
         # next turn resumes completed tool work instead of re-running it.
-        self._maybe_persist_cancelled_working_messages(working_messages, state, current_model)
+        self._maybe_persist_resumable_working_messages(
+            working_messages,
+            state,
+            current_model,
+            exit_reason="user_cancelled",
+            detail=(getattr(state, "cancel_reason", "") if state else ""),
+        )
 
         cancel_reason = (state.cancel_reason if state else "") or "用户请求停止"
         logger.info(
@@ -7796,7 +7916,13 @@ class ReasoningEngine:
 
         # Issue #608: persist the (orphan-repaired) working_messages so the
         # next turn resumes completed tool work instead of re-running it.
-        self._maybe_persist_cancelled_working_messages(working_messages, state, current_model)
+        self._maybe_persist_resumable_working_messages(
+            working_messages,
+            state,
+            current_model,
+            exit_reason="user_cancelled",
+            detail=(getattr(state, "cancel_reason", "") if state else ""),
+        )
 
         cancel_reason = (state.cancel_reason if state else "") or "用户请求停止"
         logger.info(
