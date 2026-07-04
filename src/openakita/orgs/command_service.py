@@ -162,8 +162,8 @@ class OrgCommandRequest:
     """Extra IM destinations to mirror final result / cancellation to."""
     user_facing_content: str | None = None
     """Optional content to persist/render when run content contains hidden attachment text."""
-    input_attachments: list[dict[str, Any]] = field(default_factory=list)
-    """User-uploaded attachments shown in the command console history."""
+    attachments: list[dict[str, Any]] = field(default_factory=list)
+    """User-uploaded attachments persisted with the command console message."""
 
 
 def set_command_service(service: OrgCommandService | None) -> None:
@@ -283,7 +283,7 @@ class OrgCommandService:
             request.org_id,
             request.target_node_id,
             user_facing_content,
-            input_attachments=request.input_attachments,
+            attachments=request.attachments,
         )
         self._mirror_command_to_distributed_surfaces(
             request,
@@ -302,7 +302,7 @@ class OrgCommandService:
             replace_existing=request.replace_existing,
             continue_previous=request.continue_previous,
             forward_to=list(request.forward_to),
-            input_attachments=list(request.input_attachments),
+            attachments=list(request.attachments),
         )
         self._schedule_run(
             run_request,
@@ -999,7 +999,7 @@ class OrgCommandService:
         target_node_id: str | None,
         content: str,
         *,
-        input_attachments: list[dict[str, Any]] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         sm = self._session_manager
         if not sm:
@@ -1014,8 +1014,8 @@ class OrgCommandService:
             )
             if session:
                 meta: dict[str, Any] = {}
-                if input_attachments:
-                    meta["input_attachments"] = list(input_attachments)
+                if attachments:
+                    meta["attachments"] = list(attachments)
                 session.add_message("user", content, **meta)
                 sm.mark_dirty()
         except Exception as exc:

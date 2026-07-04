@@ -9,6 +9,7 @@ import type {
   ChatSource,
   ChatMcpCall,
   ChatTodo,
+  ChatAttachment,
   MessagePart,
   ChainGroup,
   ChainEntry,
@@ -254,9 +255,23 @@ function latestMessageTimestamp(msgs: ChatMessage[]): number {
   return msgs.reduce((max, msg) => Math.max(max, Number.isFinite(msg.timestamp) ? msg.timestamp : 0), 0);
 }
 
+function attachmentSignature(attachments: ChatAttachment[] | null | undefined): string {
+  if (!attachments?.length) return "";
+  return attachments.map((att) => [
+    att.type,
+    att.name,
+    att.url,
+    att.localPath,
+    att.uploadId,
+    att.previewUrl,
+    att.size,
+    att.mimeType,
+  ].map((value) => String(value ?? "")).join("\u001f")).join("\u001e");
+}
+
 function messageSignature(msg: ChatMessage | undefined): string {
   if (!msg) return "";
-  return `${msg.role}\n${msg.timestamp}\n${msg.content}`;
+  return `${msg.role}\n${msg.timestamp}\n${msg.content}\n${attachmentSignature(msg.attachments)}`;
 }
 
 function firstUserContent(msgs: ChatMessage[]): string {
@@ -268,7 +283,12 @@ function removeAdjacentDuplicateUserMessages(msgs: ChatMessage[]): ChatMessage[]
   const deduped: ChatMessage[] = [];
   for (const msg of msgs) {
     const prev = deduped[deduped.length - 1];
-    if (msg.role === "user" && prev?.role === "user" && prev.content === msg.content) {
+    if (
+      msg.role === "user" &&
+      prev?.role === "user" &&
+      prev.content === msg.content &&
+      attachmentSignature(prev.attachments) === attachmentSignature(msg.attachments)
+    ) {
       changed = true;
       continue;
     }
@@ -277,42 +297,73 @@ function removeAdjacentDuplicateUserMessages(msgs: ChatMessage[]): ChatMessage[]
   return changed ? deduped : msgs;
 }
 
+function messageMatchKey(msg: Pick<ChatMessage, "role" | "content">): string {
+  return `${msg.role}\n${msg.content}`;
+}
+
+function backendMessageMatchKey(msg: Pick<BackendHistoryMessage, "role" | "content">): string {
+  return `${msg.role}\n${msg.content}`;
+}
+
+function mergeMissingAttachments(primary: ChatMessage[], secondary: ChatMessage[]): ChatMessage[] {
+  const withAttachments = new Map<string, ChatMessage[]>();
+  for (const msg of secondary) {
+    if (!msg.attachments?.length) continue;
+    const key = messageMatchKey(msg);
+    const queue = withAttachments.get(key);
+    if (queue) queue.push(msg);
+    else withAttachments.set(key, [msg]);
+  }
+
+  let changed = false;
+  const merged = primary.map((msg) => {
+    if (msg.attachments?.length) return msg;
+    const queue = withAttachments.get(messageMatchKey(msg));
+    const source = queue?.shift();
+    if (!source?.attachments?.length) return msg;
+    changed = true;
+    return { ...msg, attachments: source.attachments };
+  });
+  return changed ? merged : primary;
+}
+
 /**
  * Choose which message history should hydrate the UI.
  *
- * Backend history is the source of truth after SSE disconnect recovery because
- * the backend may save the completed answer after the local stream was aborted.
- * Merge backend assistant content into local first, so a newer local streaming
- * placeholder cannot hide a complete answer already persisted by the backend.
+ * Backend history is the source of truth after SSE disconnect recovery. Local
+ * messages can still contain structured fields that the backend has not seen
+ * yet during an in-flight turn, so hydration merges missing attachments before
+ * choosing the history to render.
  */
 export function chooseHydratedMessages(localMsgs: ChatMessage[], backendMsgs: ChatMessage[]): ChatMessage[] {
   const cleanBackend = removeAdjacentDuplicateUserMessages(backendMsgs);
-  if (cleanBackend.length === 0) return removeAdjacentDuplicateUserMessages(localMsgs);
-  if (localMsgs.length === 0) return cleanBackend;
+  const cleanLocal = removeAdjacentDuplicateUserMessages(localMsgs);
+  const backendWithLocalAttachments = mergeMissingAttachments(cleanBackend, cleanLocal);
+  if (backendWithLocalAttachments.length === 0) return cleanLocal;
+  if (cleanLocal.length === 0) return cleanBackend;
 
-  const localFirstUser = firstUserContent(localMsgs);
-  const backendFirstUser = firstUserContent(cleanBackend);
+  const localFirstUser = firstUserContent(cleanLocal);
+  const backendFirstUser = firstUserContent(backendWithLocalAttachments);
   if (localFirstUser && backendFirstUser && localFirstUser !== backendFirstUser) {
-    return cleanBackend;
+    return backendWithLocalAttachments;
   }
 
-  const cleanLocal = removeAdjacentDuplicateUserMessages(localMsgs);
   const patchedLocal = removeAdjacentDuplicateUserMessages(
-    patchMessagesWithBackend(cleanLocal, cleanBackend),
+    mergeMissingAttachments(patchMessagesWithBackend(cleanLocal, backendWithLocalAttachments), backendWithLocalAttachments),
   );
 
-  if (cleanBackend.length > cleanLocal.length) return cleanBackend;
+  if (backendWithLocalAttachments.length > cleanLocal.length) return backendWithLocalAttachments;
   if (cleanLocal.length > cleanBackend.length) return patchedLocal;
   if (patchedLocal !== cleanLocal) return patchedLocal;
 
   const localLatest = latestMessageTimestamp(cleanLocal);
-  const backendLatest = latestMessageTimestamp(cleanBackend);
-  if (backendLatest > localLatest) return cleanBackend;
+  const backendLatest = latestMessageTimestamp(backendWithLocalAttachments);
+  if (backendLatest > localLatest) return backendWithLocalAttachments;
   if (localLatest > backendLatest) return cleanLocal;
 
   const localLast = messageSignature(cleanLocal[cleanLocal.length - 1]);
-  const backendLast = messageSignature(cleanBackend[cleanBackend.length - 1]);
-  return backendLast && backendLast !== localLast ? cleanBackend : cleanLocal;
+  const backendLast = messageSignature(backendWithLocalAttachments[backendWithLocalAttachments.length - 1]);
+  return backendLast && backendLast !== localLast ? backendWithLocalAttachments : cleanLocal;
 }
 
 // ── 思维链 ──
@@ -583,6 +634,7 @@ type BackendHistoryMessage = {
   chain_summary?: ChainSummaryItem[];
   chain_timeline?: ChainTimelineGroup[];
   artifacts?: ChatArtifact[] | null;
+  attachments?: ChatAttachment[] | null;
   sources?: ChatSource[] | null;
   mcp_calls?: ChatMcpCall[] | null;
   usage?: ChatMessage["usage"];
@@ -660,9 +712,35 @@ export function patchMessagesWithBackendDetailed(
     return undefined;
   };
 
+  const backendAttachmentsByMessage = new Map<string, BackendHistoryMessage[]>();
+  for (const msg of backendMsgs) {
+    if (!msg.attachments?.length) continue;
+    const key = backendMessageMatchKey(msg);
+    const queue = backendAttachmentsByMessage.get(key);
+    if (queue) queue.push(msg);
+    else backendAttachmentsByMessage.set(key, [msg]);
+  }
+
+  const claimBackendAttachmentsForLocalMessage = (
+    m: ChatMessage,
+  ): BackendHistoryMessage | undefined => {
+    const queue = backendAttachmentsByMessage.get(messageMatchKey(m));
+    return queue?.shift();
+  };
+
   let changed = false;
   const patched = localMsgs.map((m, index) => {
-    if (m.role !== "assistant") return m;
+    if (m.role !== "assistant") {
+      if (!m.attachments?.length) {
+        const backend = claimBackendAttachmentsForLocalMessage(m);
+        if (backend?.attachments?.length) {
+          changed = true;
+          stats.patched += 1;
+          return { ...m, attachments: backend.attachments };
+        }
+      }
+      return m;
+    }
     const backend = claimBackendForLocalMessage(m, index);
     if (!backend) return m;
 
@@ -703,6 +781,15 @@ export function patchMessagesWithBackendDetailed(
 
     if (!m.artifacts?.length && backend.artifacts?.length) {
       patches.artifacts = backend.artifacts;
+    }
+
+    if (!m.attachments?.length) {
+      const attachmentBackend = backend.attachments?.length
+        ? backend
+        : claimBackendAttachmentsForLocalMessage(m);
+      if (attachmentBackend?.attachments?.length) {
+        patches.attachments = attachmentBackend.attachments;
+      }
     }
 
     if (!m.sources?.length && backend.sources?.length) {

@@ -107,7 +107,7 @@ def _get_command_service(request: Request):
 
 
 def _coerce_attachment_info(raw: Any) -> Any | None:
-    """Normalize setup-center attachment JSON to the ChatRequest attachment shape."""
+    """Validate setup-center attachment JSON for org command processing."""
     if not isinstance(raw, dict):
         return None
     name = str(raw.get("name") or raw.get("filename") or "").strip()
@@ -120,10 +120,10 @@ def _coerce_attachment_info(raw: Any) -> Any | None:
             type=str(raw.get("type") or "file"),
             name=name,
             url=raw.get("url"),
-            local_path=raw.get("local_path") or raw.get("localPath"),
-            upload_id=raw.get("upload_id") or raw.get("uploadId"),
+            local_path=raw.get("local_path"),
+            upload_id=raw.get("upload_id"),
             size=raw.get("size"),
-            mime_type=raw.get("mime_type") or raw.get("mimeType"),
+            mime_type=raw.get("mime_type"),
         )
     except Exception:
         logger.debug("[OrgAPI] failed to normalize attachment: %r", raw, exc_info=True)
@@ -757,19 +757,7 @@ async def send_command(request: Request, org_id: str):
                 replace_existing=bool(body.get("replace_existing")),
                 continue_previous=bool(body.get("continue_previous")),
                 forward_to=forward_targets,
-                input_attachments=[
-                    {
-                        "type": getattr(att, "type", "file"),
-                        "name": getattr(att, "name", ""),
-                        "url": getattr(att, "url", None),
-                        "local_path": getattr(att, "local_path", None),
-                        "upload_id": getattr(att, "upload_id", None),
-                        "size": getattr(att, "size", None),
-                        "mime_type": getattr(att, "mime_type", None),
-                        "uploadStatus": "uploaded",
-                    }
-                    for att in attachments
-                ],
+                attachments=[att.to_chat_attachment_dict() for att in attachments],
             )
         )
     except OrgCommandConflict as exc:

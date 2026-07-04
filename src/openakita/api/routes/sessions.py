@@ -14,6 +14,8 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from openakita.api.schemas import ChatAttachmentRecord
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -308,9 +310,6 @@ def _history_entry(session, conversation_id: str, original_idx: int, msg: dict) 
     attachments = msg.get("attachments")
     if attachments:
         entry["attachments"] = attachments
-    input_attachments = msg.get("input_attachments")
-    if input_attachments:
-        entry["input_attachments"] = input_attachments
     org_timeline = msg.get("org_timeline")
     if org_timeline:
         entry["org_timeline"] = org_timeline
@@ -640,10 +639,7 @@ def _cancel_tasks_for_session(request: Request, conversation_id: str, session_id
 class AppendMessageRequest(BaseModel):
     role: str = Field(..., description="user | assistant | system")
     content: str = Field(..., description="Message content")
-    input_attachments: list[dict] | None = Field(
-        None,
-        description="User-uploaded attachments shown in embedded chat UIs",
-    )
+    attachments: list[ChatAttachmentRecord] | None = Field(None, description="Message attachments")
 
 
 class AppendBatchRequest(BaseModel):
@@ -686,8 +682,8 @@ async def append_session_messages(
 
     for msg in body.messages:
         meta: dict = {}
-        if msg.input_attachments:
-            meta["input_attachments"] = msg.input_attachments
+        if msg.attachments:
+            meta["attachments"] = [att.to_history_dict() for att in msg.attachments]
         session.add_message(msg.role, msg.content, **meta)
 
     session_manager.mark_dirty()

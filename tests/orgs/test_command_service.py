@@ -199,7 +199,7 @@ def test_submit_persists_visible_content_and_runs_enriched_content(persisted_org
             org_id=persisted_org.id,
             content="请总结\n\n--- 文件: notes.txt ---\nsecret\n--- 文件结束 ---",
             user_facing_content="请总结",
-            input_attachments=[
+            attachments=[
                 {
                     "type": "file",
                     "name": "notes.txt",
@@ -212,7 +212,7 @@ def test_submit_persists_visible_content_and_runs_enriched_content(persisted_org
 
     service._bridge_persist_user_message.assert_called_once()
     assert service._bridge_persist_user_message.call_args.args[2] == "请总结"
-    assert service._bridge_persist_user_message.call_args.kwargs["input_attachments"][0]["name"] == "notes.txt"
+    assert service._bridge_persist_user_message.call_args.kwargs["attachments"][0]["name"] == "notes.txt"
     run_request = service._schedule_run.call_args.args[0]
     assert "secret" in run_request.content
     assert run_request.user_facing_content == "请总结"

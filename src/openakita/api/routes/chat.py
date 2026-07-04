@@ -22,12 +22,18 @@ from openakita.core.ask_user_context import AskUserReplyContext
 from openakita.core.context_stats import get_context_snapshot, merge_context_snapshot_into_usage
 from openakita.core.engine_bridge import engine_stream, is_dual_loop, to_engine
 
-from ..schemas import ChatControlRequest, ChatRequest
+from ..schemas import AttachmentInfo, ChatAttachmentRecord, ChatControlRequest, ChatRequest
 from .conversation_lifecycle import get_lifecycle_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _history_attachments_from_request(
+    attachments: list[AttachmentInfo] | None,
+) -> list[dict[str, Any]]:
+    return [att.to_chat_attachment_dict() for att in attachments or []]
 
 
 def _session_for_desktop(
@@ -1080,8 +1086,10 @@ async def _stream_chat(
                         },
                     )
 
-                    if chat_request.message:
-                        session.add_message("user", chat_request.message)
+                    user_attachments = _history_attachments_from_request(chat_request.attachments)
+                    if chat_request.message or user_attachments:
+                        meta = {"attachments": user_attachments} if user_attachments else {}
+                        session.add_message("user", chat_request.message or "", **meta)
                         if ask_user_reply_context is not None:
                             _backfill_ask_user_answer(session, ask_user_reply_context.answer)
                     session_messages_history = (
@@ -1724,13 +1732,15 @@ def _org_file_attachments_to_chat_attachments(attachments: list[dict]) -> list[d
         suffix = Path(name).suffix.lower()
         att_type = "document" if suffix in {".doc", ".docx", ".pdf", ".md", ".txt"} else "file"
         converted.append(
-            {
-                "type": att_type,
-                "name": name,
-                "localPath": file_path,
-                "size": att.get("file_size") or att.get("size"),
-                "uploadStatus": "uploaded",
-            }
+            ChatAttachmentRecord.model_validate(
+                {
+                    "type": att_type,
+                    "name": name,
+                    "localPath": file_path,
+                    "size": att.get("file_size") or att.get("size"),
+                    "uploadStatus": "uploaded",
+                }
+            ).to_history_dict()
         )
     return converted
 
@@ -1859,8 +1869,10 @@ async def _stream_org_command_chat(
                         "orgNodeId": target_node_id or "",
                     },
                 )
-                if chat_request.message:
-                    session.add_message("user", chat_request.message)
+                user_attachments = _history_attachments_from_request(chat_request.attachments)
+                if chat_request.message or user_attachments:
+                    meta = {"attachments": user_attachments} if user_attachments else {}
+                    session.add_message("user", chat_request.message or "", **meta)
                 session_manager.mark_dirty()
 
         if svc is None:
@@ -1897,6 +1909,7 @@ async def _stream_org_command_chat(
                     ),
                     origin_surface=OrgCommandSurface.DESKTOP_CHAT,
                     output_scope=default_scope_for_surface(OrgCommandSurface.DESKTOP_CHAT),
+                    attachments=_history_attachments_from_request(chat_request.attachments),
                 )
             )
         except OrgCommandError as exc:
@@ -2774,7 +2787,9 @@ async def chat_sync(request: Request, body: ChatRequest):
                 )
                 if session is not None:
                     apply_classification_to_session(session, classify_entry("api-sync"))
-                    session.add_message("user", body.message or "")
+                    user_attachments = _history_attachments_from_request(body.attachments)
+                    meta = {"attachments": user_attachments} if user_attachments else {}
+                    session.add_message("user", body.message or "", **meta)
                     if ask_reply_context is not None:
                         _backfill_ask_user_answer(session, ask_reply_context.answer)
                     session_messages_history = session.context.get_messages()

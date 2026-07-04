@@ -1213,6 +1213,7 @@ export function ChatView({
       (msg.progressEvents?.length ? 10 + msg.progressEvents.length : 0) +
       (msg.thinkingChain?.length ? 50 + msg.thinkingChain.length : 0) +
       (msg.artifacts?.length ? 20 + msg.artifacts.length : 0) +
+      (msg.attachments?.length ? 20 + msg.attachments.length : 0) +
       (msg.askUser ? 10 : 0) +
       (msg.streaming ? 5 : 0) +
       Math.min(msg.content.length, 2000) / 2000,
@@ -6059,6 +6060,7 @@ export function ChatView({
               <AttachmentPreview
                 key={`${att.name}-${att.type}-${idx}`}
                 att={att}
+                apiBaseUrl={apiBaseUrl}
                 onRemove={() => setPendingAttachments((prev) => prev.filter((_, i) => i !== idx))}
               />
             ))}
