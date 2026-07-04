@@ -30,6 +30,83 @@ class AskUserReplyRequest(BaseModel):
     )
 
 
+class ChatAttachmentRecord(BaseModel):
+    """Attachment shape persisted in session history and rendered by ChatView."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["image", "file", "voice", "video", "document"] = Field(
+        ..., description="Attachment kind rendered by the chat UI."
+    )
+    name: str = Field(..., description="Display filename")
+    url: str | None = Field(None, description="Renderable or downloadable URL")
+    local_path: str | None = Field(
+        None,
+        alias="localPath",
+        description="Server-side local path for uploaded files",
+    )
+    upload_id: str | None = Field(
+        None,
+        alias="uploadId",
+        description="Upload identifier returned by /api/upload",
+    )
+    preview_url: str | None = Field(
+        None,
+        alias="previewUrl",
+        description="Image preview URL",
+    )
+    size: int | None = Field(None, description="Attachment size in bytes")
+    mime_type: str | None = Field(None, alias="mimeType", description="MIME type")
+    upload_status: Literal["uploading", "uploaded", "failed"] | None = Field(
+        None,
+        alias="uploadStatus",
+        description="Upload state shown by the chat UI",
+    )
+    upload_error: str | None = Field(
+        None,
+        alias="uploadError",
+        description="Upload error shown by the chat UI",
+    )
+
+    def to_history_dict(self) -> dict[str, Any]:
+        return self.model_dump(by_alias=True, exclude_none=True)
+
+
+class AttachmentInfo(BaseModel):
+    """Attachment metadata accepted by chat request endpoints."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["image", "file", "voice", "video", "document"] = Field(
+        ..., description="image | file | voice | video | document"
+    )
+    name: str = Field(..., description="Filename")
+    url: str | None = Field(None, description="URL or data URI")
+    local_path: str | None = Field(None, description="Server-side local path for uploaded files")
+    upload_id: str | None = Field(None, description="Upload identifier returned by /api/upload")
+    size: int | None = Field(None, description="Attachment size in bytes")
+    mime_type: str | None = Field(None, description="MIME type")
+
+    def to_chat_attachment_record(self) -> ChatAttachmentRecord:
+        payload: dict[str, Any] = {
+            "type": self.type,
+            "name": self.name,
+            "url": self.url,
+            "localPath": self.local_path,
+            "uploadId": self.upload_id,
+            "previewUrl": self.url if self.type == "image" and self.url else None,
+            "size": self.size,
+            "mimeType": self.mime_type,
+            "uploadStatus": "uploaded",
+        }
+        return ChatAttachmentRecord.model_validate(
+            {key: value for key, value in payload.items() if value is not None}
+        )
+
+    def to_chat_attachment_dict(self) -> dict[str, Any]:
+        return self.to_chat_attachment_record().to_history_dict()
+
+
 class ChatRequest(BaseModel):
     """Chat request body."""
 
@@ -119,21 +196,6 @@ class ChatRequest(BaseModel):
         max_length=128,
         pattern=r"^[A-Za-z0-9_\-:.@]{0,128}$",
     )
-
-class AttachmentInfo(BaseModel):
-    """Attachment metadata."""
-
-    type: str = Field(..., description="image | file | voice")
-    name: str = Field(..., description="Filename")
-    url: str | None = Field(None, description="URL or data URI")
-    local_path: str | None = Field(None, description="Server-side local path for uploaded files")
-    upload_id: str | None = Field(None, description="Upload identifier returned by /api/upload")
-    size: int | None = Field(None, description="Attachment size in bytes")
-    mime_type: str | None = Field(None, description="MIME type")
-
-
-# Fix forward reference
-ChatRequest.model_rebuild()
 
 
 class ChatControlRequest(BaseModel):

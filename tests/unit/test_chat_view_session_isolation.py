@@ -98,6 +98,20 @@ def test_backend_todo_snapshot_refreshes_existing_plan_card():
     assert "patches.todo = backend.todo" in source
 
 
+def test_hydration_treats_attachments_as_structured_history():
+    chat_source = CHAT_VIEW.read_text(encoding="utf-8")
+    helper_source = CHAT_HELPERS.read_text(encoding="utf-8")
+
+    assert "msg.attachments?.length ? 20 + msg.attachments.length : 0" in chat_source
+    assert "function attachmentSignature" in helper_source
+    assert "attachmentSignature(msg.attachments)" in helper_source
+    assert "attachmentSignature(prev.attachments) === attachmentSignature(msg.attachments)" in helper_source
+    assert "function mergeMissingAttachments" in helper_source
+    assert "const backendWithLocalAttachments = mergeMissingAttachments(cleanBackend, cleanLocal)" in helper_source
+    assert "attachments?: ChatAttachment[] | null" in helper_source
+    assert "patches.attachments = attachmentBackend.attachments" in helper_source
+
+
 def test_backend_history_patch_keeps_single_sequence_fallback():
     """Backend-history -> local-message patching must consume each backend
     assistant entry **at most once** (a single Set tracks claimed ones), and

@@ -105,7 +105,7 @@ export const MessageBubble = memo(function MessageBubble({
         {msg.attachments && msg.attachments.length > 0 && (
           <div style={{ marginBottom: 8 }}>
             {msg.attachments.map((att: ChatAttachment, i: number) => (
-              <AttachmentPreview key={i} att={att} />
+              <AttachmentPreview key={i} att={att} apiBaseUrl={apiBaseUrl} />
             ))}
           </div>
         )}

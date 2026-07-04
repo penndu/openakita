@@ -33,13 +33,10 @@ interface ChatMsg {
   timestamp: number;
   streaming?: boolean;
   attachments?: FileAttachment[];
-  inputAttachments?: ChatAttachment[];
+  userAttachments?: ChatAttachment[];
   /**
-   * P11: 内容种类的细粒度标记，用于让样式（bubble 颜色 / class 名）跟"语义"
-   * 解耦。例如 role="system" 同时被用于真正的错误通知（红色合理）和
-   * IM/桌面/指挥台事件流（应当中性、不要红）。kind="activity" 即一组组织
-   * 事件聚合后渲染出的活动时间线 bubble，CSS 用 `.ocp-msg-activity` 给中性
-   * 颜色覆盖。
+   * Separates message styling from role. Activity entries reuse role="system"
+   * for ordering but render with neutral event styling instead of error styling.
    */
   kind?: "activity";
 }
@@ -84,9 +81,7 @@ interface TimelineSegment {
   /** 后端 failure_diagnoser 生成的结构化诊断 */
   diagnosis?: FailureDiagnosis;
   /**
-   * P10: 节点退出后处于"需要用户/上级补充输入"的挂起态。
-   * - "waiting_user": 节点 escalate 给用户、等待回复。UI 必须显眼提示用户回复，
-   *   否则用户会误以为系统卡死、自己点取消导致 producer 链路被 soft_stop。
+   * The node is paused because it needs a user reply before work can continue.
    */
   paused?: "waiting_user";
 }
@@ -147,19 +142,10 @@ function isSoftOrgExitReason(reason?: string): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// P11: 组织活动时间线（/api/orgs/{org}/activity）的中性渲染器。
-//
-// 之前的行为是把每个 activity item（user_command / task_assigned /
-// workbench_started / workbench_succeeded / task_completed …）映射成一条
-// 独立的 role="system" 消息——而 `.ocp-msg-system` 用了红色样式（语义上
-// 是错误通知），导致整个 IM 转发流量看起来全是"红色错误条"，并且 raw
-// event_type 直接打到标题上（[workbench_started] / [task_completed]），
-// 视觉非常吵闹、信息密度极低。
-//
-// 这里把同一条 user_command（command_id 相同）下产生的所有事件聚合到一条
-// "活动 bubble" 里，bubble 内部按时间顺序逐行渲染图标 + 行为简述，整体
-// 仍是 markdown 内容（保留 details/collapsed 等能力），而 bubble 本身用
-// kind="activity" 标记，CSS 走中性色而不是红色。
+// Neutral renderer for organization activity events from /api/orgs/{org}/activity.
+// Activity entries are grouped by command and rendered chronologically inside a
+// neutral bubble. The message still carries role="system" for ordering, while
+// kind="activity" selects the neutral visual treatment.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ActivityItem {
@@ -342,11 +328,11 @@ function saveToLocalStorage(cid: string, msgs: ChatMsg[]): void {
       : msgs;
     const slim = windowed
       .filter(m => !m.streaming)
-      .map(({ id, role, content, timestamp, attachments, inputAttachments, kind }) => {
+      .map(({ id, role, content, timestamp, attachments, userAttachments, kind }) => {
         const o: Record<string, unknown> = { id, role, content, timestamp };
         if (attachments && attachments.length > 0) o.attachments = attachments;
-        if (inputAttachments && inputAttachments.length > 0) {
-          o.inputAttachments = cleanInputAttachments(inputAttachments);
+        if (userAttachments && userAttachments.length > 0) {
+          o.userAttachments = cleanUserAttachments(userAttachments);
         }
         if (kind) o.kind = kind;
         return o;
@@ -363,7 +349,7 @@ function loadFromLocalStorage(cid: string): ChatMsg[] {
   } catch { return []; }
 }
 
-function normalizeInputAttachments(raw: unknown): ChatAttachment[] | undefined {
+function normalizeUserAttachments(raw: unknown): ChatAttachment[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: ChatAttachment[] = [];
   for (const item of raw) {
@@ -382,11 +368,11 @@ function normalizeInputAttachments(raw: unknown): ChatAttachment[] | undefined {
       type,
       name,
       url,
-      localPath: typeof obj.localPath === "string" ? obj.localPath : typeof obj.local_path === "string" ? obj.local_path : undefined,
-      uploadId: typeof obj.uploadId === "string" ? obj.uploadId : typeof obj.upload_id === "string" ? obj.upload_id : undefined,
+      localPath: typeof obj.localPath === "string" ? obj.localPath : undefined,
+      uploadId: typeof obj.uploadId === "string" ? obj.uploadId : undefined,
       previewUrl: type === "image" ? (previewUrl && !previewUrl.startsWith("blob:") ? previewUrl : url) : undefined,
       size: typeof obj.size === "number" ? obj.size : undefined,
-      mimeType: typeof obj.mimeType === "string" ? obj.mimeType : typeof obj.mime_type === "string" ? obj.mime_type : undefined,
+      mimeType: typeof obj.mimeType === "string" ? obj.mimeType : undefined,
       uploadStatus: obj.uploadStatus === "failed" ? "failed" : obj.uploadStatus === "uploading" ? "uploading" : "uploaded",
       uploadError: typeof obj.uploadError === "string" ? obj.uploadError : undefined,
     });
@@ -394,7 +380,7 @@ function normalizeInputAttachments(raw: unknown): ChatAttachment[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-function cleanInputAttachments(atts: ChatAttachment[]): ChatAttachment[] {
+function cleanUserAttachments(atts: ChatAttachment[]): ChatAttachment[] {
   return atts.map((att) => ({
     type: att.type,
     name: att.name,
@@ -412,7 +398,7 @@ function cleanInputAttachments(atts: ChatAttachment[]): ChatAttachment[] {
 }
 
 function toOrgCommandAttachments(atts: ChatAttachment[]): Record<string, unknown>[] {
-  return cleanInputAttachments(atts).map((att) => ({
+  return cleanUserAttachments(atts).map((att) => ({
     type: att.type,
     name: att.name,
     url: att.url,
@@ -425,8 +411,8 @@ function toOrgCommandAttachments(atts: ChatAttachment[]): Record<string, unknown
 
 function toPersistedMessage(m: ChatMsg): Record<string, unknown> {
   const out: Record<string, unknown> = { role: m.role, content: m.content };
-  if (m.inputAttachments && m.inputAttachments.length > 0) {
-    out.input_attachments = cleanInputAttachments(m.inputAttachments);
+  if (m.userAttachments && m.userAttachments.length > 0) {
+    out.attachments = cleanUserAttachments(m.userAttachments);
   }
   return out;
 }
@@ -444,7 +430,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   const md = useMdModules();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
-  const [inputAttachments, setInputAttachments] = useState<ChatAttachment[]>([]);
+  const [composerAttachments, setComposerAttachments] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [canContinuePrevious, setCanContinuePrevious] = useState(false);
@@ -547,15 +533,15 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         const data = await res.json();
         if (cancelled) return;
         const histMsgs: ChatMsg[] = (data.messages || []).map((m: any) => {
-          const inputAtts = normalizeInputAttachments(
-            m.input_attachments || m.inputAttachments || (m.role === "user" ? m.attachments : undefined),
+          const userAttachments = normalizeUserAttachments(
+            m.role === "user" ? m.attachments : undefined,
           );
           return {
             id: m.id || genId(),
             role: m.role || "assistant",
             content: m.content || "",
             timestamp: m.timestamp || Date.now(),
-            inputAttachments: inputAtts,
+            userAttachments,
           };
         });
         const merged = [...activityMsgs, ...histMsgs].sort(
@@ -630,15 +616,15 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         const [histData, actData] = await Promise.all([histPromise, activityPromise]);
         if (!mountedRef.current) return;
         const histMsgs: ChatMsg[] = (histData.messages || []).map((m: any) => {
-          const inputAtts = normalizeInputAttachments(
-            m.input_attachments || m.inputAttachments || (m.role === "user" ? m.attachments : undefined),
+          const userAttachments = normalizeUserAttachments(
+            m.role === "user" ? m.attachments : undefined,
           );
           return {
             id: m.id || genId(),
             role: m.role || "assistant",
             content: m.content || "",
             timestamp: m.timestamp || Date.now(),
-            inputAttachments: inputAtts,
+            userAttachments,
           };
         });
         const nameFmt2 = (id: string) => nodeNamesRef.current?.[id] || id;
@@ -812,7 +798,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
 
   const handleClear = useCallback(async () => {
     setMessages([]);
-    setInputAttachments([]);
+    setComposerAttachments([]);
     _pendingCmds.delete(convId);
     setPendingCmdId(null);
     setCanContinuePrevious(false);
@@ -891,11 +877,11 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         uploadStatus: "uploading",
         _uploadId: uploadId,
       };
-      setInputAttachments(prev => [...prev, att]);
+      setComposerAttachments(prev => [...prev, att]);
       uploadFile(file, file.name)
         .then((uploaded) => {
           const url = `${apiBaseUrl}${uploaded.url}`;
-          setInputAttachments(prev => prev.map(a => a._uploadId === uploadId
+          setComposerAttachments(prev => prev.map(a => a._uploadId === uploadId
             ? {
               ...a,
               url,
@@ -911,7 +897,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         })
         .catch((err) => {
           toast.error(`文件上传失败: ${file.name}`);
-          setInputAttachments(prev => prev.map(a => a._uploadId === uploadId
+          setComposerAttachments(prev => prev.map(a => a._uploadId === uploadId
             ? { ...a, uploadStatus: "failed", uploadError: String(err) }
             : a));
         });
@@ -921,7 +907,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
 
   const handleSend = useCallback(async (opts?: { continuePrevious?: boolean; text?: string }) => {
     const text = (opts?.text ?? input).trim();
-    const attachmentsToSend = opts?.continuePrevious ? [] : inputAttachments;
+    const attachmentsToSend = opts?.continuePrevious ? [] : composerAttachments;
     if ((!text && attachmentsToSend.length === 0) || sending) return;
     const pendingUploads = attachmentsToSend.filter(a => a.uploadStatus === "uploading" || (!a.url && !a.localPath));
     if (pendingUploads.length > 0) {
@@ -934,12 +920,12 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
     }
 
     const commandText = text || t("org.chat.attachmentsOnlyCommand", "请处理这些附件。");
-    const displayAttachments = cleanInputAttachments(attachmentsToSend);
+    const displayAttachments = cleanUserAttachments(attachmentsToSend);
     const userMsg: ChatMsg = {
       id: genId(),
       role: "user",
       content: text,
-      inputAttachments: displayAttachments.length > 0 ? displayAttachments : undefined,
+      userAttachments: displayAttachments.length > 0 ? displayAttachments : undefined,
       timestamp: Date.now(),
     };
     const placeholderId = genId();
@@ -948,7 +934,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
     };
     setMessages(prev => [...prev, userMsg, placeholder]);
     setInput("");
-    setInputAttachments([]);
+    setComposerAttachments([]);
     setCanContinuePrevious(false);
     setSending(true);
 
@@ -1038,9 +1024,8 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       return segments.map(seg => {
         const body = seg.lines.join("\n\n");
         if (seg.done) {
-          // P10: waiting_user 节点单独走"挂起需回复"模板。默认展开 + 标题用
-          // ⏸ 取代 ✓，body 顶部加 blockquote 引导用户在下方输入框回应，
-          // 避免被当成普通"完成"折叠而忽略。
+          // Waiting-user nodes need an open prompt instead of a collapsed
+          // completed-task summary.
           if (seg.paused === "waiting_user") {
             const hint = t("org.chat.waitingUserNotice", {
               name: seg.nodeName,
@@ -1082,10 +1067,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         pending.allFiles = flat;
       }
       if (!mountedRef.current) return;
-      // P10: 进度流式更新时也把 attachments 推上去，让用户在过程阶段就能
-      // 看到图片/视频预览（FileAttachmentCard 已支持 img/video 内嵌）。
-      // 之前只在 finalize 时才注入 attachments，进度期间黑板登记的媒体
-      // 一直被隐藏直到任务完成。
+      // Keep generated files visible while the command is still running.
       const streamingAtts = pending?.allFiles && pending.allFiles.length > 0
         ? pending.allFiles
         : undefined;
@@ -1158,10 +1140,8 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
             segments[idx].failed = false;
             segments[idx].diagnosis = undefined;
           }
-          // P10: waiting_user 单独标记 paused 状态，让 renderTimeline 显眼
-          // 提示用户"需要你回复"。如果不标，用户会以为节点正常完成、
-          // 没有任何挂起，于是看到 producer/art-director 静默几分钟后自己
-          // 点取消（产生"任务莫名其妙被取消"的错觉）。
+          // Mark waiting-user termination separately so renderTimeline can show
+          // the reply prompt instead of a normal completion state.
           if (reason === "waiting_user") {
             segments[idx].paused = "waiting_user";
           } else {
@@ -1438,7 +1418,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         }
       }
     }
-  }, [input, inputAttachments, sending, orgId, nodeId, apiBaseUrl, convId, persistToBackend, forwardTargets, t]);
+  }, [input, composerAttachments, sending, orgId, nodeId, apiBaseUrl, convId, persistToBackend, forwardTargets, t]);
 
   const handleContinuePrevious = useCallback(() => {
     handleSend({
@@ -1538,7 +1518,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           >
             <div className={`ocp-msg-bubble ${m.role !== "user" ? "chatMdContent" : ""}`}>
               {m.role === "user" ? (
-                m.content || (m.inputAttachments && m.inputAttachments.length > 0 ? t("org.chat.attachmentsOnlyCommand", "请处理这些附件。") : "")
+                m.content || (m.userAttachments && m.userAttachments.length > 0 ? t("org.chat.attachmentsOnlyCommand", "请处理这些附件。") : "")
               ) : md ? (
                 <md.ReactMarkdown remarkPlugins={md.remarkPlugins} rehypePlugins={md.rehypePlugins}>
                   {m.content}
@@ -1546,19 +1526,15 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
               ) : (
                 m.content
               )}
-              {m.inputAttachments && m.inputAttachments.length > 0 && (
+              {m.userAttachments && m.userAttachments.length > 0 && (
                 <div className="ocp-input-attachments ocp-msg-input-attachments">
-                  {m.inputAttachments.map((att, i) => (
-                    <AttachmentPreview key={`${att.name}-${i}`} att={att} />
+                  {m.userAttachments.map((att, i) => (
+                    <AttachmentPreview key={`${att.name}-${i}`} att={att} apiBaseUrl={apiBaseUrl} />
                   ))}
                 </div>
               )}
               {m.streaming && <span className="ocp-typing">●</span>}
               {m.attachments && m.attachments.length > 0 && (
-                /* P10: 不再用 !m.streaming 阻塞 attachments 渲染——进度阶段
-                   收到的图片/视频可以即时显示给用户，避免任务完成前用户
-                   一直看不到媒体。FileAttachmentCard 已根据扩展名渲染
-                   img / video 内嵌预览。 */
                 <div style={{ borderTop: "1px solid rgba(100,116,139,0.2)", marginTop: 10, paddingTop: 8, display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                   {m.attachments.map((f, i) => (
                     <FileAttachmentCard key={f.file_path || i} file={f} apiBaseUrl={apiBaseUrl} inline />
@@ -1637,14 +1613,15 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         </div>
       )}
 
-      {inputAttachments.length > 0 && (
+      {composerAttachments.length > 0 && (
         <div className="ocp-input-attachments ocp-composer-attachments">
-          {inputAttachments.map((att, i) => (
+          {composerAttachments.map((att, i) => (
             <AttachmentPreview
               key={att._uploadId || `${att.name}-${i}`}
               att={att}
+              apiBaseUrl={apiBaseUrl}
               onRemove={() => {
-                setInputAttachments(prev => prev.filter((_, ix) => ix !== i));
+                setComposerAttachments(prev => prev.filter((_, ix) => ix !== i));
               }}
             />
           ))}
@@ -1695,7 +1672,7 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
         <button
           data-slot="ocp"
           onClick={() => handleSend()}
-          disabled={sending || (!input.trim() && inputAttachments.length === 0)}
+          disabled={sending || (!input.trim() && composerAttachments.length === 0)}
           className={`ocp-send ${sending ? "ocp-send-busy" : ""}`}
         >
           {sending ? (
@@ -1848,10 +1825,7 @@ const CHAT_CSS = `
   color: #fca5a5;
   border-bottom-left-radius: 4px;
 }
-/* P11: activity bubble（组织事件聚合）走中性色而非红色——红色只留给真正
-   的错误/警告通知。class 同时叠加到 role="system" 上，所以放在 system 之
-   后才能覆盖；视觉上与 assistant 接近，但用 surface 标签和"活动事件"小
-   chip 在 bubble 头部点明这是事件流。 */
+/* Activity bubbles are timeline entries, not error notices. */
 .ocp-msg-activity .ocp-msg-bubble {
   background: var(--bg-subtle, rgba(30,41,59,0.55));
   border: 1px solid var(--line, rgba(100,116,139,0.25));

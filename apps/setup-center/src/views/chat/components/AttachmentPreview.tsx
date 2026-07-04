@@ -1,13 +1,35 @@
 import type { ChatAttachment } from "../utils/chatTypes";
+import { appendAuthToken } from "../utils/chatHelpers";
 import {
   IconX, IconMic, IconPlay, IconImage, IconPaperclip,
 } from "../../../icons";
 
-export function AttachmentPreview({ att, onRemove }: { att: ChatAttachment; onRemove?: () => void }) {
-  if (att.type === "image" && att.previewUrl) {
+function resolvePreviewUrl(att: ChatAttachment, apiBaseUrl?: string): string {
+  const raw = att.previewUrl || att.url || "";
+  if (raw.startsWith("data:") || raw.startsWith("blob:")) return raw;
+  if (raw.startsWith("http")) return appendAuthToken(raw);
+  if (raw.startsWith("/")) return appendAuthToken(`${apiBaseUrl || ""}${raw}`);
+  if (raw) return raw;
+  if (att.localPath) {
+    return appendAuthToken(`${apiBaseUrl || ""}/api/files?path=${encodeURIComponent(att.localPath)}`);
+  }
+  return "";
+}
+
+export function AttachmentPreview({
+  att,
+  onRemove,
+  apiBaseUrl,
+}: {
+  att: ChatAttachment;
+  onRemove?: () => void;
+  apiBaseUrl?: string;
+}) {
+  const previewUrl = att.type === "image" ? resolvePreviewUrl(att, apiBaseUrl) : "";
+  if (att.type === "image" && previewUrl) {
     return (
       <div style={{ position: "relative", display: "inline-block" }}>
-        <img src={att.previewUrl} alt={att.name} style={{ width: 80, height: 80, objectFit: "cover", display: "block", borderRadius: 10, border: "1px solid var(--line)" }} />
+        <img src={previewUrl} alt={att.name} style={{ width: 80, height: 80, objectFit: "cover", display: "block", borderRadius: 10, border: "1px solid var(--line)" }} />
         {onRemove && (
           <button
             onClick={onRemove}
