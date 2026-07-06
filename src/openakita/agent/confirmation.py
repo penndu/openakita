@@ -10,6 +10,14 @@ read paths share one in-memory store.
 from __future__ import annotations
 
 from enum import Enum
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from openakita.core.confirmation_state import (
+        PendingRiskConfirmation,
+        PendingRiskConfirmationStore,
+        get_confirmation_store,
+    )
 
 
 class ConfirmationDecision(str, Enum):  # noqa: UP042 — preserved as-is from the legacy module so str+Enum vs StrEnum behaviour differences (e.g. ``repr`` / ``format``) cannot leak into existing callers; cleanup belongs in a separate refactor commit, not in this byte-faithful MOVE.
@@ -47,11 +55,18 @@ def normalize_confirmation_answer(answer: str) -> ConfirmationDecision:
     return ConfirmationDecision.UNKNOWN
 
 
-from openakita.core.confirmation_state import (  # noqa: E402
-    PendingRiskConfirmation,
-    PendingRiskConfirmationStore,
-    get_confirmation_store,
-)
+def __getattr__(name: str) -> Any:
+    if name in {
+        "PendingRiskConfirmation",
+        "PendingRiskConfirmationStore",
+        "get_confirmation_store",
+    }:
+        from openakita.core import confirmation_state as _confirmation_state
+
+        value = getattr(_confirmation_state, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "ConfirmationDecision",

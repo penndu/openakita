@@ -34,11 +34,10 @@ from __future__ import annotations
 
 import re
 
+from ....tools.tool_result import successful_tool_effect_actions
 from ._verb_tool_map import CLAIMED_TOOL_TO_FRAGMENTS, VERB_TO_TOOL_FRAGMENTS
 from .recap_context import RECAP_NEAR_RE, is_recap_context
 from .tool_failure_ack import successful_tool_names
-
-from ....tools.tool_result import successful_tool_effect_actions
 
 __all__ = [
     "action_claim_re",

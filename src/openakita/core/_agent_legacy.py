@@ -3543,7 +3543,19 @@ class Agent:
         session_context = None
         if session:
             try:
-                sub_records = getattr(session.context, "sub_agent_records", None) or []
+                session_ctx = getattr(session, "context", None)
+                active_profile_id = (
+                    getattr(session_ctx, "agent_profile_id", "default") if session_ctx else "default"
+                ) or "default"
+                get_records_for_agent = (
+                    getattr(session_ctx, "get_sub_agent_records_for_agent", None)
+                    if session_ctx
+                    else None
+                )
+                if callable(get_records_for_agent):
+                    sub_records = get_records_for_agent(active_profile_id)
+                else:
+                    sub_records = getattr(session_ctx, "sub_agent_records", None) or []
                 session_config = getattr(session, "config", None)
                 session_context = {
                     "session_id": session.id,
@@ -5105,6 +5117,27 @@ class Agent:
         # 如果直接操作 session.context.messages 的活引用，边界消息会永久积累导致
         # 连续 user 角色消息 → API 报错 / 模型混乱 / 工具重复执行
         session_messages = list(session_messages)
+        active_agent_profile_id = "default"
+        if session is not None and hasattr(session, "context"):
+            active_agent_profile_id = (
+                getattr(session.context, "agent_profile_id", "default") or "default"
+            )
+            filter_for_agent = getattr(session.context, "filter_messages_for_agent", None)
+            if callable(filter_for_agent):
+                before_filter_count = len(session_messages)
+                session_messages = filter_for_agent(
+                    session_messages,
+                    active_agent_profile_id,
+                )
+                if len(session_messages) != before_filter_count:
+                    logger.info(
+                        "[Session:%s] Agent profile history scoped: %d -> %d "
+                        "(profile=%s)",
+                        session_id,
+                        before_filter_count,
+                        len(session_messages),
+                        active_agent_profile_id,
+                    )
         topic_changed = False
         _channel = getattr(session, "channel", None) if session else None
         _is_im = _channel and _channel not in ("cli", "desktop")
@@ -5286,7 +5319,15 @@ class Agent:
 
         # 10.5 注入子 Agent 委派结果摘要到最后一条 assistant 消息
         if session and hasattr(session, "context"):
-            sub_records = getattr(session.context, "sub_agent_records", None)
+            get_records_for_agent = getattr(
+                session.context,
+                "get_sub_agent_records_for_agent",
+                None,
+            )
+            if callable(get_records_for_agent):
+                sub_records = get_records_for_agent(active_agent_profile_id)
+            else:
+                sub_records = getattr(session.context, "sub_agent_records", None)
             if sub_records and messages:
                 from .policy_v2.prompt_hardening import wrap_external_content
 
@@ -7488,7 +7529,19 @@ class Agent:
         session = self._current_session
         if not session:
             return ""
-        records = getattr(getattr(session, "context", None), "sub_agent_records", None)
+        session_ctx = getattr(session, "context", None)
+        active_profile_id = (
+            getattr(session_ctx, "agent_profile_id", "default") if session_ctx else "default"
+        ) or "default"
+        get_records_for_agent = (
+            getattr(session_ctx, "get_sub_agent_records_for_agent", None)
+            if session_ctx
+            else None
+        )
+        if callable(get_records_for_agent):
+            records = get_records_for_agent(active_profile_id)
+        else:
+            records = getattr(session_ctx, "sub_agent_records", None)
         if not records:
             return ""
         summaries = [r.get("work_summary", "") for r in records if r.get("work_summary")]

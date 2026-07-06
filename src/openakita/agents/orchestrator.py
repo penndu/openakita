@@ -1711,11 +1711,15 @@ def _persist_sub_agent_record(
         "started_at": datetime.fromtimestamp(start_time).isoformat(),
         "completed_at": datetime.now().isoformat(),
     }
+    ctx = getattr(session, "context", None)
+    parent_profile_id = (
+        getattr(ctx, "agent_profile_id", "default") if ctx is not None else "default"
+    ) or "default"
+    record["parent_agent_profile_id"] = parent_profile_id
 
     record["output_files"] = _extract_output_files(record)
     record["work_summary"] = _build_work_summary(record)
 
-    ctx = getattr(session, "context", None)
     if ctx is not None and hasattr(ctx, "sub_agent_records"):
         _MAX_SUB_AGENT_RECORDS = 50
         ctx.sub_agent_records.append(record)

@@ -28,9 +28,6 @@ from .capabilities import (
 )
 from .confirmation import (
     ConfirmationDecision,
-    PendingRiskConfirmation,
-    PendingRiskConfirmationStore,
-    get_confirmation_store,
     normalize_confirmation_answer,
 )
 from .context import (
@@ -457,6 +454,11 @@ _LAZY_REASONING_EXPORTS = {
     "ReasoningEngine": "ReasoningEngine",
     "ReasoningDecision": "Decision",
 }
+_LAZY_CONFIRMATION_EXPORTS = {
+    "PendingRiskConfirmation",
+    "PendingRiskConfirmationStore",
+    "get_confirmation_store",
+}
 
 
 def __getattr__(name: str):  # PEP 562 module-level lazy attribute access
@@ -466,5 +468,11 @@ def __getattr__(name: str):  # PEP 562 module-level lazy attribute access
 
         value = getattr(_reasoning, target)
         globals()[name] = value  # cache so __getattr__ runs at most once per name
+        return value
+    if name in _LAZY_CONFIRMATION_EXPORTS:
+        from openakita.core import confirmation_state as _confirmation_state
+
+        value = getattr(_confirmation_state, name)
+        globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
