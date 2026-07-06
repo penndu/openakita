@@ -9158,6 +9158,12 @@ class ReasoningEngine:
         return False
 
 
+# Keep source-inspection sentinels pointed at the live loop bodies even though
+# the public entry points are thin wrappers for settle/resume cleanup.
+ReasoningEngine.run.__wrapped__ = ReasoningEngine._run_impl
+ReasoningEngine.reason_stream.__wrapped__ = ReasoningEngine._reason_stream_impl
+
+
 # P11.2b: restore legacy private aliases dropped during P-RC-5 reasoning-engine trim.
 # Canonical homes now live under runtime/state_graph/guards/*; tests in
 # tests/runtime/state_graph/guards/* still access them via
