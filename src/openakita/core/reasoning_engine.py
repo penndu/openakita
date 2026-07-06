@@ -16,6 +16,10 @@ from __future__ import annotations
 
 from openakita.config import settings
 from openakita.core import ReasoningEngine
+from openakita.core._reasoning_engine_legacy import (  # noqa: E402
+    _execute_riskgate_tool_confirmation,
+    _open_riskgate_tool_confirmation,
+)
 
 # The cancel-resume helpers (Issue #608) read these module-scoped names off the
 # legacy ``core.reasoning_engine`` module; upstream tests reference them as
@@ -27,10 +31,6 @@ from openakita.core import ReasoningEngine
 from openakita.core.cancel_cleanup import (  # noqa: E402
     DEFAULT_TTL_SECONDS,
     RESUME_HINT_FRESHNESS_SECONDS,
-)
-from openakita.core._reasoning_engine_legacy import (  # noqa: E402
-    _execute_riskgate_tool_confirmation,
-    _open_riskgate_tool_confirmation,
 )
 
 __all__ = [

@@ -25,7 +25,13 @@ from openakita.core.engine_bridge import engine_stream, is_dual_loop, to_engine
 from openakita.core.security_actions import execute_controlled_action
 from openakita.core.trusted_paths import grant_session_trust
 
-from ..schemas import AttachmentInfo, ChatAttachmentRecord, ChatAnswerRequest, ChatControlRequest, ChatRequest
+from ..schemas import (
+    AttachmentInfo,
+    ChatAnswerRequest,
+    ChatAttachmentRecord,
+    ChatControlRequest,
+    ChatRequest,
+)
 from .conversation_lifecycle import get_lifecycle_manager
 
 logger = logging.getLogger(__name__)
@@ -201,10 +207,6 @@ def _attach_todo_snapshot_meta(
             meta["progress_events"] = journal
         if snapshot and snapshot.get("steps"):
             meta["todo"] = snapshot
-    except Exception:
-        pass
-
-
     except Exception:
         pass
 
@@ -983,6 +985,8 @@ def _apply_agent_profile(session: object, new_profile_id: str) -> bool:
         }
     )
     ctx.agent_profile_id = new_profile_id
+    if hasattr(ctx, "mark_topic_boundary"):
+        ctx.mark_topic_boundary()
     logger.info(f"[Chat API] Agent profile switched: {old_profile_id!r} -> {new_profile_id!r}")
     return True
 
@@ -3065,6 +3069,8 @@ async def chat_sync(request: Request, body: ChatRequest):
                 )
                 if session is not None:
                     apply_classification_to_session(session, classify_entry("api-sync"))
+                    if body.agent_profile_id:
+                        _apply_agent_profile(session, body.agent_profile_id)
                     user_attachments = _history_attachments_from_request(body.attachments)
                     meta = {"attachments": user_attachments} if user_attachments else {}
                     session.add_message("user", body.message or "", **meta)

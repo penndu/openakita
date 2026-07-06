@@ -171,7 +171,7 @@ class OrgScopedScheduler(OrgScopedRegistry):
                     continue
         return out
 
-    def for_org(self, org_id: str) -> "OrgScopedScheduler":
+    def for_org(self, org_id: str) -> OrgScopedScheduler:
         return self
 
 

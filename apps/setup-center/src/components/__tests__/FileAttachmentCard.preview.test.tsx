@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, act, waitFor, fireEvent } from "@testing-library/react";
 
-const saveAttachment = vi.fn(async () => {});
+const saveAttachment = vi.fn(async (..._args: unknown[]) => {});
 vi.mock("../../platform", () => ({
   saveAttachment: (...a: unknown[]) => saveAttachment(...a),
   showInFolder: vi.fn(),
@@ -11,12 +11,12 @@ vi.mock("../../platform", () => ({
 vi.mock("../../platform/auth", () => ({ getAccessToken: () => "test-token" }));
 vi.mock("../../views/chat/hooks/useMdModules", () => ({ useMdModules: () => null }));
 
-const safeFetch = vi.fn(async () => ({
+const safeFetch = vi.fn(async (..._args: unknown[]) => ({
   ok: true,
   status: 200,
   text: async () => "# 标题\n\n正文内容ABC",
 } as unknown as Response));
-vi.mock("../../providers", () => ({ safeFetch: (...a: unknown[]) => safeFetch(...(a as [string])) }));
+vi.mock("../../providers", () => ({ safeFetch: (...a: unknown[]) => safeFetch(...a) }));
 
 import { FileAttachmentCard } from "../FileAttachmentCard";
 

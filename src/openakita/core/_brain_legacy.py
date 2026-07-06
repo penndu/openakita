@@ -89,7 +89,9 @@ class Brain:
         model: str | None = None,
         max_tokens: int | None = None,
     ):
-        from ..llm.client import LLMClient  # local import: break core/agent/llm cycle (P-RC-11 P11.2)
+        from ..llm.client import (
+            LLMClient,  # local import: break core/agent/llm cycle (P-RC-11 P11.2)
+        )
         # Compiler circuit breaker (P-RC-4 extraction).
         self._compiler_breaker = CompilerCircuitBreaker()
 
@@ -165,7 +167,9 @@ class Brain:
 
     def _init_compiler_client(self) -> None:
         """从配置加载 Prompt Compiler 专属 LLMClient"""
-        from ..llm.client import LLMClient  # local import: break core/agent/llm cycle (P-RC-11 P11.2)
+        from ..llm.client import (
+            LLMClient,  # local import: break core/agent/llm cycle (P-RC-11 P11.2)
+        )
         try:
             _, compiler_eps, _, _ = load_endpoints_config()
             if compiler_eps:
@@ -197,7 +201,9 @@ class Brain:
         Returns:
             True 表示成功重载，False 表示无变化或失败。
         """
-        from ..llm.client import LLMClient  # local import: break core/agent/llm cycle (P-RC-11 P11.2)
+        from ..llm.client import (
+            LLMClient,  # local import: break core/agent/llm cycle (P-RC-11 P11.2)
+        )
         try:
             _, compiler_eps, _, _ = load_endpoints_config()
             if compiler_eps:
@@ -375,8 +381,10 @@ class Brain:
             ``{"type": "error", "message": str}``（仅严重失败时）
         """
         # 延迟导入避免与 stream_accumulator 形成循环依赖
+        from ..llm.client import (
+            LLMClient,  # local import: break core/agent/llm cycle (P-RC-11 P11.2)
+        )
         from .stream_accumulator import StreamAccumulator
-        from ..llm.client import LLMClient  # local import: break core/agent/llm cycle (P-RC-11 P11.2)
 
         messages = [Message(role="user", content=[TextBlock(text=prompt)])]
         sys_prompt = system or ""

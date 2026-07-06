@@ -43,7 +43,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from .blackboard import BlackboardBackendProtocol
@@ -200,7 +200,9 @@ def _describe_recent_event(
         art = ev.get("artifact_path") or ""
         if art:
             try:
-                bits.append(f"交付 {Path(str(art)).name}")
+                name = PureWindowsPath(str(art)).name
+                if name:
+                    bits.append(f"交付 {name}")
             except (ValueError, OSError):
                 pass
         return "，".join(bits)

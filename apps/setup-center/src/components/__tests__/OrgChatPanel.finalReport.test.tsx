@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
+import { render, act, fireEvent, waitFor } from "@testing-library/react";
 
 // --- v2 stream shim (same shape as OrgChatPanel.v2.test) --------------------
 vi.mock("../../api/v2Stream", () => {

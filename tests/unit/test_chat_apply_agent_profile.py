@@ -49,6 +49,15 @@ class TestApplyAgentProfileHappyPath:
         assert entry["to"] == "content-creator"
         assert isinstance(entry["at"], str) and entry["at"]
 
+    def test_switch_marks_topic_boundary_at_current_history_position(self):
+        session = _make_session(profile_id="default")
+        session.context.add_message("user", "old default topic")
+
+        _apply_agent_profile(session, "content-creator")
+
+        assert session.context.topic_boundaries == [1]
+        assert session.context.current_topic_start == 1
+
     def test_switch_to_same_profile_is_noop_no_history(self):
         session = _make_session(profile_id="default")
 

@@ -91,6 +91,80 @@ class TestSessionCreation:
         assert restored.context.focus_terms == s.context.focus_terms
 
 
+class TestAgentProfileScopedHistory:
+    def test_add_message_stamps_active_agent_profile(self):
+        ctx = SessionContext(agent_profile_id="english")
+
+        added = ctx.add_message("user", "submit English homework")
+
+        assert added is True
+        assert ctx.messages[-1]["agent_profile_id"] == "english"
+
+    def test_duplicate_detection_keeps_same_text_from_different_profiles(self):
+        ctx = SessionContext(agent_profile_id="english")
+
+        assert ctx.add_message("user", "done") is True
+        ctx.agent_profile_id = "politics"
+
+        assert ctx.add_message("user", "done") is True
+        assert [m["agent_profile_id"] for m in ctx.messages] == ["english", "politics"]
+
+    def test_filter_messages_for_agent_excludes_other_profile_turns(self):
+        ctx = SessionContext(agent_profile_id="english")
+        ctx.add_message("user", "English homework")
+        ctx.add_message("assistant", "English feedback")
+        ctx.agent_profile_id = "politics"
+        ctx.add_message("user", "Politics textbook")
+        ctx.add_message("assistant", "Politics answer")
+
+        english = ctx.get_messages_for_agent("english")
+        politics = ctx.get_messages_for_agent("politics")
+
+        assert [m["content"] for m in english] == ["English homework", "English feedback"]
+        assert [m["content"] for m in politics] == ["Politics textbook", "Politics answer"]
+
+    def test_legacy_untagged_history_is_not_replayed_after_profile_switch(self):
+        ctx = SessionContext(agent_profile_id="english")
+        ctx.messages.extend(
+            [
+                {"role": "user", "content": "politics question"},
+                {"role": "assistant", "content": "politics answer"},
+            ]
+        )
+        ctx.agent_switch_history.append({"from": "default", "to": "english"})
+
+        assert ctx.get_messages_for_agent("english") == []
+
+    def test_legacy_single_profile_history_is_preserved_without_switches(self):
+        ctx = SessionContext(agent_profile_id="english")
+        ctx.messages.append({"role": "user", "content": "old English context"})
+
+        assert ctx.get_messages_for_agent("english") == ctx.messages
+
+    def test_legacy_single_profile_history_stays_visible_after_new_tagged_turn(self):
+        ctx = SessionContext(agent_profile_id="english")
+        ctx.messages.append({"role": "user", "content": "old English context"})
+        ctx.add_message("assistant", "new English feedback")
+
+        scoped = ctx.get_messages_for_agent("english")
+
+        assert [m["content"] for m in scoped] == [
+            "old English context",
+            "new English feedback",
+        ]
+
+    def test_sub_agent_records_are_scoped_to_parent_profile(self):
+        ctx = SessionContext(agent_profile_id="english")
+        ctx.sub_agent_records = [
+            {"parent_agent_profile_id": "english", "work_summary": "grammar review"},
+            {"parent_agent_profile_id": "politics", "work_summary": "civics review"},
+        ]
+
+        records = ctx.get_sub_agent_records_for_agent("english")
+
+        assert [r["work_summary"] for r in records] == ["grammar review"]
+
+
 class TestSessionPersistence:
     def test_save_sessions_uses_strict_atomic_json_write(self, tmp_path, monkeypatch):
         manager = SessionManager(storage_path=tmp_path / "sessions")

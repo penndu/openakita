@@ -1338,6 +1338,8 @@ class MessageGateway:
             }
         )
         ctx.agent_profile_id = p.id
+        if hasattr(ctx, "mark_topic_boundary"):
+            ctx.mark_topic_boundary()
         self.session_manager.mark_dirty()
         logger.info(f"[IM] Agent switched: {old_id!r} -> {agent_id!r} for {session.session_key}")
 
@@ -1426,6 +1428,8 @@ class MessageGateway:
             }
         )
         ctx.agent_profile_id = reset_target
+        if hasattr(ctx, "mark_topic_boundary"):
+            ctx.mark_topic_boundary()
         self.session_manager.mark_dirty()
         logger.info(f"[IM] Agent reset to {reset_target} for {session.session_key}")
 
@@ -1486,6 +1490,8 @@ class MessageGateway:
                         "timestamp": datetime.now().isoformat(),
                     }
                 )
+                if hasattr(session.context, "mark_topic_boundary"):
+                    session.context.mark_topic_boundary()
             self.session_manager.mark_dirty()
             logger.info(f"[IM] Applied bot default agent: {bot_agent} for {session.session_key}")
 
