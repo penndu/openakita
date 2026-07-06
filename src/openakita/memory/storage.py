@@ -1137,9 +1137,9 @@ class MemoryStorage:
             return False
         with self._lock:
             try:
-                cursor = self._conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+                self._conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
                 self._conn.commit()
-                return cursor.rowcount > 0
+                return True
             except Exception as e:
                 if _is_db_locked(e):
                     raise

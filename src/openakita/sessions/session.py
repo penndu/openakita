@@ -21,6 +21,28 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 DEDUP_TIME_WINDOW_SECONDS = 30
+AGENT_SCOPED_MESSAGE_ROLES = frozenset({"user", "assistant", "tool"})
+
+
+def _normalize_agent_profile_id(value: Any) -> str:
+    text = str(value or "default").strip()
+    return text or "default"
+
+
+def _message_agent_profile_id(message: dict) -> str:
+    raw = message.get("agent_profile_id") if isinstance(message, dict) else None
+    if raw is None or str(raw).strip() == "":
+        return ""
+    return _normalize_agent_profile_id(raw)
+
+
+def _record_parent_agent_profile_id(record: dict) -> str:
+    if not isinstance(record, dict):
+        return ""
+    raw = record.get("parent_agent_profile_id") or record.get("session_agent_profile_id")
+    if raw is None or str(raw).strip() == "":
+        return ""
+    return _normalize_agent_profile_id(raw)
 
 
 def is_duplicate_message(
@@ -34,6 +56,7 @@ def is_duplicate_message(
     content = candidate.get("content")
     if not role or content is None:
         return False
+    candidate_profile = _message_agent_profile_id(candidate)
 
     candidate_ts = None
     raw_ts = candidate.get("timestamp")
@@ -47,6 +70,10 @@ def is_duplicate_message(
     for msg in reversed(existing_messages[-8:]):
         if msg.get("role") != role or msg.get("content") != content:
             continue
+        existing_profile = _message_agent_profile_id(msg)
+        if candidate_profile or existing_profile:
+            if candidate_profile != existing_profile:
+                continue
 
         if msg is last_message:
             return True
@@ -216,7 +243,13 @@ class SessionContext:
             metadata = dict(metadata)
             msg_ts = metadata.get("timestamp") or now.isoformat()
             metadata["timestamp"] = msg_ts
+            if role in AGENT_SCOPED_MESSAGE_ROLES and not metadata.get("agent_profile_id"):
+                metadata["agent_profile_id"] = _normalize_agent_profile_id(
+                    self.agent_profile_id
+                )
             candidate = {"role": role, "content": content, "timestamp": msg_ts}
+            if metadata.get("agent_profile_id"):
+                candidate["agent_profile_id"] = metadata["agent_profile_id"]
             if is_duplicate_message(self.messages, candidate):
                 return False
 
@@ -251,6 +284,11 @@ class SessionContext:
                 决定渲染样式。
         """
         with self._msg_lock:
+            metadata = dict(metadata)
+            if role in AGENT_SCOPED_MESSAGE_ROLES and not metadata.get("agent_profile_id"):
+                metadata["agent_profile_id"] = _normalize_agent_profile_id(
+                    self.agent_profile_id
+                )
             self.messages.append(
                 {
                     "role": role,
@@ -346,6 +384,90 @@ class SessionContext:
             except (ValueError, TypeError):
                 pass
         return self.messages
+
+    def filter_messages_for_agent(
+        self,
+        messages: list[dict],
+        agent_profile_id: str | None = None,
+    ) -> list[dict]:
+        """Return only the history that belongs to the active agent profile.
+
+        Legacy sessions created before profile tagging have ambiguous ownership.
+        Untagged turns are replayed only while the session has never recorded a
+        profile switch. Once a session switches agents, untagged user/assistant
+        turns are not fed into profile-scoped LLM history.
+        """
+        source = list(messages or [])
+        if not source:
+            return []
+
+        profile_id = _normalize_agent_profile_id(agent_profile_id or self.agent_profile_id)
+        has_profile_tags = any(_message_agent_profile_id(msg) for msg in source)
+        has_switch_history = bool(self.agent_switch_history)
+        allow_legacy_untagged = not has_switch_history
+        if allow_legacy_untagged and not has_profile_tags:
+            return source
+
+        filtered: list[dict] = []
+        for msg in source:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            if role not in AGENT_SCOPED_MESSAGE_ROLES:
+                filtered.append(msg)
+                continue
+            msg_profile = _message_agent_profile_id(msg)
+            if msg_profile == profile_id or (not msg_profile and allow_legacy_untagged):
+                filtered.append(msg)
+        return filtered
+
+    def get_messages_for_agent(
+        self,
+        agent_profile_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """获取指定 agent profile 可见的消息历史。"""
+        messages = self.filter_messages_for_agent(self.messages, agent_profile_id)
+        if limit is not None:
+            try:
+                return messages[-int(limit) :]
+            except (ValueError, TypeError):
+                pass
+        return messages
+
+    def filter_sub_agent_records_for_agent(
+        self,
+        records: list[dict],
+        agent_profile_id: str | None = None,
+    ) -> list[dict]:
+        """Return sub-agent work records owned by the active parent profile."""
+        source = list(records or [])
+        if not source:
+            return []
+
+        profile_id = _normalize_agent_profile_id(agent_profile_id or self.agent_profile_id)
+        has_profile_tags = any(_record_parent_agent_profile_id(record) for record in source)
+        has_switch_history = bool(self.agent_switch_history)
+        allow_legacy_untagged = not has_switch_history
+        if allow_legacy_untagged and not has_profile_tags:
+            return source
+
+        return [
+            record
+            for record in source
+            if _record_parent_agent_profile_id(record) == profile_id
+            or (not _record_parent_agent_profile_id(record) and allow_legacy_untagged)
+        ]
+
+    def get_sub_agent_records_for_agent(
+        self,
+        agent_profile_id: str | None = None,
+    ) -> list[dict]:
+        """获取指定 agent profile 可见的子 agent 工作记录。"""
+        return self.filter_sub_agent_records_for_agent(
+            self.sub_agent_records,
+            agent_profile_id,
+        )
 
     def set_variable(self, key: str, value: Any) -> None:
         """设置会话变量"""
@@ -816,7 +938,7 @@ class Session:
                 if not isinstance(content, str) or not content:
                     continue
 
-                from openakita.core.tool_executor import smart_truncate
+                from openakita.agent.tools import smart_truncate
 
                 is_rule = any(w in content for w in self._RULE_SIGNAL_WORDS)
                 if is_rule and rules_len < max_rules_len:

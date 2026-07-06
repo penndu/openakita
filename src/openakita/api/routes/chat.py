@@ -19,10 +19,19 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from openakita.core.ask_user_context import AskUserReplyContext
+from openakita.core.confirmation_state import ConfirmationDecision, get_confirmation_store
 from openakita.core.context_stats import get_context_snapshot, merge_context_snapshot_into_usage
 from openakita.core.engine_bridge import engine_stream, is_dual_loop, to_engine
+from openakita.core.security_actions import execute_controlled_action
+from openakita.core.trusted_paths import grant_session_trust
 
-from ..schemas import AttachmentInfo, ChatAttachmentRecord, ChatControlRequest, ChatRequest
+from ..schemas import (
+    AttachmentInfo,
+    ChatAnswerRequest,
+    ChatAttachmentRecord,
+    ChatControlRequest,
+    ChatRequest,
+)
 from .conversation_lifecycle import get_lifecycle_manager
 
 logger = logging.getLogger(__name__)
@@ -121,6 +130,27 @@ def _should_emit_resume_task_idle(
     return (not busy) and terminal_seen and seconds_since_event > 1.0
 
 
+def _format_controlled_action_result(
+    decision: ConfirmationDecision,
+    result: dict,
+    *,
+    original_message: str = "",
+) -> str:
+    if decision == ConfirmationDecision.CANCEL:
+        return "已取消该高风险操作，未执行任何修改。"
+    if decision == ConfirmationDecision.INSPECT_ONLY:
+        prefix = "已按只查看处理"
+    elif result.get("status") == "ok":
+        prefix = "已按确认执行受控操作"
+    else:
+        prefix = "受控操作未能执行"
+    return (
+        f"{prefix}。\n\n"
+        f"原始请求：{original_message}\n\n"
+        f"结果：\n```json\n{json.dumps(result, ensure_ascii=False, indent=2)}\n```"
+    )
+
+
 def _observe_todo_snapshot_event(current: dict | None, event: dict) -> dict | None:
     """Fold one progress event into the latest todo snapshot.
 
@@ -179,6 +209,219 @@ def _attach_todo_snapshot_meta(
             meta["todo"] = snapshot
     except Exception:
         pass
+
+
+class _RiskAuthorizedReplay:
+    """Sentinel returned by ``_handle_pending_risk_answer`` when the user has
+    confirmed a high-risk action **but** the classification has no controlled
+    execution entry point (``classification.action is None``).
+
+    Caller should:
+    1. Replace the user-facing message with ``original_message``.
+    2. Continue the normal LLM flow; the agent's risk gate will detect the
+       session-level ``risk_authorized_replay`` metadata and skip re-blocking.
+    """
+
+    __slots__ = ("original_message", "confirmation_id")
+
+    def __init__(self, original_message: str, confirmation_id: str) -> None:
+        self.original_message = original_message
+        self.confirmation_id = confirmation_id
+
+
+async def _handle_pending_risk_answer(
+    *,
+    request: Request,
+    conversation_id: str,
+    answer: str,
+    as_stream: bool,
+    remember_for_session: bool = False,
+) -> JSONResponse | StreamingResponse | dict | _RiskAuthorizedReplay | None:
+    store = get_confirmation_store()
+    pending = store.get(conversation_id)
+    if pending is None:
+        return None
+
+    decision, consumed = store.consume(conversation_id, answer)
+    if decision == ConfirmationDecision.UNKNOWN or consumed is None:
+        return None
+
+    classification = dict(consumed.classification)
+    parameters = dict(classification.get("parameters") or {})
+
+    # Fix-11: 如果用户在弹窗里勾选了"本次会话内同类操作不再询问"，并且
+    # 决策是 CONFIRM/INSPECT_ONLY（即非 CANCEL），则向 session 写入一条
+    # 信任规则。仅按 operation_kind 维度记录，不绑定具体 path_pattern，
+    # 因为前端 UI 此处暂不传具体路径；保持克制 ⇒ 仅在本会话内生效。
+    if remember_for_session and decision in (
+        ConfirmationDecision.CONFIRM,
+        ConfirmationDecision.INSPECT_ONLY,
+    ):
+        try:
+            session_manager = getattr(request.app.state, "session_manager", None)
+            if session_manager and conversation_id:
+                session = session_manager.get_session(
+                    channel="desktop",
+                    chat_id=conversation_id,
+                    user_id="desktop_user",
+                    create_if_missing=True,
+                )
+                if session:
+                    grant_session_trust(
+                        session,
+                        operation=classification.get("operation_kind"),
+                    )
+                    session_manager.persist()
+                    logger.info(
+                        "[RiskGate] Session trust granted (operation=%s, session=%s, "
+                        "confirmation=%s)",
+                        classification.get("operation_kind"),
+                        conversation_id,
+                        consumed.confirmation_id,
+                    )
+        except Exception as exc:
+            logger.warning("[Chat API] Failed to persist session trust grant: %s", exc)
+    if decision == ConfirmationDecision.CANCEL:
+        result = {"status": "cancelled", "kind": "pending_risk_confirmation"}
+    elif decision == ConfirmationDecision.INSPECT_ONLY:
+        target = classification.get("target_kind")
+        inspect_action = None
+        if target == "security_user_allowlist":
+            inspect_action = "list_security_allowlist"
+        elif target == "skill_external_allowlist":
+            inspect_action = "list_skill_external_allowlist"
+        result = execute_controlled_action(inspect_action, parameters)
+    else:
+        # CONFIRM 分支：当 classification.action is None（无受控执行入口）
+        # 时，**不要走死路径** — 改为标记会话 risk_authorized_replay，
+        # 让 LLM 重新规划原始 user 意图。详见 _RiskAuthorizedReplay 文档。
+        action = classification.get("action")
+        if not action:
+            session_manager = getattr(request.app.state, "session_manager", None)
+            if session_manager and conversation_id:
+                try:
+                    session = session_manager.get_session(
+                        channel="desktop",
+                        chat_id=conversation_id,
+                        user_id="desktop_user",
+                        create_if_missing=True,
+                    )
+                    if session:
+                        # 用户的"继续/确认"是回应高危确认弹窗的应答，并非新一轮
+                        # 真实意图（真实意图是 original_message，将在下一轮被 LLM
+                        # 重新规划）。标记 transient_for_llm 仅供 UI 展示。
+                        session.add_message("user", answer, transient_for_llm=True)
+                        # 旧字段保留向后兼容（旧 agent 路径会读它）
+                        session.set_metadata(
+                            "risk_authorized_replay",
+                            {
+                                "expires_at": time.time() + 30,
+                                "confirmation_id": consumed.confirmation_id,
+                                "original_message": consumed.original_message,
+                            },
+                        )
+                        # PR-A2：结构化授权意图，避免 LLM 自由 ReAct 全盘 grep。
+                        try:
+                            from openakita.core.feature_flags import (
+                                is_enabled as _ff_enabled,
+                            )
+                            from openakita.core.risk_intent import (
+                                derive_authorized_intent,
+                            )
+
+                            if _ff_enabled("risk_authorized_intent_v2"):
+                                _intent = derive_authorized_intent(
+                                    classification,
+                                    original_message=consumed.original_message,
+                                    confirmation_id=consumed.confirmation_id,
+                                    now=time.time(),
+                                )
+                                session.set_metadata(
+                                    "risk_authorized_intent",
+                                    _intent.to_dict(),
+                                )
+                                logger.info(
+                                    "[RiskGate] Issued AuthorizedIntent op=%s target=%s scope=%s",
+                                    _intent.operation,
+                                    _intent.target_kind,
+                                    _intent.scope,
+                                )
+                        except Exception as exc:
+                            logger.warning("[Chat API] Failed to derive AuthorizedIntent: %s", exc)
+                        session_manager.persist()
+                except Exception as exc:
+                    logger.warning("[Chat API] Failed to persist risk_authorized_replay: %s", exc)
+            logger.info(
+                "[RiskGate] User confirmed high-risk action without controlled entry — "
+                "replaying original message via LLM (session=%s, confirmation=%s)",
+                conversation_id,
+                consumed.confirmation_id,
+            )
+            return _RiskAuthorizedReplay(
+                original_message=consumed.original_message,
+                confirmation_id=consumed.confirmation_id,
+            )
+        result = execute_controlled_action(action, parameters)
+
+    try:
+        from openakita.core.security_actions import (
+            maybe_broadcast_death_switch_reset,
+            maybe_refresh_skills,
+        )
+
+        await maybe_broadcast_death_switch_reset(result)
+        await maybe_refresh_skills(result, lambda: getattr(request.app.state, "agent", None))
+    except Exception:
+        pass
+
+    response_text = _format_controlled_action_result(
+        decision,
+        result,
+        original_message=consumed.original_message,
+    )
+
+    session_manager = getattr(request.app.state, "session_manager", None)
+    if session_manager and conversation_id:
+        try:
+            session = session_manager.get_session(
+                channel="desktop",
+                chat_id=conversation_id,
+                user_id="desktop_user",
+                create_if_missing=True,
+            )
+            if session:
+                # 用户的"确认/取消"回答 + 系统的受控操作回执 都仅供 UI 历史展示，
+                # 不再喂给 LLM —— 否则下一轮 LLM 会模仿"已确认高危..."句式
+                # 或被"受控操作未能执行"措辞带偏（详见 _prepare_session_context
+                # 中 transient_for_llm 跳过逻辑）。
+                session.add_message("user", answer, transient_for_llm=True)
+                session.add_message(
+                    "assistant",
+                    response_text,
+                    transient_for_llm=True,
+                    controlled_confirmation={
+                        "decision": decision.value,
+                        "confirmation_id": consumed.confirmation_id,
+                        "result": result,
+                    },
+                )
+                session_manager.persist()
+        except Exception as exc:
+            logger.warning("[Chat API] Failed to persist controlled confirmation: %s", exc)
+
+    if not as_stream:
+        return {
+            "status": "ok",
+            "conversation_id": conversation_id,
+            "decision": decision.value,
+            "confirmation_id": consumed.confirmation_id,
+            "result": result,
+            "message": response_text,
+        }
+
+    async def _gen():
+        payload = {"type": "text_delta", "content": response_text}
+        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @router.get("/api/commands")
@@ -521,7 +764,7 @@ def _append_unique_artifacts(collected: list[dict], artifacts: list[dict]) -> li
 
 def _resolve_agent(agent: object):
     """Resolve the actual Agent instance."""
-    from openakita.core.agent import Agent
+    from openakita.agent.core import Agent
 
     if isinstance(agent, Agent):
         return agent
@@ -658,7 +901,8 @@ async def _cancel_running_chat_task(
             "action": "noop",
             "reason": reason,
             "conversation_id": conv_id,
-            "message": "No running task to cancel",
+            "busy": False,
+            "message": "No running task to cancel (conversation lifecycle is idle)",
         }
 
     if not _agent_has_cancel_target(actual_agent, conv_id):
@@ -676,7 +920,11 @@ async def _cancel_running_chat_task(
             "action": "noop",
             "reason": reason,
             "conversation_id": conv_id,
-            "message": "No running task to cancel",
+            "busy": True,
+            "message": (
+                "Lifecycle was busy but the agent turn already cleaned up; "
+                "nothing left to cancel"
+            ),
         }
 
     actual_agent.cancel_current_task(reason, session_id=conv_id)
@@ -737,6 +985,8 @@ def _apply_agent_profile(session: object, new_profile_id: str) -> bool:
         }
     )
     ctx.agent_profile_id = new_profile_id
+    if hasattr(ctx, "mark_topic_boundary"):
+        ctx.mark_topic_boundary()
     logger.info(f"[Chat API] Agent profile switched: {old_profile_id!r} -> {new_profile_id!r}")
     return True
 
@@ -1880,7 +2130,7 @@ async def _stream_org_command_chat(
             yield _sse("done")
             return
 
-        from openakita.orgs.command_service import (
+        from openakita.orgs.command_models import (
             OrgCommandError,
             OrgCommandRequest,
             OrgCommandSource,
@@ -2054,6 +2304,18 @@ async def chat(request: Request, body: ChatRequest):
 
     conversation_id = body.conversation_id
     client_id = body.client_id or ""
+    # F3/F4 (Domain1): when a caller omits client_id (the frontend always sends
+    # one; this is external/API traffic), the entire lifecycle busy-lock block
+    # below used to be skipped — so double-texting policy (QUEUE/STEER/REJECT)
+    # and /api/chat/cancel were bypassed and the same conversation could run
+    # unbounded concurrent turns. Synthesize a stable fallback client_id keyed on
+    # conversation_id so these requests enter the *same* tested lifecycle path
+    # (keyed by conversation_id). Two concurrent client-less requests to one
+    # conversation now share this key → treated as same-client → serialized by
+    # the QUEUE policy instead of racing. Frontend behaviour is untouched
+    # because body.client_id is always truthy there.
+    if not client_id:
+        client_id = f"__server_fallback__::{conversation_id}"
     request_id = f"chat_{_uuid.uuid4().hex[:12]}"
     session_manager = getattr(request.app.state, "session_manager", None)
 
@@ -2065,6 +2327,26 @@ async def chat(request: Request, body: ChatRequest):
             status_code=400,
             content={"error": "empty_message", "message": "消息内容不能为空"},
         )
+
+
+    try:
+        pending_response = await _handle_pending_risk_answer(
+            request=request,
+            conversation_id=conversation_id,
+            answer=body.message or "",
+            as_stream=True,
+        )
+    except Exception as exc:
+        return _chat_startup_error_response(
+            exc,
+            conversation_id=conversation_id,
+            request_id=request_id,
+            stage="pending_risk_answer",
+        )
+    if isinstance(pending_response, _RiskAuthorizedReplay):
+        body.message = pending_response.original_message
+    elif pending_response is not None:
+        return pending_response
 
     # ── Per-turn idempotency short-circuit ──
     # (v1.27.14, plan: conversation concurrency v1.28, S1.6)
@@ -2787,6 +3069,8 @@ async def chat_sync(request: Request, body: ChatRequest):
                 )
                 if session is not None:
                     apply_classification_to_session(session, classify_entry("api-sync"))
+                    if body.agent_profile_id:
+                        _apply_agent_profile(session, body.agent_profile_id)
                     user_attachments = _history_attachments_from_request(body.attachments)
                     meta = {"attachments": user_attachments} if user_attachments else {}
                     session.add_message("user", body.message or "", **meta)
@@ -2882,6 +3166,41 @@ async def chat_sync(request: Request, body: ChatRequest):
                 conversation_id,
                 busy_gen,
             )
+
+
+@router.post("/api/chat/answer")
+async def chat_answer(request: Request, body: ChatAnswerRequest):
+    """Handle user answer to an ask_user event."""
+    if body.conversation_id:
+        pending_response = await _handle_pending_risk_answer(
+            request=request,
+            conversation_id=body.conversation_id,
+            answer=body.answer,
+            as_stream=False,
+            remember_for_session=body.remember_for_session,
+        )
+        if isinstance(pending_response, _RiskAuthorizedReplay):
+            # 非流式接口：返回提示，要求前端重发 original_message。
+            return {
+                "status": "ok",
+                "kind": "risk_authorized_replay",
+                "conversation_id": body.conversation_id,
+                "confirmation_id": pending_response.confirmation_id,
+                "original_message": pending_response.original_message,
+                "message": (
+                    "已收到你的确认。请把原始请求重新发送，系统会在已授权状态下"
+                    "让模型重新规划工具调用。"
+                ),
+            }
+        if pending_response is not None:
+            return pending_response
+    return {
+        "status": "ok",
+        "conversation_id": body.conversation_id,
+        "answer": body.answer,
+        "hint": "No pending risk confirmation matched this conversation_id and answer.",
+    }
+
 
 
 @router.get("/api/chat/busy")

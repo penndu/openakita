@@ -18,12 +18,13 @@
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ...core.policy_v2 import ApprovalClass
 
 if TYPE_CHECKING:
-    from ...core.agent import Agent
+    from ...agent.core import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,20 @@ class PersonaHandler:
                 logger.warning("[switch_persona] Session has no context")
                 return False
             old_id = getattr(ctx, "agent_profile_id", "default")
+            if old_id == profile.id:
+                return True
+            if hasattr(ctx, "agent_switch_history"):
+                ctx.agent_switch_history.append(
+                    {
+                        "from": old_id,
+                        "to": profile.id,
+                        "source": "switch_persona",
+                        "at": datetime.now(UTC).isoformat(),
+                    }
+                )
             ctx.agent_profile_id = profile.id
+            if hasattr(ctx, "mark_topic_boundary"):
+                ctx.mark_topic_boundary()
             logger.info(
                 f"[switch_persona] Switched agent_profile_id: {old_id} -> {profile.id} "
                 f"({profile.name})"

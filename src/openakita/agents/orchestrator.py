@@ -1614,7 +1614,7 @@ def _build_work_summary(record: dict) -> str:
     Returns a concise multi-line text covering:
     task, status, tools used, deliverable files, and result brief.
     """
-    from openakita.core.tool_executor import smart_truncate
+    from openakita.agent.tools import smart_truncate
 
     agent_name = record.get("agent_name", "unknown")
     task, _ = smart_truncate(record.get("task_message", ""), 300, save_full=False, label="ws_task")
@@ -1670,7 +1670,7 @@ def _persist_sub_agent_record(
     trace_raw = getattr(agent, "_last_finalized_trace", None) or []
     trace_raw = list(trace_raw)
 
-    from openakita.core.tool_executor import smart_truncate
+    from openakita.agent.tools import smart_truncate
 
     tools_used: list[dict] = []
     for it in trace_raw:
@@ -1711,11 +1711,15 @@ def _persist_sub_agent_record(
         "started_at": datetime.fromtimestamp(start_time).isoformat(),
         "completed_at": datetime.now().isoformat(),
     }
+    ctx = getattr(session, "context", None)
+    parent_profile_id = (
+        getattr(ctx, "agent_profile_id", "default") if ctx is not None else "default"
+    ) or "default"
+    record["parent_agent_profile_id"] = parent_profile_id
 
     record["output_files"] = _extract_output_files(record)
     record["work_summary"] = _build_work_summary(record)
 
-    ctx = getattr(session, "context", None)
     if ctx is not None and hasattr(ctx, "sub_agent_records"):
         _MAX_SUB_AGENT_RECORDS = 50
         ctx.sub_agent_records.append(record)

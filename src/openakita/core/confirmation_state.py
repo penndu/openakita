@@ -15,6 +15,11 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from openakita.agent.confirmation import (
+    ConfirmationDecision,
+    normalize_confirmation_answer,
+)
+
 
 class RiskGateConfirmationState(StrEnum):
     PENDING = "pending"
@@ -126,6 +131,7 @@ class PendingRiskConfirmationStore:
         )
         self._records: dict[str, RiskGateConfirmationRecord] = {}
         self._conversation_pending: dict[str, list[str]] = {}
+        self._pending_snapshots: dict[str, PendingRiskConfirmation] = {}
 
     def create_record(
         self,
@@ -152,14 +158,58 @@ class PendingRiskConfirmationStore:
         )
         self._records[record.confirmation_id] = record
         self._conversation_pending.setdefault(conversation_id, []).append(record.confirmation_id)
-        return record.to_pending()
+        pending = record.to_pending()
+        self._pending_snapshots[record.confirmation_id] = pending
+        return pending
+
+    def create(
+        self,
+        *,
+        conversation_id: str,
+        original_message: str,
+        classification: dict[str, Any],
+        request_id: str = "",
+    ) -> PendingRiskConfirmation:
+        return self.create_record(
+            conversation_id=conversation_id,
+            original_message=original_message,
+            classification=classification,
+            request_id=request_id,
+        )
+
+    def consume(
+        self,
+        conversation_id: str,
+        answer: str,
+    ) -> tuple[ConfirmationDecision, PendingRiskConfirmation | None]:
+        pending = self.get(conversation_id)
+        if pending is None:
+            return ConfirmationDecision.UNKNOWN, None
+        decision = normalize_confirmation_answer(answer)
+        if decision != ConfirmationDecision.UNKNOWN:
+            record = self.get_record(pending.confirmation_id)
+            if record is not None:
+                next_state = (
+                    RiskGateConfirmationState.CONFIRMED
+                    if decision == ConfirmationDecision.CONFIRM
+                    else RiskGateConfirmationState.CANCELLED
+                    if decision == ConfirmationDecision.CANCEL
+                    else RiskGateConfirmationState.CONFIRMED
+                )
+                self.transition_record(
+                    record,
+                    state=next_state,
+                    decision=decision.value,
+                    answer=answer,
+                )
+        return decision, pending
 
     def get(self, conversation_id: str) -> PendingRiskConfirmation | None:
         self.sweep_expired()
         for confirmation_id in reversed(self._conversation_pending.get(conversation_id, [])):
             record = self._records.get(confirmation_id)
             if record and record.is_pending():
-                return record.to_pending()
+                return self._pending_snapshots.get(confirmation_id) or record.to_pending()
         return None
 
     def get_record(self, confirmation_id: str) -> RiskGateConfirmationRecord | None:
@@ -210,6 +260,7 @@ class PendingRiskConfirmationStore:
             record.execution = execution
         if next_state != RiskGateConfirmationState.PENDING:
             self._remove_pending_index(record.conversation_id, record.confirmation_id)
+            self._pending_snapshots.pop(record.confirmation_id, None)
             record.retain_until = record.updated_at + max(0.0, self.terminal_retention_seconds)
         else:
             record.retain_until = 0.0
@@ -219,6 +270,7 @@ class PendingRiskConfirmationStore:
         if not conversation_id:
             self._records.clear()
             self._conversation_pending.clear()
+            self._pending_snapshots.clear()
             return
         ids = set(self._conversation_pending.pop(conversation_id, []))
         for confirmation_id, record in list(self._records.items()):
