@@ -125,6 +125,17 @@ def append_progress_event(events: list[dict] | None, event: dict | None) -> list
     return out
 
 
+def _terminalize_todo(todo: dict, status: str) -> dict:
+    """Return a todo snapshot with open steps closed for a terminal event."""
+    out = copy.deepcopy(todo)
+    out["status"] = status
+    step_status = "cancelled" if status == "cancelled" else "completed"
+    for step in out.get("steps") or []:
+        if isinstance(step, dict) and step.get("status") in {"pending", "in_progress"}:
+            step["status"] = step_status
+    return out
+
+
 def project_progress_events_to_todo(events: Any) -> dict | None:
     """Fold a persisted progress-event journal into the latest ChatTodo state."""
     todo: dict | None = None
@@ -160,9 +171,9 @@ def project_progress_events_to_todo(events: Any) -> dict | None:
                 else:
                     todo["status"] = "completed"
         elif event_type == "todo_completed":
-            todo["status"] = "completed"
+            todo = _terminalize_todo(todo, "completed")
         elif event_type == "todo_cancelled":
-            todo["status"] = "cancelled"
+            todo = _terminalize_todo(todo, "cancelled")
     return todo
 
 

@@ -6,7 +6,6 @@ import { AskUserBlock } from "./AskUser";
 import { AskUserSummary } from "./AskUserSummary";
 import { ErrorCard } from "./ErrorCard";
 import { SourceStrip } from "./SourceStrip";
-import { PlanCard } from "./PlanCard";
 import { MCPCallStrip } from "./MCPCallStrip";
 import { MarkdownContent } from "./MarkdownContent";
 
@@ -14,8 +13,10 @@ import { MarkdownContent } from "./MarkdownContent";
  * Ordered renderer for an assistant message's `MessagePart[]`.
  *
  * This is the single rendering path shared by both display modes
- * (`FlatMessageItem` and `MessageBubble`), so plan / answered-ask_user /
- * image cards render and re-hydrate identically regardless of the chosen mode.
+ * (`FlatMessageItem` and `MessageBubble`), so answered-ask_user / image cards
+ * render and re-hydrate identically regardless of the chosen mode. Todo/plan
+ * progress is rendered by the floating bar above the composer, not inside each
+ * assistant message.
  * Heavy text blocks read their payload from the flat message fields; the parts
  * array only carries ordering (and small inlined data for plan / attachment /
  * ask_user).
@@ -74,12 +75,8 @@ export function MessageParts({
             return <SourceStrip key={part.id} sources={msg.sources} conversationId={conversationId} httpApiBase={httpApiBase} />;
           case "mcp":
             return <MCPCallStrip key={part.id} calls={msg.mcpCalls} />;
-          case "plan": {
-            const todo = part.todo || msg.todo;
-            return todo && todo.steps?.length > 0 ? (
-              <PlanCard key={part.id} plan={todo} onStepAction={onPlanStepAction} />
-            ) : null;
-          }
+          case "plan":
+            return null;
           case "text":
             return bodyContent ? (
               <MarkdownContent

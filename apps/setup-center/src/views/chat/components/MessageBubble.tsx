@@ -67,9 +67,9 @@ export const MessageBubble = memo(function MessageBubble({
   // for this one bubble, so the effective value drives both rendering and the
   // emptiness check.
   const effShowChain = showChain || revealChain;
-  // Drives the streaming loading indicator: keep it visible only while the
-  // bubble has nothing else to render (covers showChain=off where the chain is
-  // hidden, without double-stacking under a plan / ask_user / artifact card).
+  // Drives the streaming loading indicator: keep it visible until the model
+  // has produced normal output. Todo progress is rendered in the floating bar,
+  // so it must not suppress the regular stream affordances.
   const hasBody = isAssistant && hasRenderableBody(msg, parts, effShowChain, bodyContent);
   // A finished assistant turn that renders nothing visible yet still hides a
   // reasoning chain (global toggle off) would otherwise be a blank bubble —

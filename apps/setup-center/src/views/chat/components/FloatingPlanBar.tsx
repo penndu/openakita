@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type * as React from "react";
 import { useTranslation } from "react-i18next";
 import type { ChatTodo, ChatTodoStep } from "../utils/chatTypes";
 import {
@@ -6,7 +7,18 @@ import {
   IconCircle, IconMinus, IconX,
 } from "../../../icons";
 
-function FloatingTodoStepItem({ step, idx }: { step: ChatTodoStep; idx: number }) {
+type PlanStepAction = "skip" | "retry";
+
+function FloatingTodoStepItem({
+  step,
+  idx,
+  onStepAction,
+}: {
+  step: ChatTodoStep;
+  idx: number;
+  onStepAction?: (action: PlanStepAction, stepIdx: number, description: string) => void;
+}) {
+  const { t } = useTranslation();
   const icon =
     step.status === "completed" ? <IconCheck size={13} /> :
     step.status === "in_progress" ? <IconPlay size={11} /> :
@@ -30,12 +42,32 @@ function FloatingTodoStepItem({ step, idx }: { step: ChatTodoStep; idx: number }
       <div className="floatingTodoStepContent">
         <span style={{ opacity: step.status === "skipped" || step.status === "cancelled" ? 0.5 : 1 }}>{idx + 1}. {descText}</span>
         {resultText && <div className="floatingTodoStepResult">{resultText}</div>}
+        {onStepAction && step.status === "in_progress" && (
+          <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+            <button
+              type="button"
+              onClick={() => onStepAction("skip", idx, descText)}
+              title={t("chat.plan.skipHint", {
+                defaultValue: "在输入框生成「跳过此步」的请求",
+              }) as string}
+              style={floatingPlanActionBtnStyle}
+            >
+              {t("chat.plan.skip", { defaultValue: "跳过此步" })}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-export function FloatingPlanBar({ plan }: { plan: ChatTodo }) {
+export function FloatingPlanBar({
+  plan,
+  onStepAction,
+}: {
+  plan: ChatTodo;
+  onStepAction?: (action: PlanStepAction, stepIdx: number, description: string) => void;
+}) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const completed = plan.steps.filter((s) => s.status === "completed").length;
@@ -75,6 +107,21 @@ export function FloatingPlanBar({ plan }: { plan: ChatTodo }) {
         <div className="floatingTodoActive">
           <span className="floatingTodoActiveIcon"><IconPlay size={11} /></span>
           <span className="floatingTodoActiveText">{activeIdx + 1}/{total} {activeDesc}</span>
+          {onStepAction && activeStep.status === "in_progress" && activeDesc && activeIdx >= 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onStepAction("skip", activeIdx, activeDesc);
+              }}
+              title={t("chat.plan.skipHint", {
+                defaultValue: "在输入框生成「跳过此步」的请求",
+              }) as string}
+              style={{ ...floatingPlanActionBtnStyle, marginLeft: "auto", flexShrink: 0 }}
+            >
+              {t("chat.plan.skip", { defaultValue: "跳过此步" })}
+            </button>
+          )}
         </div>
       )}
       {!expanded && allDone && (
@@ -87,10 +134,25 @@ export function FloatingPlanBar({ plan }: { plan: ChatTodo }) {
       {expanded && (
         <div className="floatingTodoSteps">
           {plan.steps.map((step, idx) => (
-            <FloatingTodoStepItem key={step.id || idx} step={step} idx={idx} />
+            <FloatingTodoStepItem
+              key={step.id || idx}
+              step={step}
+              idx={idx}
+              onStepAction={onStepAction}
+            />
           ))}
         </div>
       )}
     </div>
   );
 }
+
+const floatingPlanActionBtnStyle: React.CSSProperties = {
+  fontSize: 11,
+  padding: "2px 8px",
+  borderRadius: 6,
+  border: "1px solid var(--line)",
+  background: "transparent",
+  cursor: "pointer",
+  color: "var(--muted)",
+};

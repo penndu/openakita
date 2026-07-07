@@ -229,12 +229,23 @@ export function saveMessagesToStorage(key: string, msgs: ChatMessage[], maxMessa
   const windowed = maxMessages > 0 && msgs.length > maxMessages ? msgs.slice(-maxMessages) : msgs;
   // streamFallback is kept on purpose (see sanitizeStoredMessages) so an
   // interrupted bubble stays flagged across reloads until reconciled.
-  const base = windowed.map(({ streaming, streamStatus, ...rest }) => rest);
+  const base = windowed.map(({
+    streaming: _streaming,
+    streamStatus: _streamStatus,
+    parts: _parts,
+    ...rest
+  }) => rest);
   try {
     localStorage.setItem(key, JSON.stringify(base));
     return true;
   } catch {
-    const slim = windowed.map(({ streaming, streamStatus, thinkingChain, ...rest }) => rest);
+    const slim = windowed.map(({
+      streaming: _streaming,
+      streamStatus: _streamStatus,
+      thinkingChain: _thinkingChain,
+      parts: _parts,
+      ...rest
+    }) => rest);
     try {
       localStorage.setItem(key, JSON.stringify(slim));
       return true;

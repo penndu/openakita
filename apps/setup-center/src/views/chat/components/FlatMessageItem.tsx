@@ -74,9 +74,9 @@ export const FlatMessageItem = memo(function FlatMessageItem({
   // Local "view process" reveal can override the global hide-chain toggle for
   // this one bubble.
   const effShowChain = showChain || revealChain;
-  // Keep the streaming loading indicator up only while nothing else renders, so
-  // it never double-stacks under a plan / ask_user / artifact card and never
-  // lingers as a fake spinner when the chain is hidden (showChain=off).
+  // Keep the streaming loading indicator up until the model has produced
+  // normal output. Todo progress is rendered in the floating bar, so it must
+  // not suppress the regular stream affordances.
   const hasBody = isAssistant && hasRenderableBody(msg, parts, effShowChain, bodyContent);
   // Avoid a blank completed bubble when the only thing produced was a chain the
   // user chose to hide — surface a plain one-line handle into the process. Gate

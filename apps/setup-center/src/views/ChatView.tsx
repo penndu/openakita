@@ -1276,6 +1276,15 @@ export function ChatView({
   const mergeActiveTodo = useCallback(
     (msgs: ChatMessage[], activeTodo: ChatTodo | null | undefined): ChatMessage[] => {
       if (!activeTodo || !activeTodo.steps?.length) return msgs;
+      const matchingLocalTodo = [...msgs].reverse().find((m) => m.todo?.id === activeTodo.id)?.todo;
+      if (
+        matchingLocalTodo &&
+        (matchingLocalTodo.status === "completed" ||
+          matchingLocalTodo.status === "failed" ||
+          matchingLocalTodo.status === "cancelled")
+      ) {
+        return msgs;
+      }
       let lastAssistant = -1;
       for (let i = msgs.length - 1; i >= 0; i -= 1) {
         if (msgs[i].role === "assistant") { lastAssistant = i; break; }
@@ -4139,7 +4148,7 @@ export function ChatView({
                         ...(planId ? { planId } : {}),
                       },
                     ];
-                    currentPlan = { ...currentPlan, status: "completed" } as ChatTodo;
+                    currentPlan = terminalizeTodo(currentPlan, "completed");
                     updateMessages((prev) => prev.map((m) =>
                       m.id === assistantMsg.id
                         ? { ...m, todo: { ...currentPlan! }, progressEvents: [...currentProgressEvents] }
@@ -4162,7 +4171,7 @@ export function ChatView({
                         ...(planId ? { planId } : {}),
                       },
                     ];
-                    currentPlan = { ...currentPlan, status: "cancelled" } as ChatTodo;
+                    currentPlan = terminalizeTodo(currentPlan, "cancelled");
                     updateMessages((prev) => prev.map((m) =>
                       m.id === assistantMsg.id
                         ? { ...m, todo: { ...currentPlan! }, progressEvents: [...currentProgressEvents] }
@@ -4530,15 +4539,37 @@ export function ChatView({
                     };
                   }
                 }
-                if (currentPlan && currentPlan.status === "in_progress") {
-                  currentPlan = { ...(currentPlan as ChatTodo), status: "completed" as const };
+                let shouldTerminalizePlan = false;
+                if (
+                  currentPlan &&
+                  currentPlan.status === "in_progress" &&
+                  currentAsk === null &&
+                  !pendingApprovalRef.current
+                ) {
+                  shouldTerminalizePlan = true;
+                  const plan = currentPlan;
+                  const planId = plan.id || "";
+                  const alreadyRecordedCompletion = currentProgressEvents.some(
+                    (ev) => ev.type === "todo_completed" && (!planId || !ev.planId || ev.planId === planId),
+                  );
+                  if (!alreadyRecordedCompletion) {
+                    currentProgressEvents = [
+                      ...currentProgressEvents,
+                      {
+                        type: "todo_completed",
+                        seq: currentProgressEvents.length + 1,
+                        ...(planId ? { planId } : {}),
+                      },
+                    ];
+                  }
+                  currentPlan = terminalizeTodo(plan, "completed");
                 }
-                updateMessages((prev) => {
+                if (shouldTerminalizePlan) updateMessages((prev) => {
                   const hasStaleTodo = prev.some((m) => m.id !== assistantMsg.id && m.todo && m.todo.status !== "completed" && m.todo.status !== "failed" && m.todo.status !== "cancelled");
                   if (!hasStaleTodo) return prev;
                   return prev.map((m) =>
                     m.id !== assistantMsg.id && m.todo && m.todo.status !== "completed" && m.todo.status !== "failed" && m.todo.status !== "cancelled"
-                      ? { ...m, todo: { ...m.todo, status: "completed" as const } }
+                      ? { ...m, todo: terminalizeTodo(m.todo, "completed") }
                       : m
                   );
                 });
@@ -5033,6 +5064,14 @@ export function ChatView({
       }).catch(() => {});
     }
   }, [pendingApproval, apiBase]);
+
+  const handlePlanStepAction = useCallback((action: "skip" | "retry", stepIdx: number, description: string) => {
+    const msg = action === "skip"
+      ? `请跳过当前步骤（第 ${stepIdx + 1} 步：${description}），直接进入下一步。`
+      : `请重试这一步（第 ${stepIdx + 1} 步：${description}）。`;
+    setInputValue(msg);
+    inputRef.current?.focus();
+  }, [setInputValue]);
 
   // ── 停止生成 ──
   const stopStreaming = useCallback((targetConvId?: string) => {
@@ -6256,12 +6295,7 @@ export function ChatView({
             hasMoreBefore={historyPage.hasMoreBefore}
             loadingOlder={historyPage.loadingOlder}
             onLoadOlder={loadOlderMessages}
-            onPlanStepAction={(action, stepIdx, description) => {
-              const msg = action === "skip"
-                ? `请跳过当前步骤（第 ${stepIdx + 1} 步：${description}），直接进入下一步。`
-                : `请重试这一步（第 ${stepIdx + 1} 步：${description}）。`;
-              setInputValue(msg);
-            }}
+            onPlanStepAction={handlePlanStepAction}
             onAtBottomChange={(atBottom) => { isMessageListAtBottomRef.current = atBottom; }}
             onActiveUserMessageChange={outlineItems.length > 0 ? setActiveOutlineId : undefined}
             onAskAnswer={handleAskAnswer}
@@ -6324,7 +6358,7 @@ export function ChatView({
         {/* 浮动 Plan 进度条 —— 贴在输入框上方，仅显示进行中的 plan */}
         {(() => {
           const activePlan = [...messages].reverse().find((m) => m.todo && m.todo.status !== "completed" && m.todo.status !== "failed" && m.todo.status !== "cancelled")?.todo;
-          return activePlan ? <FloatingPlanBar plan={activePlan} /> : null;
+          return activePlan ? <FloatingPlanBar plan={activePlan} onStepAction={handlePlanStepAction} /> : null;
         })()}
 
         {/* Read-only protection banner */}

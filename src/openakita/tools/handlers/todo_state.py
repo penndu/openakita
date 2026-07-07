@@ -41,6 +41,7 @@ __all__ = [
     "clear_session_todo_state",
     "cleanup_session",
     "auto_close_todo",
+    "complete_todo_after_final_answer",
     "cancel_todo",
     "force_close_plan",
     "register_plan_handler",
@@ -232,6 +233,37 @@ def auto_close_todo(session_id: str) -> bool:
 
     handler.finalize_plan(plan, session_id, action="auto_close")
     logger.info(f"[Todo] Auto-closed todo for session {session_id}")
+
+    unregister_active_todo(session_id)
+    _emit_todo_lifecycle_event(session_id, "todo_completed", plan)
+    return True
+
+
+def complete_todo_after_final_answer(session_id: str) -> bool:
+    """
+    Close the active Todo after a normal final assistant answer has been produced.
+
+    ``auto_close_todo`` intentionally preserves plans that still have pending
+    steps so a genuine multi-turn plan can continue.  The chat API has stronger
+    context: when the turn ended with a visible final answer, no ask_user prompt,
+    and no agent error, leaving the active Todo registered makes history
+    hydration re-attach stale progress.  This finalizer is for that narrower
+    backend lifecycle point.
+
+    Returns:
+        True if an active Todo registration was closed, False if there was none.
+    """
+    if not has_active_todo(session_id):
+        return False
+
+    handler = get_todo_handler_for_session(session_id)
+    plan = handler.get_plan_for(session_id) if handler else None
+    if not handler or not plan:
+        unregister_active_todo(session_id)
+        return True
+
+    handler.finalize_plan(plan, session_id, action="final_answer")
+    logger.info(f"[Todo] Completed todo for session {session_id} after final answer")
 
     unregister_active_todo(session_id)
     _emit_todo_lifecycle_event(session_id, "todo_completed", plan)

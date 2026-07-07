@@ -211,6 +211,56 @@ def _attach_todo_snapshot_meta(
         pass
 
 
+def _complete_active_todo_after_final_answer(
+    conversation_id: str,
+    todo_snapshot: dict | None,
+    progress_events: list[dict] | None,
+) -> tuple[dict | None, list[dict]]:
+    """Finalize an active todo when a normal visible assistant answer ends the turn."""
+    next_events = list(progress_events or [])
+    if not conversation_id:
+        return todo_snapshot, next_events
+
+    try:
+        from ...tools.handlers.plan import (
+            complete_todo_after_final_answer,
+            get_active_plan_id,
+            get_todo_handler_for_session,
+            has_active_todo,
+        )
+        from ..message_parts import serialize_plan_to_chat_todo
+
+        if not has_active_todo(conversation_id):
+            return todo_snapshot, next_events
+
+        plan_id = get_active_plan_id(conversation_id) or ""
+        handler = get_todo_handler_for_session(conversation_id)
+        plan = handler.get_plan_for(conversation_id) if handler else None
+        seed_snapshot = serialize_plan_to_chat_todo(plan) if isinstance(plan, dict) else None
+
+        if not complete_todo_after_final_answer(conversation_id):
+            return todo_snapshot, next_events
+
+        next_snapshot = todo_snapshot or seed_snapshot
+        event_plan_id = plan_id or (seed_snapshot or {}).get("id") or ""
+        already_completed = any(
+            ev.get("type") == "todo_completed"
+            and (not event_plan_id or not ev.get("planId") or ev.get("planId") == event_plan_id)
+            for ev in next_events
+            if isinstance(ev, dict)
+        )
+        if not already_completed:
+            event: dict[str, Any] = {"type": "todo_completed"}
+            if event_plan_id:
+                event["planId"] = event_plan_id
+            next_events = _observe_progress_event_journal(next_events, event)
+            next_snapshot = _observe_todo_snapshot_event(next_snapshot, event)
+        return next_snapshot, next_events
+    except Exception:
+        logger.debug("[Chat API] final-answer todo completion failed", exc_info=True)
+        return todo_snapshot, next_events
+
+
 class _RiskAuthorizedReplay:
     """Sentinel returned by ``_handle_pending_risk_answer`` when the user has
     confirmed a high-risk action **but** the classification has no controlled
@@ -872,7 +922,9 @@ async def _cancel_running_chat_task(
     """
     conv_id = conversation_id or getattr(actual_agent, "_current_conversation_id", None)
     if not conv_id:
-        logger.info("[Chat API] %s cancel without conversation id; using legacy agent cancel", source)
+        logger.info(
+            "[Chat API] %s cancel without conversation id; using legacy agent cancel", source
+        )
         actual_agent.cancel_current_task(reason)
         return {"status": "ok", "action": "cancel", "reason": reason}
 
@@ -922,8 +974,7 @@ async def _cancel_running_chat_task(
             "conversation_id": conv_id,
             "busy": True,
             "message": (
-                "Lifecycle was busy but the agent turn already cleaned up; "
-                "nothing left to cancel"
+                "Lifecycle was busy but the agent turn already cleaned up; nothing left to cancel"
             ),
         }
 
@@ -1023,6 +1074,9 @@ def _schedule_background_save(
         bg_mcp_calls = list(collected_mcp_calls or [])
         bg_todo_snapshot = todo_snapshot
         bg_progress_events = list(progress_events or [])
+        bg_ask_user_seen = False
+        bg_pending_approval_seen = False
+        bg_plan_ready_for_approval_seen = False
         try:
             while not agent_queue.empty():
                 ev = agent_queue.get_nowait()
@@ -1042,6 +1096,12 @@ def _schedule_background_save(
                     bg_reply += ev["content"]
                 elif et == "text_replace" and "content" in ev:
                     bg_reply = ev["content"]
+                elif et == "ask_user":
+                    bg_ask_user_seen = True
+                elif et == "pending_approval":
+                    bg_pending_approval_seen = True
+                elif et == "plan_ready_for_approval":
+                    bg_plan_ready_for_approval_seen = True
         except Exception:
             pass
 
@@ -1054,6 +1114,17 @@ def _schedule_background_save(
                     meta["sources"] = bg_sources
                 if bg_mcp_calls:
                     meta["mcp_calls"] = bg_mcp_calls
+                if (
+                    conversation_id
+                    and not bg_ask_user_seen
+                    and not bg_pending_approval_seen
+                    and not bg_plan_ready_for_approval_seen
+                ):
+                    bg_todo_snapshot, bg_progress_events = _complete_active_todo_after_final_answer(
+                        conversation_id,
+                        bg_todo_snapshot,
+                        bg_progress_events,
+                    )
                 _attach_todo_snapshot_meta(
                     meta,
                     conversation_id=conversation_id,
@@ -1216,6 +1287,8 @@ async def _stream_chat(
     _agent_done = asyncio.Event()
     _agent_queue: asyncio.Queue = asyncio.Queue()
     _save_done = False
+    _pending_approval = False
+    _plan_ready_for_approval = False
     session = None
     conversation_id = chat_request.conversation_id or ""
     _BUSY_REFRESH_INTERVAL = 60.0
@@ -1474,6 +1547,8 @@ async def _stream_chat(
         _last_emit_ts = time.time()
         _agent_errored = False
         _agent_error_msg = ""
+        _pending_approval = False
+        _plan_ready_for_approval = False
 
         def _emit_via_coalescer(etype: str, edata: dict | None) -> list[str]:
             """Push one upstream event through the coalescer.
@@ -1581,6 +1656,10 @@ async def _stream_chat(
                 _ask_user_question = event.get("question", "")
                 _ask_user_options = event.get("options", [])
                 _ask_user_questions = event.get("questions", [])
+            elif event_type == "pending_approval":
+                _pending_approval = True
+            elif event_type == "plan_ready_for_approval":
+                _plan_ready_for_approval = True
 
             # Push the event through the coalescer.  For non-delta types
             # it bypasses immediately (potentially preceded by pending
@@ -1718,14 +1797,31 @@ async def _stream_chat(
             except Exception:
                 pass
 
+        _task = (
+            actual_agent.agent_state.current_task
+            if hasattr(actual_agent, "agent_state") and actual_agent.agent_state
+            else None
+        )
+        _task_cancelled = bool(_task and _task.cancelled)
         if not assistant_text_to_save:
-            _task = (
-                actual_agent.agent_state.current_task
-                if hasattr(actual_agent, "agent_state") and actual_agent.agent_state
-                else None
-            )
-            if _task and _task.cancelled:
+            if _task_cancelled:
                 assistant_text_to_save = "[任务已取消]"
+
+        if (
+            conversation_id
+            and assistant_text_to_save
+            and not _ask_user_question
+            and not _ask_user_questions
+            and not _pending_approval
+            and not _plan_ready_for_approval
+            and not _agent_errored
+            and not _task_cancelled
+        ):
+            _last_todo_snapshot, _progress_events = _complete_active_todo_after_final_answer(
+                conversation_id,
+                _last_todo_snapshot,
+                _progress_events,
+            )
 
         if session and assistant_text_to_save:
             try:
@@ -1886,6 +1982,20 @@ async def _stream_chat(
                     _deferred_timeline = _chain_timeline_builder.build()
                     if _deferred_timeline:
                         _deferred_meta["chain_timeline"] = _deferred_timeline
+                    if (
+                        conversation_id
+                        and not _ask_user_question
+                        and not _ask_user_questions
+                        and not _pending_approval
+                        and not _plan_ready_for_approval
+                    ):
+                        _last_todo_snapshot, _progress_events = (
+                            _complete_active_todo_after_final_answer(
+                                conversation_id,
+                                _last_todo_snapshot,
+                                _progress_events,
+                            )
+                        )
                     _attach_todo_snapshot_meta(
                         _deferred_meta,
                         conversation_id=conversation_id,
@@ -2327,7 +2437,6 @@ async def chat(request: Request, body: ChatRequest):
             status_code=400,
             content={"error": "empty_message", "message": "消息内容不能为空"},
         )
-
 
     try:
         pending_response = await _handle_pending_risk_answer(
@@ -3200,7 +3309,6 @@ async def chat_answer(request: Request, body: ChatAnswerRequest):
         "answer": body.answer,
         "hint": "No pending risk confirmation matched this conversation_id and answer.",
     }
-
 
 
 @router.get("/api/chat/busy")

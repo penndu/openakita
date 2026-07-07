@@ -141,11 +141,6 @@ export function coerceMessageParts(raw: unknown, msg: ChatMessage): MessagePart[
 }
 
 /**
- * Resolve the parts to render for a message: prefer an explicit (backend or
- * persisted) `parts`, otherwise derive from flat fields. Always self-heals
- * attachment/plan/ask payloads from flat fields when the marker omitted them.
- */
-/**
  * Does this assistant message currently have at least one part that will
  * actually render something visible, given the chosen `showChain` mode and the
  * already-stripped `bodyContent`?
@@ -177,10 +172,8 @@ export function hasRenderableBody(
         return !!msg.sources && msg.sources.length > 0;
       case "mcp":
         return !!msg.mcpCalls && msg.mcpCalls.length > 0;
-      case "plan": {
-        const todo = part.todo || msg.todo;
-        return !!todo && !!todo.steps && todo.steps.length > 0;
-      }
+      case "plan":
+        return false;
       case "text":
         return !!bodyContent;
       case "tools":
@@ -197,6 +190,51 @@ export function hasRenderableBody(
   });
 }
 
+function mergeWithDerivedParts(explicit: MessagePart[], msg: ChatMessage): MessagePart[] {
+  const derived = deriveMessageParts(msg);
+  if (derived.length === 0) return explicit;
+
+  const usedExplicit = new Set<number>();
+  const takeExplicit = (derivedPart: MessagePart): MessagePart => {
+    const idx = explicit.findIndex((part, i) => !usedExplicit.has(i) && part.kind === derivedPart.kind);
+    if (idx < 0) return derivedPart;
+    usedExplicit.add(idx);
+    const part = explicit[idx];
+    if (part.kind === "plan") {
+      return {
+        ...part,
+        todo: part.todo || (derivedPart.kind === "plan" ? derivedPart.todo : undefined),
+        progressEvents:
+          part.progressEvents || (derivedPart.kind === "plan" ? derivedPart.progressEvents : undefined),
+      };
+    }
+    if (part.kind === "attachment") {
+      return {
+        ...part,
+        artifact: part.artifact || (derivedPart.kind === "attachment" ? derivedPart.artifact : undefined),
+      };
+    }
+    if (part.kind === "ask_user") {
+      return {
+        ...part,
+        ask: part.ask || (derivedPart.kind === "ask_user" ? derivedPart.ask : undefined),
+      };
+    }
+    return part;
+  };
+
+  const merged = derived.map(takeExplicit);
+  const extras = explicit.filter((_, i) => !usedExplicit.has(i));
+  return extras.length > 0 ? [...merged, ...extras] : merged;
+}
+
+/**
+ * Resolve the parts to render for a message. Explicit backend/local markers
+ * can carry ordering and small inline payloads, but the message's flat fields
+ * remain authoritative for which normal output blocks exist. This prevents a
+ * partial plan/todo projection from suppressing text, tools, sources, or the
+ * reasoning chain.
+ */
 export function resolveMessageParts(msg: ChatMessage): MessagePart[] {
   const explicit = coerceMessageParts(msg.parts, msg);
   if (explicit) {
@@ -229,7 +267,7 @@ export function resolveMessageParts(msg: ChatMessage): MessagePart[] {
         ? [...healed.slice(0, insertBefore), planPart, ...healed.slice(insertBefore)]
         : [...healed, planPart];
     }
-    return healed;
+    return mergeWithDerivedParts(healed, msg);
   }
   return deriveMessageParts(msg);
 }

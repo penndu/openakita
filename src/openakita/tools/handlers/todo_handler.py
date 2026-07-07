@@ -172,6 +172,18 @@ class PlanHandler:
             if not plan.get("summary"):
                 plan["summary"] = "用户主动取消"
             self._add_log("计划被用户取消", plan=plan)
+        elif action == "final_answer":
+            for step in steps:
+                status = step.get("status", "pending")
+                if status in ("in_progress", "pending"):
+                    step["status"] = "completed"
+                    step["result"] = step.get("result") or "(最终答复已生成)"
+                    step["completed_at"] = now
+            plan["status"] = "completed"
+            plan["completed_at"] = now
+            if not plan.get("summary"):
+                plan["summary"] = "任务结束，计划随最终答复自动完成"
+            self._add_log("计划随最终答复自动完成", plan=plan)
         else:  # auto_close
             for step in steps:
                 status = step.get("status", "pending")

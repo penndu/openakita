@@ -35,6 +35,12 @@ def _plan() -> dict:
     }
 
 
+def _plan_with_pending_step() -> dict:
+    plan = _plan()
+    plan["steps"].append({"id": "s3", "description": "verify", "status": "pending"})
+    return plan
+
+
 def test_serialize_plan_to_chat_todo_camelcases_and_keeps_steps():
     todo = serialize_plan_to_chat_todo(_plan())
     assert todo == {
@@ -159,6 +165,29 @@ def test_progress_event_journal_projects_latest_todo_state():
     assert todo["steps"][1]["result"] == "built"
 
 
+def test_progress_completion_terminalizes_pending_steps():
+    events = append_progress_event([], {"type": "todo_created", "plan": _plan_with_pending_step()})
+    events = append_progress_event(
+        events,
+        {
+            "type": "todo_step_updated",
+            "step_id": "s2",
+            "status": "completed",
+            "result": "built",
+        },
+    )
+    events = append_progress_event(events, {"type": "todo_completed"})
+
+    todo = project_progress_events_to_todo(events)
+
+    assert todo["status"] == "completed"
+    assert [step["status"] for step in todo["steps"]] == [
+        "completed",
+        "completed",
+        "completed",
+    ]
+
+
 def test_normalize_progress_events_preserves_lifecycle_plan_id():
     events = normalize_progress_events(
         [
@@ -179,9 +208,7 @@ def test_build_message_parts_inlines_progress_event_journal_on_plan_part():
         ]
     )
 
-    parts = build_message_parts(
-        {"role": "assistant", "content": "done", "progress_events": events}
-    )
+    parts = build_message_parts({"role": "assistant", "content": "done", "progress_events": events})
 
     plan = next(p for p in parts if p["kind"] == "plan")
     assert plan["todo"]["status"] == "completed"
@@ -197,7 +224,9 @@ def test_attach_todo_meta_persists_progress_event_journal():
     )
 
     meta = {}
-    _attach_todo_snapshot_meta(meta, conversation_id="conv1", todo_snapshot=None, progress_events=events)
+    _attach_todo_snapshot_meta(
+        meta, conversation_id="conv1", todo_snapshot=None, progress_events=events
+    )
 
     assert [e["type"] for e in meta["progress_events"]] == ["todo_created", "todo_completed"]
     assert meta["todo"]["status"] == "completed"
@@ -219,7 +248,7 @@ def test_extract_artifact_events_from_tool_and_delegation_results():
             "type": "tool_call_end",
             "tool": "delegate_to_agent",
             "result": (
-                'ok\n__ARTIFACT_RECEIPTS__\n'
+                "ok\n__ARTIFACT_RECEIPTS__\n"
                 '[{"status":"delivered","file_url":"/api/files/b","path":"b.txt","name":"b.txt"}]\n'
             ),
         }
