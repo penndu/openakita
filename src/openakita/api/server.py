@@ -303,18 +303,31 @@ def _find_web_dist() -> Path | None:
     """Locate the web frontend dist directory.
 
     Search order:
-    1. openakita/web/ (pip wheel install & PyInstaller bundle)
-    2. apps/setup-center/dist-web/ (development)
+    1. apps/setup-center/dist-web/ (development source checkout)
+    2. openakita/web/ (pip wheel install & PyInstaller bundle)
     """
     # Inside the installed package
     pkg_web = Path(__file__).parent.parent / "web"
-    if (pkg_web / "index.html").exists():
-        return pkg_web
 
     # Development: relative to project root
     dev_web = Path(__file__).parent.parent.parent.parent / "apps" / "setup-center" / "dist-web"
+
+    return _select_web_dist(pkg_web=pkg_web, dev_web=dev_web)
+
+
+def _select_web_dist(*, pkg_web: Path, dev_web: Path) -> Path | None:
+    """Choose the web frontend assets directory.
+
+    In editable/source checkouts both directories may exist: ``pkg_web`` holds
+    staged release assets, while ``dev_web`` is what ``npm run build:web``
+    updates. Prefer ``dev_web`` so local backend runs do not serve stale staged
+    assets after frontend changes.
+    """
     if (dev_web / "index.html").exists():
         return dev_web
+
+    if (pkg_web / "index.html").exists():
+        return pkg_web
 
     return None
 

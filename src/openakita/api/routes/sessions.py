@@ -1,6 +1,7 @@
 """
 Sessions route: GET /api/sessions, GET /api/sessions/{conversation_id}/history,
-DELETE /api/sessions/{conversation_id}, POST /api/sessions/generate-title
+POST /api/sessions, DELETE /api/sessions/{conversation_id},
+PATCH /api/sessions/{conversation_id}/title, POST /api/sessions/generate-title
 
 提供桌面端 session 恢复能力：前端启动时可从后端加载对话列表和历史消息。
 """
@@ -27,6 +28,10 @@ router = APIRouter()
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-:.@]{1,128}$")
 _DEFAULT_HISTORY_LIMIT = 80
 _MAX_HISTORY_LIMIT = 200
+_META_CONVERSATION_TITLE = "conversation_title"
+_META_TITLE_MANUALLY_SET = "title_manually_set"
+_META_TITLE_GENERATED = "title_generated"
+_META_PINNED = "pinned"
 
 
 def _validate_id(value: str, field: str) -> None:
@@ -62,6 +67,62 @@ class SessionUiStateRequest(BaseModel):
     org_mode: bool = Field(False, alias="orgMode")
     org_id: str | None = Field(None, alias="orgId", max_length=128)
     org_node_id: str | None = Field(None, alias="orgNodeId", max_length=128)
+
+
+class SessionCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    conversation_id: str = Field(..., alias="conversationId", min_length=1, max_length=128)
+    title: str = Field("新对话", max_length=120, description="Initial conversation title")
+    title_manually_set: bool = Field(False, alias="titleManuallySet")
+    title_generated: bool = Field(False, alias="titleGenerated")
+    pinned: bool = Field(False, description="Whether the conversation is pinned")
+    agent_profile_id: str | None = Field(None, alias="agentProfileId", max_length=128)
+    endpoint_id: str | None = Field(None, alias="endpointId", max_length=200)
+    endpoint_policy: Literal["prefer", "require"] = Field("prefer", alias="endpointPolicy")
+    org_mode: bool = Field(False, alias="orgMode")
+    org_id: str | None = Field(None, alias="orgId", max_length=128)
+    org_node_id: str | None = Field(None, alias="orgNodeId", max_length=128)
+
+
+class SessionTitleRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str = Field(..., min_length=1, max_length=120, description="会话标题")
+    title_manually_set: bool = Field(True, alias="titleManuallySet")
+    title_generated: bool = Field(False, alias="titleGenerated")
+
+
+class SessionPinRequest(BaseModel):
+    pinned: bool = Field(..., description="Whether the conversation is pinned")
+
+
+def _normalize_title(title: str, *, fallback: str | None = None) -> str:
+    normalized = " ".join(str(title or "").split()).strip()
+    if normalized:
+        return normalized
+    return fallback or ""
+
+
+def _apply_session_ui_state(
+    session,
+    *,
+    endpoint_id: str | None,
+    endpoint_policy: Literal["prefer", "require"],
+    org_mode: bool,
+    org_id: str | None,
+    org_node_id: str | None,
+) -> None:
+    session.set_metadata("selected_endpoint", endpoint_id or "")
+    session.set_metadata("endpoint_policy", endpoint_policy if endpoint_id else "prefer")
+    session.set_metadata(
+        "ui_org_state",
+        {
+            "orgMode": bool(org_mode and org_id),
+            "orgId": org_id or "",
+            "orgNodeId": org_node_id or "",
+        },
+    )
 
 
 def _visible_history_messages(session) -> list[tuple[int, dict]]:
@@ -124,6 +185,62 @@ def _last_activity_ms(session, visible_msgs: list[dict]) -> int:
         return int(base.timestamp() * 1000)
     except Exception:
         return 0
+
+
+def _session_list_item(session, visible_msgs: list[dict] | None = None, last_ms: int | None = None) -> dict:
+    """Serialize one session for conversation-list sync surfaces."""
+    if visible_msgs is None:
+        visible_msgs = [m for _, m in _visible_history_messages(session)]
+    if last_ms is None:
+        last_ms = _last_activity_ms(session, visible_msgs)
+
+    user_msgs = [m for m in visible_msgs if m.get("role") == "user"]
+    first_user = user_msgs[0] if user_msgs else None
+    fallback_title = ""
+    if first_user:
+        content = first_user.get("content", "")
+        fallback_title = content[:30] if isinstance(content, str) else ""
+    if getattr(session, "channel", "") == "desktop" and session.get_metadata("source_channel"):
+        fallback_title = (
+            getattr(session, "chat_name", "")
+            or getattr(session, "display_name", "")
+            or fallback_title
+        )
+
+    stored_title = session.get_metadata(_META_CONVERSATION_TITLE)
+    stored_title = stored_title.strip() if isinstance(stored_title, str) else ""
+    title_manually_set = bool(stored_title and session.get_metadata(_META_TITLE_MANUALLY_SET))
+    title_generated = bool(stored_title and session.get_metadata(_META_TITLE_GENERATED))
+    title = stored_title or fallback_title
+
+    last_msg_content = ""
+    if visible_msgs:
+        last_content = visible_msgs[-1].get("content", "")
+        if isinstance(last_content, str):
+            last_msg_content = last_content[:100]
+
+    selected_endpoint = session.get_metadata("selected_endpoint") or ""
+    endpoint_policy = session.get_metadata("endpoint_policy") or "prefer"
+    ui_org_state = session.get_metadata("ui_org_state") or {}
+    if not isinstance(ui_org_state, dict):
+        ui_org_state = {}
+
+    return {
+        "id": session.chat_id,
+        "title": title or "对话",
+        "titleGenerated": title_generated,
+        "titleManuallySet": title_manually_set,
+        "pinned": bool(session.get_metadata(_META_PINNED)),
+        "lastMessage": last_msg_content,
+        "timestamp": last_ms,
+        "messageCount": len(visible_msgs),
+        "agentProfileId": getattr(session.context, "agent_profile_id", "default"),
+        "endpointId": selected_endpoint or None,
+        "endpointPolicy": endpoint_policy if selected_endpoint else "prefer",
+        "orgMode": bool(ui_org_state.get("orgMode") and ui_org_state.get("orgId")),
+        "orgId": ui_org_state.get("orgId") or None,
+        "orgNodeId": ui_org_state.get("orgNodeId") or None,
+    }
 
 
 _BACKFILL_DONE_FLAG = "_history_backfilled"
@@ -375,42 +492,7 @@ async def list_sessions(request: Request, channel: str = "desktop"):
 
     result = []
     for s, visible_msgs, last_ms in prepared:
-        user_msgs = [m for m in visible_msgs if m.get("role") == "user"]
-        first_user = user_msgs[0] if user_msgs else None
-        title = ""
-        if first_user:
-            content = first_user.get("content", "")
-            title = content[:30] if isinstance(content, str) else ""
-        if getattr(s, "channel", "") == "desktop" and s.get_metadata("source_channel"):
-            title = getattr(s, "chat_name", "") or getattr(s, "display_name", "") or title
-
-        last_msg_content = ""
-        if visible_msgs:
-            last_content = visible_msgs[-1].get("content", "")
-            if isinstance(last_content, str):
-                last_msg_content = last_content[:100]
-
-        selected_endpoint = s.get_metadata("selected_endpoint") or ""
-        endpoint_policy = s.get_metadata("endpoint_policy") or "prefer"
-        ui_org_state = s.get_metadata("ui_org_state") or {}
-        if not isinstance(ui_org_state, dict):
-            ui_org_state = {}
-
-        result.append(
-            {
-                "id": s.chat_id,
-                "title": title or "对话",
-                "lastMessage": last_msg_content,
-                "timestamp": last_ms,
-                "messageCount": len(visible_msgs),
-                "agentProfileId": getattr(s.context, "agent_profile_id", "default"),
-                "endpointId": selected_endpoint or None,
-                "endpointPolicy": endpoint_policy if selected_endpoint else "prefer",
-                "orgMode": bool(ui_org_state.get("orgMode") and ui_org_state.get("orgId")),
-                "orgId": ui_org_state.get("orgId") or None,
-                "orgNodeId": ui_org_state.get("orgNodeId") or None,
-            }
-        )
+        result.append(_session_list_item(s, visible_msgs, last_ms))
 
     data_epoch = ""
     wac = getattr(request.app.state, "web_access_config", None)
@@ -418,6 +500,89 @@ async def list_sessions(request: Request, channel: str = "desktop"):
         data_epoch = wac.data_epoch
 
     return {"sessions": result, "data_epoch": data_epoch, "ready": True}
+
+
+@router.post("/api/sessions")
+async def create_session(
+    request: Request,
+    body: SessionCreateRequest,
+    channel: str = "desktop",
+    user_id: str = "desktop_user",
+):
+    """Create or update the list metadata for a first-class conversation.
+
+    This endpoint intentionally owns the "empty draft conversation" case so
+    title/pin/UI-state updates do not need to create missing sessions as a side
+    effect.
+    """
+    conversation_id = body.conversation_id.strip()
+    _validate_id(conversation_id, "conversation_id")
+    _validate_id(channel, "channel")
+    _validate_id(user_id, "user_id")
+    session_manager = getattr(request.app.state, "session_manager", None)
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager unavailable")
+
+    existing = session_manager.get_session(
+        channel=channel,
+        chat_id=conversation_id,
+        user_id=user_id,
+        create_if_missing=False,
+    )
+    session = existing or session_manager.get_session(
+        channel=channel,
+        chat_id=conversation_id,
+        user_id=user_id,
+        create_if_missing=True,
+    )
+    if session is None:
+        raise HTTPException(status_code=500, detail="failed to create session")
+
+    agent_profile_id = (body.agent_profile_id or "").strip()
+    if agent_profile_id:
+        session.context.agent_profile_id = agent_profile_id
+
+    stored_title = session.get_metadata(_META_CONVERSATION_TITLE)
+    title = _normalize_title(body.title, fallback="新对话")
+    if not isinstance(stored_title, str) or not stored_title.strip():
+        manually_set = bool(body.title_manually_set)
+        session.set_metadata(_META_CONVERSATION_TITLE, title)
+        session.set_metadata(_META_TITLE_MANUALLY_SET, manually_set)
+        session.set_metadata(_META_TITLE_GENERATED, False if manually_set else bool(body.title_generated))
+
+    if existing is None or body.pinned:
+        session.set_metadata(_META_PINNED, bool(body.pinned))
+
+    _apply_session_ui_state(
+        session,
+        endpoint_id=body.endpoint_id,
+        endpoint_policy=body.endpoint_policy,
+        org_mode=body.org_mode,
+        org_id=body.org_id,
+        org_node_id=body.org_node_id,
+    )
+    session_manager.mark_dirty()
+    try:
+        session_manager.persist()
+    except Exception as exc:
+        logger.warning("[Sessions API] Failed to persist created session: %s", exc)
+
+    summary = _session_list_item(session)
+    logger.info(
+        "[Sessions API] session upserted conversation_id=%s title=%r message_count=%s pinned=%s",
+        conversation_id,
+        summary["title"],
+        summary["messageCount"],
+        summary["pinned"],
+    )
+    await _broadcast_session_event(
+        "chat:session_update",
+        {
+            "conversation_id": conversation_id,
+            **summary,
+        },
+    )
+    return {"ok": True, "created": existing is None, **summary}
 
 
 @router.post("/api/sessions/{conversation_id}/ui-state")
@@ -444,15 +609,13 @@ async def update_session_ui_state(
     )
     if session is None:
         return {"ok": False, "reason": "session_not_found"}
-    session.set_metadata("selected_endpoint", body.endpoint_id or "")
-    session.set_metadata("endpoint_policy", body.endpoint_policy if body.endpoint_id else "prefer")
-    session.set_metadata(
-        "ui_org_state",
-        {
-            "orgMode": bool(body.org_mode and body.org_id),
-            "orgId": body.org_id or "",
-            "orgNodeId": body.org_node_id or "",
-        },
+    _apply_session_ui_state(
+        session,
+        endpoint_id=body.endpoint_id,
+        endpoint_policy=body.endpoint_policy,
+        org_mode=body.org_mode,
+        org_id=body.org_id,
+        org_node_id=body.org_node_id,
     )
     session_manager.mark_dirty()
     try:
@@ -460,6 +623,116 @@ async def update_session_ui_state(
     except Exception as exc:
         logger.warning("[Sessions API] Failed to persist UI state: %s", exc)
     return {"ok": True}
+
+
+@router.patch("/api/sessions/{conversation_id}/title")
+async def update_session_title(
+    request: Request,
+    conversation_id: str,
+    body: SessionTitleRequest,
+    channel: str = "desktop",
+    user_id: str = "desktop_user",
+):
+    """Persist a user-facing conversation title in session metadata."""
+    _validate_id(conversation_id, "conversation_id")
+    _validate_id(channel, "channel")
+    _validate_id(user_id, "user_id")
+    session_manager = getattr(request.app.state, "session_manager", None)
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager unavailable")
+
+    title = _normalize_title(body.title)
+    if not title:
+        raise HTTPException(status_code=422, detail="title must not be empty")
+
+    session = session_manager.get_session(
+        channel=channel,
+        chat_id=conversation_id,
+        user_id=user_id,
+        create_if_missing=False,
+    )
+    if session is None:
+        return {"ok": False, "reason": "session_not_found"}
+
+    manually_set = bool(body.title_manually_set)
+    generated = False if manually_set else bool(body.title_generated)
+    session.set_metadata(_META_CONVERSATION_TITLE, title)
+    session.set_metadata(_META_TITLE_MANUALLY_SET, manually_set)
+    session.set_metadata(_META_TITLE_GENERATED, generated)
+    session_manager.mark_dirty()
+    try:
+        session_manager.persist()
+    except Exception as exc:
+        logger.warning("[Sessions API] Failed to persist title: %s", exc)
+
+    summary = _session_list_item(session)
+    logger.info(
+        "[Sessions API] title updated conversation_id=%s title=%r manual=%s generated=%s pinned=%s",
+        conversation_id,
+        summary["title"],
+        summary["titleManuallySet"],
+        summary["titleGenerated"],
+        summary["pinned"],
+    )
+    await _broadcast_session_event(
+        "chat:title_update",
+        {
+            "conversation_id": conversation_id,
+            **summary,
+        },
+    )
+    return {"ok": True, **summary}
+
+
+@router.patch("/api/sessions/{conversation_id}/pin")
+async def update_session_pin(
+    request: Request,
+    conversation_id: str,
+    body: SessionPinRequest,
+    channel: str = "desktop",
+    user_id: str = "desktop_user",
+):
+    """Persist conversation pinning so all clients show the same list grouping."""
+    _validate_id(conversation_id, "conversation_id")
+    _validate_id(channel, "channel")
+    _validate_id(user_id, "user_id")
+    session_manager = getattr(request.app.state, "session_manager", None)
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager unavailable")
+
+    session = session_manager.get_session(
+        channel=channel,
+        chat_id=conversation_id,
+        user_id=user_id,
+        create_if_missing=False,
+    )
+    if session is None:
+        return {"ok": False, "reason": "session_not_found"}
+
+    pinned = bool(body.pinned)
+    session.set_metadata(_META_PINNED, pinned)
+    session_manager.mark_dirty()
+    try:
+        session_manager.persist()
+    except Exception as exc:
+        logger.warning("[Sessions API] Failed to persist pin state: %s", exc)
+
+    summary = _session_list_item(session)
+    logger.info(
+        "[Sessions API] pin updated conversation_id=%s pinned=%s title=%r manual=%s",
+        conversation_id,
+        summary["pinned"],
+        summary["title"],
+        summary["titleManuallySet"],
+    )
+    await _broadcast_session_event(
+        "chat:pin_update",
+        {
+            "conversation_id": conversation_id,
+            **summary,
+        },
+    )
+    return {"ok": True, **summary}
 
 
 @router.get("/api/sessions/{conversation_id}/history")
@@ -693,6 +966,35 @@ async def append_session_messages(
 @router.post("/api/sessions/generate-title")
 async def generate_title(request: Request, body: GenerateTitleRequest):
     """Use LLM to generate a concise conversation title from the first message."""
+    session = None
+    session_manager = getattr(request.app.state, "session_manager", None)
+    if body.conversation_id:
+        _validate_id(body.conversation_id, "conversation_id")
+        if session_manager:
+            session = session_manager.get_session(
+                channel="desktop",
+                chat_id=body.conversation_id,
+                user_id="desktop_user",
+                create_if_missing=False,
+            )
+            stored_title = session.get_metadata(_META_CONVERSATION_TITLE) if session else ""
+            if (
+                isinstance(stored_title, str)
+                and stored_title.strip()
+                and session
+                and session.get_metadata(_META_TITLE_MANUALLY_SET)
+            ):
+                logger.info(
+                    "[Sessions API] generated title skipped conversation_id=%s reason=manual_title title=%r",
+                    body.conversation_id,
+                    stored_title.strip(),
+                )
+                return {
+                    "title": stored_title.strip(),
+                    "titleGenerated": False,
+                    "titleManuallySet": True,
+                }
+
     agent = getattr(request.app.state, "agent", None)
     if not agent:
         return {"title": body.message[:20] or "新对话"}
@@ -732,14 +1034,50 @@ async def generate_title(request: Request, body: GenerateTitleRequest):
         if not title or len(title) > 30:
             title = body.message[:20] or "新对话"
         if body.conversation_id:
-            await _broadcast_session_event(
-                "chat:title_update",
-                {
-                    "conversation_id": body.conversation_id,
-                    "title": title,
-                },
-            )
-        return {"title": title}
+            stored_title = session.get_metadata(_META_CONVERSATION_TITLE) if session else ""
+            if (
+                isinstance(stored_title, str)
+                and stored_title.strip()
+                and session
+                and session.get_metadata(_META_TITLE_MANUALLY_SET)
+            ):
+                logger.info(
+                    "[Sessions API] generated title skipped conversation_id=%s reason=manual_title title=%r",
+                    body.conversation_id,
+                    stored_title.strip(),
+                )
+                return {
+                    "title": stored_title.strip(),
+                    "titleGenerated": False,
+                    "titleManuallySet": True,
+                }
+            if session:
+                session.set_metadata(_META_CONVERSATION_TITLE, title)
+                session.set_metadata(_META_TITLE_MANUALLY_SET, False)
+                session.set_metadata(_META_TITLE_GENERATED, True)
+                if session_manager:
+                    session_manager.mark_dirty()
+                    try:
+                        session_manager.persist()
+                    except Exception as exc:
+                        logger.warning("[Sessions API] Failed to persist generated title: %s", exc)
+                summary = _session_list_item(session)
+                event_payload = {"conversation_id": body.conversation_id, **summary}
+                logger.info(
+                    "[Sessions API] generated title updated conversation_id=%s title=%r",
+                    body.conversation_id,
+                    title,
+                )
+                await _broadcast_session_event(
+                    "chat:title_update",
+                    event_payload,
+                )
+            else:
+                logger.info(
+                    "[Sessions API] generated title skipped conversation_id=%s reason=session_not_found",
+                    body.conversation_id,
+                )
+        return {"title": title, "titleGenerated": True, "titleManuallySet": False}
     except Exception as e:
         logger.warning(f"[Sessions] Title generation failed: {e}")
         return {"title": body.message[:20] or "新对话"}

@@ -116,6 +116,7 @@ def test_session_list_returns_conversation_ui_state(tmp_path):
     session = manager.get_session("desktop", "conv1", "desktop_user")
     session.add_message("user", "hello")
     session.set_metadata("selected_endpoint", "deepseek")
+    session.set_metadata("pinned", True)
     session.set_metadata(
         "ui_org_state",
         {"orgMode": True, "orgId": "org_company", "orgNodeId": "pm"},
@@ -125,6 +126,7 @@ def test_session_list_returns_conversation_ui_state(tmp_path):
     body = TestClient(app).get("/api/sessions").json()
 
     assert body["sessions"][0]["endpointId"] == "deepseek"
+    assert body["sessions"][0]["pinned"] is True
     assert body["sessions"][0]["orgMode"] is True
     assert body["sessions"][0]["orgId"] == "org_company"
     assert body["sessions"][0]["orgNodeId"] == "pm"
@@ -173,3 +175,217 @@ def test_update_session_ui_state_does_not_create_empty_session(tmp_path):
     assert (
         manager.get_session("desktop", "missing", "desktop_user", create_if_missing=False) is None
     )
+
+
+def test_update_session_title_persists_and_list_prefers_manual_title(tmp_path):
+    app = FastAPI()
+    app.include_router(router)
+    manager = SessionManager(storage_path=tmp_path)
+    session = manager.get_session("desktop", "conv1", "desktop_user")
+    session.add_message("user", "first message fallback")
+    app.state.session_manager = manager
+
+    client = TestClient(app)
+    resp = client.patch(
+        "/api/sessions/conv1/title",
+        json={"title": "  Custom   Title  ", "titleManuallySet": True},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["title"] == "Custom Title"
+    assert body["titleGenerated"] is False
+    assert body["titleManuallySet"] is True
+    assert body["pinned"] is False
+    assert session.get_metadata("conversation_title") == "Custom Title"
+    assert session.get_metadata("title_manually_set") is True
+    assert session.get_metadata("title_generated") is False
+
+    body = client.get("/api/sessions").json()
+
+    assert body["sessions"][0]["title"] == "Custom Title"
+    assert body["sessions"][0]["titleManuallySet"] is True
+    assert body["sessions"][0]["titleGenerated"] is False
+
+    reloaded = SessionManager(storage_path=tmp_path)
+    persisted = reloaded.get_session("desktop", "conv1", "desktop_user", create_if_missing=False)
+    assert persisted is not None
+    assert persisted.get_metadata("conversation_title") == "Custom Title"
+
+
+def test_update_session_title_does_not_create_missing_session(tmp_path):
+    app = FastAPI()
+    app.include_router(router)
+    manager = SessionManager(storage_path=tmp_path)
+    app.state.session_manager = manager
+
+    resp = TestClient(app).patch(
+        "/api/sessions/missing/title",
+        json={"title": "Custom Title"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": False, "reason": "session_not_found"}
+    assert (
+        manager.get_session("desktop", "missing", "desktop_user", create_if_missing=False) is None
+    )
+
+
+def test_create_session_persists_empty_conversation_as_list_item(tmp_path):
+    app = FastAPI()
+    app.include_router(router)
+    manager = SessionManager(storage_path=tmp_path)
+    app.state.session_manager = manager
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/sessions",
+        json={
+            "conversationId": "draft1",
+            "title": "新对话",
+            "titleManuallySet": False,
+            "agentProfileId": "research",
+            "endpointId": "deepseek",
+            "endpointPolicy": "require",
+            "orgMode": True,
+            "orgId": "org_ops",
+            "orgNodeId": "pm",
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["created"] is True
+    assert body["id"] == "draft1"
+    assert body["title"] == "新对话"
+    assert body["titleGenerated"] is False
+    assert body["titleManuallySet"] is False
+    assert body["pinned"] is False
+    assert body["messageCount"] == 0
+    assert body["lastMessage"] == ""
+    assert body["agentProfileId"] == "research"
+    assert body["endpointId"] == "deepseek"
+    assert body["endpointPolicy"] == "require"
+    assert body["orgMode"] is True
+    assert body["orgId"] == "org_ops"
+    assert body["orgNodeId"] == "pm"
+
+    listed = client.get("/api/sessions").json()["sessions"]
+    assert [s["id"] for s in listed] == ["draft1"]
+    assert listed[0]["messageCount"] == 0
+
+    session = manager.get_session("desktop", "draft1", "desktop_user", create_if_missing=False)
+    assert session is not None
+    assert session.context.agent_profile_id == "research"
+    assert session.get_metadata("conversation_title") == "新对话"
+    assert session.get_metadata("selected_endpoint") == "deepseek"
+    assert session.get_metadata("endpoint_policy") == "require"
+    assert session.get_metadata("ui_org_state") == {
+        "orgMode": True,
+        "orgId": "org_ops",
+        "orgNodeId": "pm",
+    }
+
+    reloaded = SessionManager(storage_path=tmp_path)
+    persisted = reloaded.get_session("desktop", "draft1", "desktop_user", create_if_missing=False)
+    assert persisted is not None
+    assert persisted.get_metadata("conversation_title") == "新对话"
+    assert persisted.context.agent_profile_id == "research"
+
+
+def test_update_session_title_does_not_create_missing_session_with_legacy_query(tmp_path):
+    app = FastAPI()
+    app.include_router(router)
+    manager = SessionManager(storage_path=tmp_path)
+    app.state.session_manager = manager
+
+    resp = TestClient(app).patch(
+        "/api/sessions/missing/title",
+        params={"create_if_missing": True},
+        json={"title": "Custom Title"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": False, "reason": "session_not_found"}
+    assert (
+        manager.get_session("desktop", "missing", "desktop_user", create_if_missing=False) is None
+    )
+
+
+def test_update_session_pin_persists_and_list_returns_pinned(tmp_path):
+    app = FastAPI()
+    app.include_router(router)
+    manager = SessionManager(storage_path=tmp_path)
+    session = manager.get_session("desktop", "conv1", "desktop_user")
+    session.add_message("user", "hello")
+    session.set_metadata("conversation_title", "Pinned Title")
+    session.set_metadata("title_manually_set", True)
+    session.set_metadata("title_generated", False)
+    app.state.session_manager = manager
+
+    resp = TestClient(app).patch(
+        "/api/sessions/conv1/pin",
+        json={"pinned": True},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["pinned"] is True
+    assert body["title"] == "Pinned Title"
+    assert body["titleManuallySet"] is True
+    assert body["titleGenerated"] is False
+    assert session.get_metadata("pinned") is True
+    assert TestClient(app).get("/api/sessions").json()["sessions"][0]["pinned"] is True
+
+    reloaded = SessionManager(storage_path=tmp_path)
+    persisted = reloaded.get_session("desktop", "conv1", "desktop_user", create_if_missing=False)
+    assert persisted is not None
+    assert persisted.get_metadata("pinned") is True
+
+
+def test_update_session_pin_does_not_create_missing_session_by_default(tmp_path):
+    app = FastAPI()
+    app.include_router(router)
+    manager = SessionManager(storage_path=tmp_path)
+    app.state.session_manager = manager
+
+    resp = TestClient(app).patch(
+        "/api/sessions/missing/pin",
+        json={"pinned": True},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": False, "reason": "session_not_found"}
+    assert (
+        manager.get_session("desktop", "missing", "desktop_user", create_if_missing=False) is None
+    )
+
+
+def test_generate_title_preserves_manual_session_title(tmp_path):
+    app = FastAPI()
+    app.include_router(router)
+    manager = SessionManager(storage_path=tmp_path)
+    session = manager.get_session("desktop", "conv1", "desktop_user")
+    session.add_message("user", "first message fallback")
+    session.set_metadata("conversation_title", "Manual Title")
+    session.set_metadata("title_manually_set", True)
+    session.set_metadata("title_generated", False)
+    app.state.session_manager = manager
+
+    resp = TestClient(app).post(
+        "/api/sessions/generate-title",
+        json={"message": "new prompt", "conversation_id": "conv1"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "title": "Manual Title",
+        "titleGenerated": False,
+        "titleManuallySet": True,
+    }
+    assert session.get_metadata("conversation_title") == "Manual Title"
+    assert session.get_metadata("title_manually_set") is True
+    assert session.get_metadata("title_generated") is False
