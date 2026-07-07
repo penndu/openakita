@@ -111,6 +111,107 @@ function _asFiniteCount(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
+function _hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function _timestampMs(value: unknown, fallback = Date.now()): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function _sessionConversationFromPayload(raw: Record<string, unknown>): ChatConversation | null {
+  const idRaw = typeof raw.id === "string" ? raw.id : raw.conversation_id;
+  const id = typeof idRaw === "string" ? idRaw.trim() : "";
+  if (!id) return null;
+
+  const titleRaw = typeof raw.title === "string" ? raw.title.trim() : "";
+  const conv: ChatConversation = {
+    id,
+    title: titleRaw || "对话",
+    lastMessage: typeof raw.lastMessage === "string" ? raw.lastMessage : "",
+    timestamp: _timestampMs(raw.timestamp),
+    messageCount: _asFiniteCount(raw.messageCount),
+  };
+  if (typeof raw.titleGenerated === "boolean") conv.titleGenerated = raw.titleGenerated;
+  if (typeof raw.titleManuallySet === "boolean") conv.titleManuallySet = raw.titleManuallySet;
+  if (typeof raw.pinned === "boolean") conv.pinned = raw.pinned;
+  if (typeof raw.agentProfileId === "string" && raw.agentProfileId) {
+    conv.agentProfileId = raw.agentProfileId;
+  }
+  if (_hasOwn(raw, "endpointId")) {
+    conv.endpointId = typeof raw.endpointId === "string" && raw.endpointId ? raw.endpointId : undefined;
+  }
+  if (_hasOwn(raw, "endpointPolicy")) {
+    conv.endpointPolicy = raw.endpointPolicy === "require" ? "require" : "prefer";
+  }
+  if (_hasOwn(raw, "orgMode")) conv.orgMode = Boolean(raw.orgMode);
+  if (_hasOwn(raw, "orgId")) {
+    conv.orgId = typeof raw.orgId === "string" && raw.orgId ? raw.orgId : undefined;
+  }
+  if (_hasOwn(raw, "orgNodeId")) {
+    conv.orgNodeId = typeof raw.orgNodeId === "string" && raw.orgNodeId ? raw.orgNodeId : undefined;
+  }
+  return conv;
+}
+
+function _mergeSessionConversation(
+  local: ChatConversation,
+  incoming: ChatConversation,
+  options: { timestampMode?: "backend" | "max" } = {},
+): ChatConversation {
+  const incomingRaw = incoming as unknown as Record<string, unknown>;
+  const incomingManual = incoming.titleManuallySet === true;
+  const localManual = local.titleManuallySet === true;
+  const title = incomingManual
+    ? (incoming.title || local.title || "对话")
+    : localManual
+      ? (local.title || incoming.title || "对话")
+      : (incoming.title || local.title || "对话");
+  const titleManuallySet = incomingManual || localManual;
+  const titleGenerated = titleManuallySet
+    ? false
+    : incoming.titleGenerated !== undefined
+      ? Boolean(incoming.titleGenerated)
+      : Boolean(local.titleGenerated);
+  const timestamp = options.timestampMode === "backend"
+    ? (incoming.timestamp || local.timestamp || Date.now())
+    : (Math.max(local.timestamp || 0, incoming.timestamp || 0) || Date.now());
+
+  const merged: ChatConversation = {
+    ...local,
+    title,
+    titleGenerated,
+    titleManuallySet,
+    lastMessage: incoming.lastMessage || local.lastMessage,
+    timestamp,
+    messageCount: Math.max(local.messageCount || 0, incoming.messageCount || 0),
+  };
+
+  if (_hasOwn(incomingRaw, "pinned")) merged.pinned = incoming.pinned;
+  if (_hasOwn(incomingRaw, "agentProfileId") && incoming.agentProfileId) {
+    merged.agentProfileId = incoming.agentProfileId;
+  }
+  if (_hasOwn(incomingRaw, "endpointId")) merged.endpointId = incoming.endpointId;
+  if (_hasOwn(incomingRaw, "endpointPolicy")) merged.endpointPolicy = incoming.endpointPolicy;
+  if (_hasOwn(incomingRaw, "orgMode")) merged.orgMode = incoming.orgMode;
+  if (_hasOwn(incomingRaw, "orgId")) merged.orgId = incoming.orgId;
+  if (_hasOwn(incomingRaw, "orgNodeId")) merged.orgNodeId = incoming.orgNodeId;
+  return merged;
+}
+
+function _upsertSessionConversation(
+  prev: ChatConversation[],
+  incoming: ChatConversation,
+  options: { timestampMode?: "backend" | "max" } = {},
+): ChatConversation[] {
+  const idx = prev.findIndex((c) => c.id === incoming.id);
+  if (idx < 0) return [incoming, ...prev];
+  const next = [...prev];
+  next[idx] = _mergeSessionConversation(prev[idx], incoming, options);
+  return next;
+}
+
 const SECURITY_DECISION_VALUES: readonly SecurityDecision[] = [
   "allow_once",
   "allow_session",
@@ -1712,8 +1813,6 @@ export function ChatView({
     if (!convId) return;
     const conv = conversations.find((c) => c.id === convId);
     if (!conv) return;
-    // Avoid creating empty backend sessions just because the user explored selectors.
-    if ((conv.messageCount || 0) === 0 && messages.length === 0) return;
 
     const timer = setTimeout(() => {
       safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/ui-state`, {
@@ -1737,7 +1836,6 @@ export function ChatView({
     selectedOrgId,
     selectedOrgNodeId,
     conversations,
-    messages.length,
     apiBaseUrl,
   ]);
 
@@ -1822,45 +1920,21 @@ export function ChatView({
         }
         if (backendSessions.length === 0) return;
 
-        const restoredConvs: ChatConversation[] = backendSessions.map((s) => ({
-          id: s.id,
-          title: s.title || "对话",
-          lastMessage: s.lastMessage || "",
-          timestamp: s.timestamp,
-          messageCount: s.messageCount || 0,
-          agentProfileId: s.agentProfileId,
-          endpointId: s.endpointId,
-          endpointPolicy: s.endpointPolicy,
-          orgMode: s.orgMode,
-          orgId: s.orgId,
-          orgNodeId: s.orgNodeId,
-        }));
+        const restoredConvs: ChatConversation[] = backendSessions
+          .map((s) => _sessionConversationFromPayload(s as Record<string, unknown>))
+          .filter((c): c is ChatConversation => Boolean(c));
 
         setConversations((prev) => {
           const prevMap = new Map(prev.map((c) => [c.id, c]));
           const mergedFromBackend: ChatConversation[] = restoredConvs.map((b) => {
             const local = prevMap.get(b.id);
             if (!local) return b;
-            return {
-              ...local,
-              title: local.titleGenerated ? local.title : (b.title || local.title || "对话"),
-              lastMessage: b.lastMessage || local.lastMessage,
-              // 后端时间戳现以"最后一条真实消息"为准（见后端 #628 修复），是列表
-              // 排序/显示的权威值。这里**不能**再无脑 Math.max：早期被旧逻辑
-              // 污染（≈打开时刻）并缓存进 localStorage 的 local.timestamp 会被
-              // Math.max 永久锁住，导致升级后时间与顺序仍然不对。只有正在流式
-              // 输出的会话保留本地乐观值，避免对账瞬间把活跃会话往下挪。
-              timestamp: streamContexts.current.has(b.id)
-                ? Math.max(local.timestamp || 0, b.timestamp || 0)
-                : (b.timestamp || local.timestamp || 0),
-              messageCount: Math.max(local.messageCount || 0, b.messageCount || 0),
-              agentProfileId: b.agentProfileId || local.agentProfileId,
-              endpointId: b.endpointId || local.endpointId,
-              endpointPolicy: b.endpointPolicy || local.endpointPolicy,
-              orgMode: b.orgMode ?? local.orgMode,
-              orgId: b.orgId || local.orgId,
-              orgNodeId: b.orgNodeId || local.orgNodeId,
-            };
+            // 后端时间戳现以"最后一条真实消息"为准（见后端 #628 修复），是列表
+            // 排序/显示的权威值。只有正在流式输出的会话保留本地乐观值，避免
+            // 对账瞬间把活跃会话往下挪。
+            return _mergeSessionConversation(local, b, {
+              timestampMode: streamContexts.current.has(b.id) ? "max" : "backend",
+            });
           });
           const backendIds = new Set(restoredConvs.map((c) => c.id));
           const localOnly = prev.filter((c) => !backendIds.has(c.id));
@@ -1951,13 +2025,32 @@ export function ChatView({
           const idx = prev.findIndex(c => c.id === convId);
           if (idx >= 0) {
             const updated = [...prev];
-            updated[idx] = { ...updated[idx], title: title || updated[idx].title, lastMessage: preview || updated[idx].lastMessage, timestamp: Math.max(updated[idx].timestamp || 0, ts), messageCount: (updated[idx].messageCount || 0) + 1 };
+            const current = updated[idx];
+            updated[idx] = {
+              ...current,
+              title: title && !current.titleManuallySet ? title : current.title,
+              lastMessage: preview || current.lastMessage,
+              timestamp: Math.max(current.timestamp || 0, ts),
+              messageCount: (current.messageCount || 0) + 1,
+            };
             return updated;
           }
           return [{ id: convId, title: title || preview.slice(0, 20) || "对话", lastMessage: preview, timestamp: ts, messageCount: 1 }, ...prev];
         });
         if (!activeConvIdRef.current) {
           activateConversation(convId);
+        }
+      } else if (
+        event === "chat:session_update"
+        || event === "chat:conversation_created"
+        || event === "chat:conversation_upsert"
+      ) {
+        const incoming = _sessionConversationFromPayload(d);
+        if (incoming) {
+          setConversations((prev) => _upsertSessionConversation(prev, incoming));
+          if (!activeConvIdRef.current) {
+            activateConversation(incoming.id);
+          }
         }
       } else if (event === "chat:conversation_deleted") {
         setConversations((prev) => {
@@ -1972,13 +2065,27 @@ export function ChatView({
           setMessages([]);
         }
       } else if (event === "chat:title_update") {
-        const title = d.title as string;
-        if (title) {
-          setConversations((prev) => prev.map(c => {
-            if (c.id !== convId) return c;
-            if (c.titleManuallySet) return c;
-            return { ...c, title, titleGenerated: true };
-          }));
+        const incoming = _hasOwn(d, "id") ? _sessionConversationFromPayload(d) : null;
+        if (incoming) {
+          setConversations((prev) => _upsertSessionConversation(prev, incoming));
+        } else {
+          const title = typeof d.title === "string" ? d.title.trim() : "";
+          if (title) {
+            setConversations((prev) => prev.map((c) => {
+              if (c.id !== convId) return c;
+              if (c.titleManuallySet) return c;
+              return { ...c, title, titleGenerated: true, titleManuallySet: false };
+            }));
+          }
+        }
+      } else if (event === "chat:pin_update") {
+        const incoming = _hasOwn(d, "id") ? _sessionConversationFromPayload(d) : null;
+        if (incoming) {
+          setConversations((prev) => _upsertSessionConversation(prev, incoming));
+        } else if (typeof d.pinned === "boolean") {
+          setConversations((prev) => prev.map((c) =>
+            c.id === convId ? { ...c, pinned: d.pinned as boolean } : c
+          ));
         }
       }
     });
@@ -2520,6 +2627,7 @@ export function ChatView({
   // ── 新建对话 ──
   const newConversation = useCallback(() => {
     const id = genId();
+    const createdAt = Date.now();
     if (activeConvId) {
       const ctx = streamContexts.current.get(activeConvId);
       const msgsToSave = ctx?.isStreaming ? ctx.messages : messages;
@@ -2537,16 +2645,45 @@ export function ChatView({
     setOrgMode(false);
     setSelectedOrgId(null);
     setSelectedOrgNodeId(null);
-    setConversations((prev) => [{
+    const draftConversation: ChatConversation = {
       id,
       title: "新对话",
       lastMessage: "",
-      timestamp: Date.now(),
+      timestamp: createdAt,
       messageCount: 0,
       agentProfileId: selectedAgent,
       orgMode: false,
-    }, ...prev]);
-  }, [activeConvId, messages, selectedAgent, setInputValue, activateConversation]);
+    };
+    setConversations((prev) => [draftConversation, ...prev]);
+    if (serviceRunning) {
+      void safeFetch(`${apiBaseUrl}/api/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: id,
+          title: "新对话",
+          titleManuallySet: false,
+          titleGenerated: false,
+          agentProfileId: selectedAgent,
+          endpointId: null,
+          endpointPolicy: "prefer",
+          orgMode: false,
+          orgId: null,
+          orgNodeId: null,
+        }),
+      }).then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!data || typeof data !== "object" || data.ok === false) return;
+        const incoming = _sessionConversationFromPayload(data as Record<string, unknown>);
+        if (incoming) {
+          setConversations((prev) => _upsertSessionConversation(prev, incoming));
+        }
+      }).catch((err) => {
+        logger.warn("[chat]", "create conversation session failed", { convId: id, err });
+      });
+    }
+  }, [activeConvId, messages, selectedAgent, serviceRunning, apiBaseUrl, activateConversation]);
 
   // ── 删除对话（实际执行） ──
   const doDeleteConversation = useCallback(async (convId: string) => {
@@ -2615,23 +2752,71 @@ export function ChatView({
 
   // ── 置顶/取消置顶 ──
   const togglePinConversation = useCallback((convId: string) => {
+    const pinned = !latestConversationsRef.current.find((c) => c.id === convId)?.pinned;
     setConversations((prev) => prev.map((c) =>
-      c.id === convId ? { ...c, pinned: !c.pinned } : c
+      c.id === convId ? { ...c, pinned } : c
     ));
+    void safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/pin`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    }).then(async (res) => {
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (data && data.ok !== false && typeof data.pinned === "boolean") {
+        setConversations((prev) => prev.map((c) =>
+          c.id === convId ? { ...c, pinned: data.pinned } : c
+        ));
+      }
+    }).catch((err) => {
+      logger.warn("chat", "persist conversation pin failed", { convId, err });
+    });
     setCtxMenu(null);
-  }, []);
+  }, [apiBaseUrl, latestConversationsRef]);
 
   // ── 重命名确认 ──
   const confirmRename = useCallback((convId: string, newTitle: string) => {
     const title = newTitle.trim();
     if (title) {
       setConversations((prev) => prev.map((c) =>
-        c.id === convId ? { ...c, title, titleManuallySet: true } : c
+        c.id === convId ? { ...c, title, titleManuallySet: true, titleGenerated: false } : c
       ));
+      void safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/title`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, titleManuallySet: true, titleGenerated: false }),
+      }).then(async (res) => {
+        if (!res.ok) {
+          logger.warn("[chat]", "persist conversation title failed", { convId, status: res.status });
+          return;
+        }
+        const data = await res.json().catch(() => null);
+        if (data && data.ok === false) {
+          logger.warn("[chat]", "persist conversation title skipped", { convId, reason: data.reason });
+        } else if (data && data.ok !== false) {
+          setConversations((prev) => prev.map((c) =>
+            c.id === convId
+              ? {
+                  ...c,
+                  title: typeof data.title === "string" && data.title.trim() ? data.title : c.title,
+                  titleManuallySet: data.titleManuallySet === undefined
+                    ? c.titleManuallySet
+                    : Boolean(data.titleManuallySet),
+                  titleGenerated: data.titleGenerated === undefined
+                    ? c.titleGenerated
+                    : Boolean(data.titleGenerated),
+                  pinned: typeof data.pinned === "boolean" ? data.pinned : c.pinned,
+                }
+              : c
+          ));
+        }
+      }).catch((err) => {
+        logger.warn("[chat]", "persist conversation title failed", { convId, err });
+      });
     }
     setRenamingId(null);
     setRenameText("");
-  }, []);
+  }, [apiBaseUrl]);
 
   // ── 发送消息（overrideText 用于 ask_user 回复等场景，绕过 inputText；targetConvId 用于自动出队等需要指定目标会话的场景） ──
   // displayContent: 当发送给 API 的原文（如 JSON）不适合直接展示时，可指定用户气泡中的显示文本
@@ -4554,7 +4739,7 @@ export function ChatView({
             : c
         );
         const conv = updated.find((c) => c.id === thisConvId);
-        if (appendUserMessage && conv && !conv.titleGenerated && (conv.messageCount || 0) <= 2) {
+        if (appendUserMessage && conv && !conv.titleManuallySet && !conv.titleGenerated && (conv.messageCount || 0) <= 2) {
           (async () => {
             try {
               const res = await safeFetch(`${apiBase}/api/sessions/generate-title`, {
@@ -4566,7 +4751,18 @@ export function ChatView({
               const data = await res.json();
               if (data.title) {
                 setConversations((p) => p.map((c) =>
-                  c.id === thisConvId ? { ...c, title: data.title, titleGenerated: true } : c
+                  c.id === thisConvId
+                    ? (
+                        c.titleManuallySet
+                          ? c
+                          : {
+                              ...c,
+                              title: data.title,
+                              titleGenerated: data.titleGenerated !== false,
+                              titleManuallySet: false,
+                            }
+                      )
+                    : c
                 ));
               }
             } catch { /* fallback: keep truncated title */ }
