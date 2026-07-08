@@ -39,6 +39,10 @@ class _FakeCatalog:
         self.generated += 1
 
 
+def _tool(name: str) -> dict:
+    return {"name": name, "description": name, "input_schema": {"type": "object"}}
+
+
 def test_inclusive_hides_non_selected_from_catalog():
     """INCLUSIVE mode: non-selected skills are catalog_hidden, not unregistered."""
     registry = _FakeRegistry(
@@ -166,3 +170,88 @@ def test_exclusive_unregisters_blacklisted_skills():
     assert len(registry._skills) == 2
     assert catalog.invalidated == 1
     assert catalog.generated == 1
+
+
+def test_tool_inclusive_empty_keeps_only_independent_basics_when_extensions_empty():
+    agent = SimpleNamespace(
+        _tools=[
+            _tool("run_shell"),
+            _tool("web_search"),
+            _tool("call_mcp_tool"),
+            _tool("list_skills"),
+            _tool("get_tool_info"),
+        ]
+    )
+    profile = AgentProfile(
+        id="locked",
+        name="Locked",
+        tools=[],
+        tools_mode="inclusive",
+        mcp_servers=[],
+        mcp_mode="inclusive",
+        skills=[],
+        skills_mode=SkillsMode.INCLUSIVE,
+    )
+
+    AgentFactory._apply_tool_filter(agent, profile)
+
+    assert [tool["name"] for tool in agent._tools] == ["get_tool_info"]
+
+
+def test_tool_inclusive_preserves_mcp_gateway_when_mcp_servers_are_selected():
+    agent = SimpleNamespace(
+        _tools=[
+            _tool("run_shell"),
+            _tool("call_mcp_tool"),
+            _tool("list_mcp_servers"),
+            _tool("get_mcp_instructions"),
+            _tool("web_search"),
+            _tool("get_tool_info"),
+        ]
+    )
+    profile = AgentProfile(
+        id="mcp-worker",
+        name="MCP Worker",
+        tools=["filesystem"],
+        tools_mode="inclusive",
+        mcp_servers=["database"],
+        mcp_mode="inclusive",
+        skills=[],
+        skills_mode=SkillsMode.INCLUSIVE,
+    )
+
+    AgentFactory._apply_tool_filter(agent, profile)
+
+    assert [tool["name"] for tool in agent._tools] == [
+        "call_mcp_tool",
+        "get_mcp_instructions",
+        "get_tool_info",
+        "list_mcp_servers",
+        "run_shell",
+    ]
+
+
+class _FakeMcpCatalog:
+    def __init__(self, server_count: int = 2) -> None:
+        self.server_count = server_count
+        self.clone_calls: list[tuple[list[str], str]] = []
+
+    def clone_filtered(self, server_ids: list[str], *, mode: str = "inclusive"):
+        self.clone_calls.append((list(server_ids), mode))
+        return _FakeMcpCatalog(server_count=len(server_ids) if mode == "inclusive" else 1)
+
+
+def test_mcp_inclusive_empty_filters_catalog_to_no_servers():
+    catalog = _FakeMcpCatalog()
+    agent = SimpleNamespace(mcp_catalog=catalog)
+    profile = AgentProfile(
+        id="no-mcp",
+        name="No MCP",
+        mcp_servers=[],
+        mcp_mode="inclusive",
+    )
+
+    AgentFactory._apply_mcp_filter(agent, profile)
+
+    assert catalog.clone_calls == [([], "inclusive")]
+    assert agent.mcp_catalog.server_count == 0

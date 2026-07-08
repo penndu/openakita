@@ -25,6 +25,10 @@ type AgentProfile = {
   type: string;
   skills: string[];
   skills_mode: string;
+  tools: string[];
+  tools_mode: string;
+  mcp_servers: string[];
+  mcp_mode: string;
   custom_prompt: string;
   preferred_endpoint?: string | null;
   endpoint_policy?: "prefer" | "require";
@@ -45,6 +49,20 @@ type SkillItem = {
   name_i18n?: Record<string, string> | null;
 };
 
+type ToolCategoryItem = {
+  id: string;
+  tools: string[];
+};
+
+type McpServerItem = {
+  name: string;
+  description?: string;
+  connected?: boolean;
+  enabled?: boolean;
+  tool_count?: number;
+  catalog_tool_count?: number;
+};
+
 type ModelInfo = {
   name: string;
   provider: string;
@@ -62,6 +80,10 @@ const EMPTY_PROFILE: AgentProfile = {
   type: "custom",
   skills: [],
   skills_mode: "all",
+  tools: [],
+  tools_mode: "all",
+  mcp_servers: [],
+  mcp_mode: "all",
   custom_prompt: "",
   preferred_endpoint: null,
   endpoint_policy: "prefer",
@@ -150,6 +172,8 @@ export function AgentManagerView({
   const [saving, setSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [availableSkills, setAvailableSkills] = useState<SkillItem[]>([]);
+  const [availableToolCategories, setAvailableToolCategories] = useState<ToolCategoryItem[]>([]);
+  const [availableMcpServers, setAvailableMcpServers] = useState<McpServerItem[]>([]);
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [iconCat, setIconCat] = useState("common");
@@ -161,6 +185,8 @@ export function AgentManagerView({
   const [newCatLabel, setNewCatLabel] = useState("");
   const [newCatColor, setNewCatColor] = useState("#6b7280");
   const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
+  const [toolSearch, setToolSearch] = useState("");
+  const [mcpSearch, setMcpSearch] = useState("");
   const [skillSearch, setSkillSearch] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
   const iconUploadInputRef = useRef<HTMLInputElement>(null);
@@ -259,6 +285,40 @@ export function AgentManagerView({
       );
     } catch {
       /* skills endpoint may not be available */
+    }
+  }, [apiBaseUrl]);
+
+  const fetchToolCategories = useCallback(async () => {
+    try {
+      const res = await safeFetch(`${apiBaseUrl}/api/agents/tool-categories`);
+      const data = await res.json();
+      setAvailableToolCategories(
+        (data.categories || []).map((cat: any) => ({
+          id: String(cat.id || cat.name || ""),
+          tools: Array.isArray(cat.tools) ? cat.tools.map((name: unknown) => String(name)) : [],
+        })).filter((cat: ToolCategoryItem) => cat.id),
+      );
+    } catch {
+      /* tool categories endpoint may not be available */
+    }
+  }, [apiBaseUrl]);
+
+  const fetchMcpServers = useCallback(async () => {
+    try {
+      const res = await safeFetch(`${apiBaseUrl}/api/mcp/servers`);
+      const data = await res.json();
+      setAvailableMcpServers(
+        (data.servers || []).map((server: any) => ({
+          name: String(server.name || ""),
+          description: server.description || "",
+          connected: !!server.connected,
+          enabled: server.enabled !== false,
+          tool_count: Number(server.tool_count || 0),
+          catalog_tool_count: Number(server.catalog_tool_count || 0),
+        })).filter((server: McpServerItem) => server.name),
+      );
+    } catch {
+      /* MCP endpoint may not be available */
     }
   }, [apiBaseUrl]);
 
@@ -377,26 +437,51 @@ export function AgentManagerView({
     if (visible) {
       fetchProfiles();
       fetchSkills();
+      fetchToolCategories();
+      fetchMcpServers();
       fetchCategories();
       fetchModels();
     }
-  }, [visible, fetchProfiles, fetchSkills, fetchCategories, fetchModels]);
+  }, [
+    visible,
+    fetchProfiles,
+    fetchSkills,
+    fetchToolCategories,
+    fetchMcpServers,
+    fetchCategories,
+    fetchModels,
+  ]);
 
   const openCreateEditor = () => {
     setEditingProfile({ ...EMPTY_PROFILE });
     setIsCreating(true);
     setEditorOpen(true);
     setEmojiPickerOpen(false);
+    setToolSearch("");
+    setMcpSearch("");
+    setSkillSearch("");
     setIdentityContent("");
     setIdentitySource("global");
     setMemoryStats(null);
   };
 
   const openEditEditor = (profile: AgentProfile) => {
-    setEditingProfile({ ...profile });
+    setEditingProfile({
+      ...EMPTY_PROFILE,
+      ...profile,
+      tools: profile.tools || [],
+      tools_mode: profile.tools_mode || "all",
+      mcp_servers: profile.mcp_servers || [],
+      mcp_mode: profile.mcp_mode || "all",
+      skills: profile.skills || [],
+      skills_mode: profile.skills_mode || "all",
+    });
     setIsCreating(false);
     setEditorOpen(true);
     setEmojiPickerOpen(false);
+    setToolSearch("");
+    setMcpSearch("");
+    setSkillSearch("");
     if (profile.identity_mode === "custom") {
       loadIdentityFile(profile.id, identityTab);
     }
@@ -408,6 +493,8 @@ export function AgentManagerView({
   const closeEditor = () => {
     setEditorOpen(false);
     setEmojiPickerOpen(false);
+    setToolSearch("");
+    setMcpSearch("");
     setSkillSearch("");
   };
 
@@ -470,6 +557,10 @@ export function AgentManagerView({
         description: editingProfile.description,
         icon: editingProfile.icon,
         color: editingProfile.color,
+        tools: editingProfile.tools,
+        tools_mode: editingProfile.tools_mode,
+        mcp_servers: editingProfile.mcp_servers,
+        mcp_mode: editingProfile.mcp_mode,
         skills: editingProfile.skills,
         skills_mode: editingProfile.skills_mode,
         custom_prompt: editingProfile.custom_prompt,
@@ -521,6 +612,24 @@ export function AgentManagerView({
     });
   };
 
+  const toggleToolCategory = (categoryId: string) => {
+    setEditingProfile((prev) => {
+      const tools = prev.tools.includes(categoryId)
+        ? prev.tools.filter((name) => name !== categoryId)
+        : [...prev.tools, categoryId];
+      return { ...prev, tools };
+    });
+  };
+
+  const toggleMcpServer = (serverName: string) => {
+    setEditingProfile((prev) => {
+      const mcp_servers = prev.mcp_servers.includes(serverName)
+        ? prev.mcp_servers.filter((name) => name !== serverName)
+        : [...prev.mcp_servers, serverName];
+      return { ...prev, mcp_servers };
+    });
+  };
+
   const handleVisibility = async (profileId: string, hidden: boolean) => {
     try {
       await safeFetch(`${apiBaseUrl}/api/agents/profiles/${profileId}/visibility`, {
@@ -563,6 +672,12 @@ export function AgentManagerView({
   const getI18nName = (agent: AgentProfile) => agent.name_i18n?.[langKey] || agent.name;
   const getI18nDesc = (agent: AgentProfile) => agent.description_i18n?.[langKey] || agent.description;
 
+  const getToolCategoryLabel = (categoryId: string): string =>
+    t(`agentManager.toolCategory.${categoryId}.label`, { defaultValue: categoryId });
+
+  const getToolCategoryDescription = (categoryId: string): string =>
+    t(`agentManager.toolCategory.${categoryId}.description`, { defaultValue: "" });
+
   const getCategoryColor = (catId: string): string => {
     const found = categories.find((c) => c.id === catId);
     return found?.color || "var(--primary, #3b82f6)";
@@ -592,6 +707,29 @@ export function AgentManagerView({
   const filteredProfiles = activeCategory
     ? visibleProfiles.filter((p) => p.category === activeCategory)
     : visibleProfiles;
+  const toolQuery = toolSearch.trim().toLowerCase();
+  const filteredToolCategories = availableToolCategories.filter((category) => {
+    if (!toolQuery) return true;
+    return (
+      category.id.toLowerCase().includes(toolQuery) ||
+      getToolCategoryLabel(category.id).toLowerCase().includes(toolQuery) ||
+      getToolCategoryDescription(category.id).toLowerCase().includes(toolQuery)
+    );
+  });
+  const mcpQuery = mcpSearch.trim().toLowerCase();
+  const filteredMcpServers = availableMcpServers.filter((server) => {
+    if (!mcpQuery) return true;
+    return (
+      server.name.toLowerCase().includes(mcpQuery) ||
+      (server.description || "").toLowerCase().includes(mcpQuery)
+    );
+  });
+  const skillQuery = skillSearch.trim().toLowerCase();
+  const filteredSkills = availableSkills.filter((skill) => {
+    if (!skillQuery) return true;
+    const displayName = skill.name_i18n?.[langKey] || skill.name;
+    return displayName.toLowerCase().includes(skillQuery) || skill.name.toLowerCase().includes(skillQuery);
+  });
 
   return (
     <div style={{ padding: 20, position: "relative", overflow: "auto", height: "100%" }}>
@@ -1214,63 +1352,210 @@ export function AgentManagerView({
               </div>
             </div>
 
-            {/* Skills Mode */}
             <div className="space-y-1.5">
-              <Label className="text-xs opacity-70">{t("agentManager.skills")}</Label>
+              <Label className="text-xs opacity-70">{t("agentManager.systemAbilities")}</Label>
+              <Select
+                value={editingProfile.tools_mode}
+                onValueChange={(v) => { setEditingProfile((p) => ({ ...p, tools_mode: v })); setToolSearch(""); }}
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("agentManager.modeAll")}</SelectItem>
+                  <SelectItem value="inclusive">{t("agentManager.modeInclusive")}</SelectItem>
+                  <SelectItem value="exclusive">{t("agentManager.modeExclusive")}</SelectItem>
+                </SelectContent>
+              </Select>
+              {editingProfile.tools_mode !== "all" && (
+                <>
+                  {availableToolCategories.length > 4 && (
+                    <Input
+                      placeholder={t("agentManager.systemSearchPlaceholder")}
+                      value={toolSearch}
+                      onChange={(e) => setToolSearch(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                  <div className="max-h-[220px] overflow-y-auto rounded-md border p-1">
+                    {availableToolCategories.length === 0 ? (
+                      <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                        {t("agentManager.noSystemAbilities")}
+                      </div>
+                    ) : filteredToolCategories.length === 0 ? (
+                      <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                        {t("agentManager.noCapabilityMatches")}
+                      </div>
+                    ) : (
+                      filteredToolCategories.map((category) => {
+                        const checked = editingProfile.tools.includes(category.id);
+                        return (
+                          <label
+                            key={category.id}
+                            className={`flex cursor-pointer items-start gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition-colors ${
+                              checked ? "bg-primary/8" : "hover:bg-accent/50"
+                            }`}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() => toggleToolCategory(category.id)}
+                              className="mt-0.5"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-medium">{getToolCategoryLabel(category.id)}</span>
+                              <span className="block truncate text-[11px] text-muted-foreground">
+                                {getToolCategoryDescription(category.id)}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs opacity-70">{t("agentManager.externalServices")}</Label>
+              <Select
+                value={editingProfile.mcp_mode}
+                onValueChange={(v) => { setEditingProfile((p) => ({ ...p, mcp_mode: v })); setMcpSearch(""); }}
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("agentManager.modeAll")}</SelectItem>
+                  <SelectItem value="inclusive">{t("agentManager.modeInclusive")}</SelectItem>
+                  <SelectItem value="exclusive">{t("agentManager.modeExclusive")}</SelectItem>
+                </SelectContent>
+              </Select>
+              {editingProfile.mcp_mode !== "all" && (
+                <>
+                  {availableMcpServers.length > 4 && (
+                    <Input
+                      placeholder={t("agentManager.serviceSearchPlaceholder")}
+                      value={mcpSearch}
+                      onChange={(e) => setMcpSearch(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                  <div className="max-h-[220px] overflow-y-auto rounded-md border p-1">
+                    {availableMcpServers.length === 0 ? (
+                      <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                        {t("agentManager.noExternalServices")}
+                      </div>
+                    ) : filteredMcpServers.length === 0 ? (
+                      <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                        {t("agentManager.noCapabilityMatches")}
+                      </div>
+                    ) : (
+                      filteredMcpServers.map((server) => {
+                        const checked = editingProfile.mcp_servers.includes(server.name);
+                        const actionCount = server.tool_count || server.catalog_tool_count || 0;
+                        return (
+                          <label
+                            key={server.name}
+                            className={`flex cursor-pointer items-start gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition-colors ${
+                              checked ? "bg-primary/8" : "hover:bg-accent/50"
+                            }`}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() => toggleMcpServer(server.name)}
+                              className="mt-0.5"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-medium">{server.name}</span>
+                              <span className="block truncate text-[11px] text-muted-foreground">
+                                {server.description || t("agentManager.serviceDefaultDescription")}
+                              </span>
+                            </span>
+                            <span className="flex shrink-0 flex-col items-end gap-1">
+                              <Badge
+                                variant={server.enabled === false || !server.connected ? "outline" : "default"}
+                                className="text-[10px] font-normal"
+                              >
+                                {server.enabled === false
+                                  ? t("agentManager.serviceDisabled")
+                                  : server.connected
+                                    ? t("agentManager.serviceReady")
+                                    : t("agentManager.serviceNotConnected")}
+                              </Badge>
+                              {actionCount > 0 && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {t("agentManager.availableActions", { count: actionCount })}
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs opacity-70">{t("agentManager.skillExtensions")}</Label>
               <Select
                 value={editingProfile.skills_mode}
                 onValueChange={(v) => { setEditingProfile((p) => ({ ...p, skills_mode: v })); setSkillSearch(""); }}
               >
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">{t("agentManager.skillsModeAll")}</SelectItem>
-                  <SelectItem value="inclusive">{t("agentManager.skillsModeInclusive")}</SelectItem>
-                  <SelectItem value="exclusive">{t("agentManager.skillsModeExclusive")}</SelectItem>
+                  <SelectItem value="all">{t("agentManager.modeAll")}</SelectItem>
+                  <SelectItem value="inclusive">{t("agentManager.modeInclusive")}</SelectItem>
+                  <SelectItem value="exclusive">{t("agentManager.modeExclusive")}</SelectItem>
                 </SelectContent>
               </Select>
+              {editingProfile.skills_mode !== "all" && (
+                <>
+                  {availableSkills.length > 4 && (
+                    <Input
+                      placeholder={t("agentManager.skillSearchPlaceholder")}
+                      value={skillSearch}
+                      onChange={(e) => setSkillSearch(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                  <div className="max-h-[220px] overflow-y-auto rounded-md border p-1">
+                    {availableSkills.length === 0 ? (
+                      <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                        {t("agentManager.noSkills")}
+                      </div>
+                    ) : filteredSkills.length === 0 ? (
+                      <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                        {t("agentManager.noCapabilityMatches")}
+                      </div>
+                    ) : (
+                      filteredSkills.map((skill) => {
+                        const checked = editingProfile.skills.includes(skill.skillId);
+                        return (
+                          <label
+                            key={skill.skillId}
+                            className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition-colors ${
+                              checked ? "bg-primary/8" : "hover:bg-accent/50"
+                            }`}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() => toggleSkill(skill.skillId)}
+                            />
+                            <span className="min-w-0 flex-1 truncate">
+                              {skill.name_i18n?.[langKey] || skill.name}
+                            </span>
+                            {!skill.enabled && (
+                              <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
+                                {t("agentManager.skillDisabled")}
+                              </Badge>
+                            )}
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
+              )}
             </div>
-
-            {/* Skills multi-select */}
-            {editingProfile.skills_mode !== "all" && availableSkills.length > 0 && (
-              <div className="rounded-lg border">
-                <div className="p-1.5 border-b">
-                  <Input
-                    placeholder={t("agentManager.skillSearchPlaceholder")}
-                    value={skillSearch}
-                    onChange={(e) => setSkillSearch(e.target.value)}
-                    className="h-7 text-xs"
-                  />
-                </div>
-                <div className="max-h-[200px] overflow-y-auto p-1">
-                  {availableSkills
-                    .filter((skill) => {
-                      if (!skillSearch.trim()) return true;
-                      const q = skillSearch.trim().toLowerCase();
-                      const displayName = skill.name_i18n?.[i18n.language?.startsWith("zh") ? "zh" : i18n.language || "zh"] || skill.name;
-                      return displayName.toLowerCase().includes(q) || skill.name.toLowerCase().includes(q);
-                    })
-                    .map((skill) => {
-                      const checked = editingProfile.skills.includes(skill.skillId);
-                      return (
-                        <label
-                          key={skill.skillId}
-                          className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-md cursor-pointer text-[13px] transition-colors ${
-                            checked ? "bg-primary/8" : "hover:bg-accent/50"
-                          }`}
-                        >
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={() => toggleSkill(skill.skillId)}
-                          />
-                          <span className="flex-1 min-w-0 truncate">
-                            {skill.name_i18n?.[i18n.language?.startsWith("zh") ? "zh" : i18n.language || "zh"] || skill.name}
-                          </span>
-                        </label>
-                      );
-                    })}
-                </div>
-              </div>
-            )}
 
             {/* Preferred Endpoint */}
             <div className="space-y-1.5">

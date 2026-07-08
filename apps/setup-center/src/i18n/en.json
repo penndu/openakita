@@ -1905,6 +1905,66 @@
     "skillsModeInclusive": "Only selected skills",
     "skillsModeExclusive": "Exclude selected skills",
     "skillSearchPlaceholder": "Search skills…",
+    "systemAbilities": "Built-in abilities",
+    "externalServices": "External services",
+    "skillExtensions": "Skills",
+    "modeAll": "All available",
+    "modeInclusive": "Only selected",
+    "modeExclusive": "Exclude selected",
+    "systemSearchPlaceholder": "Search built-in abilities…",
+    "serviceSearchPlaceholder": "Search external services…",
+    "noSystemAbilities": "No built-in abilities are available",
+    "noExternalServices": "No external services are configured",
+    "noSkills": "No skills available",
+    "noCapabilityMatches": "No matches",
+    "serviceDefaultDescription": "External service available to agents",
+    "serviceReady": "Ready",
+    "serviceNotConnected": "Not connected",
+    "serviceDisabled": "Disabled",
+    "availableActions": "{{count}} abilities",
+    "skillDisabled": "Disabled",
+    "toolCategory": {
+      "research": {
+        "label": "Web research",
+        "description": "Find public information, news, and web pages"
+      },
+      "planning": {
+        "label": "Planning",
+        "description": "Break down work and track step progress"
+      },
+      "filesystem": {
+        "label": "Files and commands",
+        "description": "Read and edit files, and run commands when needed"
+      },
+      "memory": {
+        "label": "Memory",
+        "description": "Read and save long-term information for tasks"
+      },
+      "browser": {
+        "label": "Browser",
+        "description": "Open pages, click, type, capture screenshots, and read page content"
+      },
+      "desktop": {
+        "label": "Desktop control",
+        "description": "Inspect and operate local application windows"
+      },
+      "communication": {
+        "label": "Messages and files",
+        "description": "Read current chat context and deliver generated files"
+      },
+      "scheduled": {
+        "label": "Reminders and scheduled tasks",
+        "description": "Create, update, and trigger reminders or automated tasks"
+      },
+      "code": {
+        "label": "Code assistance",
+        "description": "Read diagnostics, find code references, and use language feedback"
+      },
+      "profile": {
+        "label": "User preferences",
+        "description": "Read or update user preferences and proactive help settings"
+      }
+    },
     "category": "Category",
     "categoryAll": "All",
     "categoryGeneral": "General",

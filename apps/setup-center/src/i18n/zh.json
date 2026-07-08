@@ -1905,6 +1905,66 @@
     "skillsModeInclusive": "仅使用勾选的技能",
     "skillsModeExclusive": "排除勾选的技能",
     "skillSearchPlaceholder": "搜索技能…",
+    "systemAbilities": "内置能力",
+    "externalServices": "外部服务",
+    "skillExtensions": "技能",
+    "modeAll": "全部可用",
+    "modeInclusive": "仅所选",
+    "modeExclusive": "排除所选",
+    "systemSearchPlaceholder": "搜索内置能力…",
+    "serviceSearchPlaceholder": "搜索外部服务…",
+    "noSystemAbilities": "暂无可配置的内置能力",
+    "noExternalServices": "暂无已配置的外部服务",
+    "noSkills": "暂无可用技能",
+    "noCapabilityMatches": "没有匹配项",
+    "serviceDefaultDescription": "可供 Agent 使用的外部服务",
+    "serviceReady": "可用",
+    "serviceNotConnected": "未连接",
+    "serviceDisabled": "已停用",
+    "availableActions": "{{count}} 项能力",
+    "skillDisabled": "已停用",
+    "toolCategory": {
+      "research": {
+        "label": "网络搜索",
+        "description": "查找公开信息、新闻和网页内容"
+      },
+      "planning": {
+        "label": "计划跟踪",
+        "description": "拆分任务、跟踪步骤进度"
+      },
+      "filesystem": {
+        "label": "文件和命令",
+        "description": "读取、编辑文件，并在需要时运行命令"
+      },
+      "memory": {
+        "label": "记忆",
+        "description": "读取和保存与任务相关的长期信息"
+      },
+      "browser": {
+        "label": "浏览器",
+        "description": "打开网页、点击、输入、截图和读取页面内容"
+      },
+      "desktop": {
+        "label": "桌面操作",
+        "description": "查看和操作本机窗口界面"
+      },
+      "communication": {
+        "label": "消息和文件",
+        "description": "读取当前会话资料并交付生成的文件"
+      },
+      "scheduled": {
+        "label": "提醒和定时任务",
+        "description": "创建、更新和触发提醒或自动任务"
+      },
+      "code": {
+        "label": "代码辅助",
+        "description": "读取诊断信息、查找代码引用和语言服务反馈"
+      },
+      "profile": {
+        "label": "用户偏好",
+        "description": "读取或更新用户偏好和主动协助设置"
+      }
+    },
     "category": "分类",
     "categoryAll": "全部",
     "categoryGeneral": "通用基础",

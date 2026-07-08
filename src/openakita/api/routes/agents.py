@@ -37,6 +37,16 @@ VALID_BOT_TYPES = frozenset(
         "wechat",
     }
 )
+VALID_PROFILE_LIST_MODES = frozenset({"all", "inclusive", "exclusive"})
+
+
+def _validate_profile_list_mode(field_name: str, value: str | None) -> None:
+    if value is None or value in VALID_PROFILE_LIST_MODES:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=f"{field_name} must be one of: {', '.join(sorted(VALID_PROFILE_LIST_MODES))}",
+    )
 
 
 def _invalidate_bot_agent_sessions(bot_cfg: dict) -> None:
@@ -453,6 +463,14 @@ async def delete_category(category_id: str):
     return {"status": "ok"}
 
 
+@router.get("/api/agents/tool-categories")
+async def list_agent_tool_categories():
+    """Return built-in capability categories available to Agent profiles."""
+    from openakita.orgs.tool_categories import list_agent_system_tool_categories
+
+    return {"categories": list_agent_system_tool_categories()}
+
+
 # ─── Agent profile routes ───────────────────────────────────────────────
 
 
@@ -529,25 +547,15 @@ async def create_agent_profile(body: ProfileCreateRequest):
     """Create a new custom agent profile."""
     from openakita.agents.profile import AgentProfile, AgentType, SkillsMode, get_profile_store
 
-    valid_modes = {"all", "inclusive", "exclusive"}
-    if body.skills_mode not in valid_modes:
-        raise HTTPException(
-            status_code=400, detail=f"skills_mode must be one of: {', '.join(valid_modes)}"
-        )
+    _validate_profile_list_mode("skills_mode", body.skills_mode)
 
     store = get_profile_store()
 
     if store.exists(body.id):
         raise HTTPException(status_code=400, detail=f"Profile '{body.id}' already exists")
 
-    valid_mode_values = {"all", "inclusive", "exclusive"}
     for field_name in ("tools_mode", "mcp_mode", "plugins_mode"):
-        val = getattr(body, field_name)
-        if val not in valid_mode_values:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{field_name} must be one of: {', '.join(valid_mode_values)}",
-            )
+        _validate_profile_list_mode(field_name, getattr(body, field_name))
 
     profile = AgentProfile(
         id=body.id,
@@ -588,12 +596,8 @@ async def update_agent_profile(profile_id: str, body: ProfileUpdateRequest, requ
     """Update a custom agent profile (system profiles have restricted updates)."""
     from openakita.agents.profile import get_profile_store
 
-    if body.skills_mode is not None:
-        valid_modes = {"all", "inclusive", "exclusive"}
-        if body.skills_mode not in valid_modes:
-            raise HTTPException(
-                status_code=400, detail=f"skills_mode must be one of: {', '.join(valid_modes)}"
-            )
+    for field_name in ("skills_mode", "tools_mode", "mcp_mode", "plugins_mode"):
+        _validate_profile_list_mode(field_name, getattr(body, field_name))
 
     store = get_profile_store()
     update_data = body.model_dump(exclude_unset=True)

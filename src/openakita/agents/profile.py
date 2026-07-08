@@ -58,6 +58,7 @@ _SKILLS_MODE_ALIASES: dict[str, str] = {
 }
 _IDENTITY_MODES = frozenset({"shared", "custom"})
 _MEMORY_MODES = frozenset({"shared", "isolated"})
+_LIST_MODES = frozenset({"all", "inclusive", "exclusive"})
 
 
 def _normalize_choice(value: Any, *, allowed: frozenset[str], default: str, field_name: str) -> str:
@@ -208,6 +209,24 @@ class AgentProfile:
     def __post_init__(self):
         self.type = safe_agent_type(self.type)
         self.skills_mode = safe_skills_mode(self.skills_mode)
+        self.tools_mode = _normalize_choice(
+            self.tools_mode,
+            allowed=_LIST_MODES,
+            default="all",
+            field_name="tools_mode",
+        )
+        self.mcp_mode = _normalize_choice(
+            self.mcp_mode,
+            allowed=_LIST_MODES,
+            default="all",
+            field_name="mcp_mode",
+        )
+        self.plugins_mode = _normalize_choice(
+            self.plugins_mode,
+            allowed=_LIST_MODES,
+            default="all",
+            field_name="plugins_mode",
+        )
         if self.endpoint_policy not in {"prefer", "require"}:
             self.endpoint_policy = "prefer"
         self.identity_mode = _normalize_choice(

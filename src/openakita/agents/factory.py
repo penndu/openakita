@@ -23,30 +23,32 @@ logger = logging.getLogger(__name__)
 _IDLE_TIMEOUT_SECONDS = 30 * 60  # 30 分钟空闲回收
 _REAP_INTERVAL_SECONDS = 60  # 每分钟检查一次
 
-# INCLUSIVE 模式下始终保留的基础系统工具。
-# 所有子 Agent（含用户手动创建的）都需要这些工具才能正常工作。
-# 只有浏览器、桌面控制、MCP、定时任务等专用工具需在 profile.skills 显式列出。
+# INCLUSIVE 模式下始终保留的基础控制工具。业务能力（文件、网络、记忆、
+# 浏览器等）必须由 profile.tools 精确放行。
 ESSENTIAL_TOOL_NAMES: frozenset[str] = frozenset(
     {
-        "run_shell",
-        "read_file",
-        "write_file",
-        "list_directory",
-        "web_search",
-        "deliver_artifacts",
-        "get_chat_history",
-        "search_memory",
-        "add_memory",
-        "create_todo",
-        "update_todo_step",
-        "get_todo_status",
-        "complete_todo",
-        "list_skills",
-        "get_skill_info",
         "get_tool_info",
         "set_task_timeout",
-        "get_image_file",
-        "get_voice_file",
+    }
+)
+
+MCP_GATEWAY_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "call_mcp_tool",
+        "list_mcp_servers",
+        "get_mcp_instructions",
+        "connect_mcp_server",
+        "disconnect_mcp_server",
+    }
+)
+
+SKILL_GATEWAY_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "list_skills",
+        "get_skill_info",
+        "get_skill_reference",
+        "run_skill_script",
+        "execute_skill",
     }
 )
 
@@ -214,8 +216,10 @@ class AgentFactory:
         # Rebuild the initial system prompt so it reflects the filtered catalogs.
         # INCLUSIVE 模式无论 skills 是否为空都需要重建（空列表 = 隐藏全部非必要技能）。
         needs_rebuild = (
-            (profile.tools_mode != "all" and profile.tools)
-            or (profile.mcp_mode != "all" and profile.mcp_servers)
+            profile.tools_mode == "inclusive"
+            or (profile.tools_mode == "exclusive" and profile.tools)
+            or profile.mcp_mode == "inclusive"
+            or (profile.mcp_mode == "exclusive" and profile.mcp_servers)
             or profile.skills_mode == SkillsMode.INCLUSIVE
             or (profile.skills_mode == SkillsMode.EXCLUSIVE and profile.skills)
         )
@@ -360,26 +364,26 @@ class AgentFactory:
         """按 profile.tools + tools_mode 过滤 Agent 的工具列表。
 
         tools 字段支持类目名（如 "research"）和具体工具名的混合。
-        INCLUSIVE 模式下 ESSENTIAL_TOOL_NAMES 始终保留。
+        INCLUSIVE 模式下只保留基础控制工具，以及由 MCP/Skill 区块独立放行
+        所需的入口工具。
         """
-        if profile.tools_mode == "all" or not profile.tools:
+        if profile.tools_mode == "all":
+            return
+        if profile.tools_mode == "exclusive" and not profile.tools:
             return
 
         from ..orgs.tool_categories import expand_tool_categories
 
         specified = expand_tool_categories(profile.tools)
+        always_allowed = AgentFactory._always_allowed_tool_names(profile)
 
         if profile.tools_mode == "inclusive":
             agent._tools = [
-                t
-                for t in agent._tools
-                if t["name"] in specified or t["name"] in ESSENTIAL_TOOL_NAMES
+                t for t in agent._tools if t["name"] in specified or t["name"] in always_allowed
             ]
         elif profile.tools_mode == "exclusive":
             agent._tools = [
-                t
-                for t in agent._tools
-                if t["name"] not in specified or t["name"] in ESSENTIAL_TOOL_NAMES
+                t for t in agent._tools if t["name"] not in specified or t["name"] in always_allowed
             ]
 
         agent._tools.sort(key=lambda t: t["name"])
@@ -398,7 +402,9 @@ class AgentFactory:
         创建一个 filtered clone 替换 agent.mcp_catalog，
         使 call_mcp_tool handler 只能访问 clone 中的 server。
         """
-        if profile.mcp_mode == "all" or not profile.mcp_servers:
+        if profile.mcp_mode == "all":
+            return
+        if profile.mcp_mode == "exclusive" and not profile.mcp_servers:
             return
 
         catalog = getattr(agent, "mcp_catalog", None)
@@ -412,6 +418,15 @@ class AgentFactory:
             f"servers={profile.mcp_servers}, "
             f"remaining={filtered.server_count} servers"
         )
+
+    @staticmethod
+    def _always_allowed_tool_names(profile: AgentProfile) -> frozenset[str]:
+        allowed = set(ESSENTIAL_TOOL_NAMES)
+        if profile.mcp_mode != "inclusive" or profile.mcp_servers:
+            allowed.update(MCP_GATEWAY_TOOL_NAMES)
+        if profile.skills_mode != SkillsMode.INCLUSIVE or profile.skills:
+            allowed.update(SKILL_GATEWAY_TOOL_NAMES)
+        return frozenset(allowed)
 
     @staticmethod
     def _apply_identity_override(agent: Agent, profile: AgentProfile) -> None:
