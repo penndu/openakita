@@ -70,6 +70,11 @@ import { OrgDashboard } from "../components/OrgDashboard";
 import { OrgProjectBoard } from "../components/OrgProjectBoard";
 import { ZoomIn, ZoomOut, Maximize, X as XIcon, Copy as IconCopy } from "lucide-react";
 import { copyToClipboard } from "../utils/clipboard";
+import {
+  ORG_STRUCTURE_CHANGED_EVENT,
+  normalizeOrgStructureChange,
+  type OrgStructureChangeDetail,
+} from "../utils/orgStructureEvents";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Checkbox } from "../components/ui/checkbox";
@@ -924,6 +929,54 @@ export function OrgEditorView({
       fetchAgentProfiles();
     }
   }, [visible, fetchOrgList, fetchMcpServers, fetchAvailableSkills, fetchAgentProfiles]);
+
+  useEffect(() => {
+    const onOrgStructureChanged = (event: Event) => {
+      const detail = normalizeOrgStructureChange(
+        (event as CustomEvent<OrgStructureChangeDetail>).detail,
+      );
+      if (!detail) return;
+
+      void (async () => {
+        await fetchOrgList();
+        if (detail.action === "deleted") {
+          if (selectedOrgId === detail.orgId) {
+            if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+            setActiveDrawer(null);
+            setSelectedOrgId(null);
+            setCurrentOrg(null);
+            setNodes([]);
+            setEdges([]);
+          }
+          if (visible) showToast(t("org.editor.chatDeletedOrg", "聊天已删除组织"), "ok");
+          return;
+        }
+
+        setSelectedOrgId(detail.orgId);
+        if (visible) {
+          await fetchOrg(detail.orgId);
+          const name = detail.orgName || detail.orgId;
+          showToast(
+            detail.action === "created"
+              ? t("org.editor.chatCreatedOrg", "聊天已创建组织：{{name}}", { name })
+              : t("org.editor.chatUpdatedOrg", "聊天已更新组织：{{name}}", { name }),
+            "ok",
+          );
+        }
+      })();
+    };
+    window.addEventListener(ORG_STRUCTURE_CHANGED_EVENT, onOrgStructureChanged);
+    return () => window.removeEventListener(ORG_STRUCTURE_CHANGED_EVENT, onOrgStructureChanged);
+  }, [
+    fetchOrgList,
+    fetchOrg,
+    selectedOrgId,
+    setNodes,
+    setEdges,
+    showToast,
+    t,
+    visible,
+  ]);
 
   useEffect(() => {
     if (selectedOrgId && visible) {

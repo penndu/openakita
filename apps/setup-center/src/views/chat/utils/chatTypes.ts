@@ -159,6 +159,7 @@ export type StreamEvent =
     }
   | { type: "source_used"; tool_name?: string; tool_use_id?: string; requested_url: string; final_url: string; hostname?: string; redirected?: boolean; from_cache?: boolean; status?: string; hint?: string; protocol_version?: number }
   | { type: "mcp_call"; tool_use_id?: string; server: string; tool: string; status?: "ok" | "error" | string; auto_connected?: boolean; reconnected?: boolean; error?: string; protocol_version?: number }
+  | { type: "org_structure_changed"; action?: "created" | "updated" | "deleted" | string; org_id: string; org_name?: string; template_id?: string; node_count?: number; edge_count?: number; status?: string; tool_use_id?: string; protocol_version?: number }
   | { type: "todo_created"; plan: ChatTodo; restored?: boolean }
   | { type: "todo_step_updated"; planId?: string; plan_id?: string; stepId?: string; step_id?: string; stepIdx?: number; status: string; result?: string | null; protocol_version?: number }
   | { type: "todo_completed"; planId?: string; plan_id?: string }

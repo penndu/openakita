@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...core.policy_v2 import ApprovalClass
@@ -36,6 +37,14 @@ _VALID_ACTIONS = (
     "update_org",
     "delete_org",
 )
+
+_ORG_EVENT_MARKER = "[OPENAKITA_ORG]"
+
+
+def _with_org_event_marker(result: str, payload: dict[str, Any]) -> str:
+    """Append a machine-readable org-change marker for the chat SSE layer."""
+    marker = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"{result}\n\n{_ORG_EVENT_MARKER} {marker}"
 
 
 class OrgSetupHandler:
@@ -352,13 +361,21 @@ class OrgSetupHandler:
         try:
             org = manager.create(org_data)
             edge_summary = self._format_edge_summary(org.edges)
-            return (
+            return _with_org_event_marker(
                 f"✅ 组织「{org.name}」创建成功！\n"
                 f"- ID: {org.id}\n"
                 f"- 节点数: {len(org.nodes)}\n"
                 f"- 连线: {edge_summary}\n"
                 f"- 状态: dormant（需在前端启动）\n\n"
-                f"用户可在组织编排页面查看和微调架构。"
+                f"用户可在组织编排页面查看和微调架构。",
+                {
+                    "action": "created",
+                    "org_id": org.id,
+                    "org_name": org.name,
+                    "node_count": len(org.nodes),
+                    "edge_count": len(org.edges),
+                    "status": org.status.value if hasattr(org.status, "value") else org.status,
+                },
             )
         except Exception as e:
             logger.error(f"[OrgSetup] Failed to create org: {e}", exc_info=True)
@@ -381,12 +398,21 @@ class OrgSetupHandler:
 
         try:
             org = manager.create_from_template(template_id, overrides)
-            return (
+            return _with_org_event_marker(
                 f"✅ 从模板「{template_id}」创建组织成功！\n"
                 f"- 名称: {org.name}\n"
                 f"- ID: {org.id}\n"
                 f"- 节点数: {len(org.nodes)}\n"
-                f"- 状态: dormant（需在前端启动）"
+                f"- 状态: dormant（需在前端启动）",
+                {
+                    "action": "created",
+                    "org_id": org.id,
+                    "org_name": org.name,
+                    "template_id": template_id,
+                    "node_count": len(org.nodes),
+                    "edge_count": len(org.edges),
+                    "status": org.status.value if hasattr(org.status, "value") else org.status,
+                },
             )
         except FileNotFoundError:
             return f"❌ 模板 '{template_id}' 不存在。请先调用 get_resources 查看可用模板。"
@@ -655,10 +681,18 @@ class OrgSetupHandler:
 
             summary = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(changes))
             edge_summary = self._format_edge_summary(org.edges)
-            return (
+            return _with_org_event_marker(
                 f"✅ 组织「{org.name}」修改成功！\n\n"
                 f"变更摘要：\n{summary}\n\n"
-                f"当前节点数: {len(org.nodes)} | 连线: {edge_summary}"
+                f"当前节点数: {len(org.nodes)} | 连线: {edge_summary}",
+                {
+                    "action": "updated",
+                    "org_id": org.id,
+                    "org_name": org.name,
+                    "node_count": len(org.nodes),
+                    "edge_count": len(org.edges),
+                    "status": org.status.value if hasattr(org.status, "value") else org.status,
+                },
             )
         except Exception as e:
             logger.error(f"[OrgSetup] Failed to update org: {e}", exc_info=True)
@@ -679,7 +713,13 @@ class OrgSetupHandler:
         if rt is not None:
             try:
                 await rt.delete_org(org_id)
-                return f"✅ 组织({org_id}) 已永久删除。"
+                return _with_org_event_marker(
+                    f"✅ 组织({org_id}) 已永久删除。",
+                    {
+                        "action": "deleted",
+                        "org_id": org_id,
+                    },
+                )
             except ValueError:
                 return f"❌ 组织 '{org_id}' 不存在"
             except Exception as e:
@@ -697,7 +737,14 @@ class OrgSetupHandler:
         org_name = org.name
         try:
             manager.delete(org_id)
-            return f"✅ 组织「{org_name}」({org_id}) 已永久删除。"
+            return _with_org_event_marker(
+                f"✅ 组织「{org_name}」({org_id}) 已永久删除。",
+                {
+                    "action": "deleted",
+                    "org_id": org_id,
+                    "org_name": org_name,
+                },
+            )
         except Exception as e:
             logger.error(f"[OrgSetup] Failed to delete org: {e}", exc_info=True)
             return f"❌ 删除失败: {e}"
@@ -711,9 +758,18 @@ class OrgSetupHandler:
         from ...config import settings
 
         try:
+            from ...orgs.store import get_default_org_manager
+
+            base_dir = Path(settings.data_dir)
+            default_manager = get_default_org_manager()
+            if default_manager is not None:
+                default_data_dir = getattr(default_manager, "_data_dir", None)
+                if default_data_dir is not None and Path(default_data_dir) == base_dir:
+                    return default_manager
+
             from ...orgs.manager import OrgManager
 
-            return OrgManager(settings.data_dir)
+            return OrgManager(base_dir)
         except Exception as e:
             logger.error(f"[OrgSetup] Cannot get OrgManager: {e}")
             return None

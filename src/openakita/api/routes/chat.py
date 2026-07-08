@@ -667,6 +667,41 @@ def _extract_mcp_call(event: dict) -> dict | None:
     return payload
 
 
+def _extract_org_structure_change(event: dict) -> dict | None:
+    """Extract org create/update/delete metadata from setup_organization results."""
+    if event.get("type") != "tool_call_end":
+        return None
+    if (event.get("tool_name") or event.get("tool", "")) != "setup_organization":
+        return None
+    result = str(event.get("result", ""))
+    marker = "[OPENAKITA_ORG]"
+    if marker not in result:
+        return None
+    try:
+        line = result[result.index(marker) + len(marker) :].strip().splitlines()[0].strip()
+        payload = json.loads(line)
+    except (json.JSONDecodeError, TypeError, ValueError, IndexError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    payload.setdefault("tool_use_id", event.get("call_id") or event.get("id", ""))
+    payload.setdefault("action", "updated")
+    payload.setdefault("org_id", "")
+    payload.setdefault("org_name", "")
+    return payload
+
+
+def _strip_org_structure_marker(event: dict) -> dict:
+    """Hide the OpenAkita org marker from frontend tool-result rendering."""
+    result = event.get("result")
+    if not isinstance(result, str) or "[OPENAKITA_ORG]" not in result:
+        return event
+    next_event = dict(event)
+    lines = [line for line in result.splitlines() if not line.strip().startswith("[OPENAKITA_ORG]")]
+    next_event["result"] = "\n".join(lines).rstrip()
+    return next_event
+
+
 def _artifact_data_from_receipt(receipt: dict) -> dict | None:
     """Convert one delivery receipt into the chat artifact shape."""
     if not isinstance(receipt, dict):
@@ -1527,6 +1562,9 @@ async def _stream_chat(
 
             await _refresh_busy_lease()
             event_type = event.get("type", "")
+            _org_structure_change = _extract_org_structure_change(event)
+            if _org_structure_change:
+                event = _strip_org_structure_marker(event)
 
             # Observe every raw event (before coalescing / disconnect gating) so
             # the persisted timeline is complete regardless of wire state.
@@ -1609,6 +1647,10 @@ async def _stream_chat(
 
             if _mcp_call:
                 yield _sse("mcp_call", _mcp_call)
+                _last_emit_ts = time.time()
+
+            if _org_structure_change:
+                yield _sse("org_structure_changed", _org_structure_change)
                 _last_emit_ts = time.time()
 
             for art_data in _new_artifacts:

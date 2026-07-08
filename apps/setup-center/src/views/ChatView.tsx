@@ -46,6 +46,7 @@ import type {
 import { genId, timeAgo } from "../utils";
 import { SseStateMachine, type SseFrame } from "../utils/sseStateMachine";
 import { notifyError, notifyInfo } from "../utils/notify";
+import { dispatchOrgStructureChanged } from "../utils/orgStructureEvents";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import {
   IconSend, IconPaperclip, IconMic, IconStopCircle,
@@ -4310,6 +4311,30 @@ export function ChatView({
                   error: event.error,
                 }];
                 break;
+              case "org_structure_changed": {
+                dispatchOrgStructureChanged(event);
+                const changedOrgId = String(event.org_id || "");
+                safeFetch(`${apiBase}/api/v2/orgs`)
+                  .then((r) => r.json())
+                  .then((data) => {
+                    if (!Array.isArray(data)) return;
+                    setOrgList(data.map((o: any) => ({
+                      id: o.id,
+                      name: o.name,
+                      icon: o.icon || "",
+                      status: o.status,
+                    })));
+                  })
+                  .catch(() => {});
+                if (changedOrgId) {
+                  if (event.action === "deleted") {
+                    setSelectedOrgId((prev) => prev === changedOrgId ? null : prev);
+                  } else {
+                    setSelectedOrgId(changedOrgId);
+                  }
+                }
+                break;
+              }
               case "agent_handoff": {
                 // P5.1: capture delegation parentage so SubAgentCards can render
                 // a tree.  We only record when the from_agent is non-empty,

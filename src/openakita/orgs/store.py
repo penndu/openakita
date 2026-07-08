@@ -75,6 +75,7 @@ __all__ = [
     "JsonOrgStore",
     "OrgNotFound",
     "get_default_store",
+    "get_default_org_manager",
     "reset_default_store",
     "set_default_org_manager",
 ]
@@ -120,6 +121,12 @@ def set_default_org_manager(manager: OrgManager | None) -> None:
         _DEFAULT_MANAGER = manager
         if _DEFAULT_STORE is not None and isinstance(_DEFAULT_STORE, JsonOrgStore):
             _DEFAULT_STORE._set_manager(manager)
+
+
+def get_default_org_manager() -> OrgManager | None:
+    """Return the process-wide :class:`OrgManager` override, if one is wired."""
+    with _DEFAULT_MANAGER_LOCK:
+        return _DEFAULT_MANAGER
 
 
 def _build_default_manager() -> OrgManager:

@@ -258,6 +258,12 @@ class TestCreate:
         assert "✅" in result
         assert "测试组织" in result
         assert "节点数: 2" in result
+        assert "[OPENAKITA_ORG]" in result
+        marker = result.split("[OPENAKITA_ORG]", 1)[1].strip().splitlines()[0]
+        payload = json.loads(marker)
+        assert payload["action"] == "created"
+        assert payload["org_id"].startswith("org_")
+        assert payload["org_name"] == "测试组织"
         assert "连线:" in result
 
     @pytest.mark.asyncio
@@ -447,6 +453,42 @@ class TestListOrgs:
             ms.data_dir = tmp_data_dir
             result = handler._list_orgs()
         assert "没有任何组织" in result
+
+    def test_ignores_default_manager_for_different_data_dir(self, handler, tmp_path):
+        from openakita.orgs.manager import OrgManager
+        from openakita.orgs.store import set_default_org_manager
+
+        stale_manager = OrgManager(tmp_path / "stale")
+        stale_manager.create({"name": "stale org"})
+
+        try:
+            set_default_org_manager(stale_manager)
+            with patch("openakita.config.settings") as ms:
+                ms.data_dir = tmp_path / "current"
+                result = handler._list_orgs()
+        finally:
+            set_default_org_manager(None)
+
+        assert "没有任何组织" in result
+        assert "stale org" not in result
+
+    def test_reuses_default_manager_for_same_data_dir(self, handler, tmp_path):
+        from openakita.orgs.manager import OrgManager
+        from openakita.orgs.store import set_default_org_manager
+
+        shared_manager = OrgManager(tmp_path / "shared")
+        org = shared_manager.create({"name": "shared org"})
+
+        try:
+            set_default_org_manager(shared_manager)
+            with patch("openakita.config.settings") as ms:
+                ms.data_dir = tmp_path / "shared"
+                result = handler._list_orgs()
+        finally:
+            set_default_org_manager(None)
+
+        assert "shared org" in result
+        assert org.id in result
 
     def test_list_returns_existing(self, handler, tmp_data_dir, created_org):
         org_id, data_dir = created_org

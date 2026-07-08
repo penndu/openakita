@@ -30,6 +30,7 @@ export const StreamEventType = {
   CONFIG_HINT: "config_hint",
   SOURCE_USED: "source_used",
   MCP_CALL: "mcp_call",
+  ORG_STRUCTURE_CHANGED: "org_structure_changed",
 
   // ── Context management ──
   CONTEXT_COMPRESSED: "context_compressed",

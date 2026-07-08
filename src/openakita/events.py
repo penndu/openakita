@@ -38,6 +38,7 @@ class StreamEventType(StrEnum):
     CONFIG_HINT = "config_hint"
     SOURCE_USED = "source_used"
     MCP_CALL = "mcp_call"
+    ORG_STRUCTURE_CHANGED = "org_structure_changed"
 
     # ── Context management ──
     CONTEXT_COMPRESSED = "context_compressed"
@@ -111,6 +112,12 @@ def normalize_stream_event(event: dict | None) -> dict:
         payload.setdefault("auto_connected", False)
         payload.setdefault("reconnected", False)
         payload.setdefault("error", "")
+
+    if event_type == StreamEventType.ORG_STRUCTURE_CHANGED.value:
+        payload.setdefault("tool_use_id", payload.get("id", payload.get("call_id", "")))
+        payload.setdefault("action", "updated")
+        payload.setdefault("org_id", "")
+        payload.setdefault("org_name", "")
 
     if event_type == StreamEventType.SECURITY_CONFIRM.value:
         payload.setdefault("tool_name", payload.get("tool", ""))
