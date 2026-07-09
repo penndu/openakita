@@ -3012,10 +3012,28 @@ class Agent:
         from ..config import settings
         from ..scheduler import ScheduledTask, TriggerType
         from ..scheduler.consolidation_tracker import ConsolidationTracker
-        from ..scheduler.task import TaskType
+        from ..scheduler.task import TaskDeliveryPolicy, TaskSource, TaskType
 
         if not self.task_scheduler:
             return
+
+        def _ensure_system_task_contract(task: ScheduledTask, action: str) -> bool:
+            """Normalize built-in tasks to the system delivery contract."""
+
+            changed = False
+            if task.deletable:
+                task.deletable = False
+                changed = True
+            if getattr(task, "action", None) != action:
+                task.action = action
+                changed = True
+            if getattr(task, "task_source", None) != TaskSource.SYSTEM:
+                task.task_source = TaskSource.SYSTEM
+                changed = True
+            if getattr(task, "delivery_policy", None) != TaskDeliveryPolicy.FALLBACK_ALLOWED:
+                task.delivery_policy = TaskDeliveryPolicy.FALLBACK_ALLOWED
+                changed = True
+            return changed
 
         # 初始化整理时间追踪器
         tracker = ConsolidationTracker(settings.project_root / "data" / "scheduler")
@@ -3058,6 +3076,8 @@ class Agent:
                 prompt="执行记忆整理：整理对话历史，提取精华记忆，刷新 MEMORY.md",
                 description=desired_desc,
                 task_type=TaskType.TASK,
+                task_source=TaskSource.SYSTEM,
+                delivery_policy=TaskDeliveryPolicy.FALLBACK_ALLOWED,
                 enabled=True,
                 deletable=False,
             )
@@ -3066,12 +3086,9 @@ class Agent:
         else:
             changed = False
             if existing_memory_task:
-                if existing_memory_task.deletable:
-                    existing_memory_task.deletable = False
-                    changed = True
-                if not getattr(existing_memory_task, "action", None):
-                    existing_memory_task.action = "system:daily_memory"
-                    changed = True
+                changed = _ensure_system_task_contract(
+                    existing_memory_task, "system:daily_memory"
+                )
                 # 适应期 ↔ 正常期切换时，更新触发器
                 user_custom_trigger = bool(
                     (existing_memory_task.metadata or {}).get("user_custom_trigger")
@@ -3105,6 +3122,8 @@ class Agent:
                 prompt="执行系统自检：分析 ERROR 日志，尝试修复工具问题，生成报告",
                 description="分析 ERROR 日志、尝试修复工具问题、生成报告",
                 task_type=TaskType.TASK,
+                task_source=TaskSource.SYSTEM,
+                delivery_policy=TaskDeliveryPolicy.FALLBACK_ALLOWED,
                 enabled=True,
                 deletable=False,
             )
@@ -3113,19 +3132,20 @@ class Agent:
         else:
             existing_task = self.task_scheduler.get_task("system_daily_selfcheck")
             if existing_task:
-                changed = False
-                if existing_task.deletable:
-                    existing_task.deletable = False
-                    changed = True
-                if not getattr(existing_task, "action", None):
-                    existing_task.action = "system:daily_selfcheck"
-                    changed = True
+                changed = _ensure_system_task_contract(
+                    existing_task, "system:daily_selfcheck"
+                )
                 if changed:
                     await self.task_scheduler.save()
 
         # 任务 3: 活人感心跳（默认关闭；用户显式启用 proactive_enabled 后注册）
         try:
             heartbeat_task_id = "system_proactive_heartbeat"
+            existing_heartbeat = self.task_scheduler.get_task(heartbeat_task_id)
+            if existing_heartbeat and _ensure_system_task_contract(
+                existing_heartbeat, "system:proactive_heartbeat"
+            ):
+                await self.task_scheduler.save()
             if settings.proactive_enabled:
                 interval_min = max(120, int(settings.proactive_min_interval_minutes or 120))
                 if heartbeat_task_id not in existing_ids:
@@ -3138,6 +3158,8 @@ class Agent:
                         prompt="检查是否需要发送主动消息（问候/提醒/跟进）",
                         description="定时检查并发送主动消息",
                         task_type=TaskType.TASK,
+                        task_source=TaskSource.SYSTEM,
+                        delivery_policy=TaskDeliveryPolicy.FALLBACK_ALLOWED,
                         enabled=True,
                         deletable=False,
                         metadata={"notify_on_start": False, "notify_on_complete": False},
@@ -3148,7 +3170,6 @@ class Agent:
                         interval_min,
                     )
             else:
-                existing_heartbeat = self.task_scheduler.get_task(heartbeat_task_id)
                 if existing_heartbeat and existing_heartbeat.enabled:
                     await self.task_scheduler.disable_task(heartbeat_task_id)
                     logger.info("Disabled proactive_heartbeat task (feature disabled in settings)")
@@ -3158,6 +3179,11 @@ class Agent:
         # 任务 4: 记忆回顾（Memory Nudge）
         try:
             nudge_task_id = "system_memory_nudge"
+            existing_nudge = self.task_scheduler.get_task(nudge_task_id)
+            if existing_nudge and _ensure_system_task_contract(
+                existing_nudge, "system:memory_nudge_review"
+            ):
+                await self.task_scheduler.save()
             if settings.memory_nudge_enabled and settings.memory_nudge_interval > 0:
                 interval_min = max(5, settings.memory_nudge_interval * 3)
                 if nudge_task_id not in existing_ids:
@@ -3170,6 +3196,8 @@ class Agent:
                         prompt="审视最近对话，提取遗漏的重要记忆",
                         description=f"每 {interval_min} 分钟审视最近对话提取遗漏记忆",
                         task_type=TaskType.TASK,
+                        task_source=TaskSource.SYSTEM,
+                        delivery_policy=TaskDeliveryPolicy.FALLBACK_ALLOWED,
                         enabled=True,
                         deletable=False,
                         metadata={"notify_on_start": False, "notify_on_complete": False},
@@ -3177,7 +3205,6 @@ class Agent:
                     await self.task_scheduler.add_task(nudge_task)
                     logger.info(f"Registered system task: memory_nudge (every {interval_min} min)")
             else:
-                existing_nudge = self.task_scheduler.get_task(nudge_task_id)
                 if existing_nudge and existing_nudge.enabled:
                     await self.task_scheduler.disable_task(nudge_task_id)
                     logger.info("Disabled memory_nudge task (feature disabled in settings)")
@@ -3191,6 +3218,11 @@ class Agent:
             bs = read_backup_settings(settings.project_root)
             backup_enabled = bs.get("enabled", False) and bool(bs.get("backup_path"))
             backup_task_id = "system_workspace_backup"
+            existing_bt = self.task_scheduler.get_task(backup_task_id)
+            if existing_bt and _ensure_system_task_contract(
+                existing_bt, "system:workspace_backup"
+            ):
+                await self.task_scheduler.save()
 
             if backup_task_id not in existing_ids:
                 if backup_enabled:
@@ -3204,6 +3236,8 @@ class Agent:
                         prompt="执行工作区数据备份",
                         description="定时备份工作区配置和用户数据",
                         task_type=TaskType.TASK,
+                        task_source=TaskSource.SYSTEM,
+                        delivery_policy=TaskDeliveryPolicy.FALLBACK_ALLOWED,
                         enabled=True,
                         deletable=False,
                         metadata={"notify_on_start": False, "notify_on_complete": False},
@@ -3211,7 +3245,6 @@ class Agent:
                     await self.task_scheduler.add_task(backup_task)
                     logger.info(f"Registered system task: workspace_backup (cron={cron})")
             else:
-                existing_bt = self.task_scheduler.get_task(backup_task_id)
                 if existing_bt and existing_bt.enabled != backup_enabled:
                     if backup_enabled:
                         await self.task_scheduler.enable_task(backup_task_id)

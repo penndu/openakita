@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 from openakita.channels.base import ChannelDeliveryUnavailable
 from openakita.scheduler.executor import TaskExecutor
 from openakita.scheduler.scheduler import TaskScheduler
-from openakita.scheduler.task import ScheduledTask
+from openakita.scheduler.task import ScheduledTask, TaskDeliveryPolicy
 
 
 @dataclass
@@ -295,6 +296,7 @@ async def test_completion_notification_falls_back_to_known_im_target(tmp_path):
     executor = TaskExecutor(agent_factory=lambda: _SuccessfulAgent(), gateway=gateway)
     scheduler = await _make_scheduler(tmp_path, executor=executor.execute)
     task = _make_task(channel_id="qqbot:xiababy", chat_id="chat-1")
+    task.delivery_policy = TaskDeliveryPolicy.FALLBACK_ALLOWED
     task.metadata["notify_on_start"] = False
     task_id = await scheduler.add_task(task)
 
@@ -306,3 +308,48 @@ async def test_completion_notification_falls_back_to_known_im_target(tmp_path):
         ("qqbot:xiababy", "chat-1"),
         ("feishu:bot", "chat-2"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_owner_scoped_completion_notification_does_not_fallback_to_other_im_target(
+    tmp_path,
+):
+    gateway = _FallbackGateway(tmp_path)
+    executor = TaskExecutor(agent_factory=lambda: _SuccessfulAgent(), gateway=gateway)
+    scheduler = await _make_scheduler(tmp_path, executor=executor.execute)
+    task = _make_task(channel_id="qqbot:xiababy", chat_id="chat-1")
+    task.metadata["notify_on_start"] = False
+    task_id = await scheduler.add_task(task)
+
+    execution = await scheduler.trigger_now(task_id)
+
+    assert execution is not None
+    assert execution.status == "failed"
+    assert execution.error == "任务已完成，但结果通知发送失败，请检查 IM 通道连接状态。"
+    assert gateway.calls == [("qqbot:xiababy", "chat-1")]
+
+
+@pytest.mark.asyncio
+async def test_owner_scoped_reminder_without_target_uses_desktop_not_global_im(
+    tmp_path,
+    monkeypatch,
+):
+    gateway = _FallbackGateway(tmp_path)
+    executor = TaskExecutor(gateway=gateway)
+    task = ScheduledTask.create_reminder(
+        name="owner-only reminder",
+        description="owner-only reminder",
+        run_at=datetime.now() + timedelta(minutes=5),
+        message="stand up",
+    )
+
+    async def fake_desktop_fallback(_task, _message):
+        return True
+
+    monkeypatch.setattr(executor, "_try_desktop_notify_fallback", fake_desktop_fallback)
+
+    success, message = await executor.execute(task)
+
+    assert success is True
+    assert "桌面通知" in message
+    assert gateway.calls == []

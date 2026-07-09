@@ -5,7 +5,14 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from openakita.scheduler.executor import TaskExecutor
-from openakita.scheduler.task import ScheduledTask, TaskStatus, TaskType, TriggerType
+from openakita.scheduler.task import (
+    ScheduledTask,
+    TaskDeliveryPolicy,
+    TaskSource,
+    TaskStatus,
+    TaskType,
+    TriggerType,
+)
 from openakita.scheduler.triggers import CronTrigger, IntervalTrigger, OnceTrigger, Trigger
 
 
@@ -239,6 +246,100 @@ class TestTaskAgentProfiles:
 
         assert "已创建" in result
         assert captured["task"].agent_profile_id == "researcher"
+        assert captured["task"].delivery_policy == TaskDeliveryPolicy.OWNER_ONLY
+        assert captured["task"].channel_id is None
+        assert captured["task"].chat_id is None
+        assert captured["task"].metadata["origin"]["agent_profile_id"] == "researcher"
+        assert captured["task"].metadata["delivery_target_source"] == "none"
+
+    async def test_desktop_created_task_records_origin_without_im_target(self):
+        from openakita.tools.handlers.scheduled import ScheduledHandler
+
+        captured: dict[str, ScheduledTask] = {}
+
+        class FakeScheduler:
+            async def add_task(self, task):
+                captured["task"] = task
+                return task.id
+
+        agent = SimpleNamespace(
+            task_scheduler=FakeScheduler(),
+            _current_session=SimpleNamespace(
+                id="desktop-session",
+                channel="desktop",
+                chat_id="local-window",
+                user_id="desktop-user",
+                context=SimpleNamespace(agent_profile_id="desktop-profile"),
+            ),
+            _agent_profile_id="default",
+        )
+        handler = ScheduledHandler(agent)
+
+        result = await handler._schedule_task(
+            {
+                "name": "desktop-reminder",
+                "description": "desktop reminder",
+                "task_type": "reminder",
+                "trigger_type": "once",
+                "trigger_config": {"run_at": (datetime.now() + timedelta(minutes=5)).isoformat()},
+                "reminder_message": "stand up",
+            }
+        )
+
+        task = captured["task"]
+        assert "已创建" in result
+        assert task.channel_id is None
+        assert task.chat_id is None
+        assert task.user_id == "desktop-user"
+        assert task.agent_profile_id == "desktop-profile"
+        assert task.delivery_policy == TaskDeliveryPolicy.OWNER_ONLY
+        assert task.metadata["origin"]["channel"] == "desktop"
+        assert task.metadata["origin"]["chat_id"] == "local-window"
+        assert task.metadata["delivery_target_source"] == "none"
+
+    async def test_im_created_task_records_exact_owner_target(self):
+        from openakita.tools.handlers.scheduled import ScheduledHandler
+
+        captured: dict[str, ScheduledTask] = {}
+
+        class FakeScheduler:
+            async def add_task(self, task):
+                captured["task"] = task
+                return task.id
+
+        agent = SimpleNamespace(
+            task_scheduler=FakeScheduler(),
+            _current_session=SimpleNamespace(
+                id="im-session",
+                channel="feishu:bot-a",
+                chat_id="oc_owner",
+                user_id="im-user",
+                context=SimpleNamespace(agent_profile_id="assistant-a"),
+            ),
+            _agent_profile_id="default",
+        )
+        handler = ScheduledHandler(agent)
+
+        result = await handler._schedule_task(
+            {
+                "name": "im-reminder",
+                "description": "im reminder",
+                "task_type": "reminder",
+                "trigger_type": "once",
+                "trigger_config": {"run_at": (datetime.now() + timedelta(minutes=5)).isoformat()},
+                "reminder_message": "ping",
+            }
+        )
+
+        task = captured["task"]
+        assert "已创建" in result
+        assert task.channel_id == "feishu:bot-a"
+        assert task.chat_id == "oc_owner"
+        assert task.user_id == "im-user"
+        assert task.agent_profile_id == "assistant-a"
+        assert task.delivery_policy == TaskDeliveryPolicy.OWNER_ONLY
+        assert task.metadata["origin"]["channel"] == "feishu:bot-a"
+        assert task.metadata["delivery_target_source"] == "current_im_session"
 
 
 class TestSystemTaskRegistration:
@@ -298,6 +399,9 @@ class TestSystemTaskRegistration:
         assert scheduler.updates == []
         assert task.trigger_type == TriggerType.INTERVAL
         assert task.trigger_config == {"interval_minutes": 720}
+        assert task.task_source == TaskSource.SYSTEM
+        assert task.delivery_policy == TaskDeliveryPolicy.FALLBACK_ALLOWED
+        assert scheduler.saved is True
 
 
 class TestTaskSerialization:
@@ -308,12 +412,50 @@ class TestTaskSerialization:
             trigger_type=TriggerType.INTERVAL,
             trigger_config={"interval_minutes": 30},
             prompt="Do it",
+            delivery_policy=TaskDeliveryPolicy.FALLBACK_ALLOWED,
         )
         d = task.to_dict()
         assert d["name"] == "serialize-test"
+        assert d["delivery_policy"] == "fallback_allowed"
         restored = ScheduledTask.from_dict(d)
         assert restored.name == task.name
         assert restored.prompt == task.prompt
+        assert restored.delivery_policy == TaskDeliveryPolicy.FALLBACK_ALLOWED
+
+    def test_legacy_user_task_without_delivery_policy_loads_owner_only(self):
+        task = ScheduledTask.create(
+            name="legacy-user",
+            description="legacy user task",
+            trigger_type=TriggerType.ONCE,
+            trigger_config={"run_at": (datetime.now() + timedelta(minutes=5)).isoformat()},
+            prompt="",
+            task_source=TaskSource.CHAT,
+        )
+        data = task.to_dict()
+        data.pop("delivery_policy")
+
+        restored = ScheduledTask.from_dict(data)
+
+        assert restored.delivery_policy == TaskDeliveryPolicy.OWNER_ONLY
+        assert restored.allows_global_im_fallback is False
+
+    def test_legacy_system_task_without_delivery_policy_loads_fallback_allowed(self):
+        task = ScheduledTask.create(
+            name="legacy-system",
+            description="legacy system task",
+            trigger_type=TriggerType.CRON,
+            trigger_config={"cron": "0 3 * * *"},
+            prompt="",
+            action="system:daily_memory",
+            task_source=TaskSource.SYSTEM,
+        )
+        data = task.to_dict()
+        data.pop("delivery_policy")
+
+        restored = ScheduledTask.from_dict(data)
+
+        assert restored.delivery_policy == TaskDeliveryPolicy.FALLBACK_ALLOWED
+        assert restored.allows_global_im_fallback is True
 
 
 class TestTriggers:

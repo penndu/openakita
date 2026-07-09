@@ -182,11 +182,17 @@ def _sync_backup_scheduler_task(settings: dict) -> None:
     enabled = settings.get("enabled", False) and bool(settings.get("backup_path"))
 
     if existing:
+        from openakita.scheduler.task import TaskDeliveryPolicy, TaskSource
+
         updates: dict = {}
         cron = settings.get("cron", "0 2 * * *")
         if existing.trigger_config.get("cron") != cron:
             updates["trigger_config"] = {"cron": cron}
             updates["trigger_type"] = _get_cron_trigger_type()
+        if getattr(existing, "task_source", None) != TaskSource.SYSTEM:
+            updates["task_source"] = TaskSource.SYSTEM
+        if getattr(existing, "delivery_policy", None) != TaskDeliveryPolicy.FALLBACK_ALLOWED:
+            updates["delivery_policy"] = TaskDeliveryPolicy.FALLBACK_ALLOWED
 
         async def _apply():
             if updates:
@@ -210,7 +216,13 @@ def _sync_backup_scheduler_task(settings: dict) -> None:
 
 def _register_backup_task(scheduler: object, settings: dict) -> None:
     """Register the workspace backup system task."""
-    from openakita.scheduler.task import ScheduledTask, TaskType, TriggerType
+    from openakita.scheduler.task import (
+        ScheduledTask,
+        TaskDeliveryPolicy,
+        TaskSource,
+        TaskType,
+        TriggerType,
+    )
 
     cron = settings.get("cron", "0 2 * * *")
     task = ScheduledTask(
@@ -222,6 +234,8 @@ def _register_backup_task(scheduler: object, settings: dict) -> None:
         prompt="执行工作区数据备份",
         description="定时备份工作区配置和用户数据",
         task_type=TaskType.TASK,
+        task_source=TaskSource.SYSTEM,
+        delivery_policy=TaskDeliveryPolicy.FALLBACK_ALLOWED,
         enabled=True,
         deletable=False,
     )

@@ -18,6 +18,7 @@ from typing import Any
 
 from ..channels.base import ChannelDeliveryUnavailable
 from ..memory.json_utils import coerce_text
+from .delivery import allows_global_im_fallback, is_im_delivery_channel
 from .task import ScheduledTask
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,18 @@ class TaskExecutor:
             if normalized in {"0", "false", "no", "off"}:
                 return False
         return bool(value)
+
+    @staticmethod
+    def _is_im_delivery_channel(channel: str | None) -> bool:
+        """Return whether a channel name is an externally deliverable IM channel."""
+
+        return is_im_delivery_channel(channel)
+
+    @staticmethod
+    def _allows_global_im_fallback(task: ScheduledTask) -> bool:
+        """Only explicitly opted-in tasks may search unrelated IM sessions."""
+
+        return allows_global_im_fallback(task)
 
     def _escape_telegram_chars(self, text: str) -> str:
         """
@@ -179,8 +192,9 @@ class TaskExecutor:
 
             if task.channel_id and task.chat_id and self.gateway:
                 message_sent = await self._deliver_reminder_message(task, message)
-            elif self.gateway:
-                # 有网关但任务未配置通道，尝试所有已知通道
+            elif self.gateway and self._allows_global_im_fallback(task):
+                # 只有系统/管理类任务可以扫描全局 IM 目标；用户创建的提醒
+                # 没有显式目标时只能走桌面兜底，避免跨会话串台。
                 message_sent = await self._deliver_via_fallback_channels(task, message)
             # else: 无网关，无法发送
 
@@ -255,12 +269,25 @@ class TaskExecutor:
 
         logger.warning(
             f"TaskExecutor: reminder {task.id} failed on primary channel "
-            f"{channel_id}/{chat_id} (inactive), trying fallback channels"
+            f"{channel_id}/{chat_id} (inactive)"
         )
+        if not self._allows_global_im_fallback(task):
+            logger.info(
+                "TaskExecutor: reminder %s is owner-scoped; skipping global IM fallback",
+                task.id,
+            )
+            return False
         return await self._deliver_via_fallback_channels(task, message)
 
     async def _deliver_via_fallback_channels(self, task: ScheduledTask, message: str) -> bool:
         """尝试通过所有已知的备用 IM 通道投递提醒"""
+        if not self._allows_global_im_fallback(task):
+            logger.info(
+                "TaskExecutor: task %s is not allowed to use global IM fallback",
+                task.id,
+            )
+            return False
+
         targets = self._find_all_im_targets()
         primary = (task.channel_id, task.chat_id)
 
@@ -763,19 +790,25 @@ class TaskExecutor:
             except ChannelDeliveryUnavailable as exc:
                 last_unavailable = exc
 
-        for channel, chat_id in self._find_all_im_targets():
-            if (channel, chat_id) == primary:
-                continue
-            try:
-                if await self._send_gateway_text(channel=channel, chat_id=chat_id, text=text):
-                    logger.info(
-                        f"TaskExecutor: notification for {task.id} delivered via fallback "
-                        f"{channel}/{chat_id}"
-                    )
-                    return True
-            except ChannelDeliveryUnavailable as exc:
-                last_unavailable = exc
-                continue
+        if self._allows_global_im_fallback(task):
+            for channel, chat_id in self._find_all_im_targets():
+                if (channel, chat_id) == primary:
+                    continue
+                try:
+                    if await self._send_gateway_text(channel=channel, chat_id=chat_id, text=text):
+                        logger.info(
+                            f"TaskExecutor: notification for {task.id} delivered via fallback "
+                            f"{channel}/{chat_id}"
+                        )
+                        return True
+                except ChannelDeliveryUnavailable as exc:
+                    last_unavailable = exc
+                    continue
+        else:
+            logger.info(
+                "TaskExecutor: task %s is owner-scoped; skipping notification fallback",
+                task.id,
+            )
 
         if last_unavailable is not None:
             raise last_unavailable
@@ -1581,6 +1614,8 @@ class TaskExecutor:
             for session in sessions:
                 if getattr(session, "state", None) and str(session.state.value) == "closed":
                     continue
+                if not self._is_im_delivery_channel(getattr(session, "channel", "")):
+                    continue
                 pair = (session.channel, session.chat_id)
                 if pair not in seen:
                     seen.add(pair)
@@ -1599,7 +1634,12 @@ class TaskExecutor:
                     channel = s.get("channel")
                     chat_id = s.get("chat_id")
                     state = s.get("state", "")
-                    if not channel or not chat_id or state == "closed":
+                    if (
+                        not channel
+                        or not chat_id
+                        or state == "closed"
+                        or not self._is_im_delivery_channel(channel)
+                    ):
                         continue
                     pair = (channel, chat_id)
                     if pair not in seen:

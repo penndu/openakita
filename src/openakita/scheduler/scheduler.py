@@ -20,6 +20,7 @@ from typing import Any
 
 from ..utils.atomic_io import atomic_json_write, safe_write
 from ._naming import quarantine_invalid_task_name, validate_task_name
+from .delivery import coerce_delivery_policy
 from .locks import (
     HEARTBEAT_INTERVAL_SECONDS,
     ExecLock,
@@ -33,7 +34,15 @@ from .locks import (
     set_current_scheduled_task_id,
     unlink_orphan,
 )
-from .task import ScheduledTask, TaskDurability, TaskExecution, TaskStatus, TriggerType
+from .task import (
+    ScheduledTask,
+    TaskDurability,
+    TaskExecution,
+    TaskSource,
+    TaskStatus,
+    TaskType,
+    TriggerType,
+)
 from .triggers import Trigger
 
 logger = logging.getLogger(__name__)
@@ -517,10 +526,32 @@ class TaskScheduler:
         "chat_id",
         "user_id",
         "agent_profile_id",
+        "task_source",
+        "delivery_policy",
         "metadata",
         "script_path",
         "action",
     }
+
+    @staticmethod
+    def _normalize_update_value(key: str, value: Any) -> Any:
+        """Coerce enum fields accepted by update_task into domain values."""
+
+        if key == "delivery_policy":
+            return coerce_delivery_policy(value)
+        if key == "task_source" and not isinstance(value, TaskSource):
+            try:
+                return TaskSource(str(value))
+            except ValueError:
+                return TaskSource.MANUAL
+        if key == "task_type" and not isinstance(value, TaskType):
+            try:
+                return TaskType(str(value))
+            except ValueError:
+                return TaskType.TASK
+        if key == "trigger_type" and not isinstance(value, TriggerType):
+            return TriggerType(str(value))
+        return value
 
     async def update_task(self, task_id: str, updates: dict) -> bool:
         """更新任务（仅允许白名单字段）"""
@@ -536,7 +567,7 @@ class TaskScheduler:
 
             for key, value in updates.items():
                 if key in self._UPDATABLE_FIELDS and hasattr(task, key):
-                    setattr(task, key, value)
+                    setattr(task, key, self._normalize_update_value(key, value))
 
             task.updated_at = datetime.now()
 

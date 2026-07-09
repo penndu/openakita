@@ -11,13 +11,14 @@
 from .consolidation_tracker import ConsolidationTracker
 from .executor import TaskExecutor
 from .scheduler import TaskScheduler
-from .task import ScheduledTask, TaskStatus, TriggerType
+from .task import ScheduledTask, TaskDeliveryPolicy, TaskStatus, TriggerType
 from .triggers import CronTrigger, IntervalTrigger, OnceTrigger, Trigger
 
 __all__ = [
     "ScheduledTask",
     "TriggerType",
     "TaskStatus",
+    "TaskDeliveryPolicy",
     "Trigger",
     "OnceTrigger",
     "IntervalTrigger",

@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ...core.policy_v2 import ApprovalClass
+from ...scheduler.delivery import is_im_delivery_channel
 
 if TYPE_CHECKING:
     from ...agent.core import Agent
@@ -74,6 +75,23 @@ class ScheduledHandler:
                 return profile_id
         return getattr(self.agent, "_agent_profile_id", "default") or "default"
 
+    @staticmethod
+    def _task_origin_metadata(session: Any | None, agent_profile_id: str) -> dict[str, str]:
+        """Persist where a chat-created scheduled task came from."""
+
+        if session is None:
+            return {"agent_profile_id": agent_profile_id}
+
+        origin = {
+            "session_id": str(getattr(session, "id", "") or ""),
+            "channel": str(getattr(session, "channel", "") or ""),
+            "chat_id": str(getattr(session, "chat_id", "") or ""),
+            "user_id": str(getattr(session, "user_id", "") or ""),
+            "bot_instance_id": str(getattr(session, "bot_instance_id", "") or ""),
+            "agent_profile_id": agent_profile_id,
+        }
+        return {key: value for key, value in origin.items() if value}
+
     async def handle(self, tool_name: str, params: dict[str, Any]) -> str:
         """处理工具调用"""
         scheduler = self._get_scheduler()
@@ -100,7 +118,7 @@ class ScheduledHandler:
         """创建定时任务"""
         from ...core.im_context import get_im_session
         from ...scheduler import ScheduledTask, TriggerType
-        from ...scheduler.task import TaskSource, TaskType
+        from ...scheduler.task import TaskDeliveryPolicy, TaskSource, TaskType
 
         # 必填字段校验
         for field in ("name", "description", "trigger_type", "trigger_config"):
@@ -145,13 +163,18 @@ class ScheduledHandler:
             except ValueError:
                 pass
 
-        # 获取当前 IM 会话信息
+        # 获取当前会话。IM context 只在 IM/带 gateway 的执行路径中可靠；
+        # 桌面/API 路径用 agent._current_session 作为 owner 记录。
         channel_id = chat_id = user_id = None
-        session = get_im_session()
+        session = get_im_session() or getattr(self.agent, "_current_session", None)
+        current_agent_profile_id = self._current_agent_profile_id()
+        delivery_target_source = "none"
         if session:
+            user_id = getattr(session, "user_id", None)
+        if session and is_im_delivery_channel(getattr(session, "channel", None)):
             channel_id = session.channel
             chat_id = session.chat_id
-            user_id = session.user_id
+            delivery_target_source = "current_im_session"
 
         # 如果用户指定了 target_channel，尝试解析到已配置的通道
         target_channel = params.get("target_channel")
@@ -159,6 +182,7 @@ class ScheduledHandler:
             resolved = self._resolve_target_channel(target_channel)
             if resolved:
                 channel_id, chat_id = resolved
+                delivery_target_source = "target_channel"
                 logger.info(f"Using target_channel={target_channel}: {channel_id}/{chat_id}")
             else:
                 # 通道未配置或无可用 session，给出明确提示
@@ -179,11 +203,14 @@ class ScheduledHandler:
             user_id=user_id,
             channel_id=channel_id,
             chat_id=chat_id,
-            agent_profile_id=self._current_agent_profile_id(),
+            agent_profile_id=current_agent_profile_id,
             task_source=TaskSource.CHAT,
+            delivery_policy=TaskDeliveryPolicy.OWNER_ONLY,
         )
         task.silent = bool(params.get("silent", False))
         task.no_schedule_tools = bool(params.get("no_schedule_tools", False))
+        task.metadata["origin"] = self._task_origin_metadata(session, current_agent_profile_id)
+        task.metadata["delivery_target_source"] = delivery_target_source
         if params.get("skill_ids"):
             task.skill_ids = list(params["skill_ids"])
         task.metadata["notify_on_start"] = params.get("notify_on_start", True)
@@ -360,6 +387,9 @@ class ScheduledHandler:
         if not gateway:
             logger.warning("No gateway available to resolve target_channel")
             return None
+        if not is_im_delivery_channel(target_channel):
+            logger.warning("Channel '%s' is not an IM delivery channel", target_channel)
+            return None
 
         # 1. 检查适配器是否存在
         adapters = getattr(gateway, "_adapters", {})
@@ -441,6 +471,8 @@ class ScheduledHandler:
 
         running = []
         for name, adapter in adapters.items():
+            if not is_im_delivery_channel(name):
+                continue
             status = "✓" if getattr(adapter, "is_running", False) else "✗"
             running.append(f"{name}({status})")
 

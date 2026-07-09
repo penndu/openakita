@@ -101,6 +101,19 @@ class TaskDurability(Enum):
     SESSION = "session"
 
 
+class TaskDeliveryPolicy(Enum):
+    """How scheduler notifications may choose a delivery target.
+
+    OWNER_ONLY is the default for user-created tasks: deliver only to the
+    task's recorded channel/chat, or fall back to desktop notification if no
+    IM target exists. FALLBACK_ALLOWED is reserved for system/admin flows that
+    are explicitly allowed to scan known IM channels.
+    """
+
+    OWNER_ONLY = "owner_only"
+    FALLBACK_ALLOWED = "fallback_allowed"
+
+
 class TaskStatus(Enum):
     """任务状态"""
 
@@ -234,6 +247,7 @@ class ScheduledTask:
     # 领域边界
     task_source: TaskSource = TaskSource.MANUAL
     durability: TaskDurability = TaskDurability.PERSISTENT
+    delivery_policy: TaskDeliveryPolicy = TaskDeliveryPolicy.OWNER_ONLY
 
     # 状态
     enabled: bool = True
@@ -599,6 +613,23 @@ class ScheduledTask:
         """是否是简单提醒任务"""
         return self.task_type == TaskType.REMINDER
 
+    @property
+    def allows_global_im_fallback(self) -> bool:
+        """Whether this task may search unrelated IM sessions for delivery."""
+        if isinstance(self.delivery_policy, TaskDeliveryPolicy):
+            return self.delivery_policy == TaskDeliveryPolicy.FALLBACK_ALLOWED
+        return str(self.delivery_policy) == TaskDeliveryPolicy.FALLBACK_ALLOWED.value
+
+    @property
+    def delivery_policy_value(self) -> str:
+        """Serialized delivery policy value, tolerant of legacy string assignments."""
+        if isinstance(self.delivery_policy, TaskDeliveryPolicy):
+            return self.delivery_policy.value
+        try:
+            return TaskDeliveryPolicy(str(self.delivery_policy)).value
+        except ValueError:
+            return TaskDeliveryPolicy.OWNER_ONLY.value
+
     def to_dict(self) -> dict:
         """序列化"""
         return {
@@ -618,6 +649,7 @@ class ScheduledTask:
             "agent_profile_id": self.agent_profile_id,
             "task_source": self.task_source.value,
             "durability": self.durability.value,
+            "delivery_policy": self.delivery_policy_value,
             "enabled": self.enabled,
             "status": self.status.value,
             "deletable": self.deletable,
@@ -705,6 +737,19 @@ class ScheduledTask:
             durability = TaskDurability.PERSISTENT
 
         try:
+            delivery_policy = TaskDeliveryPolicy(data.get("delivery_policy", ""))
+        except ValueError:
+            # Back-compat: old persisted tasks did not record the delivery
+            # policy. Only system-owned tasks keep broad IM fallback behavior;
+            # every user/chat/manual task becomes owner-scoped on load.
+            action = data.get("action") or ""
+            source_raw = data.get("task_source", "manual")
+            if str(action).startswith("system:") or source_raw == TaskSource.SYSTEM.value:
+                delivery_policy = TaskDeliveryPolicy.FALLBACK_ALLOWED
+            else:
+                delivery_policy = TaskDeliveryPolicy.OWNER_ONLY
+
+        try:
             status = TaskStatus(data.get("status", "pending"))
         except ValueError:
             status = TaskStatus.PENDING
@@ -734,6 +779,7 @@ class ScheduledTask:
             agent_profile_id=data.get("agent_profile_id", "default"),
             task_source=task_source,
             durability=durability,
+            delivery_policy=delivery_policy,
             enabled=_safe_bool(data.get("enabled", True), True),
             status=status,
             deletable=_safe_bool(data.get("deletable", True), True),

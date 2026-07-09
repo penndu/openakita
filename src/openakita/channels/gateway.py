@@ -1151,7 +1151,13 @@ class MessageGateway:
             try:
                 from ..config import settings
                 from ..scheduler.executor import TaskExecutor
-                from ..scheduler.task import ScheduledTask, TaskType, TriggerType
+                from ..scheduler.task import (
+                    ScheduledTask,
+                    TaskDeliveryPolicy,
+                    TaskSource,
+                    TaskType,
+                    TriggerType,
+                )
 
                 executor = TaskExecutor(
                     gateway=self,
@@ -1169,6 +1175,8 @@ class MessageGateway:
                     channel_id=message.channel,
                     chat_id=message.chat_id,
                     user_id=message.user_id,
+                    task_source=TaskSource.CHAT,
+                    delivery_policy=TaskDeliveryPolicy.OWNER_ONLY,
                 )
 
                 success, result = await executor.execute(task)

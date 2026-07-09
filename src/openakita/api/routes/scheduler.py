@@ -19,6 +19,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from openakita.scheduler.delivery import is_im_delivery_channel
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -146,7 +148,13 @@ async def create_task(request: Request, body: TaskCreateRequest):
     if scheduler is None:
         return JSONResponse(status_code=503, content={"error": "Agent not initialized"})
 
-    from openakita.scheduler.task import ScheduledTask, TaskSource, TaskType, TriggerType
+    from openakita.scheduler.task import (
+        ScheduledTask,
+        TaskDeliveryPolicy,
+        TaskSource,
+        TaskType,
+        TriggerType,
+    )
 
     _ok, _err = _validate_task_name(body.name)
     if not _ok:
@@ -171,6 +179,19 @@ async def create_task(request: Request, body: TaskCreateRequest):
     except ValueError as e:
         return JSONResponse(status_code=422, content={"error": str(e)})
 
+    channel_id = (body.channel_id or "").strip() or None
+    chat_id = (body.chat_id or "").strip() or None
+    if bool(channel_id) != bool(chat_id):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "channel_id and chat_id must be provided together"},
+        )
+    if channel_id and not is_im_delivery_channel(channel_id):
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Invalid scheduler delivery channel: {channel_id}"},
+        )
+
     description = body.reminder_message or body.prompt or body.name
     task = ScheduledTask.create(
         name=body.name,
@@ -182,10 +203,16 @@ async def create_task(request: Request, body: TaskCreateRequest):
         prompt=body.prompt,
     )
     task.task_source = TaskSource.MANUAL
-    task.channel_id = body.channel_id or None
-    task.chat_id = body.chat_id or None
+    task.delivery_policy = TaskDeliveryPolicy.OWNER_ONLY
+    task.channel_id = channel_id
+    task.chat_id = chat_id
     task.agent_profile_id = agent_profile_id
     task.enabled = body.enabled
+    task.metadata["origin"] = {
+        "source": "scheduler_api",
+        "agent_profile_id": agent_profile_id,
+    }
+    task.metadata["delivery_target_source"] = "scheduler_api" if channel_id else "none"
 
     try:
         task_id = await scheduler.add_task(task)
@@ -419,8 +446,6 @@ async def list_channels(request: Request):
     seen: dict[tuple[str, str], int] = {}
     session_manager = getattr(gateway, "session_manager", None)
 
-    skip_channels = {"desktop"}
-
     def _add_or_merge(entry: dict) -> None:
         """Add a channel entry, merging chat_name into existing if needed."""
         pair = (entry["channel_id"], entry["chat_id"])
@@ -447,7 +472,7 @@ async def list_channels(request: Request):
                     continue
                 ch = getattr(s, "channel", None)
                 cid = getattr(s, "chat_id", None)
-                if not ch or not cid or ch in skip_channels:
+                if not ch or not cid or not is_im_delivery_channel(ch):
                     continue
                 _add_or_merge(
                     {
@@ -474,7 +499,7 @@ async def list_channels(request: Request):
                         ch = s.get("channel")
                         cid = s.get("chat_id")
                         state = s.get("state", "")
-                        if not ch or not cid or state == "closed" or ch in skip_channels:
+                        if not ch or not cid or state == "closed" or not is_im_delivery_channel(ch):
                             continue
                         _add_or_merge(
                             {
@@ -494,7 +519,7 @@ async def list_channels(request: Request):
         registry = getattr(session_manager, "_channel_registry", None)
         if registry and isinstance(registry, dict):
             for ch, entry in registry.items():
-                if ch in skip_channels:
+                if not is_im_delivery_channel(ch):
                     continue
                 # 兼容新格式（list of dicts）和旧格式（单 dict）
                 items = (
@@ -525,7 +550,7 @@ async def list_channels(request: Request):
     adapters = getattr(gateway, "_adapters", {})
     started = getattr(gateway, "_started_adapters", set())
     for adapter_name, adapter in adapters.items():
-        if adapter_name in skip_channels:
+        if not is_im_delivery_channel(adapter_name):
             continue
         if not getattr(adapter, "is_running", False) and adapter_name not in started:
             continue
