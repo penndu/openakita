@@ -3479,7 +3479,7 @@ export function OrgEditorView({
             right: 0,
             top: 0,
             bottom: 0,
-            zIndex: isMobile ? 50 : "auto",
+            zIndex: 50,
             boxShadow: isMobile ? "-4px 0 12px rgba(0,0,0,0.15)" : "none",
             flexShrink: 0,
             animation: isMobile ? undefined : "org-panel-in 0.3s cubic-bezier(0.4,0,0.2,1) 0.1s both",
@@ -4730,7 +4730,7 @@ export function OrgEditorView({
             scrollbarGutter: "stable",
             padding: 16,
             position: isMobile ? "absolute" : "relative",
-            zIndex: isMobile ? 50 : "auto",
+            zIndex: 50,
             right: 0, top: 0, bottom: 0,
             boxShadow: isMobile ? "-4px 0 12px rgba(0,0,0,0.15)" : "none",
             borderLeft: isMobile ? "none" : undefined,
@@ -4850,7 +4850,7 @@ export function OrgEditorView({
             onClick={() => setShowBlackboardPanel(false)}
             style={{ position: "absolute", inset: 0, zIndex: 35, cursor: "default" }}
           />
-          <div style={{ width: 520, flexShrink: 0, borderLeft: "1px solid var(--line)", display: "flex", flexDirection: "column", background: "var(--bg-app)", animation: "org-panel-in 0.3s cubic-bezier(0.4,0,0.2,1) 0s both", zIndex: 36 }}>
+          <div style={{ width: 520, flexShrink: 0, borderLeft: "1px solid var(--line)", display: "flex", flexDirection: "column", background: "var(--bg-app)", animation: "org-panel-in 0.3s cubic-bezier(0.4,0,0.2,1) 0s both", position: "relative", zIndex: 50 }}>
             <OrgBlackboardPanel
               ref={bbPanelRef}
               orgId={currentOrg.id}
@@ -4882,6 +4882,8 @@ export function OrgEditorView({
             overflowY: "auto",
             scrollbarGutter: "stable",
             background: "var(--bg-app)",
+            position: "relative",
+            zIndex: 50,
             flexShrink: 0,
             padding: 12,
             animation: "org-panel-in 0.3s cubic-bezier(0.4,0,0.2,1) 0.05s both",
