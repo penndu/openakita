@@ -210,17 +210,21 @@ class SystemHandler:
     )
 
     async def _generate_image(self, params: dict) -> str:
-        """
-        文生图：调用 Qwen-Image 同步接口，下载图片并落盘。
-
-        API 参考（通义百炼）：https://help.aliyun.com/zh/model-studio/qwen-image-api
-        """
+        """Generate an image through configured providers and save it locally."""
         import json
+        import re
         import time
 
         import httpx
 
         from ...config import settings
+        from ...llm.image_generation import (
+            ImageGenerationError,
+            load_image_endpoints,
+            request_image,
+            select_image_endpoints,
+        )
+        from ...llm.types import EndpointConfig
 
         _hint = self._GENERATE_IMAGE_FAIL_HINT
 
@@ -228,48 +232,42 @@ class SystemHandler:
         if not prompt:
             return "❌ prompt 不能为空"
 
-        api_key = (getattr(settings, "dashscope_api_key", "") or "").strip()
-        if not api_key:
-            return f"❌ 未配置 DASHSCOPE_API_KEY，无法生成图片{_hint}"
-
-        model = (params.get("model") or "qwen-image-max").strip()
+        requested_endpoint = (params.get("endpoint") or "").strip()
+        model = (params.get("model") or "").strip()
         negative_prompt = (params.get("negative_prompt") or "").strip()
-        size = (params.get("size") or "1664*928").strip()
+        size = (params.get("size") or "").strip()
+        quality = (params.get("quality") or "").strip()
+        style = (params.get("style") or "").strip()
         prompt_extend = params.get("prompt_extend", True)
         watermark = params.get("watermark", False)
         seed = params.get("seed")
         output_path = (params.get("output_path") or "").strip()
 
-        # 允许通过配置覆盖（便于跨地域/私有网络）
-        api_url = (getattr(settings, "dashscope_image_api_url", "") or "").strip()
-        if not api_url:
-            api_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-
-        body: dict[str, Any] = {
-            "model": model,
-            "input": {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [{"text": prompt}],
-                    }
+        endpoints = load_image_endpoints(settings.project_root)
+        if not endpoints:
+            legacy_key = (getattr(settings, "dashscope_api_key", "") or "").strip()
+            if legacy_key:
+                endpoints = [
+                    EndpointConfig(
+                        name="dashscope-legacy",
+                        provider="dashscope",
+                        api_type="dashscope",
+                        base_url=(getattr(settings, "dashscope_image_api_url", "") or "").strip(),
+                        api_key=legacy_key,
+                        model="qwen-image-max",
+                        priority=1,
+                        timeout=180,
+                        capabilities=["image_generation"],
+                        extra_params={"default_size": "1664*928"},
+                    )
                 ]
-            },
-            "parameters": {
-                "prompt_extend": bool(prompt_extend),
-                "watermark": bool(watermark),
-                "size": size,
-            },
-        }
-        if negative_prompt:
-            body["parameters"]["negative_prompt"] = negative_prompt
-        if seed is not None:
-            body["parameters"]["seed"] = int(seed)
+            else:
+                return f"❌ 未配置图片生成端点，请在配置中心添加生图端点{_hint}"
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
+        try:
+            candidates = select_image_endpoints(endpoints, requested_endpoint)
+        except ImageGenerationError as exc:
+            return f"❌ {exc}{_hint}"
 
         from ...channels.retry import async_with_retry
         from ...llm.providers.proxy_utils import extract_connection_error, get_httpx_client_kwargs
@@ -296,88 +294,74 @@ class SystemHandler:
                 resp.raise_for_status()
                 return resp.content
 
-        # 1) 生成图片（返回临时 URL）
         t0 = time.time()
-        try:
-            async with httpx.AsyncClient(
-                **get_httpx_client_kwargs(timeout=180), follow_redirects=True
-            ) as client:
-                resp = await client.post(api_url, headers=headers, json=body)
-                if resp.status_code >= 400:
-                    return f"❌ 图片生成失败: HTTP {resp.status_code}\n{(resp.text or '')[:800]}{_hint}"
+        failures: list[str] = []
+        async with httpx.AsyncClient(
+            **get_httpx_client_kwargs(timeout=180), follow_redirects=True
+        ) as client:
+            for endpoint in candidates:
                 try:
-                    data = resp.json()
-                except Exception as e:
-                    preview = (resp.text or "")[:800]
-                    return f"❌ 图片生成返回非 JSON（{type(e).__name__}: {e}）\n{preview}{_hint}"
-
-                # 兼容响应结构：output.choices[0].message.content[0].image
-                image_url = None
-                try:
-                    image_url = (
-                        data.get("output", {})
-                        .get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", [{}])[0]
-                        .get("image")
+                    result = await request_image(
+                        client,
+                        endpoint,
+                        prompt=prompt,
+                        model=model,
+                        negative_prompt=negative_prompt,
+                        size=size,
+                        quality=quality,
+                        style=style,
+                        seed=seed,
+                        prompt_extend=bool(prompt_extend),
+                        watermark=bool(watermark),
                     )
-                except Exception:
-                    image_url = None
+                    if result.image_bytes is not None:
+                        img_bytes = result.image_bytes
+                    elif result.image_url:
+                        img_bytes = await async_with_retry(
+                            _download_image,
+                            result.image_url,
+                            max_retries=3,
+                            base_delay=2.0,
+                            operation_name="download_generated_image",
+                        )
+                    else:
+                        raise ImageGenerationError("provider returned no image payload")
 
-                request_id = data.get("request_id") or data.get("requestId")
+                    if output_path:
+                        out_path = Path(output_path)
+                    else:
+                        out_dir = Path("data") / "generated_images"
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        suffix = result.request_id or str(int(time.time()))
+                        safe_model = re.sub(r"[^A-Za-z0-9._-]+", "_", result.model)[:80]
+                        out_path = out_dir / f"{safe_model}_{suffix}.png"
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    out_path.write_bytes(img_bytes)
+                except Exception as exc:  # noqa: BLE001 - each provider participates in fallback
+                    detail = extract_connection_error(exc) if isinstance(exc, httpx.HTTPError) else str(exc)
+                    failures.append(f"{endpoint.name}: {detail}")
+                    logger.warning("generate_image endpoint failed: %s", failures[-1])
+                    continue
 
-                if not image_url:
-                    code = data.get("code")
-                    msg = data.get("message")
-                    return f"❌ 图片生成返回异常：未找到 image 字段（code={code}, message={msg}）{_hint}"
-
-            # 2) 下载并落盘（独立客户端，每次重试全新连接）
-            if output_path:
-                out_path = Path(output_path)
-            else:
-                out_dir = Path("data") / "generated_images"
-                out_dir.mkdir(parents=True, exist_ok=True)
-                suffix = request_id or str(int(time.time()))
-                out_path = out_dir / f"{model}_{suffix}.png"
-
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-
-            try:
-                img_bytes = await async_with_retry(
-                    _download_image,
-                    image_url,
-                    max_retries=3,
-                    base_delay=2.0,
-                    operation_name="download_generated_image",
+                elapsed_ms = int((time.time() - t0) * 1000)
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "endpoint": result.endpoint_name,
+                        "model": result.model,
+                        "image_url": result.image_url,
+                        "saved_to": str(out_path),
+                        "request_id": result.request_id,
+                        "elapsed_ms": elapsed_ms,
+                        "hint": "如需把图片真正交付给用户，请继续调用 deliver_artifacts(artifacts=[{type:'image', path:saved_to}])。仅调用一次，不要只在文字里说图片已发送。",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
                 )
-                out_path.write_bytes(img_bytes)
-            except Exception as e:
-                detail = extract_connection_error(e)
-                from openakita.utils.url_safety import safe_urlparse
 
-                host = safe_urlparse(image_url).hostname or image_url[:60]
-                return f"❌ 图片下载失败（网络错误，目标: {host}）: {detail}{_hint}"
-
-        except httpx.HTTPError as e:
-            detail = extract_connection_error(e)
-            return f"❌ 图片生成请求失败（网络错误）: {detail}{_hint}"
-        except Exception as e:
-            return f"❌ 图片生成失败（异常）：{type(e).__name__}: {e}{_hint}"
-
-        elapsed_ms = int((time.time() - t0) * 1000)
-        return json.dumps(
-            {
-                "ok": True,
-                "model": model,
-                "image_url": image_url,
-                "saved_to": str(out_path),
-                "request_id": request_id,
-                "elapsed_ms": elapsed_ms,
-                "hint": "如需把图片真正交付给用户，请继续调用 deliver_artifacts(artifacts=[{type:'image', path:saved_to}])。仅调用一次，不要只在文字里说图片已发送。",
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+        if failures:
+            return "❌ 所有图片生成端点均失败:\n" + "\n".join(f"- {x}" for x in failures) + _hint
+        return f"❌ 没有可用的图片生成端点{_hint}"
 
 
 def create_handler(agent: "Agent"):

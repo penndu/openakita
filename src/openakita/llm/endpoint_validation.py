@@ -10,6 +10,7 @@ from .capabilities import is_image_generation_model
 from .types import is_local_endpoint_config
 
 _CHAT_ENDPOINT_TYPES = {"endpoints", "compiler_endpoints"}
+_IMAGE_API_TYPES = {"dashscope", "openai_images"}
 
 
 def endpoint_requires_api_key(endpoint: dict[str, Any]) -> bool:
@@ -62,6 +63,15 @@ def validate_endpoint_model_usage(
     endpoint: dict[str, Any], endpoint_type: str = "endpoints"
 ) -> str | None:
     """Return a friendly error when a model is saved to an incompatible endpoint list."""
+    if endpoint_type == "image_endpoints":
+        api_type = str(endpoint.get("api_type") or "").strip().lower()
+        if api_type not in _IMAGE_API_TYPES:
+            supported = ", ".join(sorted(_IMAGE_API_TYPES))
+            return f"图片生成端点协议必须是以下之一: {supported}。"
+        if not str(endpoint.get("model") or "").strip():
+            return "图片生成端点必须配置模型名称。"
+        return None
+
     if endpoint_type not in _CHAT_ENDPOINT_TYPES:
         return None
 

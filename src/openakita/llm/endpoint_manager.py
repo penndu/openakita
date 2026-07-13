@@ -23,6 +23,10 @@ _ENDPOINT_LISTS = (
     "endpoints",
     "compiler_endpoints",
     "stt_endpoints",
+    # Dedicated text-to-image providers. These are intentionally separate
+    # from chat endpoints because generation APIs use different payloads and
+    # response shapes even when the provider also exposes an OpenAI chat API.
+    "image_endpoints",
     # "relay_endpoints" holds shared relay / aggregator targets that
     # plugins (happyhorse-video, tongyi-image, avatar-studio, ...)
     # can reference by name instead of re-pasting base_url + api_key
@@ -781,6 +785,8 @@ class EndpointManager:
             "endpoints": [],
             "compiler_endpoints": [],
             "stt_endpoints": [],
+            "image_endpoints": [],
+            "relay_endpoints": [],
             "settings": {},
         }
 
