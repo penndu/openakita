@@ -233,8 +233,9 @@ SYSTEM_TOOLS = [
         "detail": """文生图：根据提示词生成图片并保存为本地 PNG 文件。
 
 说明：
-- 默认使用通义 Qwen-Image（如 `qwen-image-max`）。
-- 需要在环境变量中配置 `DASHSCOPE_API_KEY`（与通义其它模型共用同一个 Key）。
+- 使用配置中心的图片生成端点，支持 DashScope 和 OpenAI Images 兼容接口。
+- 未指定端点时按优先级调用，并在失败后自动切换到下一个已启用端点。
+- 旧版 `DASHSCOPE_API_KEY` 配置在没有图片生成端点时仍可兼容使用。
 - 生成结果会返回一个临时 URL（通常 24 小时有效），本工具会自动下载并落盘到本地文件。
 
 输出：
@@ -246,17 +247,21 @@ SYSTEM_TOOLS = [
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "正向提示词（期望生成的内容）"},
+                "endpoint": {
+                    "type": "string",
+                    "description": "图片生成端点名称（可选；不填则按配置优先级自动选择并故障转移）",
+                },
                 "model": {
                     "type": "string",
-                    "description": "模型名称（默认 qwen-image-max）",
-                    "default": "qwen-image-max",
+                    "description": "临时覆盖端点默认模型（可选）",
                 },
                 "negative_prompt": {"type": "string", "description": "反向提示词（可选）"},
                 "size": {
                     "type": "string",
-                    "description": "输出分辨率，格式 宽*高（如 1664*928）",
-                    "default": "1664*928",
+                    "description": "输出分辨率，支持 宽*高 或 宽x高；不填使用端点默认值",
                 },
+                "quality": {"type": "string", "description": "生成质量（可选，如 low/medium/high/hd）"},
+                "style": {"type": "string", "description": "生成风格（可选，如 vivid/natural）"},
                 "prompt_extend": {
                     "type": "boolean",
                     "description": "是否启用提示词智能改写（默认 true）",
