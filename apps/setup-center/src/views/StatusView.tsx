@@ -763,6 +763,7 @@ export function StatusView(props: StatusViewProps) {
             const ih = imHealth[channelId];
             const isOnline = ih && (ih.status === "healthy" || ih.status === "online");
             const isConfigured = ih && ih.status === "configured";
+            const channelError = ih?.error?.trim() || "";
             const effectiveEnabled = ih ? true : c.enabled;
             const serviceRunning = serviceStatus?.running;
             const dot = !effectiveEnabled
@@ -786,8 +787,24 @@ export function StatusView(props: StatusViewProps) {
                 <span className="inline-flex h-4 w-4 items-center justify-center">
                   {LogoComp && <span style={{ display: "inline-flex", flexShrink: 0 }}><LogoComp size={16} /></span>}
                 </span>
-                <span style={{ fontWeight: 600, fontSize: 13, minWidth: 0 }}>{c.name}</span>
-                <span className="imStatusLabel text-right">{label}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[13px] font-semibold">{c.name}</span>
+                  {channelError && (
+                    <button
+                      type="button"
+                      className="block max-w-full cursor-copy truncate text-left text-[10px] font-normal text-destructive"
+                      title={`${t("status.clickToCopy", "点击复制")}: ${channelError}`}
+                      aria-label={`${c.name}: ${channelError}`}
+                      onClick={async () => {
+                        const ok = await copyToClipboard(channelError);
+                        if (ok) notifySuccess(t("version.copied"));
+                      }}
+                    >
+                      {channelError}
+                    </button>
+                  )}
+                </span>
+                <span className="imStatusLabel text-right" title={channelError || undefined}>{label}</span>
               </div>
             );
           })}
