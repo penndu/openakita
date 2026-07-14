@@ -206,6 +206,14 @@ class ScheduledHandler:
             agent_profile_id=current_agent_profile_id,
             task_source=TaskSource.CHAT,
             delivery_policy=TaskDeliveryPolicy.OWNER_ONLY,
+            working_directory=(
+                str(__import__(
+                    "openakita.core.working_directory",
+                    fromlist=["session_working_directory"],
+                ).session_working_directory(session))
+                if session is not None
+                else ""
+            ),
         )
         task.silent = bool(params.get("silent", False))
         task.no_schedule_tools = bool(params.get("no_schedule_tools", False))

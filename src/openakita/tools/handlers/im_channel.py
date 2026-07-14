@@ -565,7 +565,15 @@ class IMChannelHandler:
         artifacts = self._normalize_artifacts(params.get("artifacts"))
         receipts = []
 
-        workspace_root = self._get_workspace_root()
+        from ...core.policy_v2.context import get_current_context
+        from ...core.working_directory import current_working_directory, resolve_working_path
+
+        if get_current_context() is not None:
+            workspace_root = current_working_directory(require_available=True)
+        else:
+            workspace_root = self._get_workspace_root() or current_working_directory(
+                require_available=True
+            )
         home_dir = Path.home().resolve()
 
         for idx, art in enumerate(artifacts):
@@ -584,7 +592,10 @@ class IMChannelHandler:
                 )
                 continue
 
-            p = Path(path_str)
+            try:
+                p = resolve_working_path(path_str, base=workspace_root, strict=True)
+            except Exception:
+                p = Path(path_str)
             if not p.exists() or not p.is_file():
                 receipts.append(
                     {
@@ -620,7 +631,17 @@ class IMChannelHandler:
                     logger.warning(f"[Desktop] Failed to copy external file {p}: {e}")
 
             abs_path = str(resolved)
+            try:
+                ctx = get_current_context()
+                conversation_id = ctx.session_id if ctx is not None else ""
+            except Exception:
+                conversation_id = ""
             file_url = f"/api/files?path={urllib.parse.quote(abs_path, safe='')}"
+            if conversation_id:
+                file_url += (
+                    "&conversation_id="
+                    + urllib.parse.quote(conversation_id, safe="")
+                )
             size = resolved.stat().st_size
 
             receipts.append(

@@ -465,6 +465,8 @@ export type ChatAskUser = {
 };
 
 export type ChatAttachment = {
+  source?: "upload" | "working_directory";
+  relativePath?: string;
   type: "image" | "file" | "voice" | "video" | "document";
   name: string;
   url?: string;
@@ -498,6 +500,7 @@ export type ChatConversation = {
   orgId?: string;
   orgNodeId?: string;
   status?: ConversationStatus;
+  workingDirectory?: string;
 };
 
 // ─── Slash commands ───

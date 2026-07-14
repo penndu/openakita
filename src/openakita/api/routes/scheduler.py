@@ -87,6 +87,7 @@ class TaskCreateRequest(BaseModel):
     chat_id: str | None = None
     agent_profile_id: str | None = None
     enabled: bool = True
+    working_directory: str | None = None
 
 
 class TaskUpdateRequest(BaseModel):
@@ -202,6 +203,16 @@ async def create_task(request: Request, body: TaskCreateRequest):
         reminder_message=body.reminder_message,
         prompt=body.prompt,
     )
+    if body.working_directory:
+        from ..working_directories import authorize_working_directory
+
+        task.working_directory = str(
+            authorize_working_directory(request, body.working_directory)
+        )
+    else:
+        from ...core.working_directory import config_workspace
+
+        task.working_directory = str(config_workspace())
     task.task_source = TaskSource.MANUAL
     task.delivery_policy = TaskDeliveryPolicy.OWNER_ONLY
     task.channel_id = channel_id

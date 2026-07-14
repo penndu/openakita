@@ -1,7 +1,9 @@
 import json
+from pathlib import Path
 
 import pytest
 
+from openakita.core.policy_v2 import PolicyContext, reset_current_context, set_current_context
 from openakita.tools.handlers.im_channel import IMChannelHandler
 
 
@@ -72,7 +74,10 @@ def test_normalize_delivery_params_accepts_string_path_list():
 
 
 @pytest.mark.asyncio
-async def test_deliver_artifacts_desktop_handles_legacy_recipients(tmp_path):
+async def test_deliver_artifacts_desktop_handles_legacy_recipients(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
     artifact = tmp_path / "report.md"
     artifact.write_text("hello", encoding="utf-8")
     handler = IMChannelHandler(_FakeAgent(tmp_path))
@@ -85,6 +90,34 @@ async def test_deliver_artifacts_desktop_handles_legacy_recipients(tmp_path):
 
     assert payload["ok"] is True
     assert payload["receipts"][0]["status"] == "delivered"
+    assert payload["receipts"][0]["path"] == str(artifact.resolve())
+
+
+@pytest.mark.asyncio
+async def test_deliver_artifacts_desktop_prefers_session_working_directory(tmp_path):
+    agent_root = tmp_path / "agent"
+    session_root = tmp_path / "session"
+    agent_root.mkdir()
+    session_root.mkdir()
+    artifact = session_root / "report.md"
+    artifact.write_text("hello", encoding="utf-8")
+    handler = IMChannelHandler(_FakeAgent(agent_root))
+    ctx = PolicyContext(
+        session_id="artifact-session",
+        working_directory=session_root,
+        workspace_roots=(session_root,),
+    )
+    token = set_current_context(ctx)
+    try:
+        result = await handler.handle(
+            "deliver_artifacts",
+            {"artifacts": [{"path": "report.md", "type": "file"}]},
+        )
+    finally:
+        reset_current_context(token)
+
+    payload = json.loads(result)
+    assert payload["ok"] is True
     assert payload["receipts"][0]["path"] == str(artifact.resolve())
 
 

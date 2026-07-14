@@ -69,7 +69,9 @@ def _get_terminal_manager(agent: "Agent") -> Any:
         for session in getattr(mgr, "sessions", {}).values():
             session.execution_env_spec = mgr.execution_env_spec
         return mgr
-    cwd = getattr(agent, "default_cwd", None) or str(Path.cwd())
+    from ...core.working_directory import current_working_directory
+
+    cwd = str(current_working_directory(require_available=True))
     mgr = TerminalSessionManager(
         default_cwd=cwd,
         execution_env_spec=getattr(agent, "_execution_env_spec", None),
@@ -129,6 +131,18 @@ class FilesystemHandler:
         self.agent = agent
         self._read_file_cache: dict[tuple[str, int, int], str] = {}
 
+    @staticmethod
+    def _terminal_namespace() -> str:
+        try:
+            from ...core.policy_v2.context import get_current_context
+
+            ctx = get_current_context()
+            if ctx is not None and ctx.session_id:
+                return ctx.session_id
+        except Exception:
+            pass
+        return "default"
+
     def _get_fix_policy(self) -> dict | None:
         """
         获取自检自动修复策略（可选）
@@ -148,11 +162,23 @@ class FilesystemHandler:
         return any(marker in content for marker in _TRUNCATED_PREVIEW_MARKERS)
 
     def _resolve_to_abs(self, raw: str) -> Path:
-        p = Path(raw)
-        if p.is_absolute():
-            return p.resolve()
-        # FileTool 以 cwd 为 base_path；这里保持一致
-        return (Path.cwd() / p).resolve()
+        return self.agent.file_tool._resolve_path(raw)
+
+    def _working_directory(self) -> Path:
+        """Return the same relative-path base used by the attached FileTool."""
+        from ...core.policy_v2.context import get_current_context
+        from ...core.working_directory import (
+            current_working_directory,
+            normalize_working_directory,
+        )
+
+        if get_current_context() is not None:
+            return current_working_directory(require_available=True)
+        file_tool_base = getattr(getattr(self.agent, "file_tool", None), "base_path", None)
+        if isinstance(file_tool_base, (str, Path)):
+            return normalize_working_directory(file_tool_base, must_exist=True)
+        fallback = getattr(self.agent, "default_cwd", None) or Path.cwd()
+        return normalize_working_directory(fallback, must_exist=True)
 
     def _is_under_any_root(self, target: Path, roots: list[str]) -> bool:
         for r in roots or []:
@@ -189,7 +215,12 @@ class FilesystemHandler:
                 return []
             roots.extend(str(p) for p in cfg.workspace.paths if p)
         except Exception:
-            roots.append(getattr(self.agent, "default_cwd", None) or str(Path.cwd()))
+            roots.append(str(self._working_directory()))
+        else:
+            from ...core.policy_v2.context import get_current_context
+
+            if get_current_context() is not None:
+                roots.append(str(self._working_directory()))
         try:
             roots.append(str(settings.data_dir))
         except Exception:
@@ -200,7 +231,8 @@ class FilesystemHandler:
         allowed_roots = self._allowed_roots()
         if not allowed_roots:
             return None
-        result = resolve_within_root(raw_path, allowed_roots)
+        base_dir = self._working_directory()
+        result = resolve_within_root(raw_path, allowed_roots, base_dir=base_dir)
         if result.ok:
             return None
         try:
@@ -413,6 +445,15 @@ class FilesystemHandler:
             command = self._fix_windows_python_c(command)
 
         working_directory = params.get("working_directory") or params.get("cwd")
+        from ...core.working_directory import current_working_directory, resolve_working_path
+
+        if working_directory:
+            directory_guard = self._guard_path_boundary(working_directory, op="shell cwd")
+            if directory_guard:
+                return directory_guard
+            working_directory = str(resolve_working_path(working_directory, strict=True))
+        else:
+            working_directory = str(current_working_directory(require_available=True))
 
         block_timeout_ms = params.get("block_timeout_ms")
         if block_timeout_ms is None:
@@ -466,6 +507,7 @@ class FilesystemHandler:
             result = await terminal_mgr.execute(
                 command,
                 session_id=session_id,
+                namespace=self._terminal_namespace(),
                 block_timeout_ms=block_timeout_ms,
                 working_directory=working_directory,
             )

@@ -27,6 +27,8 @@ def _coerce_workspace_roots(workspace_roots: Path | str | Iterable[Path | str]) 
 def is_inside_workspace(
     raw_path: str,
     workspace_roots: Path | str | Iterable[Path | str],
+    *,
+    base_dir: Path | str | None = None,
 ) -> bool:
     """判断 raw_path 是否在任一 workspace root 内（resolved，处理符号链接）。
 
@@ -39,7 +41,10 @@ def is_inside_workspace(
     若 workspace root 内的符号链接指向外部 → 判外（safety-by-default）。
     """
     try:
-        target = Path(raw_path).expanduser().resolve(strict=False)
+        target = Path(raw_path).expanduser()
+        if not target.is_absolute() and base_dir is not None:
+            target = Path(base_dir) / target
+        target = target.resolve(strict=False)
     except (OSError, ValueError, RuntimeError):
         return False
 
@@ -70,7 +75,19 @@ def candidate_path_fields(params: dict) -> list[str]:
     返回非空字符串列表，按字段顺序。供 ApprovalClassifier refine + safety_immune 检查共用。
     """
     out: list[str] = []
-    for key in ("path", "src", "dst", "source", "target", "file_path"):
+    for key in (
+        "path",
+        "src",
+        "dst",
+        "source",
+        "target",
+        "file_path",
+        "working_directory",
+        "working_dir",
+        "cwd",
+        "output_path",
+        "output_dir",
+    ):
         value = params.get(key)
         if isinstance(value, str) and value:
             out.append(value)
@@ -80,6 +97,8 @@ def candidate_path_fields(params: dict) -> list[str]:
 def all_paths_inside_workspace(
     params: dict,
     workspace_roots: Path | str | Iterable[Path | str],
+    *,
+    base_dir: Path | str | None = None,
 ) -> bool:
     """如果 params 里**任一**路径字段在 workspace 外，返回 False。
 
@@ -89,4 +108,7 @@ def all_paths_inside_workspace(
     candidates = candidate_path_fields(params)
     if not candidates:
         return True
-    return all(is_inside_workspace(p, workspace_roots) for p in candidates)
+    return all(
+        is_inside_workspace(p, workspace_roots, base_dir=base_dir)
+        for p in candidates
+    )

@@ -425,7 +425,11 @@ class ApprovalClassifier:
             and tool in _PATH_BASED_REFINE_TOOLS
             and ctx is not None
         ):
-            if not all_paths_inside_workspace(params, ctx.workspace_roots):
+            if not all_paths_inside_workspace(
+                params,
+                ctx.workspace_roots,
+                base_dir=ctx.working_directory,
+            ):
                 klass = ApprovalClass.MUTATING_GLOBAL
 
         needs_checkpoint = klass in (

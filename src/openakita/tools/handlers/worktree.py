@@ -55,7 +55,9 @@ class WorktreeHandler:
         from ...utils.worktree import create_agent_worktree
 
         name = params.get("name") or f"wt-{uuid.uuid4().hex[:8]}"
-        cwd = getattr(self.agent, "default_cwd", None) or os.getcwd()
+        from ...core.working_directory import current_working_directory
+
+        cwd = str(current_working_directory(require_available=True))
 
         info = await create_agent_worktree(name, project_root=cwd)
         if not info:
@@ -64,15 +66,13 @@ class WorktreeHandler:
         self._active_worktree = info
 
         # Switch agent's working directory to worktree
-        self._original_cwd = getattr(self.agent, "default_cwd", None) or os.getcwd()
-        if hasattr(self.agent, "default_cwd"):
-            self.agent.default_cwd = str(info.path)
+        self._original_cwd = str(current_working_directory(require_available=True))
 
         logger.info(f"[Worktree] Entered: {info.path} (branch: {info.branch})")
         return (
             f"Entered worktree at {info.path}\n"
             f"Branch: {info.branch}\n"
-            f"Working directory switched. Changes here won't affect the main workspace."
+            "The conversation directory remains locked; use absolute paths for worktree files."
         )
 
     async def _exit(self, params: dict[str, Any]) -> str:
@@ -100,8 +100,6 @@ class WorktreeHandler:
             )
 
         # Restore original working directory
-        if self._original_cwd and hasattr(self.agent, "default_cwd"):
-            self.agent.default_cwd = self._original_cwd
 
         project_root = self._original_cwd or os.getcwd()
 

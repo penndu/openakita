@@ -3595,6 +3595,12 @@ class Agent:
                 session_config = getattr(session, "config", None)
                 session_context = {
                     "session_id": session.id,
+                    "working_directory": str(
+                        __import__(
+                            "openakita.core.working_directory",
+                            fromlist=["session_working_directory"],
+                        ).session_working_directory(session)
+                    ),
                     "channel": getattr(session, "channel", "unknown"),
                     "chat_type": getattr(session, "chat_type", "private"),
                     "message_count": len(session.context.messages) if session.context else 0,
@@ -3749,6 +3755,7 @@ class Agent:
             tuple(sorted(_intent_tool_hints)),
             tuple(sorted(_mem_keywords)) if _mem_keywords else (),
             _working_facts_cache_key,
+            str((session_context or {}).get("working_directory", "")),
             bool((session_context or {}).get("evidence_recommended", False)),
             _contradiction_cache_key,
             _ask_user_reply_cache_key,
@@ -5585,6 +5592,19 @@ class Agent:
 
         if _has_history and compiled_message and isinstance(compiled_message, str):
             compiled_message = f"[最新消息]\n{compiled_message}"
+
+        if isinstance(compiled_message, str) and session is not None:
+            from .working_directory import resolve_text_file_mentions
+
+            file_mentions = resolve_text_file_mentions(message, session)
+            if file_mentions:
+                mention_lines = "\n".join(
+                    f"- {relative}: {absolute}" for relative, absolute in file_mentions
+                )
+                compiled_message += (
+                    "\n\n[当前工作目录文件引用；内容未自动内联，请按需使用文件工具读取]\n"
+                    + mention_lines
+                )
 
         if isinstance(compiled_message, str):
             compiled_message = current_turn.inject_into_message(compiled_message)

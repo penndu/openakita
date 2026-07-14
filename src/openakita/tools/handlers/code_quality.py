@@ -16,7 +16,6 @@ Code Quality 处理器
 import asyncio
 import json
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -43,7 +42,9 @@ class CodeQualityHandler:
 
     async def _read_lints(self, params: dict) -> str:
         paths = params.get("paths") or []
-        cwd = os.getcwd()
+        from ...core.working_directory import current_working_directory
+
+        cwd = str(current_working_directory(require_available=True))
 
         diagnostics: list[str] = []
 

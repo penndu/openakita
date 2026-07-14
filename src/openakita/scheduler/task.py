@@ -235,6 +235,7 @@ class ScheduledTask:
     prompt: str = ""  # 发送给 Agent 的 prompt（仅 TASK 类型使用）
     script_path: str | None = None  # 预置脚本路径
     action: str | None = None  # 系统动作标识（如 system:daily_memory）
+    working_directory: str = ""  # immutable execution root captured at creation
 
     # 通知配置
     channel_id: str | None = None  # 结果发送的通道
@@ -643,6 +644,7 @@ class ScheduledTask:
             "prompt": self.prompt,
             "script_path": self.script_path,
             "action": self.action,
+            "working_directory": self.working_directory,
             "channel_id": self.channel_id,
             "chat_id": self.chat_id,
             "user_id": self.user_id,
@@ -773,6 +775,7 @@ class ScheduledTask:
             prompt=data.get("prompt", ""),
             script_path=data.get("script_path"),
             action=data.get("action"),
+            working_directory=str(data.get("working_directory") or ""),
             channel_id=data.get("channel_id"),
             chat_id=data.get("chat_id"),
             user_id=data.get("user_id"),

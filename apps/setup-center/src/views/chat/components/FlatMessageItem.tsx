@@ -93,7 +93,7 @@ export const FlatMessageItem = memo(function FlatMessageItem({
           {msg.attachments && msg.attachments.length > 0 && (
             <div style={{ marginBottom: 6 }}>
               {msg.attachments.map((att, i) => (
-                <AttachmentPreview key={i} att={att} apiBaseUrl={apiBaseUrl} onImagePreview={onImagePreview} />
+                <AttachmentPreview key={i} att={att} apiBaseUrl={apiBaseUrl} conversationId={conversationId} onImagePreview={onImagePreview} />
               ))}
             </div>
           )}

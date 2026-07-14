@@ -141,6 +141,7 @@ def _build_fallback_context(
 
     return PolicyContext(
         session_id=session_id,
+        working_directory=Path(os.getcwd()).resolve(strict=False),
         workspace_roots=workspace_roots,
         session_role=SessionRole.AGENT,
         confirmation_mode=mode,
@@ -166,6 +167,7 @@ def _resolve_context(
             # 当前 ctx 没带 user_message，按需补一份（不修改原 ctx，复制一个）
             return PolicyContext(
                 session_id=current.session_id,
+                working_directory=current.working_directory,
                 workspace_roots=current.workspace_roots,
                 channel=current.channel,
                 is_owner=current.is_owner,
@@ -316,6 +318,7 @@ def build_policy_context(
     session: object | None = None,
     session_id: str = "",
     workspace: Path | str | None = None,
+    working_directory: Path | str | None = None,
     mode: str = "agent",
     is_unattended: bool = False,
     unattended_strategy: str = "",
@@ -367,12 +370,27 @@ def build_policy_context(
         config_roots = tuple(Path(p) for p in cfg.workspace.paths)
     except Exception:
         config_roots = (Path(os.getcwd()),)
+
+    from ..working_directory import config_workspace, session_working_directory
+
+    if parent_ctx is not None:
+        effective_cwd = parent_ctx.working_directory
+    elif working_directory is not None:
+        effective_cwd = Path(working_directory).expanduser().resolve(strict=False)
+    elif session is not None:
+        effective_cwd = session_working_directory(session)
+    elif workspace is not None:
+        effective_cwd = Path(workspace).expanduser().resolve(strict=False)
+    else:
+        effective_cwd = config_workspace()
     if workspace is not None:
         extra_root = Path(workspace)
         existing = {str(p) for p in config_roots}
         ws_roots = config_roots if str(extra_root) in existing else (*config_roots, extra_root)
     else:
         ws_roots = config_roots
+    if str(effective_cwd) not in {str(p) for p in ws_roots}:
+        ws_roots = (*ws_roots, effective_cwd)
 
     # C13 §15: sub-agent path — 父 ctx 已是 root 视图（root_user_id /
     # delegate_chain / safety_immune / replay / trusted_paths 全部就位），
@@ -424,6 +442,7 @@ def build_policy_context(
         # - channel：session 共享，sub-agent 视图与父相同（不暴露 override）
         return PolicyContext(
             session_id=base.session_id,
+            working_directory=base.working_directory,
             workspace_roots=eff_workspace_roots,
             channel=base.channel,
             is_owner=base.is_owner,
@@ -574,6 +593,7 @@ def build_policy_context(
 
     return PolicyContext(
         session_id=session_id or "policy_v2_ctx",
+        working_directory=effective_cwd,
         workspace_roots=ws_roots,
         channel=channel,
         is_owner=effective_is_owner,

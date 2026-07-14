@@ -502,7 +502,6 @@ class TaskExecutor:
             # 30s-TTL replay records (written by /api/pending_approvals/resolve).
             # Lift them into the PolicyContext so engine step 7 ``replay`` can
             # match and shortcut the same tool+params to ALLOW without re-asking.
-            import os as _os
             from pathlib import Path as _Path
 
             from ..core.policy_v2.context import (
@@ -563,7 +562,21 @@ class TaskExecutor:
                 _cfg_roots = tuple(_Path(p) for p in _get_cfg().workspace.paths)
             except Exception:
                 _cfg_roots = ()
-            _cwd_root = _Path(_os.getcwd())
+            from ..core.working_directory import (
+                WorkingDirectoryError,
+                config_workspace,
+                normalize_working_directory,
+                working_directory_feature_enabled,
+            )
+
+            try:
+                _cwd_root = normalize_working_directory(
+                    task.working_directory if working_directory_feature_enabled() else None,
+                    default=config_workspace(),
+                    must_exist=True,
+                )
+            except WorkingDirectoryError as exc:
+                return False, f"任务工作目录不可用: {exc}"
             _ws_seen: set[str] = set()
             _ws_list: list[_Path] = []
             for _p in (*_cfg_roots, _cwd_root):
@@ -575,6 +588,7 @@ class TaskExecutor:
                 # ScheduledTask has no first-class ``session_id`` field —
                 # fall back to a synthetic id derived from task.id.
                 session_id=getattr(task, "session_id", None) or f"task:{task.id}",
+                working_directory=_cwd_root,
                 workspace_roots=tuple(_ws_list),
                 channel="scheduler",
                 is_owner=True,  # scheduler-owned tasks act on behalf of owner

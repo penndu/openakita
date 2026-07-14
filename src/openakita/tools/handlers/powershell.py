@@ -19,7 +19,6 @@ PowerShell 工具处理器
 import asyncio
 import base64
 import logging
-import os
 import shutil
 import subprocess
 from typing import TYPE_CHECKING, Any
@@ -241,7 +240,13 @@ class PowerShellHandler:
             encoded,
         ]
 
-        cwd = working_dir or getattr(self.agent, "default_cwd", None) or os.getcwd()
+        from ...core.working_directory import current_working_directory, resolve_working_path
+
+        cwd = (
+            str(resolve_working_path(working_dir, strict=True))
+            if working_dir
+            else str(current_working_directory(require_available=True))
+        )
 
         from ...runtime_manager import build_user_subprocess_environment
 

@@ -1,7 +1,7 @@
 // ─── ChatView: 完整 AI 聊天页面 ───
 // 组装层: 通过 hooks + 子组件构建完整聊天界面
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { setLanguage } from "../i18n";
@@ -15,7 +15,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { toast } from "sonner";
 import { setThemePref } from "../theme";
 import type { Theme } from "../theme";
-import { downloadFile, showInFolder, readFileBase64, getLocalFileInfo, onDragDrop, IS_TAURI, IS_WEB, IS_MOBILE_BROWSER, onWsEvent, logger } from "../platform";
+import { downloadFile, showInFolder, readFileBase64, getLocalFileInfo, onDragDrop, openFileDialog, IS_TAURI, IS_WEB, IS_MOBILE_BROWSER, onWsEvent, logger } from "../platform";
 import { safeFetch } from "../providers";
 import type {
   ChatMessage,
@@ -59,6 +59,7 @@ import {
   IconPin, IconSearch, IconCircleDot, IconXCircle,
   IconBuilding, IconAlertCircle,
   IconHourglass, IconTarget, IconCheckCircle, IconPlug, IconClock, IconBarChart, IconGlobe, IconMail,
+  IconFile, IconFolder, IconFolderOpen, IconRefresh,
 } from "../icons";
 
 // ─── Chat module imports ───
@@ -517,6 +518,9 @@ function _sessionConversationFromPayload(raw: Record<string, unknown>): ChatConv
   if (_hasOwn(raw, "orgNodeId")) {
     conv.orgNodeId = typeof raw.orgNodeId === "string" && raw.orgNodeId ? raw.orgNodeId : undefined;
   }
+  if (typeof raw.workingDirectory === "string" && raw.workingDirectory) {
+    conv.workingDirectory = raw.workingDirectory;
+  }
   return conv;
 }
 
@@ -866,6 +870,52 @@ type HistoryPageState = {
   loadingOlder: boolean;
 };
 
+type WorkingFileSuggestion = {
+  name: string;
+  relativePath: string;
+  mimeType: string;
+  size: number;
+  modified: number;
+};
+
+type FileTreeEntry = {
+  name: string;
+  relativePath: string;
+  kind: "directory" | "file";
+  hasChildren?: boolean;
+  mimeType?: string;
+  size?: number;
+  modified?: number;
+};
+
+type SessionFileTreeState = {
+  childrenByPath: Record<string, FileTreeEntry[]>;
+  expandedPaths: string[];
+  loadingPaths: string[];
+  selectedPath?: string;
+  workingDirectory?: string;
+  error?: string;
+};
+
+function fileTreeEntriesEqual(a: FileTreeEntry[] | undefined, b: FileTreeEntry[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  return a.every((entry, index) => {
+    const other = b[index];
+    return entry.name === other.name
+      && entry.relativePath === other.relativePath
+      && entry.kind === other.kind
+      && entry.hasChildren === other.hasChildren
+      && entry.mimeType === other.mimeType
+      && entry.size === other.size
+      && entry.modified === other.modified;
+  });
+}
+
+type WorkingDirectorySuggestion = {
+  name: string;
+  path: string;
+};
+
 const DESKTOP_DRAG_FILE_MAX_SIZE = 50 * 1024 * 1024;
 const DESKTOP_DRAG_VIDEO_MAX_SIZE = 7 * 1024 * 1024;
 
@@ -879,8 +929,15 @@ function formatAttachmentSize(bytes: number | null | undefined): string {
 }
 
 function isAttachmentStillPreparing(att: ChatAttachment): boolean {
+  if (att.source === "working_directory" && att.relativePath) return false;
   if (att.uploadStatus === "uploading") return true;
   return !att.url && !att.localPath;
+}
+
+function workingDirectoryName(path?: string): string {
+  if (!path) return "";
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] || path;
 }
 
 // ─── 主组件 ───
@@ -1070,6 +1127,8 @@ export function ChatView({
 
     setSelectedEndpoint("auto");
     setSelectedEndpointPolicy("prefer");
+    setFileTrees({});
+    setSidebarView("conversations");
   // eslint-disable-next-line react-hooks/exhaustive-deps -- STORAGE_KEY_*/OLD_KEY_* are
   // derived from wsTag (or are constants); listing wsTag alone is sufficient and
   // avoids re-running the migration on every render.
@@ -1087,8 +1146,15 @@ export function ChatView({
   const [sidebarPinned, setSidebarPinned] = useState(() => {
     try { return localStorage.getItem("openakita_convSidebarPinned") === "true"; } catch { return false; }
   });
+  const [sidebarView, setSidebarView] = useState<"conversations" | "files">("conversations");
+  const [fileTrees, setFileTrees] = useState<Record<string, SessionFileTreeState>>({});
+  const fileTreesRef = useRef<Record<string, SessionFileTreeState>>({});
+  const fileTreeWatchInFlightRef = useRef<Set<string>>(new Set());
+  useEffect(() => { fileTreesRef.current = fileTrees; }, [fileTrees]);
   const [convSearchQuery, setConvSearchQuery] = useState("");
-  const [orbitTip, setOrbitTip] = useState<{ x: number; y: number; name: string; title: string } | null>(null);
+  const [orbitTip, setOrbitTip] = useState<{ x: number; y: number; name: string; title: string; directory: string; directoryPath?: string } | null>(null);
+  const [newConversationMenuOpen, setNewConversationMenuOpen] = useState(false);
+  const newConversationMenuRef = useRef<HTMLDivElement | null>(null);
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
   const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
@@ -1219,6 +1285,17 @@ export function ChatView({
   // 持久化用户偏好
   useEffect(() => { try { localStorage.setItem("chat_showChain", String(showChain)); } catch {} }, [showChain]);
   useEffect(() => { try { localStorage.setItem("chat_displayMode", displayMode); } catch {} }, [displayMode]);
+
+  useEffect(() => {
+    if (!newConversationMenuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!newConversationMenuRef.current?.contains(event.target as Node)) {
+        setNewConversationMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [newConversationMenuOpen]);
 
   const [isRecording, setIsRecording] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -1419,6 +1496,11 @@ export function ChatView({
   const [contextEditOpen, setContextEditOpen] = useState(false);
   const [editingContextLimit, setEditingContextLimit] = useState("");
   const [contextSaving, setContextSaving] = useState(false);
+  const [workingDirectoryDialogOpen, setWorkingDirectoryDialogOpen] = useState(false);
+  const [workingDirectoryLoading, setWorkingDirectoryLoading] = useState(false);
+  const [workingDirectoryEntries, setWorkingDirectoryEntries] = useState<WorkingDirectorySuggestion[]>([]);
+  const [browsingWorkingDirectory, setBrowsingWorkingDirectory] = useState<string | null>(null);
+  const [workingDirectoryParent, setWorkingDirectoryParent] = useState<string | null>(null);
   const contextStatsReqSeqRef = useRef(0);
 
   // ── 长闲置回归检测 (6.7) ──
@@ -3074,7 +3156,7 @@ export function ChatView({
   }, [endpoints, chatMode, orgList, orgMode, thinkingMode, thinkingDepth, activeConvId, apiBase, agentProfiles, selectedAgent]);
 
   // ── 新建对话 ──
-  const newConversation = useCallback(() => {
+  const newConversation = useCallback((workingDirectory?: string) => {
     const id = genId();
     const createdAt = Date.now();
     if (activeConvId) {
@@ -3102,6 +3184,7 @@ export function ChatView({
       messageCount: 0,
       agentProfileId: selectedAgent,
       orgMode: false,
+      ...(workingDirectory ? { workingDirectory } : {}),
     };
     setConversations((prev) => [draftConversation, ...prev]);
     if (serviceRunning) {
@@ -3119,6 +3202,7 @@ export function ChatView({
           orgMode: false,
           orgId: null,
           orgNodeId: null,
+          workingDirectory: workingDirectory || null,
         }),
       }).then(async (res) => {
         if (!res.ok) return;
@@ -3133,6 +3217,41 @@ export function ChatView({
       });
     }
   }, [activeConvId, messages, selectedAgent, serviceRunning, apiBaseUrl, activateConversation]);
+
+  const loadWorkingDirectories = useCallback(async (parent?: string) => {
+    setWorkingDirectoryLoading(true);
+    try {
+      const query = parent ? `?parent=${encodeURIComponent(parent)}` : "";
+      const response = await safeFetch(`${apiBaseUrl}/api/working-directories${query}`);
+      if (!response.ok) throw new Error(String(response.status));
+      const data = await response.json();
+      setWorkingDirectoryEntries(Array.isArray(data?.directories) ? data.directories : []);
+      setBrowsingWorkingDirectory(typeof data?.directory === "string" ? data.directory : null);
+      setWorkingDirectoryParent(typeof data?.parent === "string" ? data.parent : null);
+    } catch {
+      notifyError(t("chat.workingDirectoryLoadFailed", "无法加载可用目录"));
+    } finally {
+      setWorkingDirectoryLoading(false);
+    }
+  }, [apiBaseUrl, t]);
+
+  const newConversationInFolder = useCallback(async () => {
+    if (IS_TAURI) {
+      const selected = await openFileDialog({
+        directory: true,
+        title: t("chat.selectWorkingDirectory", "选择工作目录"),
+      });
+      if (selected) newConversation(selected);
+      return;
+    }
+    setWorkingDirectoryDialogOpen(true);
+    await loadWorkingDirectories();
+  }, [loadWorkingDirectories, newConversation, t]);
+
+  const createConversationInSelectedDirectory = useCallback((path: string) => {
+    setWorkingDirectoryDialogOpen(false);
+    newConversation(path);
+  }, [newConversation]);
 
   // ── 删除对话（实际执行） ──
   const doDeleteConversation = useCallback(async (convId: string) => {
@@ -3667,6 +3786,8 @@ export function ChatView({
       if (attachmentsToSend.length > 0) {
         body.attachments = attachmentsToSend.map((a) => ({
           type: a.type,
+          source: a.source || "upload",
+          relativePath: a.relativePath,
           name: a.name,
           url: a.url,
           local_path: a.localPath,
@@ -6276,6 +6397,265 @@ export function ChatView({
   const [atAgentOpen, setAtAgentOpen] = useState(false);
   const [atAgentFilter, setAtAgentFilter] = useState("");
   const [atAgentIdx, setAtAgentIdx] = useState(0);
+  const [atFileSuggestions, setAtFileSuggestions] = useState<WorkingFileSuggestion[]>([]);
+
+  useEffect(() => {
+    if (!atAgentOpen || !activeConvId) {
+      setAtFileSuggestions([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      const query = new URLSearchParams({ q: atAgentFilter, limit: "40" });
+      safeFetch(
+        `${apiBaseRef.current}/api/sessions/${encodeURIComponent(activeConvId)}/files/search?${query}`,
+        { signal: controller.signal },
+      )
+        .then((res) => res.ok ? res.json() : Promise.reject(new Error(String(res.status))))
+        .then((data) => setAtFileSuggestions(Array.isArray(data?.files) ? data.files : []))
+        .catch(() => { if (!controller.signal.aborted) setAtFileSuggestions([]); });
+    }, 120);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [atAgentOpen, atAgentFilter, activeConvId]);
+
+  const attachWorkingFile = useCallback((file: WorkingFileSuggestion) => {
+    const mime = file.mimeType || "application/octet-stream";
+    const type: ChatAttachment["type"] = mime.startsWith("image/")
+      ? "image"
+      : mime.startsWith("video/")
+        ? "video"
+        : mime.startsWith("audio/")
+          ? "voice"
+          : mime === "application/pdf"
+            ? "document"
+            : "file";
+    setPendingAttachments((prev) => {
+      if (prev.some((item) => item.source === "working_directory" && item.relativePath === file.relativePath)) return prev;
+      return [...prev, {
+        source: "working_directory",
+        relativePath: file.relativePath,
+        type,
+        name: file.name,
+        size: file.size,
+        mimeType: mime,
+        uploadStatus: "uploaded",
+      }];
+    });
+    const ta = inputRef.current;
+    if (ta) {
+      const val = ta.value;
+      const cursor = ta.selectionStart ?? val.length;
+      const before = val.slice(0, cursor).replace(/@[^@\s]*$/, "");
+      setInputValue(before + val.slice(cursor));
+    }
+    setAtAgentOpen(false);
+    inputRef.current?.focus();
+  }, [setInputValue]);
+
+  const loadFileTreeDirectory = useCallback(async (
+    conversationId: string,
+    parent: string,
+    options: { silent?: boolean } = {},
+  ) => {
+    if (!options.silent) {
+      setFileTrees((prev) => {
+        const current = prev[conversationId] || {
+          childrenByPath: {}, expandedPaths: [], loadingPaths: [],
+        };
+        return {
+          ...prev,
+          [conversationId]: {
+            ...current,
+            loadingPaths: current.loadingPaths.includes(parent)
+              ? current.loadingPaths
+              : [...current.loadingPaths, parent],
+            error: undefined,
+          },
+        };
+      });
+    }
+    try {
+      const query = new URLSearchParams({ parent, limit: "500" });
+      const response = await safeFetch(
+        `${apiBaseRef.current}/api/sessions/${encodeURIComponent(conversationId)}/files/tree?${query}`,
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || String(response.status));
+      const entries = Array.isArray(payload?.entries) ? payload.entries as FileTreeEntry[] : [];
+      setFileTrees((prev) => {
+        const current = prev[conversationId] || {
+          childrenByPath: {}, expandedPaths: [], loadingPaths: [],
+        };
+        const previousEntries = current.childrenByPath[parent];
+        const nextWorkingDirectory = typeof payload?.workingDirectory === "string"
+          ? payload.workingDirectory
+          : current.workingDirectory;
+        const entriesUnchanged = fileTreeEntriesEqual(previousEntries, entries);
+        const loadingPaths = current.loadingPaths.filter((path) => path !== parent);
+        if (
+          entriesUnchanged
+          && loadingPaths.length === current.loadingPaths.length
+          && nextWorkingDirectory === current.workingDirectory
+          && !current.error
+        ) {
+          return prev;
+        }
+
+        const nextChildrenByPath = { ...current.childrenByPath, [parent]: entries };
+        const nextEntryPaths = new Set(entries.map((entry) => entry.relativePath));
+        const removedDirectories = (previousEntries || [])
+          .filter((entry) => entry.kind === "directory" && !nextEntryPaths.has(entry.relativePath))
+          .map((entry) => entry.relativePath);
+        const isUnderRemovedDirectory = (path: string) => removedDirectories.some(
+          (removed) => path === removed || path.startsWith(`${removed}/`),
+        );
+        for (const cachedParent of Object.keys(nextChildrenByPath)) {
+          if (isUnderRemovedDirectory(cachedParent)) delete nextChildrenByPath[cachedParent];
+        }
+        const selectedWasDirectChild = (previousEntries || []).some(
+          (entry) => entry.relativePath === current.selectedPath,
+        );
+        const selectedWasRemoved = Boolean(
+          current.selectedPath
+          && (isUnderRemovedDirectory(current.selectedPath)
+            || (selectedWasDirectChild && !nextEntryPaths.has(current.selectedPath))),
+        );
+        return {
+          ...prev,
+          [conversationId]: {
+            ...current,
+            childrenByPath: nextChildrenByPath,
+            expandedPaths: current.expandedPaths.filter(
+              (path) => !isUnderRemovedDirectory(path),
+            ),
+            loadingPaths,
+            selectedPath: selectedWasRemoved ? undefined : current.selectedPath,
+            workingDirectory: nextWorkingDirectory,
+            error: undefined,
+          },
+        };
+      });
+    } catch (error) {
+      if (options.silent && parent) return;
+      setFileTrees((prev) => {
+        const current = prev[conversationId] || {
+          childrenByPath: {}, expandedPaths: [], loadingPaths: [],
+        };
+        return {
+          ...prev,
+          [conversationId]: {
+            ...current,
+            loadingPaths: current.loadingPaths.filter((path) => path !== parent),
+            error: error instanceof Error && error.message
+              ? error.message
+              : t("chat.fileTreeLoadFailed", "无法加载文件列表"),
+          },
+        };
+      });
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (!sidebarOpen || sidebarView !== "files" || !activeConvId) return;
+    const tree = fileTrees[activeConvId];
+    if (tree?.childrenByPath[""] !== undefined || tree?.loadingPaths.includes("") || tree?.error) return;
+    void loadFileTreeDirectory(activeConvId, "");
+  }, [activeConvId, fileTrees, loadFileTreeDirectory, sidebarOpen, sidebarView]);
+
+  useEffect(() => {
+    if (!sidebarOpen || sidebarView !== "files" || !activeConvId) return;
+    const conversationId = activeConvId;
+    const watchKey = conversationId;
+    const pollLoadedDirectories = async () => {
+      if (document.visibilityState !== "visible" || fileTreeWatchInFlightRef.current.has(watchKey)) {
+        return;
+      }
+      const tree = fileTreesRef.current[conversationId];
+      if (!tree?.childrenByPath[""]) return;
+      const parents = ["", ...tree.expandedPaths]
+        .filter((parent, index, all) => all.indexOf(parent) === index)
+        .filter((parent) => tree.childrenByPath[parent] !== undefined)
+        .slice(0, 100);
+      fileTreeWatchInFlightRef.current.add(watchKey);
+      try {
+        await Promise.allSettled(
+          parents.map((parent) => loadFileTreeDirectory(conversationId, parent, { silent: true })),
+        );
+      } finally {
+        fileTreeWatchInFlightRef.current.delete(watchKey);
+      }
+    };
+    const timer = window.setInterval(() => { void pollLoadedDirectories(); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [activeConvId, loadFileTreeDirectory, sidebarOpen, sidebarView]);
+
+  const toggleFileTreeDirectory = useCallback((entry: FileTreeEntry) => {
+    if (!activeConvId) return;
+    const tree = fileTrees[activeConvId];
+    const isExpanded = tree?.expandedPaths.includes(entry.relativePath) ?? false;
+    setFileTrees((prev) => {
+      const current = prev[activeConvId] || {
+        childrenByPath: {}, expandedPaths: [], loadingPaths: [],
+      };
+      return {
+        ...prev,
+        [activeConvId]: {
+          ...current,
+          expandedPaths: isExpanded
+            ? current.expandedPaths.filter((path) => path !== entry.relativePath)
+            : current.expandedPaths.includes(entry.relativePath)
+              ? current.expandedPaths
+              : [...current.expandedPaths, entry.relativePath],
+          selectedPath: entry.relativePath,
+        },
+      };
+    });
+    if (!isExpanded && tree?.childrenByPath[entry.relativePath] === undefined) {
+      void loadFileTreeDirectory(activeConvId, entry.relativePath);
+    }
+  }, [activeConvId, fileTrees, loadFileTreeDirectory]);
+
+  const selectFileTreeFile = useCallback((entry: FileTreeEntry) => {
+    if (!activeConvId) return;
+    setFileTrees((prev) => {
+      const current = prev[activeConvId] || {
+        childrenByPath: {}, expandedPaths: [], loadingPaths: [],
+      };
+      return { ...prev, [activeConvId]: { ...current, selectedPath: entry.relativePath } };
+    });
+  }, [activeConvId]);
+
+  const attachFileTreeEntry = useCallback((entry: FileTreeEntry) => {
+    if (entry.kind !== "file") return;
+    attachWorkingFile({
+      name: entry.name,
+      relativePath: entry.relativePath,
+      mimeType: entry.mimeType || "application/octet-stream",
+      size: entry.size || 0,
+      modified: entry.modified || 0,
+    });
+  }, [attachWorkingFile]);
+
+  const refreshActiveFileTree = useCallback(() => {
+    if (!activeConvId) return;
+    setFileTrees((prev) => ({
+      ...prev,
+      [activeConvId]: {
+        childrenByPath: {}, expandedPaths: [], loadingPaths: [],
+        workingDirectory: prev[activeConvId]?.workingDirectory,
+      },
+    }));
+    void loadFileTreeDirectory(activeConvId, "");
+  }, [activeConvId, loadFileTreeDirectory]);
+
+  const collapseActiveFileTree = useCallback(() => {
+    if (!activeConvId) return;
+    setFileTrees((prev) => {
+      const current = prev[activeConvId];
+      if (!current) return prev;
+      return { ...prev, [activeConvId]: { ...current, expandedPaths: [] } };
+    });
+  }, [activeConvId]);
 
   // ── 输入框键盘处理 ──
   const handleInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -6303,7 +6683,8 @@ export function ChatView({
     if (atAgentOpen) {
       const q = atAgentFilter;
       const agents = agentProfiles.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
-      if (e.key === "ArrowDown") { e.preventDefault(); setAtAgentIdx((i) => Math.min(i + 1, agents.length - 1)); return; }
+      const candidateCount = agents.length + atFileSuggestions.length;
+      if (e.key === "ArrowDown") { e.preventDefault(); setAtAgentIdx((i) => Math.min(i + 1, Math.max(0, candidateCount - 1))); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setAtAgentIdx((i) => Math.max(0, i - 1)); return; }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
@@ -6313,8 +6694,11 @@ export function ChatView({
           const ta = e.target as HTMLTextAreaElement;
           const val = ta.value;
           const cursor = ta.selectionStart ?? val.length;
-          const before = val.slice(0, cursor).replace(/@\w*$/, "");
+          const before = val.slice(0, cursor).replace(/@[^@\s]*$/, "");
           setInputValue(before + val.slice(cursor));
+        } else {
+          const file = atFileSuggestions[atAgentIdx - agents.length];
+          if (file) attachWorkingFile(file);
         }
         setAtAgentOpen(false);
         return;
@@ -6375,7 +6759,7 @@ export function ChatView({
         sendMessage();
       }
     }
-  }, [atAgentOpen, atAgentFilter, atAgentIdx, agentProfiles, slashOpen, slashFilter, slashCommands, slashSelectedIdx, sendMessage, isCurrentConvStreaming, submitWhileStreaming, handleQueueMessage, setInputValue, shortcutsOpen, handleCancelTask]);
+  }, [atAgentOpen, atAgentFilter, atAgentIdx, atFileSuggestions, agentProfiles, attachWorkingFile, slashOpen, slashFilter, slashCommands, slashSelectedIdx, sendMessage, isCurrentConvStreaming, submitWhileStreaming, handleQueueMessage, setInputValue, shortcutsOpen, handleCancelTask]);
 
   // ── 输入变化处理（非受控模式：仅更新 ref，不触发全局重渲染） ──
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -6400,8 +6784,8 @@ export function ChatView({
     // @agent 联想
     const cursor = e.target.selectionStart ?? val.length;
     const beforeCursor = val.slice(0, cursor);
-    const atMatch = beforeCursor.match(/@(\w*)$/);
-    if (atMatch && agentProfiles.length > 0) {
+    const atMatch = beforeCursor.match(/@([^@\s]*)$/);
+    if (atMatch && activeConvId) {
       setAtAgentOpen(true);
       setAtAgentFilter(atMatch[1].toLowerCase());
       setAtAgentIdx(0);
@@ -6416,7 +6800,7 @@ export function ChatView({
     } else {
       setSlashOpen(false);
     }
-  }, [orgMode, orgList, agentProfiles.length, pushUndoSnapshot]);
+  }, [orgMode, orgList, activeConvId, pushUndoSnapshot]);
 
   // ── Filtered + grouped conversations for Cursor-style sidebar ──
   const filteredConversations = useMemo(() => {
@@ -6495,6 +6879,8 @@ export function ChatView({
     const isActive = conv.id === activeConvId;
     const profileId = conv.agentProfileId || "default";
     const agentProfile = agentProfiles.find((p) => p.id === profileId) ?? null;
+    const directoryName = workingDirectoryName(conv.workingDirectory)
+      || t("chat.defaultWorkingDirectory", "默认工作目录");
     return (
       <div
         key={conv.id}
@@ -6527,6 +6913,10 @@ export function ChatView({
               <div className="convItemTitle">{conv.title}</div>
               <div className="convItemMeta">
                 {agentProfile && <span className="convItemAgent">{agentProfile.name}</span>}
+                <span className={`convItemDirectory ${conv.lastMessage ? "convItemDirectoryWithDesc" : ""}`} title={conv.workingDirectory || directoryName}>
+                  <IconFolderOpen size={10} />
+                  <span>{directoryName}</span>
+                </span>
                 {conv.lastMessage && <span className="convItemDesc">{conv.lastMessage.slice(0, 40)}</span>}
               </div>
             </>
@@ -6540,6 +6930,71 @@ export function ChatView({
         </div>
       </div>
     );
+  };
+
+  const activeConversation = conversations.find((conv) => conv.id === activeConvId);
+  const activeFileTree = activeConvId ? fileTrees[activeConvId] : undefined;
+  const activeWorkingDirectory = activeFileTree?.workingDirectory || activeConversation?.workingDirectory;
+  const activeWorkingDirectoryName = workingDirectoryName(activeWorkingDirectory)
+    || t("chat.defaultWorkingDirectory", "默认工作目录");
+
+  const renderFileTreeRows = (parent = "", depth = 0): ReactNode[] => {
+    const entries = activeFileTree?.childrenByPath[parent] || [];
+    return entries.flatMap((entry) => {
+      const isDirectory = entry.kind === "directory";
+      const isExpanded = activeFileTree?.expandedPaths.includes(entry.relativePath) ?? false;
+      const isLoading = activeFileTree?.loadingPaths.includes(entry.relativePath) ?? false;
+      const isSelected = activeFileTree?.selectedPath === entry.relativePath;
+      const activate = () => {
+        if (isDirectory) toggleFileTreeDirectory(entry);
+        else selectFileTreeFile(entry);
+      };
+      const row = (
+        <div
+          key={entry.relativePath}
+          className={`fileTreeRow${isSelected ? " fileTreeRowSelected" : ""}`}
+          style={{ paddingLeft: 8 + depth * 16 }}
+          role="treeitem"
+          tabIndex={0}
+          aria-expanded={isDirectory && entry.hasChildren ? isExpanded : undefined}
+          aria-selected={isSelected}
+          title={entry.relativePath}
+          onClick={activate}
+          onDoubleClick={() => { if (!isDirectory) attachFileTreeEntry(entry); }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              activate();
+            }
+          }}
+        >
+          <span className={`fileTreeChevron${isExpanded ? " fileTreeChevronExpanded" : ""}${!isDirectory || !entry.hasChildren ? " fileTreeChevronHidden" : ""}`}>
+            <IconChevronRight size={13} />
+          </span>
+          <span className="fileTreeKindIcon">
+            {isDirectory
+              ? isExpanded ? <IconFolderOpen size={15} /> : <IconFolder size={15} />
+              : <IconFile size={14} />}
+          </span>
+          <span className="fileTreeName">{entry.name}</span>
+        </div>
+      );
+      const children: ReactNode[] = isDirectory && isExpanded
+        ? isLoading
+          ? [(
+              <div
+                key={`${entry.relativePath}-loading`}
+                className="fileTreeStatusRow"
+                style={{ paddingLeft: 32 + (depth + 1) * 16 }}
+              >
+                <IconLoader size={12} />
+                <span>{t("common.loading", "加载中...")}</span>
+              </div>
+            )]
+          : renderFileTreeRows(entry.relativePath, depth + 1)
+        : [];
+      return [row, ...children];
+    });
   };
 
   return (
@@ -6623,9 +7078,43 @@ export function ChatView({
       <div className="flex min-w-0 flex-1 flex-col" style={{ position: "relative" }} onMouseDown={() => { if (sidebarOpen && !sidebarPinned) setSidebarOpen(false); }}>
         {/* Chat top bar */}
         <div className="chatTopBar">
-          <button onClick={newConversation} className="chatTopBarBtn" aria-label={t("chat.newConversation", "新建会话")}>
-            <IconPlus size={14} />
-          </button>
+          <div className="chatNewConversationMenuWrap" ref={newConversationMenuRef}>
+            <button
+              onClick={() => setNewConversationMenuOpen((open) => !open)}
+              className="chatTopBarBtn"
+              aria-label={t("chat.newConversation", "新建会话")}
+              aria-haspopup="menu"
+              aria-expanded={newConversationMenuOpen}
+            >
+              <IconPlus size={14} />
+            </button>
+            {newConversationMenuOpen && (
+              <div className="chatNewConversationMenu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setNewConversationMenuOpen(false);
+                    newConversation();
+                  }}
+                >
+                  <IconPlus size={14} />
+                  <span>{t("chat.defaultWorkingDirectory", "默认工作目录")}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setNewConversationMenuOpen(false);
+                    void newConversationInFolder();
+                  }}
+                >
+                  <IconFolderOpen size={14} />
+                  <span>{t("chat.openWorkingDirectory", "打开工作目录")}</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Active agent orbits — shown when sidebar is closed */}
           {!sidebarOpen && conversations.length > 0 && (
@@ -6646,7 +7135,15 @@ export function ChatView({
                       onClick={() => activateConversation(conv.id)}
                       onMouseEnter={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect();
-                        setOrbitTip({ x: rect.left + rect.width / 2, y: rect.bottom + 6, name: ap?.name || "Default", title: conv.title });
+                        setOrbitTip({
+                          x: rect.left + rect.width / 2,
+                          y: rect.bottom + 6,
+                          name: ap?.name || "Default",
+                          title: conv.title,
+                          directory: workingDirectoryName(conv.workingDirectory)
+                            || t("chat.defaultWorkingDirectory", "默认工作目录"),
+                          directoryPath: conv.workingDirectory,
+                        });
                       }}
                       onMouseLeave={() => setOrbitTip(null)}
                     >
@@ -7036,7 +7533,7 @@ export function ChatView({
             <IconHourglass size={16} />
             <span style={{ flex: 1 }}>{t("chat.busyOnOtherDevice")}</span>
             <button
-              onClick={newConversation}
+              onClick={() => newConversation()}
               style={{
                 padding: "4px 12px", borderRadius: 6, border: "none",
                 background: "var(--primary, #3b82f6)", color: "#fff",
@@ -7065,12 +7562,12 @@ export function ChatView({
             />
           )}
 
-          {/* @Agent 联想面板 */}
+          {/* @ Agent / working-directory file mentions */}
           {atAgentOpen && (() => {
             const agents = agentProfiles.filter((a) =>
               a.name.toLowerCase().includes(atAgentFilter) || a.id.toLowerCase().includes(atAgentFilter),
             );
-            if (agents.length === 0) return null;
+            if (agents.length === 0 && atFileSuggestions.length === 0) return null;
             return (
               <div style={{
                 position: "absolute", bottom: "100%", left: 0, right: 0,
@@ -7088,7 +7585,7 @@ export function ChatView({
                       if (ta) {
                         const val = ta.value;
                         const cursor = ta.selectionStart ?? val.length;
-                        const before = val.slice(0, cursor).replace(/@\w*$/, "");
+                        const before = val.slice(0, cursor).replace(/@[^@\s]*$/, "");
                         setInputValue(before + val.slice(cursor));
                       }
                       setAtAgentOpen(false);
@@ -7111,6 +7608,25 @@ export function ChatView({
                     </div>
                   </div>
                 ))}
+                {atFileSuggestions.map((file, fileIndex) => {
+                  const index = agents.length + fileIndex;
+                  return (
+                    <div
+                      key={`file:${file.relativePath}`}
+                      onClick={() => attachWorkingFile(file)}
+                      style={{
+                        padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+                        background: index === atAgentIdx ? "rgba(37,99,235,0.08)" : "transparent",
+                      }}
+                    >
+                      <IconFolderOpen size={16} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{file.name}</div>
+                        <div style={{ fontSize: 11, opacity: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.relativePath}</div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             );
           })()}
@@ -7631,21 +8147,26 @@ export function ChatView({
         )}
         <nav className={`convSidebar${typeof window !== "undefined" && window.innerWidth <= 768 ? " convSidebarMobileOpen" : ""}`} aria-label={t("chat.conversationList", "会话列表")}>
           <div className="convSidebarHeader">
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div className="convSearchBox" style={{ flex: 1 }}>
-                <IconSearch size={13} style={{ opacity: 0.4, flexShrink: 0 }} />
-                <input
-                  data-slot="search"
-                  className="convSearchInput"
-                  placeholder={t("chat.searchConversations") || "搜索会话..."}
-                  value={convSearchQuery}
-                  onChange={(e) => setConvSearchQuery(e.target.value)}
-                />
-                {convSearchQuery && (
-                  <button data-slot="clear" className="convSearchClear" onClick={() => setConvSearchQuery("")}>
-                    <IconX size={11} />
-                  </button>
-                )}
+            <div className="convSidebarTopRow">
+              <div className="convSidebarTabs" role="tablist" aria-label={t("chat.sidebarViews", "侧栏视图")}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sidebarView === "conversations"}
+                  className={`convSidebarTab${sidebarView === "conversations" ? " convSidebarTabActive" : ""}`}
+                  onClick={() => setSidebarView("conversations")}
+                >
+                  {t("chat.sidebarConversations", "会话")}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sidebarView === "files"}
+                  className={`convSidebarTab${sidebarView === "files" ? " convSidebarTabActive" : ""}`}
+                  onClick={() => setSidebarView("files")}
+                >
+                  {t("chat.sidebarFiles", "文件")}
+                </button>
               </div>
               <button
                 data-slot="pin"
@@ -7661,32 +8182,107 @@ export function ChatView({
                 <IconPin size={14} />
               </button>
             </div>
-            <button data-slot="new-chat" className="convNewBtn" onClick={newConversation}>
-              {t("chat.newConversation")}
-            </button>
-          </div>
-
-          <div className="convSidebarList">
-            {pinnedConvs.length > 0 && (
+            {sidebarView === "conversations" ? (
               <>
-                <div className="convSectionLabel">{t("chat.pinnedSection")}</div>
-                {pinnedConvs.map(renderConvItem)}
+                <div className="convSearchBox">
+                  <IconSearch size={13} style={{ opacity: 0.4, flexShrink: 0 }} />
+                  <input
+                    data-slot="search"
+                    className="convSearchInput"
+                    placeholder={t("chat.searchConversations") || "搜索会话..."}
+                    value={convSearchQuery}
+                    onChange={(e) => setConvSearchQuery(e.target.value)}
+                  />
+                  {convSearchQuery && (
+                    <button data-slot="clear" className="convSearchClear" onClick={() => setConvSearchQuery("")}>
+                      <IconX size={11} />
+                    </button>
+                  )}
+                </div>
+                <button data-slot="new-chat" className="convNewBtn" onClick={() => newConversation()}>
+                  {t("chat.newConversation")}
+                </button>
               </>
-            )}
-
-            {agentConvs.length > 0 && (
-              <>
-                <div className="convSectionLabel">{t("chat.conversationsLabel") || "会话"}</div>
-                {agentConvs.map(renderConvItem)}
-              </>
-            )}
-
-            {filteredConversations.length === 0 && (
-              <div className="convEmpty">
-                {convSearchQuery ? t("common.noResults") || "无结果" : t("common.noData")}
+            ) : (
+              <div className="fileTreeToolbar">
+                <div className="fileTreeDirectory" title={activeWorkingDirectory || activeWorkingDirectoryName}>
+                  <IconFolderOpen size={14} />
+                  <span>{activeWorkingDirectoryName}</span>
+                </div>
+                <button
+                  type="button"
+                  className="fileTreeToolbarBtn"
+                  onClick={refreshActiveFileTree}
+                  disabled={!activeConvId}
+                  title={t("chat.refreshFiles", "刷新文件")}
+                  aria-label={t("chat.refreshFiles", "刷新文件")}
+                >
+                  <IconRefresh size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="fileTreeToolbarBtn"
+                  onClick={collapseActiveFileTree}
+                  disabled={!activeConvId || !activeFileTree?.expandedPaths.length}
+                  title={t("chat.collapseAllFolders", "全部折叠")}
+                  aria-label={t("chat.collapseAllFolders", "全部折叠")}
+                >
+                  <IconChevronUp size={13} />
+                </button>
               </div>
             )}
           </div>
+
+          {sidebarView === "conversations" ? (
+            <div className="convSidebarList" role="tabpanel">
+              {pinnedConvs.length > 0 && (
+                <>
+                  <div className="convSectionLabel">{t("chat.pinnedSection")}</div>
+                  {pinnedConvs.map(renderConvItem)}
+                </>
+              )}
+
+              {agentConvs.length > 0 && (
+                <>
+                  <div className="convSectionLabel">{t("chat.conversationsLabel") || "会话"}</div>
+                  {agentConvs.map(renderConvItem)}
+                </>
+              )}
+
+              {filteredConversations.length === 0 && (
+                <div className="convEmpty">
+                  {convSearchQuery ? t("common.noResults") || "无结果" : t("common.noData")}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="fileTreePanel" role="tabpanel">
+              {!activeConvId ? (
+                <div className="fileTreeEmpty">{t("chat.noActiveConversation", "暂无活动会话")}</div>
+              ) : (
+                <>
+                  {activeFileTree?.error && (
+                    <div className="fileTreeError">
+                      <span>{t("chat.fileTreeLoadFailed", "无法加载文件列表")}</span>
+                      <button type="button" onClick={refreshActiveFileTree}>{t("common.retry", "重试")}</button>
+                    </div>
+                  )}
+                  {activeFileTree?.loadingPaths.includes("") && activeFileTree.childrenByPath[""] === undefined ? (
+                    <div className="fileTreeEmpty fileTreeLoading">
+                      <IconLoader size={14} />
+                      <span>{t("common.loading", "加载中...")}</span>
+                    </div>
+                  ) : activeFileTree?.childrenByPath[""]?.length === 0 ? (
+                    <div className="fileTreeEmpty">{t("chat.fileTreeEmpty", "当前目录为空")}</div>
+                  ) : (
+                    <div className="fileTree" role="tree" aria-label={t("chat.sidebarFiles", "文件")}>
+                      {renderFileTreeRows()}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </nav>
         </>
       )}
@@ -7696,6 +8292,10 @@ export function ChatView({
         <div className="agentOrbitTooltip agentOrbitTooltipVisible" style={{ left: orbitTip.x, top: orbitTip.y }}>
           <span className="agentOrbitTooltipName">{orbitTip.name}</span>
           <span className="agentOrbitTooltipTitle">{orbitTip.title}</span>
+          <span className="agentOrbitTooltipDirectory" title={orbitTip.directoryPath || orbitTip.directory}>
+            <IconFolderOpen size={10} />
+            <span>{orbitTip.directory}</span>
+          </span>
         </div>,
         document.body,
       )}
@@ -7743,6 +8343,60 @@ export function ChatView({
             <Button onClick={() => void saveContextLimit()} disabled={contextSaving}>
               {contextSaving ? t("common.saving", "保存中...") : t("chat.contextEditSave", "保存")}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={workingDirectoryDialogOpen} onOpenChange={setWorkingDirectoryDialogOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>{t("chat.selectWorkingDirectory", "选择工作目录")}</DialogTitle>
+            <DialogDescription className="sr-only">
+              {t("chat.selectWorkingDirectory", "选择工作目录")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-[260px] max-h-[420px] flex-col gap-2 overflow-auto">
+            {(browsingWorkingDirectory || workingDirectoryParent) && (
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-md border border-[var(--line)] px-3 py-2 text-left text-sm"
+                onClick={() => void loadWorkingDirectories(workingDirectoryParent || undefined)}
+              >
+                <IconChevronUp size={14} />
+                <span className="truncate">{workingDirectoryParent || t("chat.configuredDirectories", "可用目录")}</span>
+              </button>
+            )}
+            {workingDirectoryEntries.map((entry) => (
+              <div key={entry.path} className="flex items-center gap-2 rounded-md border border-[var(--line)] p-2">
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1 text-left text-sm"
+                  title={entry.path}
+                  onClick={() => void loadWorkingDirectories(entry.path)}
+                >
+                  <IconFolderOpen size={15} />
+                  <span className="truncate">{entry.name}</span>
+                  <IconChevronRight size={14} className="ml-auto shrink-0 opacity-50" />
+                </button>
+                <Button size="sm" variant="outline" onClick={() => createConversationInSelectedDirectory(entry.path)}>
+                  {t("common.select", "选择")}
+                </Button>
+              </div>
+            ))}
+            {!workingDirectoryLoading && workingDirectoryEntries.length === 0 && (
+              <div className="grid flex-1 place-items-center text-sm text-[var(--muted)]">
+                {t("common.noData", "暂无数据")}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWorkingDirectoryDialogOpen(false)}>
+              {t("common.cancel", "取消")}
+            </Button>
+            {browsingWorkingDirectory && (
+              <Button onClick={() => createConversationInSelectedDirectory(browsingWorkingDirectory)}>
+                {t("chat.useCurrentDirectory", "使用当前目录")}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

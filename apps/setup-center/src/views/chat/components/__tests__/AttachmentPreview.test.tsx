@@ -74,4 +74,24 @@ describe("AttachmentPreview image lightbox trigger", () => {
     expect(progress).toHaveAttribute("value", "42");
     expect(screen.getByText("处理中")).toBeInTheDocument();
   });
+
+  it("scopes local working-directory previews to the conversation", () => {
+    render(
+      <AttachmentPreview
+        att={{
+          source: "working_directory",
+          relativePath: "images/result.png",
+          type: "image",
+          name: "result.png",
+          localPath: "D:/projects/example/images/result.png",
+        }}
+        apiBaseUrl="http://127.0.0.1:18900"
+        conversationId="conversation-1"
+      />,
+    );
+
+    const image = screen.getByRole("img", { name: "result.png" });
+    expect(image.getAttribute("src")).toContain("conversation_id=conversation-1");
+    expect(image.getAttribute("src")).toContain("path=D%3A%2Fprojects%2Fexample%2Fimages%2Fresult.png");
+  });
 });
