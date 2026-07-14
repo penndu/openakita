@@ -16,7 +16,6 @@
 """
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...core.policy_v2 import ApprovalClass
@@ -157,6 +156,9 @@ class SystemHandler:
         from ...config import settings
 
         root = settings.project_root
+        from ...core.working_directory import current_working_directory
+
+        working_directory = current_working_directory()
 
         try:
             identity_rel = settings.identity_path.relative_to(root)
@@ -170,7 +172,8 @@ class SystemHandler:
         lines = [
             "## 工作区路径地图",
             "",
-            f"- **项目根目录**: {root}",
+            f"- **配置工作区**: {root}",
+            f"- **当前工作目录**: {working_directory}",
             f"- **用户数据目录**: {settings.openakita_home}",
             f"- **Identity**: {identity_rel}/ — 身份文档 (SOUL.md, AGENT.md, USER.md, MEMORY.md)",
             "- **Skills**: 技能系统是多源的，可能来自 builtin、用户工作区或项目目录。",
@@ -327,18 +330,28 @@ class SystemHandler:
                     else:
                         raise ImageGenerationError("provider returned no image payload")
 
+                    from ...core.working_directory import (
+                        current_working_directory,
+                        resolve_working_path,
+                    )
+
                     if output_path:
-                        out_path = Path(output_path)
+                        out_path = resolve_working_path(output_path)
                     else:
-                        out_dir = Path("data") / "generated_images"
-                        out_dir.mkdir(parents=True, exist_ok=True)
                         suffix = result.request_id or str(int(time.time()))
                         safe_model = re.sub(r"[^A-Za-z0-9._-]+", "_", result.model)[:80]
-                        out_path = out_dir / f"{safe_model}_{suffix}.png"
+                        out_path = (
+                            current_working_directory(require_available=True)
+                            / f"{safe_model}_{suffix}.png"
+                        )
                     out_path.parent.mkdir(parents=True, exist_ok=True)
                     out_path.write_bytes(img_bytes)
                 except Exception as exc:  # noqa: BLE001 - each provider participates in fallback
-                    detail = extract_connection_error(exc) if isinstance(exc, httpx.HTTPError) else str(exc)
+                    detail = (
+                        extract_connection_error(exc)
+                        if isinstance(exc, httpx.HTTPError)
+                        else str(exc)
+                    )
                     failures.append(f"{endpoint.name}: {detail}")
                     logger.warning("generate_image endpoint failed: %s", failures[-1])
                     continue

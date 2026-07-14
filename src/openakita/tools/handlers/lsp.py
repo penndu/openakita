@@ -298,7 +298,9 @@ class LSPHandler:
                 await self._open_file(conn, file_path)
             return conn
 
-        cwd = getattr(self.agent, "default_cwd", None) or os.getcwd()
+        from ...core.working_directory import current_working_directory
+
+        cwd = str(current_working_directory(require_available=True))
         process = await asyncio.create_subprocess_exec(
             *server_cmd,
             stdin=asyncio.subprocess.PIPE,

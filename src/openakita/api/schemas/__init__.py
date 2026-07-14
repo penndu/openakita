@@ -52,6 +52,9 @@ class ChatAttachmentRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    source: Literal["upload", "working_directory"] = "upload"
+    relative_path: str | None = Field(None, alias="relativePath")
+
     type: Literal["image", "file", "voice", "video", "document"] = Field(
         ..., description="Attachment kind rendered by the chat UI."
     )
@@ -86,13 +89,20 @@ class ChatAttachmentRecord(BaseModel):
     )
 
     def to_history_dict(self) -> dict[str, Any]:
-        return self.model_dump(by_alias=True, exclude_none=True)
+        return self.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
 
 
 class AttachmentInfo(BaseModel):
     """Attachment metadata accepted by chat request endpoints."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    source: Literal["upload", "working_directory"] = Field(
+        "upload", description="Attachment source"
+    )
+    relative_path: str | None = Field(
+        None, alias="relativePath", description="Path relative to the conversation directory"
+    )
 
     type: Literal["image", "file", "voice", "video", "document"] = Field(
         ..., description="image | file | voice | video | document"
@@ -106,6 +116,8 @@ class AttachmentInfo(BaseModel):
 
     def to_chat_attachment_record(self) -> ChatAttachmentRecord:
         payload: dict[str, Any] = {
+            "source": self.source,
+            "relativePath": self.relative_path,
             "type": self.type,
             "name": self.name,
             "url": self.url,
@@ -164,6 +176,11 @@ class ChatRequest(BaseModel):
         ),
     )
     attachments: list[AttachmentInfo] | None = Field(None, description="Attached files/images")
+    working_directory: str | None = Field(
+        None,
+        description="Immutable working directory used only when creating the conversation",
+        max_length=4096,
+    )
     thinking_mode: Literal["auto", "on", "off"] | None = Field(
         None,
         description="Thinking mode override: 'auto'(system decides), 'on'(force enable), 'off'(force disable). null=use system default.",

@@ -27,8 +27,23 @@ _WORKSPACE_ROOT_ALIASES: frozenset[str] = frozenset({"", ".", "./", "/"})
 _MAX_DIR_LISTING_ENTRIES = 500
 
 
-def _get_workspace_root(request: Request) -> Path:
+def _get_workspace_root(request: Request, conversation_id: str = "") -> Path:
     """Get the workspace root directory from the running agent."""
+    if conversation_id:
+        session_manager = getattr(request.app.state, "session_manager", None)
+        if session_manager is None:
+            raise HTTPException(status_code=503, detail="Session manager unavailable")
+        session = session_manager.get_session(
+            channel="desktop",
+            chat_id=conversation_id,
+            user_id="desktop_user",
+            create_if_missing=False,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        from ...core.working_directory import session_working_directory
+
+        return session_working_directory(session, require_available=True)
     agent = getattr(request.app.state, "agent", None)
 
     if agent is not None:
@@ -51,7 +66,12 @@ def _get_workspace_root(request: Request) -> Path:
 
 
 @router.get("")
-async def serve_file(request: Request, path: str = "", inline: str = ""):
+async def serve_file(
+    request: Request,
+    path: str = "",
+    inline: str = "",
+    conversation_id: str = "",
+):
     """
     Serve a file from the workspace directory.
 
@@ -70,7 +90,12 @@ async def serve_file(request: Request, path: str = "", inline: str = ""):
     response. The frontend file picker expects "list the root" to
     work without a special endpoint.
     """
-    workspace = _get_workspace_root(request)
+    try:
+        workspace = _get_workspace_root(request, conversation_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     if (path or "").strip() in _WORKSPACE_ROOT_ALIASES:
         return _list_directory(workspace, workspace)
@@ -91,10 +116,18 @@ async def serve_file(request: Request, path: str = "", inline: str = ""):
     # false positives (e.g. /home/user matching /home/user_docs) and
     # case-sensitivity issues on Windows.
     workspace_resolved = workspace.resolve()
-    safe_roots = [
-        workspace_resolved,
-        Path.home().resolve(),  # Allow files from user home (Downloads, etc.)
-    ]
+    safe_roots = [workspace_resolved]
+    if not conversation_id:
+        # Legacy callers without a conversation scope retain the historical
+        # home-directory allowance. New chat surfaces always send a scope.
+        safe_roots.append(Path.home().resolve())
+    if not conversation_id:
+        try:
+            from ...config import settings
+
+            safe_roots.append(Path(settings.data_dir).resolve())
+        except Exception:
+            pass
 
     is_safe = any(full_path.is_relative_to(root) for root in safe_roots)
     if not is_safe:

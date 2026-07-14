@@ -120,6 +120,7 @@ _orchestrator = None  # AgentOrchestrator（多 Agent 模式）
 _desktop_pool = None  # AgentInstancePool — Desktop Chat per-session 隔离
 _message_gateway = None
 _session_manager = None
+_CLI_LAUNCH_CWD = Path.cwd().resolve()
 
 
 def get_agent() -> Agent:
@@ -974,9 +975,26 @@ async def run_interactive():
         _cli_chat_id = _cid
         if _session_manager:
             cs = _session_manager.get_session(
-                channel="cli", chat_id=_cid, user_id="cli_user", create_if_missing=True
+                channel="cli",
+                chat_id=_cid,
+                user_id="cli_user",
+                create_if_missing=True,
+                working_directory=_cli_working_directory,
             )
             if cs:
+                from .core.working_directory import session_working_directory
+
+                if (
+                    _cli_cwd_explicit
+                    and not _cli_force_new_session
+                    and session_working_directory(cs) != Path(_cli_working_directory)
+                ):
+                    console.print(
+                        "[red]恢复的会话绑定了其他工作目录；请同时使用 --new --cwd。[/red]"
+                    )
+                    shutdown_event.set()
+                    init_done.set()
+                    return
                 # C14 re-audit (D2): mark CLI interactive sessions via the
                 # entry classifier so the architectural SoT is consistent
                 # (``run_interactive`` is already TTY-gated upstream, so
@@ -1187,6 +1205,7 @@ async def run_interactive():
                                 chat_id=_new_id,
                                 user_id="cli_user",
                                 create_if_missing=True,
+                                working_directory=_cli_working_directory,
                             )
                             if cli_session:
                                 agent_or_master._cli_session = cli_session
@@ -1418,6 +1437,8 @@ def show_skills():
 
 _cli_force_new_session = False
 _cli_permission_mode = "default"
+_cli_working_directory = str(_CLI_LAUNCH_CWD)
+_cli_cwd_explicit = False
 
 
 def _apply_auto_confirm_flag(*, enabled: bool) -> None:
@@ -1476,6 +1497,11 @@ def main(
             "为准；自动化场景请优先使用 --auto-confirm。"
         ),
     ),
+    cwd: str | None = typer.Option(
+        None,
+        "--cwd",
+        help="会话工作目录（默认使用启动 OpenAkita 时的当前目录）",
+    ),
 ):
     """
     OpenAkita - 全能自进化AI助手
@@ -1483,8 +1509,22 @@ def main(
     直接运行进入交互模式
     """
     global _cli_force_new_session, _cli_permission_mode
+    global _cli_working_directory, _cli_cwd_explicit
     _cli_force_new_session = new_session
     _cli_permission_mode = permission_mode
+    _cli_cwd_explicit = cwd is not None
+    if cwd is not None:
+        candidate = Path(cwd).expanduser()
+        if not candidate.is_absolute():
+            candidate = _CLI_LAUNCH_CWD / candidate
+        from .core.working_directory import normalize_working_directory
+
+        try:
+            _cli_working_directory = str(
+                normalize_working_directory(candidate, must_exist=True)
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--cwd") from exc
 
     # C18 Phase D: translate the CLI flag into the Phase C ENV var.
     # MUST happen before any policy_v2 import in a sub-command, hence we
@@ -1604,6 +1644,7 @@ def run(
             is_unattended=_cls.is_unattended,
             unattended_strategy=_cls.default_strategy or "",
             user_message=task,
+            working_directory=_cli_working_directory,
         )
         ctx_token = set_current_context(cli_ctx)
 

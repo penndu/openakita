@@ -15,7 +15,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from openakita.core.ask_user_context import AskUserReplyContext
@@ -37,6 +37,51 @@ from .conversation_lifecycle import get_lifecycle_manager
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _bootstrap_working_directory(
+    request: Request,
+    body: ChatRequest,
+    session_manager: object | None,
+):
+    """Create/validate the immutable conversation root before streaming starts."""
+    if session_manager is None or not body.conversation_id:
+        return None
+    requested: str | None = None
+    try:
+        from ...core.feature_flags import is_enabled
+
+        enabled = is_enabled("session_working_directory_v1")
+    except Exception:
+        enabled = True
+    if enabled and body.working_directory:
+        from ..working_directories import authorize_working_directory
+
+        requested = str(authorize_working_directory(request, body.working_directory))
+
+    existing = session_manager.get_session(
+        channel="desktop",
+        chat_id=body.conversation_id,
+        user_id="desktop_user",
+        create_if_missing=False,
+    )
+    if existing is not None and requested:
+        from ...core.working_directory import session_working_directory
+
+        if session_working_directory(existing) != __import__("pathlib").Path(requested):
+            raise HTTPException(status_code=409, detail="working_directory_locked")
+    session = existing or session_manager.get_session(
+        channel="desktop",
+        chat_id=body.conversation_id,
+        user_id="desktop_user",
+        create_if_missing=True,
+        working_directory=requested,
+    )
+    if session is not None:
+        from ..working_directories import resolve_chat_attachments
+
+        resolve_chat_attachments(body.attachments, session)
+    return session
 
 
 def _history_attachments_from_request(
@@ -2470,6 +2515,13 @@ async def chat(request: Request, body: ChatRequest):
         client_id = f"__server_fallback__::{conversation_id}"
     request_id = f"chat_{_uuid.uuid4().hex[:12]}"
     session_manager = getattr(request.app.state, "session_manager", None)
+    try:
+        _bootstrap_working_directory(request, body, session_manager)
+    except HTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": str(exc.detail), "message": str(exc.detail)},
+        )
 
     ask_reply_context = _ask_user_reply_context(body)
     if ask_reply_context is not None and not (body.message or "").strip():
@@ -3133,6 +3185,13 @@ async def chat_sync(request: Request, body: ChatRequest):
     conversation_id = body.conversation_id
     request_id = f"chat_sync_{_uuid.uuid4().hex[:12]}"
     session_manager = getattr(request.app.state, "session_manager", None)
+    try:
+        _bootstrap_working_directory(request, body, session_manager)
+    except HTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": str(exc.detail), "message": str(exc.detail)},
+        )
 
     ask_reply_context = _ask_user_reply_context(body)
     if ask_reply_context is not None and not (body.message or "").strip():

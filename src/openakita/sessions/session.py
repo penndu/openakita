@@ -594,6 +594,10 @@ class Session:
     chat_type: str = "private"  # "group" | "private"
     display_name: str = ""  # 用户昵称（用于 UI 展示）
     chat_name: str = ""  # 聊天/群组名称（群名、频道名等）
+    # User-file execution root. OpenAkita configuration and state continue to
+    # live under settings.project_root; this path is immutable for a logical
+    # conversation after creation.
+    working_directory: str = ""
 
     # 状态
     state: SessionState = SessionState.ACTIVE
@@ -649,11 +653,22 @@ class Session:
         chat_type: str = "private",
         display_name: str = "",
         chat_name: str = "",
+        working_directory: str | None = None,
     ) -> "Session":
         """创建新会话"""
         session_id = (
             f"{channel}_{chat_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
         )
+        from ..core.working_directory import (
+            config_workspace,
+            normalize_working_directory,
+            working_directory_feature_enabled,
+        )
+
+        if working_directory is None or not working_directory_feature_enabled():
+            working_directory = str(config_workspace())
+        else:
+            working_directory = str(normalize_working_directory(working_directory, must_exist=True))
         return cls(
             id=session_id,
             channel=channel,
@@ -664,6 +679,7 @@ class Session:
             chat_type=chat_type,
             display_name=display_name,
             chat_name=chat_name,
+            working_directory=working_directory,
             config=config or SessionConfig(),
         )
 
@@ -1029,6 +1045,7 @@ class Session:
             "chat_type": self.chat_type,
             "display_name": self.display_name,
             "chat_name": self.chat_name,
+            "working_directory": self.working_directory,
             "state": self.state.value,
             "created_at": self.created_at.isoformat(),
             "last_active": self.last_active.isoformat(),
@@ -1074,6 +1091,11 @@ class Session:
         is_unattended = bool(is_unattended_raw) if is_unattended_raw is not None else False
         us_raw = data.get("unattended_strategy", "")
         unattended_strategy = us_raw if isinstance(us_raw, str) else ""
+        working_directory = str(data.get("working_directory") or "")
+        if not working_directory:
+            from ..core.working_directory import config_workspace
+
+            working_directory = str(config_workspace())
         return cls(
             id=data["id"],
             channel=data["channel"],
@@ -1084,6 +1106,7 @@ class Session:
             chat_type=data.get("chat_type", "private"),
             display_name=data.get("display_name", ""),
             chat_name=data.get("chat_name", ""),
+            working_directory=working_directory,
             state=SessionState(data.get("state", "active")),
             created_at=datetime.fromisoformat(data["created_at"]),
             last_active=datetime.fromisoformat(data["last_active"]),

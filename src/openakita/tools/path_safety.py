@@ -16,7 +16,11 @@ class PathSafetyResult:
 
 
 def resolve_within_root(
-    path: str, roots: list[str | Path], *, max_len: int = 4096
+    path: str,
+    roots: list[str | Path],
+    *,
+    base_dir: str | Path | None = None,
+    max_len: int = 4096,
 ) -> PathSafetyResult:
     """Resolve a path and ensure it stays inside at least one allowed root."""
     raw = str(path or "")
@@ -32,7 +36,7 @@ def resolve_within_root(
     try:
         candidate = Path(raw)
         if not candidate.is_absolute():
-            candidate = Path.cwd() / candidate
+            candidate = Path(base_dir) / candidate if base_dir is not None else Path.cwd() / candidate
         resolved = candidate.resolve(strict=False)
     except (OSError, RuntimeError, ValueError) as exc:
         return PathSafetyResult(False, reason=f"resolve_error:{exc}")

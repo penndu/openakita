@@ -9,6 +9,7 @@ Inspired by Cursor's "terminal as file" abstraction:
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import sys
@@ -46,6 +47,7 @@ class TerminalSession:
 
     id: int
     cwd: str
+    namespace: str = "default"
     env: dict = field(default_factory=dict)
     execution_env_spec: Any = None
     last_command: str | None = None
@@ -63,7 +65,8 @@ class TerminalSession:
 
     @property
     def output_file(self) -> Path:
-        return self._get_terminal_dir() / f"{self.id}.txt"
+        namespace_hash = hashlib.sha256(self.namespace.encode("utf-8")).hexdigest()[:12]
+        return self._get_terminal_dir() / f"{namespace_hash}-{self.id}.txt"
 
     def _write_header(self, pid: int, command: str) -> None:
         self._started_at = time.time()
@@ -321,28 +324,31 @@ class TerminalSessionManager:
     """Manages multiple persistent terminal sessions."""
 
     def __init__(self, default_cwd: str | None = None, execution_env_spec: Any = None):
-        self.sessions: dict[int, TerminalSession] = {}
+        self.sessions: dict[tuple[str, int], TerminalSession] = {}
         self.default_cwd = default_cwd or os.getcwd()
         self.execution_env_spec = execution_env_spec
         self._next_id = 1
 
-    def get_or_create(self, session_id: int = 1) -> TerminalSession:
-        if session_id not in self.sessions:
-            self.sessions[session_id] = TerminalSession(
+    def get_or_create(self, session_id: int = 1, *, namespace: str = "default") -> TerminalSession:
+        key = (namespace or "default", session_id)
+        if key not in self.sessions:
+            self.sessions[key] = TerminalSession(
                 id=session_id,
                 cwd=self.default_cwd,
+                namespace=key[0],
                 execution_env_spec=self.execution_env_spec,
             )
             if session_id >= self._next_id:
                 self._next_id = session_id + 1
-        return self.sessions[session_id]
+        return self.sessions[key]
 
     def list_sessions(self) -> list[dict]:
         result = []
-        for sid, session in self.sessions.items():
+        for _key, session in self.sessions.items():
             result.append(
                 {
-                    "id": sid,
+                    "id": session.id,
+                    "namespace": session.namespace,
                     "cwd": session.cwd,
                     "last_command": session.last_command,
                     "last_exit_code": session.last_exit_code,
@@ -355,10 +361,11 @@ class TerminalSessionManager:
         self,
         command: str,
         session_id: int = 1,
+        namespace: str = "default",
         block_timeout_ms: int = 30000,
         working_directory: str | None = None,
     ) -> ShellResult:
-        session = self.get_or_create(session_id)
+        session = self.get_or_create(session_id, namespace=namespace)
         return await session.execute(
             command,
             block_timeout_ms=block_timeout_ms,

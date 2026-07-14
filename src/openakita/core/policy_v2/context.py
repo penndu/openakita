@@ -154,6 +154,7 @@ class PolicyContext:
     """PolicyEngineV2 决策上下文。"""
 
     session_id: str
+    working_directory: Path = Path(".")
     workspace_roots: tuple[Path, ...] = (Path("."),)
     workspace: InitVar[Path | str | None] = None
 
@@ -235,6 +236,16 @@ class PolicyContext:
             self.confirmation_mode = _coerce_mode(self.confirmation_mode)
         roots_raw = workspace if workspace is not None else self.workspace_roots
         self.workspace_roots = _coerce_workspace_roots(roots_raw)
+        try:
+            from ..working_directory import config_workspace, working_directory_feature_enabled
+
+            self.working_directory = (
+                Path(self.working_directory).expanduser().resolve(strict=False)
+                if working_directory_feature_enabled()
+                else config_workspace()
+            )
+        except (OSError, RuntimeError, ValueError):
+            self.working_directory = Path(".").resolve(strict=False)
 
     @classmethod
     def from_session(cls, session: Any, **overrides: Any) -> PolicyContext:
@@ -272,9 +283,12 @@ class PolicyContext:
         session_ws = getattr(session, "workspace_roots", None) or getattr(
             session, "workspace", None
         )
+        from ..working_directory import session_working_directory
+
+        session_cwd = session_working_directory(session)
         roots_seq: list[Path] = []
         seen: set[str] = set()
-        for raw in (*config_roots, session_ws):
+        for raw in (*config_roots, session_ws, session_cwd):
             if not raw:
                 continue
             for p in _coerce_workspace_roots(raw):
@@ -293,6 +307,7 @@ class PolicyContext:
 
         ctx = cls(
             session_id=str(session_id),
+            working_directory=session_cwd,
             workspace_roots=workspace_raw,
             channel=str(meta.get("channel", "desktop")),
             is_owner=bool(meta.get("is_owner", True)),
@@ -337,6 +352,7 @@ class PolicyContext:
         chain = list(self.delegate_chain) + [child_agent_name]
         return PolicyContext(
             session_id=child_session_id,
+            working_directory=self.working_directory,
             workspace_roots=self.workspace_roots,
             channel=self.channel,
             is_owner=self.is_owner,

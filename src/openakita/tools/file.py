@@ -104,8 +104,18 @@ class FileTool:
         """解析路径（支持相对路径和绝对路径）"""
         p = Path(path)
         if p.is_absolute():
-            return p
-        return self.base_path / p
+            return p.expanduser().resolve(strict=False)
+        from ..core.policy_v2.context import get_current_context
+        from ..core.working_directory import (
+            current_working_directory,
+            normalize_working_directory,
+        )
+
+        if get_current_context() is not None:
+            root = current_working_directory(require_available=True)
+        else:
+            root = normalize_working_directory(self.base_path, must_exist=True)
+        return (root / p).resolve(strict=False)
 
     # 二进制文件扩展名
     BINARY_EXTENSIONS = {

@@ -638,7 +638,10 @@ def build_system_prompt(
         system_parts.append(mode_rules)
 
     # 6. Runtime 层（所有 prompt_mode 都注入）
-    runtime_section = _build_runtime_section()
+    working_directory = None
+    if isinstance(session_context, dict):
+        working_directory = session_context.get("working_directory")
+    runtime_section = _build_runtime_section(working_directory)
     system_parts.append(runtime_section)
 
     # 6.5 会话元数据（session_context 和 model_display_name）
@@ -709,7 +712,7 @@ def build_system_prompt(
         and mode != "ask"
         and _include_project_guidelines
     ):
-        agents_md_content = _cached_section("agents_md", _read_agents_md)
+        agents_md_content = _read_agents_md(working_directory)
         if agents_md_content:
             from ..utils.context_scan import scan_context_content
 
@@ -1280,21 +1283,26 @@ _runtime_section_cache: tuple[float, str, str] | None = None  # (timestamp, cwd,
 _RUNTIME_CACHE_TTL = 30.0
 
 
-def _build_runtime_section() -> str:
+def _build_runtime_section(working_directory: str | None = None) -> str:
     """构建 Runtime 层，带 30s TTL 缓存（减少 which_command 等 I/O）。"""
     global _runtime_section_cache
-    cwd = os.getcwd()
+    if working_directory:
+        cwd = str(Path(working_directory).expanduser().resolve(strict=False))
+    else:
+        from ..core.working_directory import current_working_directory
+
+        cwd = str(current_working_directory())
     now = _time.monotonic()
     if _runtime_section_cache:
         ts, cached_cwd, cached_result = _runtime_section_cache
         if now - ts < _RUNTIME_CACHE_TTL and cached_cwd == cwd:
             return cached_result
-    result = _build_runtime_section_uncached()
+    result = _build_runtime_section_uncached(cwd)
     _runtime_section_cache = (now, cwd, result)
     return result
 
 
-def _build_runtime_section_uncached() -> str:
+def _build_runtime_section_uncached(working_directory: str | None = None) -> str:
     """构建 Runtime 层（运行时信息）"""
     import locale as _locale
     import sys as _sys
@@ -1379,13 +1387,16 @@ def _build_runtime_section_uncached() -> str:
         path_tools.append(cmd)
     path_tools_str = ", ".join(path_tools) if path_tools else "无"
 
+    current_cwd = working_directory or str(settings.project_root)
+
     return f"""## 运行环境
 
 - **OpenAkita 版本**: {version_str}
 - **部署模式**: {deploy_mode}
 - **当前时间**: {current_time}
 - **操作系统**: {platform.system()} {platform.release()} ({platform.machine()})
-- **当前工作目录**: {os.getcwd()}
+- **配置工作区**: {settings.project_root}
+- **当前工作目录**: {current_cwd}
 - **OpenAkita 数据根目录**: {settings.openakita_home}
 - **工作区信息**: 需要操作系统文件（日志/配置/数据/截图等）时，先调用 `get_workspace_map` 获取目录布局
 - **临时目录**: data/temp/{shell_hint}

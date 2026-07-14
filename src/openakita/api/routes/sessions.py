@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import copy
 import logging
+import mimetypes
+import os
 import re
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -84,6 +87,7 @@ class SessionCreateRequest(BaseModel):
     org_mode: bool = Field(False, alias="orgMode")
     org_id: str | None = Field(None, alias="orgId", max_length=128)
     org_node_id: str | None = Field(None, alias="orgNodeId", max_length=128)
+    working_directory: str | None = Field(None, alias="workingDirectory", max_length=4096)
 
 
 class SessionTitleRequest(BaseModel):
@@ -226,6 +230,8 @@ def _session_list_item(session, visible_msgs: list[dict] | None = None, last_ms:
     if not isinstance(ui_org_state, dict):
         ui_org_state = {}
 
+    from ...core.working_directory import session_working_directory
+
     return {
         "id": session.chat_id,
         "title": title or "对话",
@@ -241,6 +247,7 @@ def _session_list_item(session, visible_msgs: list[dict] | None = None, last_ms:
         "orgMode": bool(ui_org_state.get("orgMode") and ui_org_state.get("orgId")),
         "orgId": ui_org_state.get("orgId") or None,
         "orgNodeId": ui_org_state.get("orgNodeId") or None,
+        "workingDirectory": str(session_working_directory(session)),
     }
 
 
@@ -710,11 +717,26 @@ async def create_session(
         user_id=user_id,
         create_if_missing=False,
     )
+    requested_working_directory = None
+    from ...core.working_directory import working_directory_feature_enabled
+
+    if body.working_directory and working_directory_feature_enabled():
+        from ..working_directories import authorize_working_directory
+
+        requested_working_directory = str(
+            authorize_working_directory(request, body.working_directory)
+        )
+    if existing is not None and requested_working_directory:
+        from ...core.working_directory import session_working_directory
+
+        if session_working_directory(existing) != Path(requested_working_directory):
+            raise HTTPException(status_code=409, detail="working_directory_locked")
     session = existing or session_manager.get_session(
         channel=channel,
         chat_id=conversation_id,
         user_id=user_id,
         create_if_missing=True,
+        working_directory=requested_working_directory,
     )
     if session is None:
         raise HTTPException(status_code=500, detail="failed to create session")
@@ -989,6 +1011,8 @@ async def get_session_history(
     except Exception:
         active_todo = None
 
+    from ...core.working_directory import session_working_directory
+
     return {
         "messages": result,
         "total": len(all_visible),
@@ -996,6 +1020,270 @@ async def get_session_history(
         "end_index": end_index,
         "has_more_before": bool(page and any(idx < page[0][0] for idx, _ in visible)),
         "active_todo": active_todo,
+        "workingDirectory": str(session_working_directory(session)),
+    }
+
+
+@router.get("/api/sessions/{conversation_id}/files/search")
+async def search_session_files(
+    request: Request,
+    conversation_id: str,
+    q: str = Query("", max_length=256),
+    limit: int = Query(50, ge=1, le=100),
+    channel: str = "desktop",
+    user_id: str = "desktop_user",
+):
+    """Search regular files inside a conversation's immutable directory."""
+    _validate_id(conversation_id, "conversation_id")
+    session_manager = getattr(request.app.state, "session_manager", None)
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager unavailable")
+    session = session_manager.get_session(
+        channel=channel,
+        chat_id=conversation_id,
+        user_id=user_id,
+        create_if_missing=False,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    from ...core.working_directory import WorkingDirectoryError, session_working_directory
+    from ...tools.file import DEFAULT_IGNORE_DIRS, GREP_EXTRA_BLOCKED_DIR_NAMES
+
+    try:
+        root = session_working_directory(session, require_available=True)
+    except WorkingDirectoryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    needle = q.strip().lower()
+    results: list[dict] = []
+    dirs_seen = 0
+    files_seen = 0
+    ignored = DEFAULT_IGNORE_DIRS | GREP_EXTRA_BLOCKED_DIR_NAMES
+    for current, dirs, files in os.walk(root, followlinks=False):
+        dirs_seen += 1
+        if dirs_seen > 3000 or files_seen > 10000:
+            break
+        dirs[:] = [d for d in dirs if d not in ignored and not (Path(current) / d).is_symlink()]
+        for filename in files:
+            files_seen += 1
+            if files_seen > 10000:
+                break
+            candidate = Path(current) / filename
+            try:
+                resolved = candidate.resolve(strict=True)
+                relative = resolved.relative_to(root).as_posix()
+                if not resolved.is_file() or (needle and needle not in relative.lower()):
+                    continue
+                stat = resolved.stat()
+            except (OSError, RuntimeError, ValueError):
+                continue
+            mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            results.append(
+                {
+                    "name": filename,
+                    "relativePath": relative,
+                    "mimeType": mime_type,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                }
+            )
+            if len(results) >= limit:
+                break
+        if len(results) >= limit:
+            break
+    return {
+        "workingDirectory": str(root),
+        "files": results,
+        "truncated": len(results) >= limit or dirs_seen > 3000 or files_seen > 10000,
+    }
+
+
+def _resolve_file_tree_parent(root: Path, parent: str) -> tuple[Path, str]:
+    """Resolve a client-supplied relative directory without following links."""
+    raw = parent
+    if len(raw) > 4096 or any(ord(ch) < 32 for ch in raw):
+        raise HTTPException(status_code=422, detail="Invalid parent path")
+    relative = Path(raw) if raw else Path()
+    if (
+        relative.is_absolute()
+        or relative.anchor
+        or relative.drive
+        or any(part == ".." for part in relative.parts)
+    ):
+        raise HTTPException(status_code=403, detail="Parent must stay within working directory")
+
+    current = root
+    for part in relative.parts:
+        if part in ("", "."):
+            continue
+        current = current / part
+        try:
+            if current.is_symlink():
+                raise HTTPException(status_code=403, detail="Symbolic links are not allowed")
+        except OSError as exc:
+            raise HTTPException(status_code=409, detail="Working directory is unavailable") from exc
+
+    try:
+        resolved = current.resolve(strict=True)
+        resolved.relative_to(root)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Directory not found") from exc
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail="Parent must stay within working directory") from exc
+    if not resolved.is_dir():
+        raise HTTPException(status_code=422, detail="Parent is not a directory")
+    normalized = resolved.relative_to(root).as_posix()
+    return resolved, "" if normalized == "." else normalized
+
+
+def _file_tree_directory_has_children(directory: Path, ignored: set[str]) -> bool:
+    try:
+        for child in directory.iterdir():
+            if child.name in ignored or child.is_symlink():
+                continue
+            if child.is_dir() or child.is_file():
+                return True
+    except OSError:
+        return False
+    return False
+
+
+@router.get("/api/sessions/{conversation_id}/files/tree")
+async def list_session_file_tree(
+    request: Request,
+    conversation_id: str,
+    parent: str = Query("", max_length=4096),
+    limit: int = Query(500, ge=1, le=500),
+    channel: str = "desktop",
+    user_id: str = "desktop_user",
+):
+    """List one directory level inside a conversation's immutable directory."""
+    _validate_id(conversation_id, "conversation_id")
+    session_manager = getattr(request.app.state, "session_manager", None)
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager unavailable")
+    session = session_manager.get_session(
+        channel=channel,
+        chat_id=conversation_id,
+        user_id=user_id,
+        create_if_missing=False,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    from ...core.working_directory import WorkingDirectoryError, session_working_directory
+    from ...tools.file import DEFAULT_IGNORE_DIRS, GREP_EXTRA_BLOCKED_DIR_NAMES
+
+    try:
+        root = session_working_directory(session, require_available=True)
+    except WorkingDirectoryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    directory, normalized_parent = _resolve_file_tree_parent(root, parent)
+    ignored = DEFAULT_IGNORE_DIRS | GREP_EXTRA_BLOCKED_DIR_NAMES
+    visible: list[Path] = []
+    try:
+        for child in directory.iterdir():
+            if child.name in ignored or child.is_symlink():
+                continue
+            if child.is_dir() or child.is_file():
+                visible.append(child)
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail="Working directory is unavailable") from exc
+
+    visible.sort(key=lambda item: (not item.is_dir(), item.name.lower(), item.name))
+    entries: list[dict] = []
+    for child in visible[:limit]:
+        relative_path = child.relative_to(root).as_posix()
+        if child.is_dir():
+            entries.append(
+                {
+                    "name": child.name,
+                    "relativePath": relative_path,
+                    "kind": "directory",
+                    "hasChildren": _file_tree_directory_has_children(child, ignored),
+                }
+            )
+            continue
+        try:
+            stat = child.stat()
+        except OSError:
+            continue
+        entries.append(
+            {
+                "name": child.name,
+                "relativePath": relative_path,
+                "kind": "file",
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+                "mimeType": mimetypes.guess_type(child.name)[0] or "application/octet-stream",
+            }
+        )
+    return {
+        "workingDirectory": str(root),
+        "parent": normalized_parent,
+        "entries": entries,
+        "truncated": len(visible) > limit,
+    }
+
+
+@router.get("/api/working-directories")
+async def browse_working_directories(
+    request: Request,
+    parent: str | None = Query(None, max_length=4096),
+):
+    """List administrator-approved roots or one level of their subdirectories."""
+    from ..working_directories import authorize_working_directory, configured_working_roots
+
+    if parent:
+        directory = authorize_working_directory(request, parent)
+        roots = configured_working_roots()
+    else:
+        roots = configured_working_roots()
+        return {
+            "directory": None,
+            "parent": None,
+            "directories": [
+                {"name": root.name or str(root), "path": str(root)}
+                for root in roots
+                if root.is_dir()
+            ],
+        }
+
+    children: list[dict[str, str]] = []
+    try:
+        for child in sorted(directory.iterdir(), key=lambda item: item.name.lower()):
+            try:
+                if child.is_symlink() or not child.is_dir():
+                    continue
+                resolved = child.resolve(strict=True)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            children.append({"name": child.name, "path": str(resolved)})
+            if len(children) >= 500:
+                break
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Cannot browse directory: {exc}") from exc
+
+    parent_path: str | None = None
+    for root in roots:
+        if directory == root:
+            break
+        try:
+            candidate = directory.parent.resolve(strict=True)
+        except (OSError, RuntimeError, ValueError):
+            break
+        from ...core.working_directory import is_within
+
+        if is_within(candidate, root):
+            parent_path = str(candidate)
+            break
+    return {
+        "directory": str(directory),
+        "parent": parent_path,
+        "directories": children,
+        "truncated": len(children) >= 500,
     }
 
 

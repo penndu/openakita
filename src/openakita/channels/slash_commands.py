@@ -44,7 +44,7 @@ COMMAND_REGISTRY: list[SlashCommand] = [
     SlashCommand(
         name="/new",
         aliases=["/新话题", "/reset"],
-        description="开启新话题，清除对话上下文",
+        description="开启新话题；Owner 可用 /new --cwd \"路径\" 绑定工作目录",
         category="conversation",
     ),
     SlashCommand(

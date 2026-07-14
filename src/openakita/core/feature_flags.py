@@ -53,6 +53,8 @@ _DEFAULTS: dict[str, bool] = {
     "intent_tool_slim_v1": True,
     # P1-2
     "text_replace_on_restart_v1": True,
+    # Conversation config-workspace / working-directory split.
+    "session_working_directory_v1": True,
 }
 
 

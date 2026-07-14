@@ -337,6 +337,7 @@ class SessionManager:
         chat_type: str = "private",
         display_name: str = "",
         chat_name: str = "",
+        working_directory: str | None = None,
     ) -> Session | None:
         """
         获取或创建会话
@@ -405,6 +406,7 @@ class SessionManager:
                     display_name=display_name,
                     chat_name=chat_name,
                     bot_instance_id=bot_instance_id,
+                    working_directory=working_directory,
                 )
                 self._sessions[session_key] = session
                 self._attach_manager(session)
@@ -515,6 +517,7 @@ class SessionManager:
         display_name: str = "",
         chat_name: str = "",
         bot_instance_id: str | None = None,
+        working_directory: str | None = None,
     ) -> Session:
         """创建新会话"""
         # 合并配置
@@ -532,6 +535,7 @@ class SessionManager:
             chat_type=chat_type,
             display_name=display_name,
             chat_name=chat_name,
+            working_directory=working_directory,
         )
 
         # 设置记忆范围

@@ -11,7 +11,7 @@ function normalizeAttachmentUrl(raw: string, apiBaseUrl?: string): string {
   return raw;
 }
 
-function resolvePreviewUrls(att: ChatAttachment, apiBaseUrl?: string): { displayUrl: string; downloadUrl: string } {
+function resolvePreviewUrls(att: ChatAttachment, apiBaseUrl?: string, conversationId?: string): { displayUrl: string; downloadUrl: string } {
   const displayRaw = att.previewUrl || att.url || "";
   const downloadRaw = att.url || att.previewUrl || "";
   const displayUrl = normalizeAttachmentUrl(displayRaw, apiBaseUrl);
@@ -20,7 +20,9 @@ function resolvePreviewUrls(att: ChatAttachment, apiBaseUrl?: string): { display
     return { displayUrl: displayUrl || downloadUrl, downloadUrl: downloadUrl || displayUrl };
   }
   if (att.localPath) {
-    const fileUrl = appendAuthToken(`${apiBaseUrl || ""}/api/files?path=${encodeURIComponent(att.localPath)}`);
+    const params = new URLSearchParams({ path: att.localPath });
+    if (conversationId) params.set("conversation_id", conversationId);
+    const fileUrl = appendAuthToken(`${apiBaseUrl || ""}/api/files?${params.toString()}`);
     return { displayUrl: fileUrl, downloadUrl: fileUrl };
   }
   return { displayUrl: "", downloadUrl: "" };
@@ -39,11 +41,13 @@ export function AttachmentPreview({
   att,
   onRemove,
   apiBaseUrl,
+  conversationId,
   onImagePreview,
 }: {
   att: ChatAttachment;
   onRemove?: () => void;
   apiBaseUrl?: string;
+  conversationId?: string;
   onImagePreview?: (displayUrl: string, downloadUrl: string, name: string) => void;
 }) {
   const isUploading = att.uploadStatus === "uploading";
@@ -51,7 +55,7 @@ export function AttachmentPreview({
   const hasProgress = Number.isFinite(rawProgress);
   const progressValue = hasProgress ? Math.max(0, Math.min(100, Math.round(rawProgress * 100))) : undefined;
   const { displayUrl: previewUrl, downloadUrl } = att.type === "image" && !isUploading
-    ? resolvePreviewUrls(att, apiBaseUrl)
+    ? resolvePreviewUrls(att, apiBaseUrl, conversationId)
     : { displayUrl: "", downloadUrl: "" };
   if (att.type === "image" && previewUrl) {
     return (

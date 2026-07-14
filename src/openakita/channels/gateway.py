@@ -1164,6 +1164,16 @@ class MessageGateway:
                     timeout_seconds=settings.scheduler_task_timeout,
                 )
 
+                source_session = self.session_manager.get_session(
+                    channel=message.channel,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    thread_id=message.thread_id,
+                    bot_instance_id=self._get_message_bot_instance_id(message),
+                    create_if_missing=False,
+                )
+                from ..core.working_directory import session_working_directory
+
                 task = ScheduledTask(
                     id=bg_id,
                     name=f"后台任务: {prompt[:30]}",
@@ -1177,6 +1187,11 @@ class MessageGateway:
                     user_id=message.user_id,
                     task_source=TaskSource.CHAT,
                     delivery_policy=TaskDeliveryPolicy.OWNER_ONLY,
+                    working_directory=(
+                        str(session_working_directory(source_session))
+                        if source_session is not None
+                        else ""
+                    ),
                 )
 
                 success, result = await executor.execute(task)
@@ -4118,7 +4133,16 @@ class MessageGateway:
             # 检查是否是上下文重置命令（开启新话题）
             _CONTEXT_RESET_COMMANDS = {"/new", "/reset", "/clear", "/新话题", "/新任务", "新对话"}
             _user_cmd = user_text.strip()
-            if _user_cmd in _CONTEXT_RESET_COMMANDS or _user_cmd.lower() in _CONTEXT_RESET_COMMANDS:
+            _new_cwd_match = re.match(
+                r'^/new\s+--cwd\s+(?:"([^"]+)"|(.+))$',
+                _user_cmd,
+                flags=re.IGNORECASE,
+            )
+            if (
+                _user_cmd in _CONTEXT_RESET_COMMANDS
+                or _user_cmd.lower() in _CONTEXT_RESET_COMMANDS
+                or _new_cwd_match is not None
+            ):
                 _reset_session = self.session_manager.get_session(
                     channel=message.channel,
                     chat_id=message.chat_id,
@@ -4126,6 +4150,31 @@ class MessageGateway:
                     thread_id=message.thread_id,
                     bot_instance_id=self._get_message_bot_instance_id(message),
                 )
+                _new_working_directory = None
+                if _new_cwd_match is not None:
+                    owner_ids = self._get_owner_user_ids(message.channel)
+                    is_owner = True if owner_ids is None else str(message.user_id) in owner_ids
+                    if not is_owner:
+                        await self._send_response(message, "只有 Owner 可以绑定工作目录。")
+                        return
+                    raw_cwd = (_new_cwd_match.group(1) or _new_cwd_match.group(2) or "").strip()
+                    try:
+                        from ..api.working_directories import configured_working_roots
+                        from ..core.working_directory import (
+                            is_within,
+                            normalize_working_directory,
+                        )
+
+                        candidate_cwd = normalize_working_directory(raw_cwd, must_exist=True)
+                        if not any(
+                            is_within(candidate_cwd, root)
+                            for root in configured_working_roots()
+                        ):
+                            raise ValueError("目录不在管理员预配的路径范围内")
+                        _new_working_directory = str(candidate_cwd)
+                    except ValueError as exc:
+                        await self._send_response(message, f"无法绑定工作目录：{exc}")
+                        return
                 if _reset_session:
                     _old_count = len(_reset_session.context.messages)
                     _reset_session.context.clear_messages()
@@ -4133,6 +4182,10 @@ class MessageGateway:
                     _reset_session.context.summary = None
                     _reset_session.context.variables.pop("task_description", None)
                     _reset_session.context.variables.pop("task_status", None)
+                    if _new_working_directory is not None:
+                        # /new is the IM conversation boundary. The directory
+                        # remains immutable for all subsequent turns.
+                        _reset_session.working_directory = _new_working_directory
                     self.session_manager.mark_dirty()
                     # 同步清理 SQLite 中的 conversation_turns，防止 getChatHistory 兜底加载旧数据
                     try:
@@ -4149,9 +4202,10 @@ class MessageGateway:
                     logger.info(
                         f"[IM] Context reset for {session_key}: cleared {_old_count} messages"
                     )
-                await self._send_response(
-                    message, "好的，已开启新话题。之前的对话上下文已清除，请说说你的新需求吧~"
-                )
+                response = "好的，已开启新话题。之前的对话上下文已清除，请说说你的新需求吧~"
+                if _new_working_directory:
+                    response += f"\n当前工作目录：`{_new_working_directory}`"
+                await self._send_response(message, response)
                 return
 
             # 停止/跳过指令兜底（非处理中状态下收到这些指令，直接返回提示）
