@@ -1,12 +1,24 @@
 name: Docker Publish
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要构建并打到镜像上的 tag（例如 v1.2.7）。留空则使用当前 ref。"
+        required: false
+        default: ""
+      ref:
+        description: "要构建的 commit SHA 或分支（留空则用 tag 指向的 commit）"
+        required: false
+        default: ""
   push:
     tags:
       - "*"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RELEASE_TAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
+  CHECKOUT_REF: ${{ (github.event_name == 'workflow_dispatch' && inputs.ref != '' && inputs.ref) || (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
 
 concurrency:
   group: docker-publish-${{ github.ref }}
@@ -20,6 +32,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
 
       - name: Validate Docker Hub configuration
         env:
@@ -54,11 +68,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ secrets.DOCKERHUB_IMAGE }}
+          # value=${{ env.RELEASE_TAG }} 让 semver/raw 都以 RELEASE_TAG 为准，
+          # 这样 push tag 与 workflow_dispatch 手动指定 tag 两种入口行为一致，
+          # 而不再隐式依赖 tag push 事件（否则手动触发时 type=ref/semver 不生成）。
           tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref_name, 'v') && !contains(github.ref_name, '-') }}
+            type=raw,value=${{ env.RELEASE_TAG }}
+            type=semver,pattern={{version}},value=${{ env.RELEASE_TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.RELEASE_TAG }}
+            type=raw,value=latest,enable=${{ startsWith(env.RELEASE_TAG, 'v') && !contains(env.RELEASE_TAG, '-') }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
