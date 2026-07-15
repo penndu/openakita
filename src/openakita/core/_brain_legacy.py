@@ -420,7 +420,7 @@ class Brain:
                 yield ("error", exc)
                 return
             decision = acc.build_decision()
-            yield ("done", decision)
+            yield ("done", (decision, dict(acc.usage or {})))
             logger.info(
                 f"[LLM] think_lightweight_stream completed via {label} endpoint "
                 f"(yielded_text={yielded_text})"
@@ -445,6 +445,7 @@ class Brain:
                     self._compiler_on_failure(str(payload))
                 break
             elif kind == "done":
+                _decision, _usage = payload
                 if use_compiler:
                     self._compiler_on_success()
                 self._dump_llm_response(
@@ -452,7 +453,7 @@ class Brain:
                     caller=f"think_lightweight_stream_{primary_label}",
                     request_id=req_id,
                 )
-                yield {"type": "done"}
+                yield {"type": "done", "usage": _usage}
                 return
 
         # 失败回退：仅当 compiler 链路报错且主端点尚未被使用时
@@ -481,12 +482,13 @@ class Brain:
                     yield {"type": "done"}
                     return
                 elif kind == "done":
+                    _decision, _usage = payload
                     self._dump_llm_response(
                         None,
                         caller="think_lightweight_stream_main_fallback",
                         request_id=req_id,
                     )
-                    yield {"type": "done"}
+                    yield {"type": "done", "usage": _usage}
                     return
 
         if compiler_failed_exc is not None and not use_compiler:

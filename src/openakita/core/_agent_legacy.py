@@ -7040,6 +7040,44 @@ class Agent:
                 """
                 _stream_text = ""
                 _stream_failed = False
+                from ._context_manager_legacy import ContextManager
+                from .context_stats import update_context_snapshot
+
+                _context_base = ContextManager.static_estimate_tokens(_system or "")
+                _context_base += ContextManager.static_estimate_tokens(message or "")
+                _context_output_tokens = 0
+                _context_last_tokens = _context_base
+                _context_last_emit = time.monotonic()
+
+                def _context_event(
+                    tokens: int,
+                    *,
+                    source: str,
+                    usage_estimated: bool,
+                    usage: dict | None = None,
+                ) -> dict | None:
+                    snapshot = update_context_snapshot(
+                        self,
+                        conversation_id,
+                        usage=usage,
+                        source=source,
+                        measured_context_tokens=tokens,
+                    )
+                    if snapshot is None:
+                        return None
+                    event = snapshot.to_dict()
+                    event["type"] = "context_usage"
+                    event["usage_estimated"] = usage_estimated
+                    return event
+
+                _initial_context_event = _context_event(
+                    _context_base,
+                    source="stream_estimate",
+                    usage_estimated=True,
+                )
+                if _initial_context_event is not None:
+                    yield _initial_context_event
+
                 # —— 路径 A：尝试真流式 ——
                 try:
                     async for _evt in self.brain.think_lightweight_stream(
@@ -7062,7 +7100,98 @@ class Agent:
                                 f"{_evt.get('message', '')}"
                             )
                         elif _et == "done":
+                            _usage = dict(_evt.get("usage") or {})
+                            result_holder["usage"] = _usage or None
+                            _in_tokens = int(
+                                _usage.get("input_tokens") or _usage.get("prompt_tokens") or 0
+                            )
+                            _out_tokens = int(
+                                _usage.get("output_tokens") or _usage.get("completion_tokens") or 0
+                            )
+                            _final_tokens = (
+                                _in_tokens + _out_tokens
+                                if (_in_tokens or _out_tokens)
+                                else _context_base + _context_output_tokens
+                            )
+                            _final_context_event = _context_event(
+                                _final_tokens,
+                                source=(
+                                    "provider" if (_in_tokens or _out_tokens) else "stream_estimate"
+                                ),
+                                usage_estimated=not bool(_in_tokens or _out_tokens),
+                                usage=_usage,
+                            )
+                            if _final_context_event is not None:
+                                yield _final_context_event
+                            if _in_tokens or _out_tokens:
+                                try:
+                                    from .token_tracking import record_usage as _record_usage
+
+                                    _cache_read = int(_usage.get("cache_read_input_tokens") or 0)
+                                    _cache_create = int(
+                                        _usage.get("cache_creation_input_tokens") or 0
+                                    )
+                                    _endpoint_info = self.brain.get_current_endpoint_info() or {}
+                                    _endpoint_name = _endpoint_info.get("name", "")
+                                    _model = _endpoint_info.get("model", "")
+                                    _cost = 0.0
+                                    for _endpoint in self.brain._llm_client.endpoints:
+                                        if _endpoint.name == _endpoint_name:
+                                            _cost = _endpoint.calculate_cost(
+                                                input_tokens=_in_tokens,
+                                                output_tokens=_out_tokens,
+                                                cache_read_tokens=_cache_read,
+                                            )
+                                            break
+                                    _tracking_token = set_tracking_context(
+                                        TokenTrackingContext(
+                                            session_id=conversation_id or "",
+                                            request_id=_request_id,
+                                            turn_id=_turn_id,
+                                            operation_type="chat_fast_reply_stream",
+                                            operation_detail="provider",
+                                            channel="api",
+                                            agent_profile_id=_agent_profile_id,
+                                        )
+                                    )
+                                    try:
+                                        _record_usage(
+                                            model=_model,
+                                            endpoint_name=_endpoint_name,
+                                            input_tokens=_in_tokens,
+                                            output_tokens=_out_tokens,
+                                            cache_creation_tokens=_cache_create,
+                                            cache_read_tokens=_cache_read,
+                                            context_tokens=_in_tokens + _out_tokens,
+                                            estimated_cost=_cost,
+                                        )
+                                    finally:
+                                        reset_tracking_context(_tracking_token)
+                                except Exception as _tracking_error:
+                                    logger.debug(
+                                        "[FastReply-Stream] token tracking failed: %s",
+                                        _tracking_error,
+                                    )
                             break
+
+                        if _et in ("text_delta", "thinking_delta"):
+                            _piece = str(_evt.get("content") or "")
+                            _context_output_tokens += ContextManager.static_estimate_tokens(_piece)
+                            _current_context_tokens = _context_base + _context_output_tokens
+                            _now = time.monotonic()
+                            if (
+                                _current_context_tokens - _context_last_tokens >= 16
+                                or _now - _context_last_emit >= 0.25
+                            ):
+                                _context_last_tokens = _current_context_tokens
+                                _context_last_emit = _now
+                                _stream_context_event = _context_event(
+                                    _current_context_tokens,
+                                    source="stream_estimate",
+                                    usage_estimated=True,
+                                )
+                                if _stream_context_event is not None:
+                                    yield _stream_context_event
                 except Exception as exc:
                     _stream_failed = True
                     logger.warning(f"[{log_prefix}] streaming path failed: {exc}")
@@ -7070,7 +7199,6 @@ class Agent:
                 _cleaned = clean_llm_response(_stream_text) if _stream_text else ""
                 if _cleaned and not _stream_failed:
                     result_holder["text"] = _cleaned
-                    result_holder["usage"] = None
                     result_holder["ok"] = True
                     return
 
@@ -7088,6 +7216,17 @@ class Agent:
                         result_holder["text"] = _fb_text
                         result_holder["usage"] = _resp.usage
                         result_holder["ok"] = True
+                        _fallback_usage = dict(_resp.usage or {})
+                        _fallback_in = int(_fallback_usage.get("input_tokens") or 0)
+                        _fallback_out = int(_fallback_usage.get("output_tokens") or 0)
+                        _fallback_context_event = _context_event(
+                            _fallback_in + _fallback_out,
+                            source="provider",
+                            usage_estimated=False,
+                            usage=_fallback_usage,
+                        )
+                        if _fallback_context_event is not None:
+                            yield _fallback_context_event
                         return
                 except Exception as exc:
                     logger.error(f"[{log_prefix}] non-stream fallback also failed: {exc}")

@@ -18,7 +18,11 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Query, Request
 
 from openakita.config import settings
-from openakita.core.context_stats import get_context_snapshot
+from openakita.core.context_stats import (
+    context_snapshot_from_dict,
+    get_context_snapshot,
+    update_context_snapshot,
+)
 from openakita.storage.database import Database
 
 logger = logging.getLogger(__name__)
@@ -426,13 +430,52 @@ async def pricing_overview(request: Request):
 @router.get("/context")
 async def context(request: Request, conversation_id: str | None = Query(default=None)):
     """Return the current session's context token usage and limit."""
+    session = None
+    session_manager = None
+    if conversation_id:
+        session_manager = getattr(request.app.state, "session_manager", None)
+        if session_manager is not None:
+            try:
+                session = session_manager.get_session(
+                    channel="desktop",
+                    chat_id=conversation_id,
+                    user_id="desktop_user",
+                    create_if_missing=False,
+                )
+                persisted = context_snapshot_from_dict(
+                    session.get_metadata("context_usage") if session is not None else None
+                )
+                if persisted is not None:
+                    return persisted.to_dict()
+            except Exception as e:
+                logger.debug("[TokenStats] persisted context lookup failed: %s", e)
+
     agent = _get_existing_agent(request, conversation_id)
     actual = getattr(agent, "_local_agent", agent) if agent else None
     if actual is None:
         return {"error": "agent not available"}
 
     try:
-        snapshot = get_context_snapshot(actual, conversation_id=conversation_id)
+        snapshot = get_context_snapshot(
+            actual,
+            conversation_id=conversation_id,
+            allow_estimate=False,
+        )
+        if snapshot is None and session is not None:
+            messages = list(getattr(getattr(session, "context", None), "messages", None) or [])
+            if messages:
+                snapshot = update_context_snapshot(
+                    actual,
+                    conversation_id=conversation_id,
+                    messages=messages,
+                    source="persisted_history_estimate",
+                )
+                if snapshot is not None:
+                    session.set_metadata("context_usage", snapshot.to_dict())
+                    if session_manager is not None:
+                        session_manager.mark_dirty()
+        if snapshot is None:
+            snapshot = get_context_snapshot(actual, conversation_id=conversation_id)
         if snapshot is not None:
             return snapshot.to_dict()
     except Exception as e:

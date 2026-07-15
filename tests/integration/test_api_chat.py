@@ -99,6 +99,75 @@ class TestChatEndpoint:
         assert captured_kwargs["mode"] == "agent"
         assert captured_kwargs["plan_mode"] is False
 
+    async def test_chat_streams_and_persists_context_usage(
+        self, client, app, mock_agent, monkeypatch, tmp_path
+    ):
+        from openakita.sessions.manager import SessionManager
+
+        conversation_id = "test-conv-context-stream"
+        storage = tmp_path / "sessions"
+        app.state.session_manager = SessionManager(storage_path=storage)
+        mock_agent._last_usage_summary = None
+        mock_agent._last_finalized_trace = []
+        mock_agent.reasoning_engine = SimpleNamespace(_last_react_trace=[])
+        mock_agent.build_tool_trace_summary.return_value = ""
+
+        async def fake_stream(*args, **kwargs):
+            yield {
+                "type": "context_usage",
+                "conversation_id": conversation_id,
+                "context_tokens": 100,
+                "context_limit": 1000,
+                "remaining_tokens": 900,
+                "percent": 10.0,
+                "source": "stream_estimate",
+                "usage_estimated": True,
+            }
+            yield {"type": "text_delta", "content": "streaming"}
+            yield {
+                "type": "context_usage",
+                "conversation_id": conversation_id,
+                "context_tokens": 120,
+                "context_limit": 1000,
+                "remaining_tokens": 880,
+                "percent": 12.0,
+                "source": "stream_estimate",
+                "usage_estimated": True,
+            }
+            yield {
+                "type": "context_usage",
+                "conversation_id": conversation_id,
+                "context_tokens": 140,
+                "context_limit": 1000,
+                "remaining_tokens": 860,
+                "percent": 14.0,
+                "source": "provider",
+                "usage_estimated": False,
+            }
+            yield {"type": "done"}
+
+        monkeypatch.setattr(mock_agent, "chat_with_session_stream", fake_stream)
+
+        response = await client.post(
+            "/api/chat",
+            json={"message": "Hello", "conversation_id": conversation_id},
+        )
+
+        assert response.status_code == 200
+        assert response.text.count('"type": "context_usage"') == 3
+        session = next(
+            session
+            for session in app.state.session_manager.list_sessions()
+            if session.chat_id == conversation_id
+        )
+        assert session.get_metadata("context_usage")["context_tokens"] == 140
+
+        restored = SessionManager(storage_path=storage)
+        restored_session = next(
+            session for session in restored.list_sessions() if session.chat_id == conversation_id
+        )
+        assert restored_session.get_metadata("context_usage")["context_tokens"] == 140
+
     async def test_chat_passes_normal_ask_user_reply_to_agent(
         self, client, mock_agent, monkeypatch
     ):

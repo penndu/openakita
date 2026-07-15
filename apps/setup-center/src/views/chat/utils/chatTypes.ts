@@ -116,6 +116,21 @@ export type StreamEvent =
   | { type: "org_command_done"; org_id: string; command_id: string; result?: Record<string, unknown>; error?: string }
   | { type: "iteration_start"; iteration: number }
   | { type: "context_compressed"; before_tokens: number; after_tokens: number }
+  | {
+      type: "context_usage";
+      conversation_id?: string;
+      context_tokens: number;
+      context_limit: number;
+      history_context_tokens?: number;
+      history_context_limit?: number;
+      remaining_tokens?: number;
+      percent?: number;
+      updated_at?: number;
+      source?: string;
+      usage_estimated?: boolean;
+      endpoint_name?: string;
+      model?: string;
+    }
   | { type: "thinking_start" }
   | { type: "thinking_delta"; content: string }
   | { type: "thinking_end"; duration_ms?: number; has_thinking?: boolean }

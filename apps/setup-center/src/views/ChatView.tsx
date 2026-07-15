@@ -4332,6 +4332,20 @@ export function ChatView({
                   chainGroups = chainGroups.map((g, i) => i === chainGroups.length - 1 ? currentChainGroup! : g);
                 }
                 break;
+              case "context_usage": {
+                const eventConversationId: string = event.conversation_id || convId;
+                if (eventConversationId === convId && isTargetConversationActive()) {
+                  const ctxTokens = event.history_context_tokens ?? event.context_tokens;
+                  const ctxLimit = event.history_context_limit ?? event.context_limit;
+                  if (typeof ctxTokens === "number" && Number.isFinite(ctxTokens)) {
+                    setContextTokens(Math.max(0, ctxTokens));
+                  }
+                  if (typeof ctxLimit === "number" && Number.isFinite(ctxLimit) && ctxLimit > 0) {
+                    setContextLimit(ctxLimit);
+                  }
+                }
+                break;
+              }
               case "text_delta":
                 currentStreamStatus = null;
                 currentContent += event.content;
