@@ -4069,6 +4069,63 @@ class ReasoningEngine:
                             "after_tokens": _after_tokens,
                         }
 
+                # Publish context occupancy before the provider starts and keep
+                # updating it while output streams. Provider usage later
+                # calibrates this estimate with the exact input/output counts.
+                try:
+                    _stream_context_base = ContextManager.static_estimate_tokens(
+                        effective_prompt or ""
+                    )
+                    _stream_context_base += self._context_manager.estimate_messages_tokens(
+                        working_messages
+                    )
+                    _stream_context_base += self._context_manager.estimate_tools_tokens(tools)
+                except Exception:
+                    _stream_context_base = 0
+                try:
+                    _stream_context_limit = self._context_manager.get_max_context_tokens(
+                        conversation_id=conversation_id
+                    )
+                except Exception:
+                    _stream_context_limit = 0
+                _stream_context_output_tokens = 0
+                _stream_context_last_tokens = _stream_context_base
+                _stream_context_last_emit = time.monotonic()
+
+                def _context_usage_event(
+                    tokens: int,
+                    *,
+                    source: str,
+                    usage_estimated: bool,
+                    context_limit: int = _stream_context_limit,
+                    model: str = current_model,
+                ) -> dict:
+                    _tokens = max(int(tokens or 0), 0)
+                    _limit = max(int(context_limit or 0), 0)
+                    _ep_info = self._brain.get_current_endpoint_info() or {}
+                    return {
+                        "type": "context_usage",
+                        "conversation_id": conversation_id,
+                        "context_tokens": _tokens,
+                        "history_context_tokens": _tokens,
+                        "context_limit": _limit,
+                        "history_context_limit": _limit,
+                        "remaining_tokens": max(_limit - _tokens, 0),
+                        "percent": round((_tokens / _limit) * 100, 1) if _limit else 0,
+                        "updated_at": time.time(),
+                        "source": source,
+                        "usage_estimated": usage_estimated,
+                        "endpoint_name": _ep_info.get("name", ""),
+                        "model": model or _ep_info.get("model", ""),
+                    }
+
+                if _stream_context_limit > 0:
+                    yield _context_usage_event(
+                        _stream_context_base,
+                        source="stream_estimate",
+                        usage_estimated=True,
+                    )
+
                 # --- 思维链: 迭代开始事件 ---
                 yield {"type": "iteration_start", "iteration": _iteration + 1}
 
@@ -4121,9 +4178,45 @@ class ReasoningEngine:
                         elif _evt_type == "text_delta":
                             yield stream_event
                             _streamed_text = True
+                            _stream_context_output_tokens += ContextManager.static_estimate_tokens(
+                                str(stream_event.get("content") or "")
+                            )
+                            _current_context_tokens = (
+                                _stream_context_base + _stream_context_output_tokens
+                            )
+                            _now = time.monotonic()
+                            if (
+                                _current_context_tokens - _stream_context_last_tokens >= 16
+                                or _now - _stream_context_last_emit >= 0.25
+                            ):
+                                _stream_context_last_tokens = _current_context_tokens
+                                _stream_context_last_emit = _now
+                                yield _context_usage_event(
+                                    _current_context_tokens,
+                                    source="stream_estimate",
+                                    usage_estimated=True,
+                                )
                         elif _evt_type == "thinking_delta":
                             yield stream_event
                             _streamed_thinking = True
+                            _stream_context_output_tokens += ContextManager.static_estimate_tokens(
+                                str(stream_event.get("content") or "")
+                            )
+                            _current_context_tokens = (
+                                _stream_context_base + _stream_context_output_tokens
+                            )
+                            _now = time.monotonic()
+                            if (
+                                _current_context_tokens - _stream_context_last_tokens >= 16
+                                or _now - _stream_context_last_emit >= 0.25
+                            ):
+                                _stream_context_last_tokens = _current_context_tokens
+                                _stream_context_last_emit = _now
+                                yield _context_usage_event(
+                                    _current_context_tokens,
+                                    source="stream_estimate",
+                                    usage_estimated=True,
+                                )
                         elif _evt_type == "endpoint_meta":
                             # 由 LLMClient 注入的端点元信息（vision_degraded 等）
                             # 转换成前端协议一致的 endpoint_notice。
@@ -4376,6 +4469,17 @@ class ReasoningEngine:
                     self._budget.record_tokens(_in_tokens, _out_tokens)
                     if _in_tokens and not _usage_estimated:
                         _last_real_input_tokens = _in_tokens
+                if _stream_context_limit > 0:
+                    _final_context_tokens = (
+                        _in_tokens + _out_tokens
+                        if (_in_tokens or _out_tokens)
+                        else _stream_context_last_tokens
+                    )
+                    yield _context_usage_event(
+                        _final_context_tokens,
+                        source=_usage_source or "stream_estimate",
+                        usage_estimated=_usage_estimated or not bool(_usage_source),
+                    )
                 # 流式路径下 brain 不落 token_tracking（详见 brain.messages_create_stream
                 # 注释），需在此显式落库以保留 cache_read/cache_create 命中统计。
                 if _in_tokens or _out_tokens or _cache_read or _cache_create:

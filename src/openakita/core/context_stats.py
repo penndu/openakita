@@ -149,7 +149,11 @@ def resolve_context_limit(agent: Any, conversation_id: str | None = None) -> dic
                 if raw <= 0:
                     raw = int(DEFAULT_CONTEXT_WINDOW)
                 raw_context_window = raw
-                effective = min(raw, settings.context_max_window) if settings.context_max_window > 0 else raw
+                effective = (
+                    min(raw, settings.context_max_window)
+                    if settings.context_max_window > 0
+                    else raw
+                )
                 effective_context_window = int(effective)
                 reserve = int(getattr(ep, "max_tokens", 0) or 4096)
                 output_reserve = min(reserve, max(effective_context_window // 3, 0))
@@ -196,6 +200,13 @@ def _snapshot_from_dict(data: dict[str, Any]) -> ContextUsageSnapshot | None:
     )
 
 
+def context_snapshot_from_dict(data: dict[str, Any] | None) -> ContextUsageSnapshot | None:
+    """Parse a persisted or wire-format context snapshot."""
+    if not isinstance(data, dict):
+        return None
+    return _snapshot_from_dict(data)
+
+
 def update_context_snapshot(
     agent: Any,
     conversation_id: str | None = None,
@@ -204,6 +215,7 @@ def update_context_snapshot(
     usage: dict[str, Any] | None = None,
     pressure: dict[str, Any] | None = None,
     source: str = "estimated",
+    measured_context_tokens: int | None = None,
 ) -> ContextUsageSnapshot | None:
     """Estimate and store the latest context usage snapshot on runtime objects."""
 
@@ -214,7 +226,11 @@ def update_context_snapshot(
     ctx_mgr = _context_manager(actual)
     if messages is None:
         messages = _last_messages(actual)
-    context_tokens = _estimate_tokens(ctx_mgr, messages)
+    context_tokens = (
+        max(int(measured_context_tokens), 0)
+        if measured_context_tokens is not None
+        else _estimate_tokens(ctx_mgr, messages)
+    )
     limit_info = resolve_context_limit(actual, conversation_id)
     context_limit = int(limit_info.get("context_limit") or 0)
     if context_limit <= 0:
@@ -243,8 +259,20 @@ def update_context_snapshot(
     )
 
     actual._last_context_usage_snapshot = snapshot
+    snapshots = getattr(actual, "_context_usage_snapshots", None)
+    if not isinstance(snapshots, dict):
+        snapshots = {}
+        actual._context_usage_snapshots = snapshots
+    if conversation_id:
+        snapshots[conversation_id] = snapshot
     if re is not None:
         re._last_context_usage_snapshot = snapshot
+        re_snapshots = getattr(re, "_context_usage_snapshots", None)
+        if not isinstance(re_snapshots, dict):
+            re_snapshots = {}
+            re._context_usage_snapshots = re_snapshots
+        if conversation_id:
+            re_snapshots[conversation_id] = snapshot
     return snapshot
 
 
@@ -261,14 +289,30 @@ def get_context_snapshot(
         return None
     re = _reasoning_engine(actual)
 
+    if conversation_id:
+        for owner in (actual, re):
+            snapshots = (
+                getattr(owner, "_context_usage_snapshots", None) if owner is not None else None
+            )
+            if isinstance(snapshots, dict):
+                snapshot = snapshots.get(conversation_id)
+                if isinstance(snapshot, ContextUsageSnapshot):
+                    return snapshot
+                if isinstance(snapshot, dict):
+                    parsed = _snapshot_from_dict(snapshot)
+                    if parsed:
+                        return parsed
+
     for owner in (actual, re):
-        snapshot = getattr(owner, "_last_context_usage_snapshot", None) if owner is not None else None
+        snapshot = (
+            getattr(owner, "_last_context_usage_snapshot", None) if owner is not None else None
+        )
         if isinstance(snapshot, ContextUsageSnapshot):
-            if conversation_id is None or snapshot.conversation_id in (None, conversation_id):
+            if conversation_id is None or snapshot.conversation_id == conversation_id:
                 return snapshot
         if isinstance(snapshot, dict):
             parsed = _snapshot_from_dict(snapshot)
-            if parsed and (conversation_id is None or parsed.conversation_id in (None, conversation_id)):
+            if parsed and (conversation_id is None or parsed.conversation_id == conversation_id):
                 return parsed
 
     cached = getattr(actual, "_last_usage_summary", None)

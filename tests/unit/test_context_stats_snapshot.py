@@ -66,6 +66,30 @@ def test_get_context_snapshot_reuses_stored_snapshot():
     assert get_context_snapshot(agent, "conv-1") is created
 
 
+def test_context_snapshots_are_isolated_by_conversation():
+    agent = _make_agent()
+    first = update_context_snapshot(
+        agent,
+        "conv-1",
+        measured_context_tokens=111,
+        source="provider",
+    )
+    agent.reasoning_engine._context_manager.get_max_context_tokens = lambda conversation_id=None: (
+        1000
+    )
+    second = update_context_snapshot(
+        agent,
+        "conv-2",
+        measured_context_tokens=222,
+        source="provider",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert get_context_snapshot(agent, "conv-1").context_tokens == 111
+    assert get_context_snapshot(agent, "conv-2").context_tokens == 222
+
+
 def test_merge_context_snapshot_into_usage_preserves_billable_fields():
     agent = _make_agent()
     snapshot = update_context_snapshot(agent, "conv-1")

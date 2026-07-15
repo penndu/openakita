@@ -20,7 +20,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from openakita.core.ask_user_context import AskUserReplyContext
 from openakita.core.confirmation_state import ConfirmationDecision, get_confirmation_store
-from openakita.core.context_stats import get_context_snapshot, merge_context_snapshot_into_usage
+from openakita.core.context_stats import (
+    context_snapshot_from_dict,
+    get_context_snapshot,
+    merge_context_snapshot_into_usage,
+)
 from openakita.core.engine_bridge import engine_stream, is_dual_loop, to_engine
 from openakita.core.security_actions import execute_controlled_action
 from openakita.core.trusted_paths import grant_session_trust
@@ -1367,6 +1371,7 @@ async def _stream_chat(
     _agent_done = asyncio.Event()
     _agent_queue: asyncio.Queue = asyncio.Queue()
     _save_done = False
+    _latest_context_snapshot: dict | None = None
     _pending_approval = False
     _plan_ready_for_approval = False
     session = None
@@ -1711,6 +1716,17 @@ async def _stream_chat(
             if _mcp_call:
                 _collected_mcp_calls.append(_mcp_call)
 
+            if event_type == "context_usage":
+                event_conversation_id = str(event.get("conversation_id") or conversation_id)
+                if not conversation_id or event_conversation_id == conversation_id:
+                    _latest_context_snapshot = {
+                        key: value for key, value in event.items() if key != "type"
+                    }
+                    if session is not None:
+                        session.set_metadata("context_usage", _latest_context_snapshot)
+                        if session_manager is not None:
+                            session_manager.mark_dirty()
+
             if event_type == "__agent_error__":
                 _agent_errored = True
                 _agent_error_msg = event.get("__exc_msg__") or "Unknown error"
@@ -1838,7 +1854,12 @@ async def _stream_chat(
                             _usage_data["usage_source"] = (
                                 "mixed" if len(usage_sources) > 1 else next(iter(usage_sources))
                             )
-            _snapshot = get_context_snapshot(actual_agent)
+            _snapshot = context_snapshot_from_dict(
+                _latest_context_snapshot
+            ) or get_context_snapshot(
+                actual_agent,
+                conversation_id=conversation_id or None,
+            )
             _usage_data = merge_context_snapshot_into_usage(_usage_data, _snapshot)
         except Exception:
             pass
