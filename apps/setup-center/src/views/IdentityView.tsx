@@ -12,7 +12,6 @@ type IdentityFile = {
   name: string;
   exists: boolean;
   restricted: boolean;
-  is_runtime: boolean;
   warning_key: string | null;
   budget_tokens: number | null;
   size?: number;
@@ -55,11 +54,6 @@ const WARNING_KEYS: Record<string, string> = {
   "MEMORY.md": "memoryWarning",
   "POLICIES.yaml": "policiesYamlWarning",
   "prompts/policies.md": "policiesMdWarning",
-};
-
-const SOURCE_TO_RUNTIME: Record<string, string[]> = {
-  "AGENT.md": ["runtime/agent.core.md", "runtime/agent.tooling.md"],
-  "USER.md": ["runtime/user.summary.md"],
 };
 
 export function IdentityView({ serviceRunning, apiBaseUrl }: Props) {
@@ -201,16 +195,12 @@ export function IdentityView({ serviceRunning, apiBaseUrl }: Props) {
       const data = await res.json();
       showToast(`${t("identity.compiled")} (${data.mode_used})`);
       loadFiles();
-      // If currently viewing a runtime file, reload it
-      if (selectedFile?.startsWith("runtime/")) {
-        loadFile(selectedFile);
-      }
     } catch (e) {
       setError(String(e));
     } finally {
       setCompiling(false);
     }
-  }, [API, t, showToast, loadFiles, selectedFile, loadFile]);
+  }, [API, t, showToast, loadFiles]);
 
   // Reload identity
   const handleReload = useCallback(async () => {
@@ -224,14 +214,9 @@ export function IdentityView({ serviceRunning, apiBaseUrl }: Props) {
 
   const hasChanges = content !== originalContent;
   const currentMeta = files.find(f => f.name === selectedFile);
-  const warningKey = selectedFile ? (WARNING_KEYS[selectedFile] || (selectedFile.startsWith("runtime/") ? "runtimeWarning" : null)) : null;
+  const warningKey = selectedFile ? (WARNING_KEYS[selectedFile] || null) : null;
   const tokenCount = estimateTokens(content);
   const budgetTokens = currentMeta?.budget_tokens;
-
-  const sourceFiles = files.filter(f => !f.is_runtime);
-  const runtimeFiles = files.filter(f => f.is_runtime);
-
-  const runtimeLinks = selectedFile ? SOURCE_TO_RUNTIME[selectedFile] : undefined;
 
   if (!serviceRunning) {
     return (
@@ -281,14 +266,7 @@ export function IdentityView({ serviceRunning, apiBaseUrl }: Props) {
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", padding: "4px 0 6px", letterSpacing: 0.5 }}>
             {t("identity.sourceFiles")}
           </div>
-          {sourceFiles.map(f => (
-            <FileItem key={f.name} file={f} selected={selectedFile === f.name} onClick={() => loadFile(f.name)} />
-          ))}
-
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", padding: "10px 0 6px", letterSpacing: 0.5 }}>
-            {t("identity.runtimeFiles")}
-          </div>
-          {runtimeFiles.map(f => (
+          {files.map(f => (
             <FileItem key={f.name} file={f} selected={selectedFile === f.name} onClick={() => loadFile(f.name)} />
           ))}
         </div>
@@ -304,17 +282,6 @@ export function IdentityView({ serviceRunning, apiBaseUrl }: Props) {
               {/* Toolbar */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>{selectedFile}</span>
-
-                {runtimeLinks && (
-                  <span style={{ fontSize: 12, color: "#64748b" }}>
-                    → {runtimeLinks.map((r, i) => (
-                      <span key={r}>
-                        {i > 0 && ", "}
-                        <a href="#" onClick={e => { e.preventDefault(); loadFile(r); }} style={{ color: "var(--primary, #3b82f6)" }}>{r}</a>
-                      </span>
-                    ))}
-                  </span>
-                )}
 
                 {selectedFile === "SOUL.md" && (
                   <span style={{ fontSize: 11, color: "var(--ok, #059669)", background: "var(--ok-bg, #d1fae5)", padding: "2px 8px", borderRadius: 4 }}>
@@ -500,9 +467,7 @@ export function IdentityView({ serviceRunning, apiBaseUrl }: Props) {
 // ─── Sub-components ──────────────────────────────────────────────────
 
 function FileItem({ file, selected, onClick }: { file: IdentityFile; selected: boolean; onClick: () => void }) {
-  const displayName = file.name.startsWith("runtime/")
-    ? file.name.replace("runtime/", "")
-    : file.name.startsWith("personas/")
+  const displayName = file.name.startsWith("personas/")
     ? file.name.replace("personas/", "")
     : file.name;
 
@@ -532,9 +497,6 @@ function FileItem({ file, selected, onClick }: { file: IdentityFile; selected: b
       </span>
       {file.restricted && (
         <span title="Restricted" style={{ color: "#f59e0b", display: "inline-flex" }}><IconAlertCircle size={10} /></span>
-      )}
-      {file.is_runtime && (
-        <span title="Compiled" style={{ color: "#8b5cf6", fontSize: 9 }}>RT</span>
       )}
     </div>
   );

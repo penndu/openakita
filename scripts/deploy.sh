@@ -516,7 +516,6 @@ QQBOT_ENABLED=false
 PERSONA_NAME=default
 STICKER_ENABLED=true
 PROACTIVE_ENABLED=false
-SCHEDULER_ENABLED=true
 # SCHEDULER_TIMEZONE=Asia/Shanghai
 ORCHESTRATION_ENABLED=false
 
@@ -525,10 +524,6 @@ EMBEDDING_MODEL=shibing624/text2vec-base-chinese
 EMBEDDING_DEVICE=cpu
 # 模型下载源: auto | huggingface | hf-mirror | modelscope
 MODEL_DOWNLOAD_SOURCE=auto
-
-# 会话
-# SESSION_TIMEOUT_MINUTES=30
-# SESSION_MAX_HISTORY=50
 
 # 网络代理（可选）
 # HTTP_PROXY=http://127.0.0.1:7890

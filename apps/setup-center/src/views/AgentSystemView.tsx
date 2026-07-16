@@ -23,8 +23,6 @@ type AgentSystemViewProps = {
   envDraft: EnvMap;
   setEnvDraft: (updater: (prev: EnvMap) => EnvMap) => void;
   busy?: string | null;
-  disabledViews: string[];
-  toggleViewDisabled: (viewName: string) => void;
   serviceRunning?: boolean;
   apiBaseUrl?: string;
 };
@@ -77,7 +75,7 @@ function TogglePill({ enabled, label, onToggle }: {
 // ─── Main Component ─────────────────────────────────────────────────────
 
 export function AgentSystemView(props: AgentSystemViewProps) {
-  const { envDraft, setEnvDraft, busy = null, disabledViews, toggleViewDisabled, serviceRunning, apiBaseUrl = "" } = props;
+  const { envDraft, setEnvDraft, busy = null, serviceRunning, apiBaseUrl = "" } = props;
   const { t } = useTranslation();
 
   const [reviewing, setReviewing] = useState(false);
@@ -349,13 +347,6 @@ export function AgentSystemView(props: AgentSystemViewProps) {
           title={t("sidebar.memory")}
           subtitle={t("config.memorySub")}
           className="mt-2"
-          toggle={
-            <TogglePill
-              enabled={!disabledViews.includes("memory")}
-              label={enabledLabel}
-              onToggle={() => toggleViewDisabled("memory")}
-            />
-          }
         >
           <div className="space-y-3">
             <FieldSelect
@@ -440,13 +431,6 @@ export function AgentSystemView(props: AgentSystemViewProps) {
           title={t("config.agentScheduler")}
           subtitle={t("config.agentSchedulerSub")}
           className="mt-2"
-          toggle={
-            <TogglePill
-              enabled={!disabledViews.includes("scheduler")}
-              label={enabledLabel}
-              onToggle={() => toggleViewDisabled("scheduler")}
-            />
-          }
         >
           <div className="grid3">
             {FT({ k: "SCHEDULER_TIMEZONE", label: t("config.agentTimezone"), placeholder: "Asia/Shanghai", help: t("config.agentTimezoneHelp") })}

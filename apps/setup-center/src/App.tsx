@@ -2330,7 +2330,6 @@ function MainApp() {
         return [
           "MAX_ITERATIONS", "SELFCHECK_AUTOFIX",
           "THINKING_MODE",
-          "PROGRESS_TIMEOUT_SECONDS", "HARD_TIMEOUT_SECONDS",
           "MEMORY_MODE",
           "EMBEDDING_MODEL", "EMBEDDING_DEVICE", "MODEL_DOWNLOAD_SOURCE",
           "MEMORY_HISTORY_DAYS", "MEMORY_MAX_HISTORY_FILES", "MEMORY_MAX_HISTORY_SIZE_MB",
@@ -2342,12 +2341,12 @@ function MainApp() {
         ];
       case "advanced":
         return [
-          "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FORCE_IPV4",
+          "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FORCE_IPV4",
           "DATABASE_PATH", "LOG_LEVEL",
           "LOG_DIR", "LOG_FILE_PREFIX", "LOG_MAX_SIZE_MB", "LOG_BACKUP_COUNT",
           "LOG_RETENTION_DAYS", "LOG_FORMAT", "LOG_TO_CONSOLE", "LOG_TO_FILE",
           "DESKTOP_NOTIFY_ENABLED", "DESKTOP_NOTIFY_SOUND",
-          "SESSION_TIMEOUT_MINUTES", "SESSION_MAX_HISTORY", "SESSION_STORAGE_PATH",
+          "SESSION_STORAGE_PATH",
           "API_HOST", "TRUST_PROXY",
           "BACKUP_ENABLED", "BACKUP_PATH", "BACKUP_CRON",
           "BACKUP_MAX_BACKUPS", "BACKUP_INCLUDE_USERDATA", "BACKUP_INCLUDE_MEDIA",
@@ -2363,6 +2362,7 @@ function MainApp() {
           "API_TOOLS_SCHEMA_BUDGET_TOKENS",
           "TASK_BUDGET_TOKENS", "TASK_BUDGET_COST",
           "TASK_BUDGET_DURATION", "TASK_BUDGET_ITERATIONS",
+          "PROGRESS_TIMEOUT_SECONDS", "HARD_TIMEOUT_SECONDS", "SUPERVISOR_ENABLED",
         ];
       default:
         return [];
@@ -3341,7 +3341,7 @@ function MainApp() {
   }
 
   function renderAgentSystem() {
-    return <AgentSystemView {..._configViewProps} serviceRunning={!!serviceStatus?.running} apiBaseUrl={apiBaseUrl} />;
+    return <AgentSystemView envDraft={envDraft} setEnvDraft={setEnvDraft} serviceRunning={!!serviceStatus?.running} apiBaseUrl={apiBaseUrl} />;
   }
 
   function renderAdvanced() {
@@ -4616,22 +4616,10 @@ function MainApp() {
       return <PluginManagerView visible={true} httpApiBase={httpApiBase} />;
     }
     if (view === "scheduler") {
-      return disabledViews.includes("scheduler") ? (
-        <div className="card" style={{ opacity: 0.65, textAlign: "center", padding: 28 }}>
-          <p style={{ color: "#94a3b8", fontSize: 13 }}>此模块已禁用，请在「灵魂与意志」配置中启用</p>
-        </div>
-      ) : (
-        <SchedulerView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
-      );
+      return <SchedulerView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />;
     }
     if (view === "memory") {
-      return disabledViews.includes("memory") ? (
-        <div className="card" style={{ opacity: 0.65, textAlign: "center", padding: 28 }}>
-          <p style={{ color: "#94a3b8", fontSize: 13 }}>此模块已禁用，请在「灵魂与意志」配置中启用</p>
-        </div>
-      ) : (
-        <MemoryView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
-      );
+      return <MemoryView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />;
     }
     if (view === "identity") {
       return (

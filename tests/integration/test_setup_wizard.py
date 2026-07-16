@@ -95,9 +95,11 @@ class TestGenerateEnvContent:
         assert "HTTP_PROXY=http://proxy:8080" in content
 
     def test_env_with_scheduler(self, wizard):
-        wizard.config = {"SCHEDULER_ENABLED": "true"}
+        wizard.config = {"SCHEDULER_TIMEZONE": "Asia/Shanghai"}
         content = wizard._generate_env_content()
-        assert "SCHEDULER_ENABLED" in content
+        assert "SCHEDULER_TIMEZONE=Asia/Shanghai" in content
+        assert "SCHEDULER_ENABLED" not in content
+        assert "SCHEDULER_MAX_CONCURRENT" not in content
 
 
 class TestWriteLLMEndpoints:

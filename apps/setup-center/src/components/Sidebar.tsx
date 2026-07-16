@@ -265,10 +265,10 @@ export function Sidebar({
             <div className={`navItem ${view === "plugins" ? "navItemActive" : ""}`} onClick={() => onViewChange("plugins")} role="button" tabIndex={0} title={t("sidebar.plugins")}>
               <IconPuzzle size={16} /> {!collapsed && <span>{t("sidebar.plugins")} {BETA_SUP}</span>}
             </div>
-            <div className={`navItem ${view === "memory" ? "navItemActive" : ""}`} onClick={() => onViewChange("memory")} role="button" tabIndex={0} title={t("sidebar.memory")} style={disabledViews.includes("memory") ? { opacity: 0.4 } : undefined}>
+            <div className={`navItem ${view === "memory" ? "navItemActive" : ""}`} onClick={() => onViewChange("memory")} role="button" tabIndex={0} title={t("sidebar.memory")}>
               <IconBrain size={16} /> {!collapsed && <span>{t("sidebar.memory")}</span>}
             </div>
-            <div className={`navItem ${view === "scheduler" ? "navItemActive" : ""}`} onClick={() => onViewChange("scheduler")} role="button" tabIndex={0} title={t("sidebar.scheduler")} style={disabledViews.includes("scheduler") ? { opacity: 0.4 } : undefined}>
+            <div className={`navItem ${view === "scheduler" ? "navItemActive" : ""}`} onClick={() => onViewChange("scheduler")} role="button" tabIndex={0} title={t("sidebar.scheduler")}>
               <IconCalendar size={16} /> {!collapsed && <span>{t("sidebar.scheduler")}</span>}
             </div>
           </div>

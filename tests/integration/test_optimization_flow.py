@@ -704,7 +704,19 @@ class TestIdentityRouteNoTooling:
 
         assert "runtime/agent.tooling.md" not in _BUDGET_MAP
 
-    def test_runtime_files_no_tooling(self):
-        from openakita.api.routes.identity import _RUNTIME_FILES
+    def test_editable_files_exclude_compiled_runtime_artifacts(self):
+        from openakita.api.routes.identity import _EDITABLE_SOURCE_FILES
 
-        assert "runtime/agent.tooling.md" not in _RUNTIME_FILES
+        assert all(not name.startswith("runtime/") for name in _EDITABLE_SOURCE_FILES)
+
+    @pytest.mark.asyncio
+    async def test_compiled_runtime_artifacts_are_not_writable(self):
+        from fastapi import HTTPException
+
+        from openakita.api.routes.identity import FileWriteRequest, write_identity_file
+
+        with pytest.raises(HTTPException, match="Cannot write to compiled identity files"):
+            await write_identity_file(
+                FileWriteRequest(name="runtime/agent.core.md", content="ignored"),
+                MagicMock(),
+            )

@@ -734,10 +734,6 @@ class Settings(BaseSettings):
     wechat_token: str = Field(default="", description="微信 iLink Bot Token（扫码登录获取）")
 
     # === 会话配置 ===
-    session_timeout_minutes: int = Field(default=30, description="会话超时时间（分钟）")
-    session_max_history: int = Field(
-        default=2000, description="会话消息硬上限（日常由 metadata trim 控制体积）"
-    )
     session_storage_path: str = Field(default="data/sessions", description="会话存储路径")
 
     # === 多 Agent 模式 (Beta) ===

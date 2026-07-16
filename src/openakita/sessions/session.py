@@ -115,7 +115,6 @@ class SessionConfig:
     """
 
     max_history: int = 2000  # 硬安全上限（日常由 _trim_old_metadata 控制体积，此值仅为极端兜底）
-    timeout_minutes: int = 30  # 超时时间（分钟）
     language: str = "zh"  # 语言
     model: str | None = None  # 覆盖默认模型
     custom_prompt: str | None = None  # 自定义系统提示
@@ -125,7 +124,6 @@ class SessionConfig:
         """合并配置，self 优先"""
         return SessionConfig(
             max_history=self.max_history or defaults.max_history,
-            timeout_minutes=self.timeout_minutes or defaults.timeout_minutes,
             language=self.language or defaults.language,
             model=self.model or defaults.model,
             custom_prompt=self.custom_prompt or defaults.custom_prompt,
@@ -706,11 +704,10 @@ class Session:
         if self.state == SessionState.IDLE:
             self.state = SessionState.ACTIVE
 
-    def is_expired(self, timeout_minutes: int | None = None) -> bool:
+    def is_expired(self) -> bool:
         """仅在超长不活跃时标记过期（30 天冷归档）"""
-        timeout = timeout_minutes or (60 * 24 * 30)  # 30 天
         elapsed = (datetime.now() - self.last_active).total_seconds() / 60
-        return elapsed > timeout
+        return elapsed > 60 * 24 * 30
 
     def mark_expired(self) -> None:
         """标记为过期"""
@@ -1052,7 +1049,6 @@ class Session:
             "context": self.context.to_dict(),
             "config": {
                 "max_history": self.config.max_history,
-                "timeout_minutes": self.config.timeout_minutes,
                 "language": self.config.language,
                 "model": self.config.model,
                 "custom_prompt": self.config.custom_prompt,
@@ -1113,7 +1109,6 @@ class Session:
             context=SessionContext.from_dict(data.get("context") or {}),
             config=SessionConfig(
                 max_history=max(config_data.get("max_history", 2000), 500),
-                timeout_minutes=config_data.get("timeout_minutes", 30),
                 language=config_data.get("language", "zh"),
                 model=config_data.get("model"),
                 custom_prompt=config_data.get("custom_prompt"),

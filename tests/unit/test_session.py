@@ -61,6 +61,22 @@ class TestSessionCreation:
         assert s.bot_instance_id == "feishu"
         assert s.session_key == "feishu:chat-1:user-1"
 
+    def test_from_dict_ignores_legacy_timeout_minutes(self):
+        s = Session.from_dict(
+            {
+                "id": "s1",
+                "channel": "cli",
+                "chat_id": "chat-1",
+                "user_id": "user-1",
+                "state": "active",
+                "created_at": "2026-01-01T00:00:00",
+                "last_active": "2026-01-01T00:00:00",
+                "config": {"timeout_minutes": 1},
+            }
+        )
+
+        assert "timeout_minutes" not in s.to_dict()["config"]
+
     def test_session_manager_splits_same_chat_by_bot_instance(self, tmp_path):
         manager = SessionManager(storage_path=tmp_path / "sessions")
 
