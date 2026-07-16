@@ -45,12 +45,6 @@ _EDITABLE_SOURCE_FILES = [
     "prompts/policies.md",
 ]
 
-_RUNTIME_FILES = [
-    "runtime/agent.core.md",
-    "runtime/user.summary.md",
-    "runtime/persona.custom.md",
-]
-
 _RESTRICTED_FILES = {
     "AGENT.md",
     "MEMORY.md",
@@ -207,19 +201,13 @@ async def list_identity_files():
             if rel not in all_names:
                 all_names.append(rel)
 
-    # add runtime files
-    all_names.extend(_RUNTIME_FILES)
-
     for name in all_names:
         path = identity / name
         entry: dict[str, Any] = {
             "name": name,
             "exists": path.exists(),
             "restricted": name in _RESTRICTED_FILES,
-            "is_runtime": name.startswith("runtime/"),
-            "warning_key": _FILE_WARNINGS.get(
-                name, "runtime" if name.startswith("runtime/") else None
-            ),
+            "warning_key": _FILE_WARNINGS.get(name),
             "budget_tokens": _BUDGET_MAP.get(name),
         }
         if path.exists():
@@ -271,8 +259,8 @@ async def write_identity_file(req: FileWriteRequest, request: Request):
     name = req.name
 
     # Block writing to .compiled_at or other non-editable paths
-    if name.startswith("runtime/.") or name.startswith("compiled/"):
-        raise HTTPException(403, "Cannot write to internal files")
+    if name.startswith("runtime/") or name.startswith("compiled/"):
+        raise HTTPException(403, "Cannot write to compiled identity files")
 
     path = _resolve_file(name)
 

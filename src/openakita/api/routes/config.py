@@ -690,9 +690,6 @@ async def write_env(body: EnvUpdateRequest, request: Request):
         "SCHEDULER_",
         "SELFCHECK_",
         "DESKTOP_NOTIFY_",
-        "SESSION_TIMEOUT_",
-        "SESSION_MAX_HISTORY",
-        "BACKUP_",
     )
     if runtime_changed_fields:
         _sync_runtime_agent_settings(request, runtime_changed_fields)

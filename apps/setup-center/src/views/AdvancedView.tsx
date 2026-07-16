@@ -404,9 +404,7 @@ export function AdvancedView(props: AdvancedViewProps) {
         </Section>
 
         <Section title={t("config.agentSessionSection")} className="mt-2">
-          <div className="grid3">
-            {FT({ k: "SESSION_TIMEOUT_MINUTES", label: t("config.agentSessionTimeout"), placeholder: "30" })}
-            {FT({ k: "SESSION_MAX_HISTORY", label: t("config.agentSessionMax"), placeholder: "50" })}
+          <div className="grid2">
             {FT({ k: "SESSION_STORAGE_PATH", label: t("config.agentSessionPath"), placeholder: "data/sessions" })}
           </div>
         </Section>
