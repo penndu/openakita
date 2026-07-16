@@ -97,102 +97,82 @@ SYSTEM_SKILL_DIRECTORIES = [
     "skills",  # 系统技能也放在 skills/ 目录下，通过 system: true 标记区分
 ]
 
-# 打包时默认不启用的外部技能（新安装 / 无 data/skills.json 时生效）。
+# 默认不启用的外部技能（新安装 / 无 data/skills.json 时生效）。
+# 这里必须使用注册表的 skill_id（即目录名），不能使用 frontmatter 的命名空间 name。
 # 用户通过前端面板手动勾选后会创建 skills.json，之后以用户选择为准。
 DEFAULT_DISABLED_SKILLS: frozenset[str] = frozenset(
     {
-        "openakita/skills@algorithmic-art",
-        "openakita/skills@apify-scraper",
-        "jimliu/baoyu-skills@baoyu-article-illustrator",
-        "jimliu/baoyu-skills@baoyu-comic",
-        "jimliu/baoyu-skills@baoyu-cover-image",
-        "jimliu/baoyu-skills@baoyu-format-markdown",
-        "jimliu/baoyu-skills@baoyu-image-gen",
-        "jimliu/baoyu-skills@baoyu-infographic",
-        "jimliu/baoyu-skills@baoyu-slide-deck",
-        "jimliu/baoyu-skills@baoyu-url-to-markdown",
-        "openakita/skills@bilibili-watcher",
-        "openakita/skills@brand-guidelines",
-        "openakita/skills@changelog-generator",
-        "openakita/skills@chinese-novelist",
-        "openakita/skills@chinese-writing",
-        "openakita/skills@code-reviewer",
-        "openakita/skills@douyin-tool",
-        "openakita/skills@frontend-design",
-        "openakita/skills@github-automation",
-        "openakita/skills@gmail-automation",
-        "openakita/skills@google-calendar-automation",
-        "openakita/skills@image-understander",
-        "openakita/skills@internal-comms",
-        "openakita/skills@knowledge-capture",
-        "openakita/skills@moltbook",
-        "openakita/skills@notebooklm",
-        "openakita/skills@obsidian-skills",
-        "openakita/skills@ppt-creator",
-        "openakita/skills@pretty-mermaid",
-        "openakita/skills@slack-gif-creator",
-        "openakita/skills@summarizer",
-        "obra/superpowers@brainstorming",
-        "obra/superpowers@dispatching-parallel-agents",
-        "obra/superpowers@executing-plans",
-        "obra/superpowers@finishing-a-development-branch",
-        "obra/superpowers@receiving-code-review",
-        "obra/superpowers@requesting-code-review",
-        "obra/superpowers@subagent-driven-development",
-        "obra/superpowers@systematic-debugging",
-        "obra/superpowers@test-driven-development",
-        "obra/superpowers@using-git-worktrees",
-        "obra/superpowers@using-superpowers",
-        "obra/superpowers@verification-before-completion",
-        "obra/superpowers@writing-plans",
-        "obra/superpowers@writing-skills",
-        "openakita/skills@theme-factory",
-        "openakita/skills@todoist-task",
-        "openakita/skills@translate-pdf",
-        "openakita/skills@video-downloader",
-        "openakita/skills@webapp-testing",
-        "openakita/skills@wechat-article",
-        "openakita/skills@xiaohongshu-creator",
-        "openakita/skills@youtube-summarizer",
-        "openakita/skills@yuque-skills",
+        "algorithmic-art",
+        "apify-scraper",
+        "bilibili-watcher",
+        "changelog-generator",
+        "chinese-novelist",
+        "chinese-writing",
+        "code-review",
+        "content-research-writer",
+        "douyin-tool",
+        "frontend-design",
+        "github-automation",
+        "gmail-automation",
+        "google-calendar-automation",
+        "image-understander",
+        "image-understanding",
+        "internal-comms",
+        "moltbook",
+        "obsidian-skills",
+        "ppt-creator",
+        "pretty-mermaid",
+        "slack-gif-creator",
+        "superpowers-brainstorming",
+        "superpowers-debugging",
+        "superpowers-receiving-review",
+        "superpowers-tdd",
+        "superpowers-verification",
+        "superpowers-writing-plans",
+        "theme-factory",
+        "video-downloader",
+        "webapp-testing",
+        "wechat-article",
+        "xiaohongshu-creator",
+        "youtube-summarizer",
         # IM 办公 CLI
-        "openakita/skills@feishu-cli",
-        "openakita/skills@wecom-cli",
-        "openakita/skills@dingtalk-cli",
+        "feishu-cli",
+        "wecom-cli",
+        "dingtalk-cli",
         # AI 视频生成
-        "openakita/skills@seedance-video",
+        "seedance-video",
         # 出行与地图
-        "openakita/skills@amap-maps",
-        "openakita/skills@fliggy-travel",
-        "openakita/skills@didi-ride",
+        "amap-maps",
+        "fliggy-travel",
+        "didi-ride",
         # 腾讯生态
-        "openakita/skills@qq-channel",
-        "openakita/skills@tencent-meeting",
-        "openakita/skills@tencent-survey",
-        "openakita/skills@tencent-news",
-        "openakita/skills@tencent-ima",
+        "qq-channel",
+        "tencent-meeting",
+        "tencent-survey",
+        "tencent-news",
+        "tencent-ima",
         # 百度系 Skills
-        "openakita/skills@baidu-search",
-        "openakita/skills@baidu-netdisk",
-        "openakita/skills@baidu-baike",
-        "openakita/skills@baidu-maps",
-        "openakita/skills@baidu-scholar",
-        "openakita/skills@miaoda-app-builder",
-        "openakita/skills@baidu-paddleocr-doc",
-        "openakita/skills@baidu-paddleocr-text",
-        "openakita/skills@baidu-deep-research",
-        "openakita/skills@baidu-ecommerce",
-        "openakita/skills@baidu-marketing",
-        "openakita/skills@baidu-picture-book",
-        "openakita/skills@baidu-ppt-gen",
-        "openakita/skills@baidu-video-notes",
-        "openakita/skills@baidu-yijian",
-        "openakita/skills@baidu-famou",
-        "openakita/skills@xiaodu-control",
+        "baidu-search",
+        "baidu-netdisk",
+        "baidu-baike",
+        "baidu-maps",
+        "baidu-scholar",
+        "miaoda-app-builder",
+        "baidu-paddleocr-doc",
+        "baidu-paddleocr-text",
+        "baidu-deep-research",
+        "baidu-ecommerce",
+        "baidu-marketing",
+        "baidu-picture-book",
+        "baidu-ppt-gen",
+        "baidu-video-notes",
+        "baidu-yijian",
+        "baidu-famou",
+        "xiaodu-control",
         # 电商工具
-        "openakita/skills@taobaoke-tool",
+        "taobaoke-tool",
         # 网易云音乐
-        "openakita/skills@netease-music",
+        "netease-music",
     }
 )
 
@@ -224,6 +204,31 @@ class SkillLoader:
             self.category_registry = _default_reg
         self._loaded_skills: dict[str, ParsedSkill] = {}
         self._last_load_issues: list[SkillLoadIssue] = []
+        self._category_catalog_paths: set[Path] = set()
+        self._default_category_bindings: dict[str, str] = {}
+
+    def _load_category_catalog(self, directory: Path) -> None:
+        """Merge read-only category defaults shipped beside a skill directory."""
+        catalog_path = directory / "catalog.json"
+        try:
+            resolved = catalog_path.resolve()
+        except OSError:
+            return
+        if resolved in self._category_catalog_paths or not resolved.is_file():
+            return
+
+        self._category_catalog_paths.add(resolved)
+        catalog = CategoryStore(resolved)
+        for category in catalog.list_categories():
+            name = str(category.get("name") or "").strip()
+            if not name:
+                continue
+            self.category_registry.upsert(
+                name,
+                description=str(category.get("description") or "").strip() or None,
+            )
+        for skill_id, category in catalog.get_bindings().items():
+            self._default_category_bindings.setdefault(skill_id, category)
 
     @property
     def last_load_issues(self) -> list[dict[str, str]]:
@@ -293,6 +298,8 @@ class SkillLoader:
             加载的技能数量
         """
         self._last_load_issues = []
+        self._category_catalog_paths.clear()
+        self._default_category_bindings.clear()
         try:
             self.category_registry.clear()
         except Exception:
@@ -309,6 +316,7 @@ class SkillLoader:
         runtime_records: list[_RuntimeRegistryRecord] = []
 
         for skill_dir in directories:
+            self._load_category_catalog(skill_dir)
             # __builtin__ / skills/system/ 等只读源以及被识别为 system 的根
             # 视为只读分类容器；用户工作区与项目 skills/ 视为可写
             try:
@@ -429,6 +437,8 @@ class SkillLoader:
             logger.warning(f"Skill directory not found: {directory}")
             return 0
 
+        self._load_category_catalog(directory)
+
         loaded = 0
         runtime_records = _runtime_registry_records if _runtime_registry_records is not None else []
         flush_runtime_records = _runtime_registry_records is None
@@ -507,7 +517,6 @@ class SkillLoader:
         # ``openakita/skills@<dir>``. Preset profiles and default allowlists use
         # that key, so matching it here avoids reading SKILL.md just to learn it.
         candidates.add(f"openakita/skills@{skill_dir.name}")
-        candidates.add(f"jimliu/baoyu-skills@{skill_dir.name}")
         candidates.add(f"obra/superpowers@{skill_dir.name.removeprefix('superpowers-')}")
 
         try:
@@ -591,11 +600,14 @@ class SkillLoader:
 
             self._load_i18n(skill_dir, skill.metadata)
 
-            # 从 JSON bindings 查找分类（优先于 frontmatter）
+            # 用户 JSON bindings 优先，其次使用随技能目录分发的只读默认分类；
+            # 未收录的用户技能继续使用自身 frontmatter category。
             sid = skill_dir.name
             bound_category = self.category_registry.resolve_category(sid)
             if bound_category:
                 skill.metadata.category = bound_category
+            elif default_category := self._default_category_bindings.get(sid):
+                skill.metadata.category = default_category
 
             # OS compatibility check
             if not self._is_os_compatible(skill.metadata.supported_os):
@@ -783,9 +795,10 @@ class SkillLoader:
             except Exception:
                 continue
 
-            if name in external_allowlist:
+            metadata_name = str(getattr(skill.metadata, "name", "") or "")
+            if name in external_allowlist or metadata_name in external_allowlist:
                 self.registry.set_disabled(name, False)
-            elif name in keep_extra:
+            elif name in keep_extra or metadata_name in keep_extra:
                 self.registry.set_disabled(name, True)
                 disabled_count += 1
             else:
