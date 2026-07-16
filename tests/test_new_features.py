@@ -74,21 +74,18 @@ class TestSession:
         print("✅ Session 上下文管理正常")
 
     def test_session_expiry(self):
-        """测试会话过期"""
-        from openakita.sessions import Session, SessionConfig
+        """测试会话冷归档过期"""
+        from openakita.sessions import Session
 
-        config = SessionConfig(timeout_minutes=1)
         session = Session.create(
             channel="test",
             chat_id="test",
             user_id="test",
-            config=config,
         )
 
-        # 手动设置 last_active 为过去（超过 1 分钟）
-        session.last_active = datetime.now() - timedelta(minutes=2)
+        session.last_active = datetime.now() - timedelta(days=31)
 
-        assert session.is_expired(timeout_minutes=1)
+        assert session.is_expired()
         print("✅ Session 过期检测正常")
 
     def test_session_serialization(self):
