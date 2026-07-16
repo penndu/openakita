@@ -203,7 +203,6 @@ _INTERRUPT_BEHAVIOR_MAP: dict[str, InterruptBehavior] = {
     "update_scheduled_task": "block",
     # ── Skills ────────────────────────────────────────────────
     "execute_skill": "block",
-    "find_skills": "cancel",
     "get_skill_info": "cancel",
     "get_skill_reference": "cancel",
     "install_skill": "block",

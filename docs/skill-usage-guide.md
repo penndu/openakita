@@ -261,7 +261,6 @@ Agent> [自动生成 SKILL.md + scripts → 加载 → 可用]
 | browser-list-tabs | browser_list_tabs | 列出标签页 |
 | browser-new-tab | browser_new_tab | 新建标签页 |
 | browser-switch-tab | browser_switch_tab | 切换标签页 |
-| browser-status | browser_status | 浏览器状态 |
 | browser-task | browser_task | 浏览器复合任务 |
 
 ### 桌面自动化（9 个）
@@ -507,4 +506,3 @@ Cursor 中的 Agent Skills 可以从以下位置加载：
 ---
 
 *最后更新：2026-02-09*
-

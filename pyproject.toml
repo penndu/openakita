@@ -243,53 +243,49 @@ artifacts = [
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
 
-# 把仓库根目录的系统技能、外部技能、内置 MCP 配置一并打进 wheel，
-# 保证 `pip install openakita` 后可用。
+# 把系统技能、精选外部技能、内置 MCP 配置一并打进 wheel，
+# 保证 `pip install openakita` 后可用。外部技能按用户任务分类维护；
+# 不要把整个 skills/ 目录或未经 OpenAkita 适配的技能集合打包。
 # skills/system → site-packages/openakita/builtin_skills/system/
-# skills/*      → site-packages/openakita/builtin_skills/external/  (不含 system/)
+# 精选 skills/* → site-packages/openakita/builtin_skills/external/  (不含 system/)
 # mcps          → site-packages/openakita/builtin_mcps/
 [tool.hatch.build.targets.wheel.force-include]
 "skills/system" = "openakita/builtin_skills/system"
+"skills/catalog.json" = "openakita/builtin_skills/catalog.json"
 "mcps" = "openakita/builtin_mcps"
+
+# 内容创作与发布
 "skills/xiaohongshu-creator" = "openakita/builtin_skills/external/xiaohongshu-creator"
 "skills/wechat-article" = "openakita/builtin_skills/external/wechat-article"
 "skills/chinese-writing" = "openakita/builtin_skills/external/chinese-writing"
 "skills/chinese-novelist" = "openakita/builtin_skills/external/chinese-novelist"
 "skills/douyin-tool" = "openakita/builtin_skills/external/douyin-tool"
+"skills/content-research-writer" = "openakita/builtin_skills/external/content-research-writer"
+
+# 视频与图像
 "skills/youtube-summarizer" = "openakita/builtin_skills/external/youtube-summarizer"
 "skills/bilibili-watcher" = "openakita/builtin_skills/external/bilibili-watcher"
-"skills/summarizer" = "openakita/builtin_skills/external/summarizer"
+"skills/video-downloader" = "openakita/builtin_skills/external/video-downloader"
+"skills/image-understander" = "openakita/builtin_skills/external/image-understander"
+"skills/image-understanding" = "openakita/builtin_skills/external/image-understanding"
+
+# 知识与效率
 "skills/obsidian-skills" = "openakita/builtin_skills/external/obsidian-skills"
-"skills/knowledge-capture" = "openakita/builtin_skills/external/knowledge-capture"
-"skills/notebooklm" = "openakita/builtin_skills/external/notebooklm"
 "skills/pretty-mermaid" = "openakita/builtin_skills/external/pretty-mermaid"
 "skills/ppt-creator" = "openakita/builtin_skills/external/ppt-creator"
-"skills/baoyu-image-gen" = "openakita/builtin_skills/external/baoyu-image-gen"
+
+# 搜索与研究
 "skills/apify-scraper" = "openakita/builtin_skills/external/apify-scraper"
-"skills/translate-pdf" = "openakita/builtin_skills/external/translate-pdf"
-"skills/yuque-skills" = "openakita/builtin_skills/external/yuque-skills"
-"skills/todoist-task" = "openakita/builtin_skills/external/todoist-task"
-"skills/baoyu-infographic" = "openakita/builtin_skills/external/baoyu-infographic"
-"skills/baoyu-cover-image" = "openakita/builtin_skills/external/baoyu-cover-image"
-"skills/baoyu-comic" = "openakita/builtin_skills/external/baoyu-comic"
-"skills/baoyu-article-illustrator" = "openakita/builtin_skills/external/baoyu-article-illustrator"
-"skills/baoyu-slide-deck" = "openakita/builtin_skills/external/baoyu-slide-deck"
-"skills/baoyu-format-markdown" = "openakita/builtin_skills/external/baoyu-format-markdown"
-"skills/baoyu-url-to-markdown" = "openakita/builtin_skills/external/baoyu-url-to-markdown"
+
+# 开发与测试
+"skills/code-review" = "openakita/builtin_skills/external/code-review"
+"skills/webapp-testing" = "openakita/builtin_skills/external/webapp-testing"
 "skills/superpowers-brainstorming" = "openakita/builtin_skills/external/superpowers-brainstorming"
 "skills/superpowers-tdd" = "openakita/builtin_skills/external/superpowers-tdd"
 "skills/superpowers-debugging" = "openakita/builtin_skills/external/superpowers-debugging"
 "skills/superpowers-verification" = "openakita/builtin_skills/external/superpowers-verification"
-"skills/superpowers-dispatching-agents" = "openakita/builtin_skills/external/superpowers-dispatching-agents"
-"skills/superpowers-executing-plans" = "openakita/builtin_skills/external/superpowers-executing-plans"
-"skills/superpowers-finishing-branch" = "openakita/builtin_skills/external/superpowers-finishing-branch"
 "skills/superpowers-receiving-review" = "openakita/builtin_skills/external/superpowers-receiving-review"
-"skills/superpowers-requesting-review" = "openakita/builtin_skills/external/superpowers-requesting-review"
-"skills/superpowers-subagent-dev" = "openakita/builtin_skills/external/superpowers-subagent-dev"
-"skills/superpowers-git-worktrees" = "openakita/builtin_skills/external/superpowers-git-worktrees"
-"skills/superpowers-workflow" = "openakita/builtin_skills/external/superpowers-workflow"
 "skills/superpowers-writing-plans" = "openakita/builtin_skills/external/superpowers-writing-plans"
-"skills/superpowers-writing-skills" = "openakita/builtin_skills/external/superpowers-writing-skills"
 
 # Identity templates: shipped as bundled examples so the setup wizard can
 # seed the user-customizable identity/*.md files on first install. The

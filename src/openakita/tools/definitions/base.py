@@ -120,7 +120,6 @@ CATEGORY_PREFIXES = {
         "manage_skill_enabled",
         "execute_skill",
         "uninstall_skill",
-        "find_skills",
         "install_store_skill",
         "search_store_skills",
         "submit_skill_repo",
@@ -213,9 +212,7 @@ CATEGORY_PREFIXES = {
         "search_hub_agents",
         "install_hub_agent",
         "list_exportable_agents",
-        "generate_agents_md",
     ),
-    "Platform": ("platform_guide", "opencli", "cli_anything", "tool_routing"),
 }
 
 
