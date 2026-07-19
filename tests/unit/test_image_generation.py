@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
+from openakita.core.policy_v2 import PolicyContext, reset_current_context, set_current_context
 from openakita.llm.endpoint_manager import EndpointManager
 from openakita.llm.image_generation import (
     ImageGenerationError,
@@ -179,19 +181,29 @@ async def test_generate_image_falls_back_and_saves_base64_result(tmp_path, monke
             image_bytes=b"png-bytes",
         )
 
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "openakita.llm.image_generation.load_image_endpoints",
         lambda _workspace: [primary, backup],
     )
     monkeypatch.setattr("openakita.llm.image_generation.request_image", fake_request)
 
-    result = json.loads(
-        await SystemHandler(SimpleNamespace()).handle(
-            "generate_image", {"prompt": "fallback test"}
-        )
+    context = PolicyContext(
+        session_id="image-generation-test",
+        working_directory=tmp_path,
+        workspace_roots=(tmp_path,),
     )
+    token = set_current_context(context)
+    try:
+        result = json.loads(
+            await SystemHandler(SimpleNamespace()).handle(
+                "generate_image", {"prompt": "fallback test"}
+            )
+        )
+    finally:
+        reset_current_context(token)
 
     assert result["ok"] is True
     assert result["endpoint"] == "backup"
-    assert (tmp_path / result["saved_to"]).read_bytes() == b"png-bytes"
+    saved_path = Path(result["saved_to"])
+    assert saved_path == (tmp_path / "gpt-image-1_img-fallback.png").resolve()
+    assert saved_path.read_bytes() == b"png-bytes"
