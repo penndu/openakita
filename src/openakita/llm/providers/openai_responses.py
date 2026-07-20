@@ -468,7 +468,8 @@ class OpenAIResponsesProvider(OpenAIProvider):
         并处理 Responses API 特有的流式错误事件。
         """
         client = await self._get_client()
-        req_timeout = self._estimate_request_timeout(body)
+        req_timeout = self._estimate_stream_timeout(body)
+        has_content = False
 
         try:
             import httpx
@@ -504,7 +505,6 @@ class OpenAIResponsesProvider(OpenAIProvider):
                         status_code=response.status_code,
                     )
 
-                has_content = False
                 async for line in response.aiter_lines():
                     if not line.strip():
                         continue
@@ -567,7 +567,8 @@ class OpenAIResponsesProvider(OpenAIProvider):
             if isinstance(e, httpx.TimeoutException):
                 detail = f"{type(e).__name__}: {e}"
                 self.mark_unhealthy(f"Timeout: {detail}", is_local=self._is_local_endpoint())
-                raise LLMError(f"Stream timeout: {detail}")
+                timeout_phase = "stalled" if has_content else "first-byte timeout"
+                raise LLMError(f"Stream {timeout_phase}: {detail}")
             if isinstance(e, httpx.RequestError):
                 detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}({repr(e)})"
                 self.mark_unhealthy(

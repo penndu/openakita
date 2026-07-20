@@ -58,6 +58,12 @@ from .proxy_utils import (
 logger = logging.getLogger(__name__)
 
 
+# Remote streaming requests should fail over promptly when the upstream sends no
+# data. Non-streaming calls retain their configured/dynamic timeout, while local
+# inference keeps its longer timeout because slow first tokens are expected.
+REMOTE_STREAM_READ_TIMEOUT_CAP_SECONDS = 90.0
+
+
 def _safe_dig(data: object, *keys: str) -> object:
     """Walk nested dicts safely; returns ``None`` if any key is missing."""
     cur = data
@@ -337,6 +343,37 @@ class OpenAIProvider(LLMProvider):
             pool=min(30.0, new_read),
         )
 
+    def _estimate_stream_timeout(self, body: dict) -> httpx.Timeout | None:
+        """Bound remote time-to-first-data and inter-chunk stalls.
+
+        The generic request timeout grows with prompt size, which is useful for
+        non-streaming responses but can leave an interactive stream apparently
+        frozen for several minutes before endpoint failover starts.
+        """
+        if self._is_local_endpoint():
+            return self._estimate_request_timeout(body)
+
+        dynamic_timeout = self._estimate_request_timeout(body)
+        configured_read = float(self.config.timeout or 180)
+        if dynamic_timeout is not None:
+            configured_read = float(dynamic_timeout.read or configured_read)
+
+        read_timeout = min(configured_read, REMOTE_STREAM_READ_TIMEOUT_CAP_SECONDS)
+        if configured_read > read_timeout:
+            logger.info(
+                "[OpenAI] '%s': capping remote stream read timeout %.0fs -> %.0fs",
+                self.name,
+                configured_read,
+                read_timeout,
+            )
+
+        return httpx.Timeout(
+            connect=min(10.0, read_timeout),
+            read=read_timeout,
+            write=min(30.0, read_timeout),
+            pool=min(30.0, read_timeout),
+        )
+
     async def chat(self, request: LLMRequest) -> LLMResponse:
         """发送聊天请求（统一的非流式 → 流式自动回退）
 
@@ -517,7 +554,8 @@ class OpenAIProvider(LLMProvider):
         子类可覆写以适配不同 SSE 格式（如 Responses API 的 named events）。
         """
         client = await self._get_client()
-        req_timeout = self._estimate_request_timeout(body)
+        req_timeout = self._estimate_stream_timeout(body)
+        has_content = False
 
         try:
             async with client.stream(
@@ -559,7 +597,6 @@ class OpenAIProvider(LLMProvider):
                         raw_body=error_text,
                     )
 
-                has_content = False
                 first_line_raw = None
                 async for line in response.aiter_lines():
                     if not line.strip():
@@ -616,7 +653,8 @@ class OpenAIProvider(LLMProvider):
         except httpx.TimeoutException as e:
             detail = f"{type(e).__name__}: {e}"
             self.mark_unhealthy(f"Timeout: {detail}", is_local=self._is_local_endpoint())
-            raise LLMError(f"Stream timeout: {detail}")
+            timeout_phase = "stalled" if has_content else "first-byte timeout"
+            raise LLMError(f"Stream {timeout_phase}: {detail}")
         except httpx.RequestError as e:
             detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}({repr(e)})"
             self.mark_unhealthy(

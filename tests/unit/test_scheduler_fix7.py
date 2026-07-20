@@ -2,24 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 from openakita.scheduler.scheduler import TaskScheduler
 from openakita.scheduler.task import (
     ScheduledTask,
-    TaskStatus,
     TaskType,
     TriggerType,
 )
-
 
 # ---------------------------------------------------------------------------
 # missed_count 上限保护
@@ -110,3 +106,23 @@ def test_memory_nudge_json_completely_invalid_returns_skip_marker():
 
     # 仅做模块加载冒烟，确保 import 路径与正则常量没回归。
     assert hasattr(ex_mod, "TaskExecutor")
+
+
+@pytest.mark.asyncio
+async def test_memory_nudge_defers_while_an_llm_request_is_active(monkeypatch):
+    from openakita.config import settings
+    from openakita.llm.client import LLMClient
+    from openakita.scheduler.executor import TaskExecutor
+
+    monkeypatch.setattr(settings, "memory_nudge_enabled", True)
+    monkeypatch.setattr(settings, "memory_nudge_interval", 10)
+    monkeypatch.setattr(
+        LLMClient,
+        "get_concurrency_stats",
+        classmethod(lambda cls: {"inflight": 1, "max_concurrent": 20, "tracked_loops": 1}),
+    )
+
+    success, message = await TaskExecutor()._system_memory_nudge_review()
+
+    assert success is True
+    assert message == "Active LLM request in progress, deferring memory nudge"
