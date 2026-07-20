@@ -1192,6 +1192,19 @@ class TaskExecutor:
             if not settings.memory_nudge_enabled or settings.memory_nudge_interval <= 0:
                 return True, "Memory nudge disabled, skipping"
 
+            # Interactive work takes priority over opportunistic memory review.
+            # This task creates its own Brain/LLMClient, so without this guard it
+            # can compete with the user's request for the same upstream endpoint.
+            from ..llm.client import LLMClient
+
+            inflight = LLMClient.get_concurrency_stats()["inflight"]
+            if inflight > 0:
+                logger.info(
+                    "[memory_nudge] Deferring review while %d LLM request(s) are active",
+                    inflight,
+                )
+                return True, "Active LLM request in progress, deferring memory nudge"
+
             mm = self.memory_manager
             if not mm:
                 return True, "No MemoryManager available, skipping nudge"

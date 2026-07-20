@@ -2065,7 +2065,7 @@ class ReasoningEngine:
                 if retry_result == "retry":
                     _total_r = getattr(state, "_total_llm_retries", 1)
                     await _emit_progress(
-                        f"AI 服务响应异常，正在重试（{_total_r}/{self.MAX_TOTAL_LLM_RETRIES}）..."
+                        self._retry_progress_message(e, _total_r, self.MAX_TOTAL_LLM_RETRIES)
                     )
                     _retry_sleep = min(2 * _total_r, 15)
                     _sleep = asyncio.create_task(asyncio.sleep(_retry_sleep))
@@ -4305,11 +4305,10 @@ class ReasoningEngine:
                         _total_r = getattr(state, "_total_llm_retries", 1)
                         yield {
                             "type": "chain_text",
-                            "content": (
-                                f"AI 服务响应异常，正在重试"
-                                f"（{_total_r}/{self.MAX_TOTAL_LLM_RETRIES}）..."
+                            "content": self._retry_progress_message(
+                                e, _total_r, self.MAX_TOTAL_LLM_RETRIES
                             ),
-                            "icon": "alert",
+                            "icon": "clock" if self._is_llm_timeout_error(e) else "alert",
                         }
                         _retry_sleep = min(2 * _total_r, 15)
                         _sleep = asyncio.create_task(asyncio.sleep(_retry_sleep))
@@ -8650,6 +8649,27 @@ class ReasoningEngine:
             target_tokens,
         )
         return True
+
+    @staticmethod
+    def _is_llm_timeout_error(error: Exception) -> bool:
+        error_text = str(error).lower()
+        return any(
+            marker in error_text
+            for marker in (
+                "timeout",
+                "timed out",
+                "readtimeout",
+                "first-byte",
+                "stream stalled",
+            )
+        )
+
+    @classmethod
+    def _retry_progress_message(cls, error: Exception, attempt: int, max_attempts: int) -> str:
+        progress = f"（{attempt}/{max_attempts}）"
+        if cls._is_llm_timeout_error(error):
+            return f"AI 服务响应较慢，正在尝试恢复连接{progress}..."
+        return f"AI 服务暂时不可用，正在重试{progress}..."
 
     async def _handle_llm_error(
         self,
