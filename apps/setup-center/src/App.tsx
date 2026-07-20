@@ -5160,6 +5160,10 @@ function MainApp() {
               multiAgentEnabled={multiAgentEnabled}
               currentWorkspaceId={currentWorkspaceId}
               feedbackModalOpen={bugReportOpen}
+              onOpenFeedback={(prefill) => {
+                setFeedbackPrefill(prefill);
+                setBugReportOpen(true);
+              }}
               envDraft={envDraft}
               setEnvDraft={setEnvDraft}
               onStartService={async () => {
