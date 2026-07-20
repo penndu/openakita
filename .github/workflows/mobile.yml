@@ -14,10 +14,43 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   RELEASE_TAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
+  CHECKOUT_REF: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
+
+concurrency:
+  group: mobile-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  release_contract:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Verify immutable mobile assets and tag provenance
+        if: startsWith(env.RELEASE_TAG, 'v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          python scripts/release_contract.py
+          --repo "${{ github.repository }}"
+          --tag "${{ env.RELEASE_TAG }}"
+          --expected-commit "$(git rev-parse HEAD)"
+          --asset-name "OpenAkita-${{ env.RELEASE_TAG }}-android.apk"
+          --asset-name "OpenAkita-${{ env.RELEASE_TAG }}-ios.ipa"
+          --require-release
+          --wait-seconds 180
+
   # ── Android APK ──
   android:
+    needs: [release_contract]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -26,6 +59,8 @@ jobs:
         working-directory: apps/setup-center
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
 
       - uses: actions/setup-node@v6
         with:
@@ -113,10 +148,11 @@ jobs:
           APK="${{ steps.find_apk.outputs.apk_path }}"
           BASENAME="OpenAkita-${{ env.RELEASE_TAG }}-android.apk"
           cp "$APK" "$BASENAME"
-          gh release upload "${{ env.RELEASE_TAG }}" "$BASENAME" --clobber || true
+          gh release upload "${{ env.RELEASE_TAG }}" "$BASENAME"
 
   # ── iOS IPA ──
   ios:
+    needs: [release_contract]
     runs-on: macos-15
     permissions:
       contents: write
@@ -125,6 +161,8 @@ jobs:
         working-directory: apps/setup-center
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
 
       - uses: actions/setup-node@v6
         with:
@@ -305,10 +343,8 @@ jobs:
           IPA=$(find $RUNNER_TEMP/ipa -name '*.ipa' | head -1)
           BASENAME="OpenAkita-${{ env.RELEASE_TAG }}-ios.ipa"
           cp "$IPA" "$BASENAME"
-          gh release upload "${{ env.RELEASE_TAG }}" "$BASENAME" --clobber || true
+          gh release upload "${{ env.RELEASE_TAG }}" "$BASENAME"
 
       - name: Clean up keychain
         if: always()
         run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
-
-

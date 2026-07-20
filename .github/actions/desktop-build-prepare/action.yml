@@ -131,7 +131,10 @@ runs:
 
     - name: Package Python backend (PyInstaller)
       shell: bash
-      run: python build/build_backend.py
+      run: |
+        set -euo pipefail
+        export OPENAKITA_BUILD_GIT_HASH="$(git rev-parse HEAD)"
+        python build/build_backend.py
 
     - name: Read bootstrap pins (PBS / uv version)
       id: bootstrap_pins

@@ -202,11 +202,14 @@ jobs:
           du -sh "$RESOURCE_DIR"/*
 
       - name: Verify bundled Python contract (seed packaged)
-        run: >
-          python build/verify_bundled_python_contract.py
-          --backend-dir apps/setup-center/src-tauri/resources/openakita-server
-          --bootstrap-manifest apps/setup-center/src-tauri/resources/bootstrap/manifest.json
-          --require-seed-packaged
+        shell: bash
+        run: |
+          python build/verify_bundled_python_contract.py \
+            --backend-dir apps/setup-center/src-tauri/resources/openakita-server \
+            --bootstrap-manifest apps/setup-center/src-tauri/resources/bootstrap/manifest.json \
+            --require-seed-packaged \
+            --expected-git-hash "$(git rev-parse HEAD)" \
+            --check-chat-api
 
       - name: Codesign embedded binaries for macOS notarization
         if: runner.os == 'macOS'

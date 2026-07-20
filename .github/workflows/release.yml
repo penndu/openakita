@@ -25,6 +25,10 @@ env:
   RELEASE_TAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
   CHECKOUT_REF: ${{ (github.event_name == 'workflow_dispatch' && inputs.ref != '' && inputs.ref) || (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   # ── Job 0: Bootstrap contract 预检（廉价 HEAD 检查 + 版本一致性） ──
   # 在任何下载/打包之前先确保 PBS / uv 远端 URL + pyproject.toml 与 PBS pin
@@ -33,6 +37,8 @@ jobs:
   bootstrap_contract:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -43,11 +49,25 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Verify immutable release and tag provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          python scripts/release_contract.py
+          --repo "${{ github.repository }}"
+          --tag "${{ env.RELEASE_TAG }}"
+          --expected-commit "$(git rev-parse HEAD)"
+
+      - name: Verify version matches release tag
+        shell: bash
+        run: python scripts/version.py check --expected "${RELEASE_TAG#v}"
+
       - name: Verify remote bootstrap asset URLs + version pins
         run: python build/prepare_bootstrap_resources.py --verify-remote-assets
 
   # ── Job 1: 确保 Draft Release 存在（仅首次创建，重新打包时跳过） ──
   create_release:
+    needs: [bootstrap_contract]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -66,7 +86,7 @@ jobs:
         run: |
           if gh release view "${{ env.RELEASE_TAG }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Release ${{ env.RELEASE_TAG }} already exists — will upload new artifacts to it"
+            echo "Release ${{ env.RELEASE_TAG }} already exists and passed the empty-asset contract"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "📦 Release ${{ env.RELEASE_TAG }} does not exist — will create draft"
@@ -144,8 +164,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ env.RELEASE_TAG }}" dist/* --clobber
-          gh release upload "${{ env.RELEASE_TAG }}" dist-sdk/* --clobber
+          gh release upload "${{ env.RELEASE_TAG }}" dist/*
+          gh release upload "${{ env.RELEASE_TAG }}" dist-sdk/*
 
       # 必须先发 Plugin SDK 再发 main package：
       # main 的 [plugins]/[all] extras 依赖 openakita-plugin-sdk>=X，
@@ -362,11 +382,14 @@ jobs:
           du -sh "$RESOURCE_DIR"/*
 
       - name: Verify bundled Python contract (seed packaged)
-        run: >
-          python build/verify_bundled_python_contract.py
-          --backend-dir apps/setup-center/src-tauri/resources/openakita-server
-          --bootstrap-manifest apps/setup-center/src-tauri/resources/bootstrap/manifest.json
-          --require-seed-packaged
+        shell: bash
+        run: |
+          python build/verify_bundled_python_contract.py \
+            --backend-dir apps/setup-center/src-tauri/resources/openakita-server \
+            --bootstrap-manifest apps/setup-center/src-tauri/resources/bootstrap/manifest.json \
+            --require-seed-packaged \
+            --expected-git-hash "$(git rev-parse HEAD)" \
+            --check-chat-api
 
       - name: Codesign embedded binaries for macOS notarization
         if: runner.os == 'macOS'
@@ -1367,7 +1390,7 @@ jobs:
           fi
           OUT_DIR="${BUNDLE_DIR}/_upload"
           ls -la "${OUT_DIR}"
-          gh release upload "${RELEASE_TAG}" "${OUT_DIR}"/* --clobber
+          gh release upload "${RELEASE_TAG}" "${OUT_DIR}"/*
 
       - name: Upload signature files as artifacts
         if: always()
