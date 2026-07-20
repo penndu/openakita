@@ -7,9 +7,11 @@ Usage:
 """
 
 import os
-import sys
 import shutil
+import sys
 from pathlib import Path
+
+from PyInstaller.building.datastruct import Tree
 from PyInstaller.utils.hooks import collect_submodules
 
 # Project root directory
@@ -530,8 +532,7 @@ else:
 # in _internal/openakita/
 _openakita_src = SRC_DIR / "openakita"
 if _openakita_src.exists():
-    datas.append((str(_openakita_src), "openakita"))
-    print(f"[spec] Bundling openakita source: {_openakita_src}")
+    print(f"[spec] Will bundle openakita source without build-owned version metadata: {_openakita_src}")
 
 # Provider list (single source of truth, shared by frontend and backend)
 # Must be bundled to openakita/llm/registries/ directory, Python reads via Path(__file__).parent
@@ -737,6 +738,17 @@ a = Analysis(
     excludes=excludes,
     noarchive=False,
 )
+
+# Add importable source for bridge subprocesses, but keep the build-owned
+# VERSION+commit file as the sole _bundled_version.txt provider. Supplying the
+# source directory and generated file to the same destination made PyInstaller's
+# winner platform-dependent and allowed Linux artifacts to lose the commit hash.
+if _openakita_src.exists():
+    a.datas += Tree(
+        str(_openakita_src),
+        prefix="openakita",
+        excludes=["_bundled_version.txt"],
+    )
 
 pyz = PYZ(a.pure)
 

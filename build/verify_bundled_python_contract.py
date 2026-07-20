@@ -15,14 +15,21 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 def _bundled_python_env(internal_dir: Path) -> dict:
     """Build environment dict for invoking standalone _internal/python.exe."""
     env = dict(os.environ)
-    for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP",
-                "VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"):
+    for key in (
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "VIRTUAL_ENV",
+        "CONDA_PREFIX",
+        "CONDA_DEFAULT_ENV",
+    ):
         env.pop(key, None)
 
     # NOTE: When python3XX._pth exists (created by build_backend.py), Python
@@ -59,6 +66,53 @@ def _major_minor(version: str) -> str:
     return f"{match.group(1)}.{match.group(2)}"
 
 
+def _verify_build_identity(version_file: Path, expected_git_hash: str) -> str:
+    if not version_file.is_file():
+        raise RuntimeError(f"bundled version file missing: {version_file}")
+    version = version_file.read_text(encoding="utf-8").strip()
+    if "+" not in version:
+        raise RuntimeError(f"bundled version does not include a git hash: {version!r}")
+    _, bundled_hash = version.rsplit("+", 1)
+    expected = expected_git_hash.strip().lower()[:7]
+    if not expected or bundled_hash.lower() != expected:
+        raise RuntimeError(
+            f"bundled git hash {bundled_hash!r} does not match build commit {expected!r}"
+        )
+    return version
+
+
+def _run_bundled_chat_smoke(internal_dir: Path) -> None:
+    smoke_script = Path(__file__).parents[1] / "scripts" / "package_chat_smoke.py"
+    if not smoke_script.is_file():
+        raise RuntimeError(f"bundled chat smoke script missing: {smoke_script}")
+    with tempfile.TemporaryDirectory(prefix="openakita-package-smoke-") as temp_root:
+        env = dict(os.environ)
+        env.update(
+            {
+                "OPENAKITA_ROOT": temp_root,
+                "OPENAKITA_USER_WORKSPACE": temp_root,
+                "LOG_FORMAT": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                "FEISHU_ENABLED": "false",
+                "QQBOT_ENABLED": "false",
+                "TELEGRAM_ENABLED": "false",
+                "DINGTALK_ENABLED": "false",
+                "WEWORK_ENABLED": "false",
+            }
+        )
+        result = subprocess.run(
+            [sys.executable, str(smoke_script), "--internal-dir", str(internal_dir)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+            cwd=temp_root,
+        )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"bundled /api/chat smoke failed: {details[:2000]}")
+    print((result.stdout or "").strip())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify bundled Python contract")
     parser.add_argument(
@@ -81,6 +135,16 @@ def main() -> int:
             "Use in CI/release packaging path."
         ),
     )
+    parser.add_argument(
+        "--expected-git-hash",
+        default="",
+        help="Require openakita/_bundled_version.txt to contain this build commit hash",
+    )
+    parser.add_argument(
+        "--check-chat-api",
+        action="store_true",
+        help="Run a minimal POST /api/chat against the Python source copied into the bundle",
+    )
     args = parser.parse_args()
 
     backend_dir = Path(args.backend_dir).resolve()
@@ -95,6 +159,24 @@ def main() -> int:
     print(f"[OK] backend executable: {exe}")
 
     internal = backend_dir / "_internal"
+    if args.expected_git_hash:
+        try:
+            bundled_identity = _verify_build_identity(
+                internal / "openakita" / "_bundled_version.txt",
+                args.expected_git_hash,
+            )
+        except RuntimeError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+        print(f"[OK] bundled build identity: {bundled_identity}")
+
+    if args.check_chat_api:
+        try:
+            _run_bundled_chat_smoke(internal)
+        except RuntimeError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+
     if sys.platform == "win32":
         candidates = [internal / "python.exe"]
     else:
@@ -131,7 +213,11 @@ def main() -> int:
     print(f"[OK] bundled pip check passed (pip {pip_ver})")
 
     version_check = subprocess.run(
-        [str(py), "-c", "import platform,sysconfig; print(platform.python_version()); print(sysconfig.get_config_var('SOABI') or '')"],
+        [
+            str(py),
+            "-c",
+            "import platform,sysconfig; print(platform.python_version()); print(sysconfig.get_config_var('SOABI') or '')",
+        ],
         capture_output=True,
         text=True,
         timeout=20,
@@ -251,12 +337,16 @@ def main() -> int:
                 print(f"[OK] Linux bundled native runtime artifacts: {len(hits)} {rel} matches")
                 break
         else:
-            print("[WARN] Linux libpython artifact not found under _internal; verify PyInstaller bundle manually")
+            print(
+                "[WARN] Linux libpython artifact not found under _internal; verify PyInstaller bundle manually"
+            )
 
     if sys.platform == "darwin":
         framework = internal / "Python.framework"
         if not framework.exists():
-            print("[WARN] macOS Python.framework not found under _internal; notarization may still pass for non-framework builds")
+            print(
+                "[WARN] macOS Python.framework not found under _internal; notarization may still pass for non-framework builds"
+            )
         else:
             print(f"[OK] macOS Python.framework present: {framework}")
     return 0
