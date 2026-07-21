@@ -1,20 +1,31 @@
 name: Mobile Build (Android + iOS)
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to attach artifacts to."
+        required: true
+        type: string
+      ref:
+        description: "Commit, branch, or tag to build."
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
         description: "Tag to attach artifacts to (e.g. v1.2.7). Leave empty to skip release upload."
         required: false
         default: ""
-  push:
-    tags:
-      - 'v*'
+      ref:
+        description: "Commit, branch, or tag to build. Leave empty to use the tag or current ref."
+        required: false
+        default: ""
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  RELEASE_TAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
-  CHECKOUT_REF: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  CHECKOUT_REF: ${{ inputs.ref || inputs.tag || github.ref_name }}
 
 concurrency:
   group: mobile-release-${{ inputs.tag || github.ref_name }}
