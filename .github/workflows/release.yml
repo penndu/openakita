@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      include_mobile:
+        description: "是否同时构建 Android 和 iOS；推送 tag 时始终构建。"
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - 'v*'
@@ -100,6 +105,16 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
           generate_release_notes: true
+
+  # Mobile must start after the draft exists; independent tag workflows can race in runner queues.
+  mobile_release:
+    needs: [create_release]
+    if: github.event_name == 'push' || inputs.include_mobile
+    uses: ./.github/workflows/mobile.yml
+    with:
+      tag: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
+      ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.ref != '' && inputs.ref) || (github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag) || github.ref_name }}
+    secrets: inherit
 
   # ── Job 2a: Python 包发布 ──
   python_release:

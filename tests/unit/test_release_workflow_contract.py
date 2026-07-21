@@ -26,6 +26,22 @@ def test_release_workflows_enforce_release_contract() -> None:
     assert "--expected-commit" in mobile_source
 
 
+def test_mobile_release_waits_for_draft_creation_without_an_independent_tag_trigger() -> None:
+    release_workflow = yaml.load(RELEASE.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    mobile_workflow = yaml.load(MOBILE.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+
+    mobile_triggers = mobile_workflow["on"]
+    assert "workflow_call" in mobile_triggers
+    assert "workflow_dispatch" in mobile_triggers
+    assert "push" not in mobile_triggers
+
+    mobile_job = release_workflow["jobs"]["mobile_release"]
+    assert mobile_job["needs"] == ["create_release"]
+    assert mobile_job["uses"] == "./.github/workflows/mobile.yml"
+    assert mobile_job["secrets"] == "inherit"
+    assert "github.event_name == 'push'" in mobile_job["if"]
+
+
 def test_packaging_verifies_checkout_identity_and_chat_api() -> None:
     workflow_sources = [
         path.read_text(encoding="utf-8")
