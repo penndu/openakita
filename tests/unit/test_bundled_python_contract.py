@@ -37,6 +37,7 @@ def test_bundled_chat_smoke_exercises_request_without_mode() -> None:
 def test_bundled_chat_smoke_checks_loose_toolbelt_import() -> None:
     smoke_source = (Path("scripts") / "package_chat_smoke.py").read_text(encoding="utf-8")
 
+    assert 'if internal_dir.name != "src":' in smoke_source
     assert "import requests_toolbelt" in smoke_source
     assert "requests_toolbelt imported from" in smoke_source
 
