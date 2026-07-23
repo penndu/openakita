@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from openakita.optional_assets import OptionalAssetMirror
 from openakita.tools.browser import manager
 
 
@@ -44,10 +45,11 @@ async def test_download_managed_chromium_uses_bundled_driver_cli(
         return _InstallProcess(browsers_dir)
 
     monkeypatch.setattr(
-        "playwright._impl._driver.compute_driver_executable",
+        "openakita.optional_features.configure_playwright_driver",
         lambda: (tmp_path / "node", tmp_path / "cli.js"),
     )
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subprocess)
+    monkeypatch.setattr(manager, "resolve_optional_asset_mirror", lambda *args, **kwargs: None)
 
     await manager._download_managed_chromium(browsers_dir)
 
@@ -64,7 +66,7 @@ async def test_download_managed_chromium_reports_installer_failure(
     browsers_dir = tmp_path / "browsers"
 
     monkeypatch.setattr(
-        "playwright._impl._driver.compute_driver_executable",
+        "openakita.optional_features.configure_playwright_driver",
         lambda: (tmp_path / "node", tmp_path / "cli.js"),
     )
     monkeypatch.setattr(
@@ -72,9 +74,53 @@ async def test_download_managed_chromium_reports_installer_failure(
         "create_subprocess_exec",
         lambda *args, **kwargs: _async_value(_InstallProcess(browsers_dir, returncode=1)),
     )
+    monkeypatch.setattr(manager, "resolve_optional_asset_mirror", lambda *args, **kwargs: None)
 
     with pytest.raises(RuntimeError, match="Chromium download failed"):
         await manager._download_managed_chromium(browsers_dir)
+
+
+@pytest.mark.asyncio
+async def test_download_managed_chromium_prefers_mirror_then_falls_back(
+    tmp_path: Path, monkeypatch
+) -> None:
+    browsers_dir = tmp_path / "browsers"
+    calls = []
+    processes = iter(
+        (
+            _InstallProcess(browsers_dir, returncode=1),
+            _InstallProcess(browsers_dir, returncode=0),
+        )
+    )
+
+    async def fake_subprocess(*args, **kwargs):
+        calls.append((args, kwargs))
+        return next(processes)
+
+    monkeypatch.setattr(
+        "playwright._impl._driver.compute_driver_executable",
+        lambda: (tmp_path / "node", tmp_path / "cli.js"),
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subprocess)
+    monkeypatch.setattr(
+        manager,
+        "resolve_optional_asset_mirror",
+        lambda *args, **kwargs: OptionalAssetMirror(
+            "browser.chromium",
+            "playwright_download_host",
+            "https://mirror.example/optional/playwright",
+        ),
+    )
+    monkeypatch.delenv("PLAYWRIGHT_DOWNLOAD_HOST", raising=False)
+
+    await manager._download_managed_chromium(browsers_dir)
+
+    assert len(calls) == 2
+    assert (
+        calls[0][1]["env"]["PLAYWRIGHT_DOWNLOAD_HOST"]
+        == "https://mirror.example/optional/playwright"
+    )
+    assert "PLAYWRIGHT_DOWNLOAD_HOST" not in calls[1][1]["env"]
 
 
 async def _async_value(value):
@@ -140,12 +186,14 @@ async def test_missing_chromium_requires_confirmation_without_downloading(
     download.assert_not_awaited()
 
 
-def test_packaging_excludes_chromium_but_keeps_playwright_driver() -> None:
+def test_packaging_excludes_chromium_and_playwright_driver() -> None:
     root = Path(__file__).parents[2]
     spec = (root / "build" / "openakita.spec").read_text(encoding="utf-8")
     backend = (root / "build" / "build_backend.py").read_text(encoding="utf-8")
 
-    assert 'datas.append((str(_pw_driver_dir), "playwright/driver"))' in spec
+    assert "_pw_driver_dir" not in spec
+    assert '"playwright/driver"' not in spec
+    assert 'copy_metadata("playwright")' in spec
     assert "_pw_browser_dir" not in spec
     assert "Bundling Playwright Chromium" not in spec
     assert '".local-browsers" not in entry[0]' in spec

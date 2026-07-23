@@ -208,11 +208,7 @@ def build_message_parts(
         if progress_events is not None
         else normalize_progress_events(msg.get("progress_events"))
     )
-    plan = (
-        todo
-        if todo is not None
-        else project_progress_events_to_todo(events) or msg.get("todo")
-    )
+    plan = todo if todo is not None else project_progress_events_to_todo(events) or msg.get("todo")
     plan_todo = serialize_plan_to_chat_todo(plan) if isinstance(plan, dict) else plan
     if isinstance(plan_todo, dict) and plan_todo.get("steps"):
         part = {"kind": "plan", "id": f"plan:{plan_todo.get('id', '')}", "todo": plan_todo}
@@ -220,8 +216,18 @@ def build_message_parts(
             part["progressEvents"] = events
         parts.append(part)
 
+    optional_feature = msg.get("optional_feature_install")
+    if isinstance(optional_feature, dict):
+        parts.append(
+            {
+                "kind": "optional_feature_install",
+                "id": f"optional_feature_install:{optional_feature.get('request_id', '')}",
+                "request": optional_feature,
+            }
+        )
+
     content = msg.get("content")
-    if isinstance(content, str) and content.strip():
+    if not isinstance(optional_feature, dict) and isinstance(content, str) and content.strip():
         parts.append({"kind": "text", "id": "text"})
 
     artifacts = msg.get("artifacts")

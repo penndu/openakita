@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from PyInstaller.building.datastruct import Tree
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 # Project root directory
 PROJECT_ROOT = Path(SPECPATH).parent
@@ -634,19 +634,11 @@ datas.append((_pip_dir, "pip"))
 # Already included in pip directory, no extra handling needed
 
 # Playwright driver (node.js executable + browser protocol implementation)
-# playwright._impl._driver 在运行时通过 subprocess 启动 node 进程，
-# 必须将 driver 目录打包，否则 "playwright install" 可以完成但运行时找不到 driver。
-try:
-    import playwright
-    _pw_pkg_dir = Path(playwright.__file__).parent
-    _pw_driver_dir = _pw_pkg_dir / "driver"
-    if _pw_driver_dir.exists():
-        datas.append((str(_pw_driver_dir), "playwright/driver"))
-        print(f"[spec] Bundling Playwright driver: {_pw_driver_dir}")
-    else:
-        print(f"[spec] WARNING: Playwright driver dir not found: {_pw_driver_dir}")
-except ImportError:
-    print("[spec] WARNING: playwright not installed, driver not bundled")
+# Playwright's Python API stays in core, while its platform-specific Node and
+# driver package are installed into the user runtime after explicit approval.
+# Keep only the small dist-info directory so the runtime can resolve the exact
+# Playwright version and select a matching optional driver artifact.
+datas += copy_metadata("playwright")
 
 # Chromium is intentionally not bundled. BrowserManager downloads the revision
 # matching this Playwright driver after user confirmation, or uses an installed Chrome.

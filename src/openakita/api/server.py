@@ -50,6 +50,7 @@ from .routes import (
     mcp,
     memory,
     memory_repair,
+    optional_features,
     orgs_v2,
     orgs_v2_runtime,
     orgs_v2_stream,
@@ -1120,6 +1121,7 @@ def create_app(
     app.include_router(memory_repair.router, tags=["记忆修复"])
     app.include_router(scheduler.router, tags=["定时任务"])
     app.include_router(pending_approvals.router, tags=["待审批"])
+    app.include_router(optional_features.router, tags=["可选功能"])
     app.include_router(sessions.router, tags=["会话"])
     app.include_router(skills.router, tags=["技能"])
     app.include_router(skill_categories.router, tags=["技能分类"])

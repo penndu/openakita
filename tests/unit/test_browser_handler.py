@@ -189,8 +189,8 @@ async def test_browser_open_reports_chromium_confirmation_requirement():
 
     result = await BrowserHandler(agent).handle("browser_open", {"visible": True})
 
-    assert "本次不会自动下载" in result
-    assert 'browser_open({"install_chromium": true})' in result
+    assert "会话中显示安装确认卡片" in result
+    assert "__OPENAKITA_OPTIONAL_FEATURE_INSTALL__" in result
 
 
 @pytest.mark.asyncio
@@ -245,8 +245,8 @@ async def test_implicit_browser_start_also_requests_install_confirmation():
         {"url": "https://example.com"},
     )
 
-    assert "本次不会自动下载" in result
-    assert 'browser_open({"install_chromium": true})' in result
+    assert "会话中显示安装确认卡片" in result
+    assert "__OPENAKITA_OPTIONAL_FEATURE_INSTALL__" in result
 
 
 @pytest.mark.asyncio

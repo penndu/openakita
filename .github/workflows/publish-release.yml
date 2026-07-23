@@ -102,6 +102,89 @@ jobs:
           fi
           echo "✅ Release $TAG exists"
 
+      # ── 发布前同步可选功能资源，避免用户首次下载走境外链路 ──
+      - name: Configure Aliyun OSS
+        if: ${{ env.HAS_OSS_KEY != '' }}
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_SECRET }}
+          OSS_ENDPOINT: ${{ secrets.ALIYUN_OSS_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://gosspublic.alicdn.com/ossutil/install.sh | sudo bash
+          ossutil config \
+            -e "${OSS_ENDPOINT}" \
+            -i "${OSS_ACCESS_KEY_ID}" \
+            -k "${OSS_ACCESS_KEY_SECRET}"
+
+      - name: Mirror optional feature assets to Aliyun OSS
+        if: ${{ env.HAS_OSS_KEY != '' }}
+        env:
+          OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
+          CDN_BASE_URL: https://${{ secrets.ALIYUN_OSS_CDN_DOMAIN }}
+        run: |
+          set -euo pipefail
+
+          PLAYWRIGHT_VERSION=$(python - <<'PY'
+          import tomllib
+          with open("uv.lock", "rb") as f:
+              lock = tomllib.load(f)
+          print(next(p["version"] for p in lock["package"] if p["name"] == "playwright"))
+          PY
+          )
+          python -m pip install --disable-pip-version-check --no-deps \
+            "playwright==${PLAYWRIGHT_VERSION}"
+          EXISTING_OPTIONAL_ARGS=()
+          if curl -sf "${CDN_BASE_URL}/api/optional-assets.json" \
+            -o manifest-out/existing-optional-assets.json; then
+            EXISTING_OPTIONAL_ARGS=(
+              --existing-manifest manifest-out/existing-optional-assets.json
+            )
+          fi
+          python scripts/prepare_optional_assets.py \
+            --catalog .github/optional-assets.json \
+            --inventory manifest-out/optional-assets-inventory.json \
+            --manifest manifest-out/optional-assets.json \
+            --cdn-base-url "${CDN_BASE_URL}" \
+            "${EXISTING_OPTIONAL_ARGS[@]}"
+
+          jq -c '.artifacts[]' manifest-out/optional-assets-inventory.json | while read -r artifact; do
+            OBJECT_PATH=$(jq -r '.object_path' <<<"${artifact}")
+            DESTINATION="oss://${OSS_BUCKET}/${OBJECT_PATH}"
+            if ossutil stat "${DESTINATION}" >/dev/null 2>&1; then
+              echo "Already mirrored: ${OBJECT_PATH}"
+              continue
+            fi
+
+            TEMP_FILE=$(mktemp)
+            DOWNLOADED=false
+            while read -r SOURCE_URL; do
+              echo "Downloading ${SOURCE_URL}"
+              if curl -fL --retry 3 --retry-delay 2 -o "${TEMP_FILE}" "${SOURCE_URL}"; then
+                DOWNLOADED=true
+                break
+              fi
+            done < <(jq -r '.sources[]' <<<"${artifact}")
+            if [ "${DOWNLOADED}" != "true" ]; then
+              rm -f "${TEMP_FILE}"
+              echo "Failed to download ${OBJECT_PATH} from all upstream sources" >&2
+              exit 1
+            fi
+            EXPECTED_SHA256=$(jq -r '.sha256 // empty' <<<"${artifact}")
+            if [ -n "${EXPECTED_SHA256}" ]; then
+              echo "${EXPECTED_SHA256}  ${TEMP_FILE}" | sha256sum --check --status
+            fi
+            ossutil cp "${TEMP_FILE}" "${DESTINATION}" -f \
+              --meta "Cache-Control:public, max-age=31536000, immutable"
+            rm -f "${TEMP_FILE}"
+            echo "Mirrored: ${OBJECT_PATH}"
+          done
+
+          ossutil cp manifest-out/optional-assets.json \
+            "oss://${OSS_BUCKET}/api/optional-assets.json" -f \
+            --meta "Cache-Control:public, max-age=60"
+          echo "Optional feature manifest uploaded"
+
       # ── 发布 Release：移除 draft 标记，设置 latest / prerelease 标志 ──
       - name: Publish release
         env:
@@ -235,12 +318,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          curl -fsSL https://gosspublic.alicdn.com/ossutil/install.sh | sudo bash
-          ossutil config \
-            -e "${OSS_ENDPOINT}" \
-            -i "${OSS_ACCESS_KEY_ID}" \
-            -k "${OSS_ACCESS_KEY_SECRET}"
-
           TAG="${{ inputs.tag }}"
           CC="Cache-Control:public, max-age=60"
           MD="$GITHUB_WORKSPACE/manifest-out"
@@ -309,4 +386,3 @@ jobs:
           else
             echo "No changes to push"
           fi
-

@@ -16,6 +16,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from openakita.optional_assets import resolve_optional_asset_mirror
+
 logger = logging.getLogger(__name__)
 
 _IS_MAC = platform.system() == "Darwin"
@@ -160,51 +162,81 @@ def _has_managed_chromium(browsers_dir: Path) -> bool:
     return any(path.is_dir() for path in browsers_dir.glob("chromium-*"))
 
 
-async def _download_managed_chromium(browsers_dir: Path) -> None:
+async def _download_managed_chromium(
+    browsers_dir: Path,
+    *,
+    download_host: str | None = None,
+    progress: Any | None = None,
+) -> None:
     """Download the Chromium revision matching the bundled Playwright driver."""
-    from playwright._impl._driver import compute_driver_executable
+    from openakita.optional_features import configure_playwright_driver
 
-    node, cli = compute_driver_executable()
+    resolved_driver = configure_playwright_driver()
+    if resolved_driver is None:
+        raise RuntimeError("Playwright driver runtime is not installed")
+    node, cli = resolved_driver
     browsers_dir.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_dir)
-
     kwargs: dict[str, Any] = {}
     if platform.system() == "Windows":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-    logger.info("[Browser] Downloading Chromium after explicit user confirmation")
-    process = await asyncio.create_subprocess_exec(
-        str(node),
-        str(cli),
-        "install",
-        "--no-shell",
-        "chromium",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        env=env,
-        **kwargs,
-    )
-    try:
-        output, _ = await asyncio.wait_for(
-            process.communicate(),
-            timeout=_CHROMIUM_INSTALL_TIMEOUT,
+    async def run_installer(download_host: str | None) -> tuple[int, str]:
+        if progress:
+            progress(25, "正在准备 Chromium 文件")
+        env = dict(os.environ)
+        env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_dir)
+        if download_host:
+            env["PLAYWRIGHT_DOWNLOAD_HOST"] = download_host
+        else:
+            env.pop("PLAYWRIGHT_DOWNLOAD_HOST", None)
+        process = await asyncio.create_subprocess_exec(
+            str(node),
+            str(cli),
+            "install",
+            "--no-shell",
+            "chromium",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+            **kwargs,
         )
-    except asyncio.CancelledError:
-        process.kill()
-        await process.communicate()
-        raise
-    except TimeoutError as exc:
-        process.kill()
-        await process.communicate()
-        raise RuntimeError("Chromium download timed out after 15 minutes") from exc
+        try:
+            output, _ = await asyncio.wait_for(
+                process.communicate(), timeout=_CHROMIUM_INSTALL_TIMEOUT
+            )
+        except asyncio.CancelledError:
+            process.kill()
+            await process.communicate()
+            raise
+        except TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise RuntimeError("Chromium download timed out after 15 minutes") from exc
+        details = output.decode("utf-8", errors="replace").strip()
+        for line in details.splitlines():
+            logger.info("[Browser install] %s", line)
+        if process.returncode == 0 and progress:
+            progress(85, "Chromium 文件已解压")
+        return process.returncode or 0, details
 
-    details = output.decode("utf-8", errors="replace").strip()
-    for line in details.splitlines():
-        logger.info("[Browser install] %s", line)
-    if process.returncode != 0:
+    configured_host = download_host or os.environ.get("PLAYWRIGHT_DOWNLOAD_HOST", "").strip()
+    mirror = None
+    if not configured_host:
+        mirror = await asyncio.to_thread(
+            resolve_optional_asset_mirror,
+            "browser.chromium",
+            strategy="playwright_download_host",
+            mirror_path="optional/playwright",
+        )
+    preferred_host = configured_host or (mirror.base_url if mirror else None)
+    logger.info("[Browser] Downloading Chromium after explicit user confirmation")
+    returncode, details = await run_installer(preferred_host)
+    if returncode != 0 and mirror is not None and not configured_host:
+        logger.warning("[Browser] Optional asset mirror failed; retrying Playwright upstream")
+        returncode, details = await run_installer(None)
+    if returncode != 0:
         tail = details[-2000:] if details else "no installer output"
-        raise RuntimeError(f"Chromium download failed (exit {process.returncode}): {tail}")
+        raise RuntimeError(f"Chromium download failed (exit {returncode}): {tail}")
     if not _has_managed_chromium(browsers_dir):
         raise RuntimeError(
             f"Chromium installer succeeded but no runtime was found in {browsers_dir}"
@@ -418,6 +450,7 @@ class BrowserManager:
         self._chromium_install_error: str | None = None
         self._chromium_install_allowed = False
         self.chromium_install_required = False
+        self.optional_feature_install_required = False
         self._startup_lock = asyncio.Lock()
         self._is_server = _is_server_environment()
 
@@ -506,6 +539,7 @@ class BrowserManager:
             self._chromium_install_error = None
             self._chromium_install_allowed = install_chromium
             self.chromium_install_required = False
+            self.optional_feature_install_required = False
 
             headless = not visible
 
@@ -585,6 +619,13 @@ class BrowserManager:
 
     async def _start_playwright_driver(self) -> bool:
         """启动 Playwright driver 进程（最多重试 2 次），失败时返回 False。"""
+        from openakita.optional_features import configure_playwright_driver
+
+        if configure_playwright_driver() is None:
+            self.optional_feature_install_required = True
+            self.state = BrowserState.ERROR
+            self._startup_errors.append("Playwright driver runtime is not installed")
+            return False
         try:
             from playwright.async_api import async_playwright
         except ImportError:

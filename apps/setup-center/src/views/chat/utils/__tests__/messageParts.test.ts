@@ -70,4 +70,31 @@ describe("message parts projection", () => {
 
     expect(hasRenderableBody(msg, parts, true, "")).toBe(false);
   });
+
+  it("restores an optional feature install card without duplicate fallback text", () => {
+    const msg: ChatMessage = {
+      id: "optional-1",
+      role: "assistant",
+      content: "浏览器自动化组件需要安装。",
+      timestamp: 1,
+      optionalFeatureInstall: {
+        request_id: "request-1",
+        conversation_id: "conversation-1",
+        feature_id: "browser.automation",
+        title: "安装浏览器自动化组件",
+        description: "安装浏览器自动化组件",
+        components: [],
+        estimated_download_mb: 450,
+        estimated_disk_mb: 550,
+        status: "pending",
+        progress: 0,
+        message: "等待用户确认",
+      },
+    };
+
+    const parts = resolveMessageParts(msg);
+
+    expect(parts.map((part) => part.kind)).toEqual(["optional_feature_install"]);
+    expect(hasRenderableBody(msg, parts, true, "")).toBe(true);
+  });
 });

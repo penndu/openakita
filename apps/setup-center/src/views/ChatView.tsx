@@ -43,6 +43,7 @@ import type {
   OrgTimelineEntry,
   MessagePart,
   MessageCompletionAction,
+  OptionalFeatureInstallRequest,
   EnvMap,
 } from "../types";
 import type { FeedbackPrefill } from "./FeedbackModal";
@@ -1725,7 +1726,7 @@ export function ChatView({
   const hydrateSeqRef = useRef(0);
 
   const mapBackendHistoryToMessages = useCallback(
-    (rows: { id: string; index?: number; role: string; content: string; timestamp: number; chain_summary?: ChainSummaryItem[]; chain_timeline?: ChainTimelineGroup[]; artifacts?: ChatArtifact[]; sources?: ChatSource[]; mcp_calls?: ChatMcpCall[]; attachments?: ChatAttachment[]; org_timeline?: OrgTimelineEntry[]; ask_user?: ChatAskUser; error_info?: { message?: string; raw?: string; error_code?: string; org_status?: string | null }; todo?: ChatTodo; progress_events?: ChatProgressEvent[]; parts?: MessagePart[]; usage?: ChatMessage["usage"]; completion_actions?: MessageCompletionAction[] }[]): ChatMessage[] => {
+    (rows: { id: string; index?: number; role: string; content: string; timestamp: number; chain_summary?: ChainSummaryItem[]; chain_timeline?: ChainTimelineGroup[]; artifacts?: ChatArtifact[]; sources?: ChatSource[]; mcp_calls?: ChatMcpCall[]; attachments?: ChatAttachment[]; org_timeline?: OrgTimelineEntry[]; ask_user?: ChatAskUser; optional_feature_install?: OptionalFeatureInstallRequest; error_info?: { message?: string; raw?: string; error_code?: string; org_status?: string | null }; todo?: ChatTodo; progress_events?: ChatProgressEvent[]; parts?: MessagePart[]; usage?: ChatMessage["usage"]; completion_actions?: MessageCompletionAction[] }[]): ChatMessage[] => {
       return rows.map((m) => ({
         id: m.id,
         ...(typeof m.index === "number" ? { historyIndex: m.index } : {}),
@@ -1747,6 +1748,7 @@ export function ChatView({
         ...(m.todo?.steps?.length ? { todo: m.todo } : {}),
         ...(m.progress_events?.length ? { progressEvents: m.progress_events } : {}),
         ...(m.ask_user ? { askUser: m.ask_user, content: "" } : {}),
+        ...(m.optional_feature_install ? { optionalFeatureInstall: m.optional_feature_install } : {}),
         ...(m.error_info ? {
           errorInfo: (() => {
             const message = localizeOrgCommandStateError(t, m.error_info)
@@ -4975,6 +4977,24 @@ export function ChatView({
                 if (currentContent && event.question && event.question.includes(currentContent.trim())) {
                   currentContent = "";
                 }
+                break;
+              }
+              case "optional_feature_install": {
+                const installRequest = event as unknown as OptionalFeatureInstallRequest;
+                const cardId = `optional-feature-${installRequest.request_id}`;
+                updateMessages((prev) => {
+                  if (prev.some((message) => message.id === cardId)) return prev;
+                  const card: ChatMessage = {
+                    id: cardId,
+                    role: "assistant",
+                    content: "浏览器自动化组件需要安装。",
+                    timestamp: Date.now(),
+                    optionalFeatureInstall: installRequest,
+                  };
+                  const streamIndex = prev.findIndex((message) => message.id === assistantMsg.id);
+                  if (streamIndex < 0) return [...prev, card];
+                  return [...prev.slice(0, streamIndex), card, ...prev.slice(streamIndex)];
+                });
                 break;
               }
               case "ui_preference":
