@@ -8,6 +8,7 @@ import { ErrorCard } from "./ErrorCard";
 import { SourceStrip } from "./SourceStrip";
 import { MCPCallStrip } from "./MCPCallStrip";
 import { MarkdownContent } from "./MarkdownContent";
+import { OptionalFeatureInstallCard } from "./OptionalFeatureInstallCard";
 
 /**
  * Ordered renderer for an assistant message's `MessagePart[]`.
@@ -107,6 +108,12 @@ export function MessageParts({
             ) : (
               <AskUserBlock key={part.id} ask={ask} onAnswer={(ans) => onAskAnswer?.(msg.id, ans)} />
             );
+          }
+          case "optional_feature_install": {
+            const request = part.request || msg.optionalFeatureInstall;
+            return request && apiBaseUrl ? (
+              <OptionalFeatureInstallCard key={part.id} request={request} apiBaseUrl={apiBaseUrl} />
+            ) : null;
           }
           case "error":
             return msg.errorInfo ? (

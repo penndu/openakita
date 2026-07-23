@@ -9,6 +9,7 @@ import type {
   ChatTodoStep,
   ChatAskUser,
   ChatAskQuestion,
+  OptionalFeatureInstallRequest,
   ChatAttachment,
   ChatArtifact,
   ChatSource,
@@ -37,6 +38,7 @@ export type {
   ChatTodoStep,
   ChatAskUser,
   ChatAskQuestion,
+  OptionalFeatureInstallRequest,
   ChatAttachment,
   ChatArtifact,
   ChatSource,
@@ -187,6 +189,7 @@ export type StreamEvent =
   | { type: "todo_cancelled"; planId?: string; plan_id?: string }
   | { type: "plan_ready_for_approval"; data: { conversation_id: string; summary: string; plan_id: string; plan_file: string }; conversation_id?: string; plan_id?: string; plan_file?: string; protocol_version?: number }
   | { type: "ask_user"; question: string; options?: { id: string; label: string }[]; allow_multiple?: boolean; questions?: { id: string; prompt: string; options?: { id: string; label: string }[]; allow_multiple?: boolean }[]; confirmation_id?: string; risk_intent?: Record<string, unknown> }
+  | ({ type: "optional_feature_install" } & OptionalFeatureInstallRequest)
   | { type: "user_insert"; content: string }
   | { type: "agent_switch"; agentName: string; reason: string }
   | { type: "agent_handoff"; from_agent: string; to_agent: string; reason?: string }

@@ -9,6 +9,7 @@ DRY_RUN = ROOT / ".github" / "workflows" / "release-dryrun.yml"
 MOBILE = ROOT / ".github" / "workflows" / "mobile.yml"
 PREPARE = ROOT / ".github" / "actions" / "desktop-build-prepare" / "action.yml"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+PUBLISH = ROOT / ".github" / "workflows" / "publish-release.yml"
 TAURI_CONFIG = ROOT / "apps" / "setup-center" / "src-tauri" / "tauri.conf.json"
 FULL_BUILD_SCRIPTS = (ROOT / "build" / "build_full.ps1", ROOT / "build" / "build_full.sh")
 
@@ -158,6 +159,24 @@ def test_pyinstaller_analysis_reports_are_uploaded() -> None:
         assert "xref-*.html" in source
 
 
+def test_publish_release_mirrors_optional_assets_before_publishing() -> None:
+    source = PUBLISH.read_text(encoding="utf-8")
+    mirror_step = source.index("Mirror optional feature assets to Aliyun OSS")
+    publish_step = source.index("- name: Publish release")
+
+    assert mirror_step < publish_step
+    assert "scripts/prepare_optional_assets.py" in source
+    assert "ossutil stat" in source
+    assert "optional-assets-inventory.json" in source
+    assert "api/optional-assets.json" in source
+    assert '"playwright==${PLAYWRIGHT_VERSION}"' in source
+    assert "sha256sum --check" in source
+    assert "--existing-manifest" in source
+
+    catalog = (ROOT / ".github" / "optional-assets.json").read_text(encoding="utf-8")
+    assert '"browser.playwright-runtime"' in catalog
+
+
 def test_changed_workflow_yaml_is_valid() -> None:
     paths = (
         RELEASE,
@@ -165,6 +184,7 @@ def test_changed_workflow_yaml_is_valid() -> None:
         DRY_RUN,
         ROOT / ".github" / "workflows" / "ci.yml",
         PREPARE,
+        PUBLISH,
     )
     for path in paths:
         assert yaml.safe_load(path.read_text(encoding="utf-8"))

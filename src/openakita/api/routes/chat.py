@@ -1807,6 +1807,24 @@ async def _stream_chat(
                 _ask_user_question = event.get("question", "")
                 _ask_user_options = event.get("options", [])
                 _ask_user_questions = event.get("questions", [])
+            elif event_type == "optional_feature_install":
+                request_id = str(event.get("request_id") or "")
+                if session is not None and request_id:
+                    already_saved = any(
+                        isinstance(message.get("optional_feature_install"), dict)
+                        and message["optional_feature_install"].get("request_id") == request_id
+                        for message in session.context.messages
+                    )
+                    if not already_saved:
+                        session.add_message(
+                            "assistant",
+                            "浏览器自动化组件需要安装。",
+                            optional_feature_install={
+                                key: value for key, value in event.items() if key != "type"
+                            },
+                        )
+                        if session_manager is not None:
+                            session_manager.persist()
             elif event_type == "pending_approval":
                 _pending_approval = True
             elif event_type == "plan_ready_for_approval":

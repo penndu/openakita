@@ -33,6 +33,7 @@ const KNOWN_KINDS = new Set<MessagePart["kind"]>([
   "tools",
   "attachment",
   "ask_user",
+  "optional_feature_install",
   "error",
 ]);
 
@@ -74,7 +75,14 @@ export function deriveMessageParts(msg: ChatMessage): MessagePart[] {
       progressEvents: msg.progressEvents || undefined,
     });
   }
-  if (msg.content) {
+  if (msg.optionalFeatureInstall) {
+    parts.push({
+      kind: "optional_feature_install",
+      id: pid(msg.id, "optional_feature_install", msg.optionalFeatureInstall.request_id),
+      request: msg.optionalFeatureInstall,
+    });
+  }
+  if (msg.content && !msg.optionalFeatureInstall) {
     parts.push({ kind: "text", id: pid(msg.id, "text") });
   }
   // Legacy ToolCallsGroup only renders when there is no structured chain.
@@ -133,8 +141,13 @@ export function coerceMessageParts(raw: unknown, msg: ChatMessage): MessagePart[
         out.push({ kind: "ask_user", id, ask });
         break;
       }
+      case "optional_feature_install": {
+        const request = ((item as { request?: ChatMessage["optionalFeatureInstall"] }).request ?? msg.optionalFeatureInstall) || undefined;
+        out.push({ kind: "optional_feature_install", id, request });
+        break;
+      }
       default:
-        out.push({ kind: kind as Exclude<MessagePart["kind"], "plan" | "attachment" | "ask_user">, id });
+        out.push({ kind: kind as Exclude<MessagePart["kind"], "plan" | "attachment" | "ask_user" | "optional_feature_install">, id });
     }
   }
   return out.length > 0 ? out : null;
@@ -182,6 +195,8 @@ export function hasRenderableBody(
         return !!part.artifact;
       case "ask_user":
         return !!(part.ask || msg.askUser);
+      case "optional_feature_install":
+        return !!(part.request || msg.optionalFeatureInstall);
       case "error":
         return !!msg.errorInfo;
       default:
@@ -218,6 +233,12 @@ function mergeWithDerivedParts(explicit: MessagePart[], msg: ChatMessage): Messa
       return {
         ...part,
         ask: part.ask || (derivedPart.kind === "ask_user" ? derivedPart.ask : undefined),
+      };
+    }
+    if (part.kind === "optional_feature_install") {
+      return {
+        ...part,
+        request: part.request || (derivedPart.kind === "optional_feature_install" ? derivedPart.request : undefined),
       };
     }
     return part;

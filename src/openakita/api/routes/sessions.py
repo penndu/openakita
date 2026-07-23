@@ -211,7 +211,9 @@ def _last_activity_ms(session, visible_msgs: list[dict]) -> int:
         return 0
 
 
-def _session_list_item(session, visible_msgs: list[dict] | None = None, last_ms: int | None = None) -> dict:
+def _session_list_item(
+    session, visible_msgs: list[dict] | None = None, last_ms: int | None = None
+) -> dict:
     """Serialize one session for conversation-list sync surfaces."""
     if visible_msgs is None:
         visible_msgs = [m for _, m in _visible_history_messages(session)]
@@ -460,6 +462,17 @@ def _history_entry(session, conversation_id: str, original_idx: int, msg: dict) 
     ask_user = msg.get("ask_user")
     if ask_user:
         entry["ask_user"] = ask_user
+    optional_feature_install = msg.get("optional_feature_install")
+    if isinstance(optional_feature_install, dict):
+        request_id = str(optional_feature_install.get("request_id") or "")
+        if request_id:
+            try:
+                from ...optional_features import get_install_request
+
+                current_request = get_install_request(request_id)
+            except Exception:
+                current_request = None
+            entry["optional_feature_install"] = current_request or optional_feature_install
     error_info = msg.get("error_info")
     if isinstance(error_info, dict):
         entry["error_info"] = error_info
@@ -498,8 +511,11 @@ def _history_entry(session, conversation_id: str, original_idx: int, msg: dict) 
     )
     if todo_norm and todo_norm.get("steps"):
         entry["todo"] = todo_norm
+    projected_message = {**msg, "content": content}
+    if "optional_feature_install" in entry:
+        projected_message["optional_feature_install"] = entry["optional_feature_install"]
     parts = build_message_parts(
-        {**msg, "content": content},
+        projected_message,
         todo=todo_norm,
         progress_events=progress_events,
     )
@@ -785,7 +801,9 @@ async def create_session(
         manually_set = bool(body.title_manually_set)
         session.set_metadata(_META_CONVERSATION_TITLE, title)
         session.set_metadata(_META_TITLE_MANUALLY_SET, manually_set)
-        session.set_metadata(_META_TITLE_GENERATED, False if manually_set else bool(body.title_generated))
+        session.set_metadata(
+            _META_TITLE_GENERATED, False if manually_set else bool(body.title_generated)
+        )
 
     if existing is None or body.pinned:
         session.set_metadata(_META_PINNED, bool(body.pinned))
@@ -1196,7 +1214,9 @@ def _resolve_file_tree_parent(root: Path, parent: str) -> tuple[Path, str]:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Directory not found") from exc
     except (OSError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=403, detail="Parent must stay within working directory") from exc
+        raise HTTPException(
+            status_code=403, detail="Parent must stay within working directory"
+        ) from exc
     if not resolved.is_dir():
         raise HTTPException(status_code=422, detail="Parent is not a directory")
     normalized = resolved.relative_to(root).as_posix()

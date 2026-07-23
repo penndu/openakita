@@ -144,11 +144,11 @@ class BrowserHandler:
 
         result = await self._dispatch_with_lock(actual_tool_name, params)
 
-        if (
-            not result.get("success")
-            and getattr(self.agent.browser_manager, "chromium_install_required", False)
+        if not result.get("success") and (
+            getattr(self.agent.browser_manager, "chromium_install_required", False)
+            or getattr(self.agent.browser_manager, "optional_feature_install_required", False)
         ):
-            result = self._chromium_install_confirmation_result()
+            result = self._optional_feature_install_result()
 
         if actual_tool_name == "browser_get_content" and result.get("success"):
             output = self._format_get_content_result(result, params)
@@ -451,8 +451,10 @@ class BrowserHandler:
 
             return {"success": True, "result": result_data}
         else:
+            if getattr(manager, "optional_feature_install_required", False):
+                return self._optional_feature_install_result(visible=visible)
             if getattr(manager, "chromium_install_required", False):
-                return self._chromium_install_confirmation_result()
+                return self._optional_feature_install_result(visible=visible)
 
             hints: list[str] = []
             try:
@@ -509,17 +511,20 @@ class BrowserHandler:
             }
 
     @staticmethod
-    def _chromium_install_confirmation_result() -> dict:
+    def _optional_feature_install_result(*, visible: bool = True) -> dict:
+        from openakita.optional_features import optional_feature_marker
+
         return {
             "success": False,
             "result": {"is_open": False, "status": "install_confirmation_required"},
             "error": (
-                "未安装浏览器自动化所需的 Chromium（约 400 MB）。"
-                "本次不会自动下载。请先询问用户是否安装；只有用户明确确认后，"
-                "才能再次调用 "
-                'browser_open({"install_chromium": true})。'
+                "浏览器自动化可选组件尚未安装。系统已在会话中显示安装确认卡片，"
+                "请等待用户直接选择，不要调用 ask_user 重复询问。\n"
+                + optional_feature_marker(visible=visible)
             ),
         }
+
+    _chromium_install_confirmation_result = _optional_feature_install_result
 
     @staticmethod
     def _build_open_status_result(

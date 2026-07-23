@@ -3915,6 +3915,52 @@ class ReasoningEngine:
                                 result_text, _stream_hint = _unpack_tool_result(
                                     tool_exec_task.result()
                                 )
+                                from openakita.optional_features import (
+                                    create_install_request,
+                                    parse_optional_feature_marker,
+                                    wait_for_install_request,
+                                )
+
+                                _optional_request = parse_optional_feature_marker(result_text)
+                                if _optional_request is not None:
+                                    _install_request = create_install_request(
+                                        conversation_id,
+                                        visible=_optional_request.get("visible", True),
+                                    )
+                                    yield {
+                                        "type": "optional_feature_install",
+                                        **_install_request,
+                                    }
+                                    _install_result = await wait_for_install_request(
+                                        _install_request["request_id"]
+                                    )
+                                    if (
+                                        _install_result
+                                        and _install_result.get("status") == "installed"
+                                    ):
+                                        _retry_raw = (
+                                            await self._tool_executor.execute_tool_with_policy(
+                                                tool_name=tool_name,
+                                                tool_input=(
+                                                    tool_args if isinstance(tool_args, dict) else {}
+                                                ),
+                                                policy_result=_pr,
+                                                session_id=conversation_id,
+                                            )
+                                        )
+                                        result_text, _stream_hint = _unpack_tool_result(_retry_raw)
+                                    elif (
+                                        _install_result
+                                        and _install_result.get("status") == "failed"
+                                    ):
+                                        result_text = "浏览器自动化组件安装失败：" + str(
+                                            _install_result.get("message") or "未知错误"
+                                        )
+                                    else:
+                                        result_text = (
+                                            "浏览器自动化组件尚未安装。安装卡片已保留在会话中，"
+                                            "用户稍后仍可直接点击安装。"
+                                        )
                                 self._remember_readonly_tool_result(
                                     tool_name,
                                     tool_args,

@@ -699,6 +699,7 @@ type BackendHistoryMessage = {
   usage?: ChatMessage["usage"];
   todo?: ChatTodo | null;
   ask_user?: ChatAskUser | null;
+  optional_feature_install?: ChatMessage["optionalFeatureInstall"] | null;
   errorInfo?: ChatErrorInfo | null;
   parts?: MessagePart[] | null;
   completion_actions?: MessageCompletionAction[] | null;
@@ -884,6 +885,13 @@ export function patchMessagesWithBackendDetailed(
       patches.askUser = m.askUser
         ? { ...m.askUser, ...backend.ask_user, answered: true, answer: backend.ask_user.answer }
         : backend.ask_user;
+    }
+
+    if (
+      backend.optional_feature_install &&
+      JSON.stringify(m.optionalFeatureInstall) !== JSON.stringify(backend.optional_feature_install)
+    ) {
+      patches.optionalFeatureInstall = backend.optional_feature_install;
     }
 
     if (backend.errorInfo && !m.errorInfo) {

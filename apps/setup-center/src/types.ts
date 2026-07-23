@@ -231,6 +231,7 @@ export type ChatMessage = {
   todo?: ChatTodo | null;
   progressEvents?: ChatProgressEvent[] | null;
   askUser?: ChatAskUser | null;
+  optionalFeatureInstall?: OptionalFeatureInstallRequest | null;
   attachments?: ChatAttachment[] | null;
   artifacts?: ChatArtifact[] | null;
   sources?: ChatSource[] | null;
@@ -305,7 +306,31 @@ export type MessagePart =
   | { kind: "tools"; id: string }
   | { kind: "attachment"; id: string; artifact?: ChatArtifact }
   | { kind: "ask_user"; id: string; ask?: ChatAskUser }
+  | { kind: "optional_feature_install"; id: string; request?: OptionalFeatureInstallRequest }
   | { kind: "error"; id: string };
+
+export type OptionalFeatureInstallRequest = {
+  request_id: string;
+  conversation_id: string;
+  feature_id: string;
+  title: string;
+  description: string;
+  components: Array<{ id: string; name: string }>;
+  estimated_download_mb: number;
+  estimated_disk_mb: number;
+  status: "pending" | "installing" | "installed" | "failed" | "cancelled";
+  progress: number;
+  phase?: "awaiting_confirmation" | "downloading" | "installing" | "complete";
+  phase_progress?: number;
+  downloaded_bytes?: number;
+  total_bytes?: number;
+  current_item?: string;
+  install_progress?: number;
+  message: string;
+  visible?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
 
 // ─── 思维链 (Thinking Chain) 类型 ───
 
