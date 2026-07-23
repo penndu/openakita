@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import os
 import shutil
 import zipfile
 from pathlib import Path
@@ -95,8 +96,9 @@ async def test_install_request_completion_wakes_waiter(tmp_path: Path, monkeypat
 
 def test_playwright_runtime_extracts_only_driver(tmp_path: Path, monkeypatch) -> None:
     wheel = tmp_path / "playwright.whl"
+    node_name = "node.exe" if os.name == "nt" else "node"
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("playwright/driver/node.exe", b"node")
+        archive.writestr(f"playwright/driver/{node_name}", b"node")
         archive.writestr("playwright/driver/package/cli.js", b"cli")
         archive.writestr("playwright/async_api/__init__.py", b"ignored")
     digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
@@ -122,15 +124,16 @@ def test_playwright_runtime_extracts_only_driver(tmp_path: Path, monkeypatch) ->
 
     optional_features.install_playwright_runtime()
 
-    assert (managed / "node.exe").read_bytes() == b"node"
+    assert (managed / node_name).read_bytes() == b"node"
     assert (managed / "package" / "cli.js").read_bytes() == b"cli"
     assert not (managed / "async_api").exists()
 
 
 def test_playwright_runtime_rejects_unsafe_driver_path(tmp_path: Path, monkeypatch) -> None:
     wheel = tmp_path / "playwright.whl"
+    node_name = "node.exe" if os.name == "nt" else "node"
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("playwright/driver/node.exe", b"node")
+        archive.writestr(f"playwright/driver/{node_name}", b"node")
         archive.writestr("playwright/driver/package/cli.js", b"cli")
         archive.writestr("playwright/driver/../../outside.txt", b"unsafe")
     digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
