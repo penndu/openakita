@@ -11,6 +11,10 @@ on:
         description: "Commit, branch, or tag to build."
         required: true
         type: string
+      release_id:
+        description: "Numeric GitHub Release ID to validate and receive mobile assets."
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -19,6 +23,10 @@ on:
         default: ""
       ref:
         description: "Commit, branch, or tag to build. Leave empty to use the tag or current ref."
+        required: false
+        default: ""
+      release_id:
+        description: "Numeric GitHub Release ID. Required when tag starts with v."
         required: false
         default: ""
 
@@ -45,6 +53,12 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Require release ID for release builds
+        if: startsWith(env.RELEASE_TAG, 'v') && inputs.release_id == ''
+        run: |
+          echo "A numeric release_id is required for release builds" >&2
+          exit 1
+
       - name: Verify immutable mobile assets and tag provenance
         if: startsWith(env.RELEASE_TAG, 'v')
         env:
@@ -54,10 +68,10 @@ jobs:
           --repo "${{ github.repository }}"
           --tag "${{ env.RELEASE_TAG }}"
           --expected-commit "$(git rev-parse HEAD)"
+          --release-id "${{ inputs.release_id }}"
           --asset-name "OpenAkita-${{ env.RELEASE_TAG }}-android.apk"
           --asset-name "OpenAkita-${{ env.RELEASE_TAG }}-ios.ipa"
           --require-release
-          --wait-seconds 180
 
   # ── Android APK ──
   android:

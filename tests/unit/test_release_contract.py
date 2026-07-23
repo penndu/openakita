@@ -58,6 +58,59 @@ def test_release_contract_resolves_annotated_tag() -> None:
     )
 
 
+def test_release_contract_loads_draft_by_numeric_release_id() -> None:
+    commit = "a" * 40
+    fetcher = _Fetcher(
+        {
+            "repos/openakita/openakita/git/ref/tags/v1.2.3": {
+                "object": {"type": "commit", "sha": commit}
+            },
+            "repos/openakita/openakita/releases/123": {
+                "id": 123,
+                "tag_name": "v1.2.3",
+                "draft": True,
+                "assets": [],
+            },
+        }
+    )
+
+    check_release_contract(
+        repo="openakita/openakita",
+        tag="v1.2.3",
+        expected_commit=commit,
+        release_id=123,
+        require_release=True,
+        fetch_json=fetcher,
+    )
+
+
+def test_release_contract_rejects_release_id_for_another_tag() -> None:
+    commit = "a" * 40
+    fetcher = _Fetcher(
+        {
+            "repos/openakita/openakita/git/ref/tags/v1.2.3": {
+                "object": {"type": "commit", "sha": commit}
+            },
+            "repos/openakita/openakita/releases/123": {
+                "id": 123,
+                "tag_name": "v9.9.9",
+                "draft": True,
+                "assets": [],
+            },
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="belongs to tag"):
+        check_release_contract(
+            repo="openakita/openakita",
+            tag="v1.2.3",
+            expected_commit=commit,
+            release_id=123,
+            require_release=True,
+            fetch_json=fetcher,
+        )
+
+
 def test_release_contract_rejects_commit_mismatch() -> None:
     fetcher = _Fetcher(
         {

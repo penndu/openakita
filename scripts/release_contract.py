@@ -56,6 +56,7 @@ def check_release_contract(
     repo: str,
     tag: str,
     expected_commit: str,
+    release_id: int | None = None,
     asset_names: Sequence[str] = (),
     require_release: bool = False,
     wait_seconds: int = 0,
@@ -70,14 +71,26 @@ def check_release_contract(
             f"tag {tag!r} points to {tag_commit}, but the build checkout is {expected_commit}"
         )
 
-    encoded_tag = quote(tag, safe="")
-    deadline = time.monotonic() + max(0, wait_seconds)
     release: dict[str, Any] | None
-    while True:
-        release = fetch_json(f"repos/{repo}/releases/tags/{encoded_tag}", True)
-        if release is not None or not require_release or time.monotonic() >= deadline:
-            break
-        time.sleep(2)
+    if release_id is not None:
+        if release_id <= 0:
+            raise RuntimeError(f"release ID must be positive, got {release_id}")
+        release = fetch_json(f"repos/{repo}/releases/{release_id}", False)
+        if release is None:
+            raise RuntimeError(f"release ID {release_id} does not exist")
+        release_tag = str(release.get("tag_name") or "")
+        if release_tag != tag:
+            raise RuntimeError(
+                f"release ID {release_id} belongs to tag {release_tag!r}, expected {tag!r}"
+            )
+    else:
+        encoded_tag = quote(tag, safe="")
+        deadline = time.monotonic() + max(0, wait_seconds)
+        while True:
+            release = fetch_json(f"repos/{repo}/releases/tags/{encoded_tag}", True)
+            if release is not None or not require_release or time.monotonic() >= deadline:
+                break
+            time.sleep(2)
 
     if release is None:
         if require_release:
@@ -99,6 +112,7 @@ def main() -> int:
     parser.add_argument("--repo", required=True, help="GitHub repository in owner/name form")
     parser.add_argument("--tag", required=True, help="Release tag to validate")
     parser.add_argument("--expected-commit", required=True, help="Full checkout commit SHA")
+    parser.add_argument("--release-id", type=int, help="Numeric GitHub Release ID")
     parser.add_argument(
         "--asset-name",
         action="append",
@@ -114,6 +128,7 @@ def main() -> int:
             repo=args.repo,
             tag=args.tag,
             expected_commit=args.expected_commit,
+            release_id=args.release_id,
             asset_names=args.asset_name,
             require_release=args.require_release,
             wait_seconds=args.wait_seconds,

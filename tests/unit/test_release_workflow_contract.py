@@ -46,9 +46,29 @@ def test_mobile_release_waits_for_draft_creation_without_an_independent_tag_trig
     assert mobile_job["uses"] == "./.github/workflows/mobile.yml"
     assert mobile_job["secrets"] == "inherit"
     assert "github.event_name == 'push'" in mobile_job["if"]
+    assert mobile_job["with"]["release_id"] == "${{ needs.create_release.outputs.release_id }}"
+
+    create_release_job = release_workflow["jobs"]["create_release"]
+    assert create_release_job["outputs"]["release_id"] == (
+        "${{ steps.resolve_release.outputs.release_id }}"
+    )
 
     release_contract_job = mobile_workflow["jobs"]["release_contract"]
     assert release_contract_job["permissions"] == {"contents": "write"}
+    workflow_call_inputs = mobile_workflow["on"]["workflow_call"]["inputs"]
+    assert workflow_call_inputs["release_id"] == {
+        "description": ("Numeric GitHub Release ID to validate and receive mobile assets."),
+        "required": "true",
+        "type": "string",
+    }
+
+    release_contract_run = next(
+        step["run"]
+        for step in release_contract_job["steps"]
+        if step.get("name") == "Verify immutable mobile assets and tag provenance"
+    )
+    assert '--release-id "${{ inputs.release_id }}"' in release_contract_run
+    assert "--wait-seconds" not in release_contract_run
 
 
 def test_packaging_verifies_checkout_identity_and_chat_api() -> None:
