@@ -45,8 +45,17 @@ def test_bundled_chat_smoke_checks_loose_toolbelt_import() -> None:
 def test_pyinstaller_source_tree_excludes_build_owned_version_file() -> None:
     spec_source = (Path("build") / "openakita.spec").read_text(encoding="utf-8")
 
-    assert 'excludes=["_bundled_version.txt"]' in spec_source
+    assert 'excludes=["_bundled_version.txt", "__pycache__", "*.pyc"]' in spec_source
     assert 'datas.append((str(_openakita_src), "openakita"))' not in spec_source
+
+
+def test_pyinstaller_archives_lark_oapi_without_copying_loose_package() -> None:
+    spec_source = (Path("build") / "openakita.spec").read_text(encoding="utf-8")
+
+    assert 'hidden_imports += _collect_package_modules("lark_oapi")' in spec_source
+    assert 'datas.append((_lark_dir, "lark_oapi"))' not in spec_source
+    assert "import lark_oapi as _lark" not in spec_source
+    assert 'and not entry[0].lower().endswith(".pyc")' in spec_source
 
 
 def test_pyinstaller_does_not_analyze_loose_requests_toolbelt_copy_twice() -> None:
