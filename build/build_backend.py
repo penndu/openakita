@@ -136,6 +136,57 @@ def verify_bundled_python_contract(output_dir: Path) -> None:
     print(f"  [OK] Bundled Python pip check passed (pip {pip_ver})")
 
 
+def prune_loose_python_bytecode(output_dir: Path) -> tuple[int, int]:
+    """Remove runtime-generated caches from the final onedir artifact."""
+    removed_files = 0
+    removed_dirs = 0
+
+    cache_dirs = sorted(
+        (path for path in output_dir.rglob("__pycache__") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for cache_dir in cache_dirs:
+        removed_files += sum(1 for path in cache_dir.rglob("*") if path.is_file())
+        shutil.rmtree(cache_dir)
+        removed_dirs += 1
+
+    for pyc_file in output_dir.rglob("*.pyc"):
+        pyc_file.unlink()
+        removed_files += 1
+
+    return removed_files, removed_dirs
+
+
+def verify_python_archive_layout(output_dir: Path, work_dir: Path) -> None:
+    """Require lark_oapi in PYZ and reject loose bytecode in release output."""
+    internal_dir = output_dir / "_internal"
+    loose_lark = internal_dir / "lark_oapi"
+    if loose_lark.exists():
+        raise RuntimeError(f"lark_oapi must be stored in PYZ, found loose package: {loose_lark}")
+
+    loose_bytecode = next(output_dir.rglob("*.pyc"), None)
+    if loose_bytecode is not None:
+        raise RuntimeError(f"loose Python bytecode found in packaged output: {loose_bytecode}")
+    cache_dir = next(
+        (path for path in output_dir.rglob("__pycache__") if path.is_dir()),
+        None,
+    )
+    if cache_dir is not None:
+        raise RuntimeError(f"Python cache directory found in packaged output: {cache_dir}")
+
+    pyz_toc = work_dir / "openakita" / "PYZ-00.toc"
+    if not pyz_toc.exists():
+        raise RuntimeError(f"PyInstaller PYZ manifest not found: {pyz_toc}")
+    pyz_manifest = pyz_toc.read_text(encoding="utf-8")
+    required_modules = ("lark_oapi", "lark_oapi.api", "lark_oapi.ws")
+    missing = [name for name in required_modules if f"('{name}'," not in pyz_manifest]
+    if missing:
+        raise RuntimeError(f"lark_oapi modules missing from PYZ: {', '.join(missing)}")
+
+    print("  [OK] lark_oapi is archived in PYZ; no loose bytecode remains")
+
+
 def create_stdlib_zip(output_dir: Path) -> Path | None:
     """Create python3XX.zip containing stdlib for the standalone interpreter.
 
@@ -393,10 +444,20 @@ def build_backend(mode: str, fast: bool = False, skip_web_build: bool = False):
     else:
         print("  [WARN] Web frontend not found after build attempt")
 
+    removed_files, removed_dirs = prune_loose_python_bytecode(OUTPUT_DIR)
+    print(
+        f"  [OK] Removed {removed_files} loose bytecode files "
+        f"from {removed_dirs} cache directories"
+    )
+    verify_python_archive_layout(
+        OUTPUT_DIR,
+        PROJECT_ROOT / "build" / "pyinstaller_work",
+    )
+
     # Calculate size
     total_size = sum(f.stat().st_size for f in OUTPUT_DIR.rglob("*") if f.is_file())
     size_mb = total_size / (1024 * 1024)
-    print(f"\n  Build completed!")
+    print("\n  Build completed!")
     print(f"  Output directory: {OUTPUT_DIR}")
     print(f"  Total size: {size_mb:.1f} MB")
     print(f"  Mode: {mode.upper()}")

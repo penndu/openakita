@@ -6,6 +6,7 @@ Usage:
   pyinstaller build/openakita.spec
 """
 
+import importlib.util
 import os
 import shutil
 import sys
@@ -235,9 +236,8 @@ hidden_imports_core = [
     "telegram.request",         # HTTPXRequest (自定义超时配置)
     "telegram.constants",       # Telegram API 常量
     "telegram.error",           # Telegram 异常类
-    # lark_oapi: 10K+ 自动生成的 API 文件，hidden_imports 无法完整收集
-    # (wildcard imports: from .api import * 等)。改为在 datas 中直接复制整包目录，
-    # 确保飞书 IM 通道开箱即用，不再依赖运行时自动安装。
+    # lark_oapi modules are added to hidden_imports below so their bytecode is
+    # stored in the PYZ instead of copied as thousands of loose data files.
     "requests",                 # lark_oapi 依赖: HTTP 客户端
     "requests.adapters",
     "requests.auth",
@@ -397,10 +397,42 @@ print(f"[spec] Auto-collected {len(_stdlib_modules)} stdlib modules")
 
 hidden_imports = hidden_imports_core + _stdlib_modules
 
+
+def _collect_package_modules(package_name):
+    """Enumerate package modules without importing the package itself."""
+    package_spec = importlib.util.find_spec(package_name)
+    if package_spec is None or not package_spec.submodule_search_locations:
+        print(f"[spec] WARNING: {package_name} not installed")
+        return []
+
+    modules = {package_name}
+    for package_root_value in package_spec.submodule_search_locations:
+        package_root = Path(package_root_value)
+        for source_file in package_root.rglob("*.py"):
+            relative = source_file.relative_to(package_root)
+            if "__pycache__" in relative.parts:
+                continue
+            module_parts = list(relative.with_suffix("").parts)
+            if module_parts[-1] == "__init__":
+                module_parts.pop()
+            if not all(part.isidentifier() for part in module_parts):
+                continue
+            module_name = ".".join([package_name, *module_parts])
+            modules.add(module_name.rstrip("."))
+
+    collected = sorted(modules)
+    print(f"[spec] Collected {len(collected)} {package_name} modules for PYZ")
+    return collected
+
 # Collect all OpenAkita LLM submodules to prevent regressions when adding
 # new files (e.g. openakita.llm.cache/retry/sse) that may be imported
 # transitively but missed by static analysis in frozen builds.
 hidden_imports += collect_submodules("openakita.llm")
+
+# lark_oapi contains more than 10K generated API modules and uses wildcard
+# imports extensively. Filesystem enumeration is deterministic and avoids
+# executing its expensive package __init__ during the build.
+hidden_imports += _collect_package_modules("lark_oapi")
 
 # ============== Excludes ==============
 
@@ -554,18 +586,6 @@ if _pyproject_path.exists():
     _version_file.write_text(build_version_string(), encoding="utf-8")
     datas.append((str(_version_file), "openakita"))
 
-# lark_oapi (飞书 SDK): 10K+ 自动生成的 API 文件，PyInstaller hidden_imports 无法
-# 完整收集 (wildcard imports: from .api import *)。直接复制整包目录作为 data files，
-# 确保飞书 IM 通道开箱即用，不再依赖运行时自动安装 (运行时安装需要独立 Python
-# 解释器，在打包环境中不可靠)。
-try:
-    import lark_oapi as _lark
-    _lark_dir = str(Path(_lark.__file__).parent)
-    datas.append((_lark_dir, "lark_oapi"))
-    print(f"[spec] Bundling lark_oapi: {_lark_dir}")
-except ImportError:
-    print("[spec] WARNING: lark_oapi not installed, feishu channel will need runtime install")
-
 # requests_toolbelt (lark_oapi 依赖): 同样直接复制，避免 PyInstaller 遗漏
 try:
     import requests_toolbelt as _rt
@@ -686,6 +706,8 @@ a.datas = [
     for entry in a.datas
     if ".local-browsers" not in entry[0].replace("\\", "/")
     and not entry[0].replace("\\", "/").startswith("playwright-browsers/")
+    and "__pycache__" not in entry[0].replace("\\", "/").split("/")
+    and not entry[0].lower().endswith(".pyc")
 ]
 
 # Add importable source for bridge subprocesses, but keep the build-owned
@@ -696,7 +718,7 @@ if _openakita_src.exists():
     a.datas += Tree(
         str(_openakita_src),
         prefix="openakita",
-        excludes=["_bundled_version.txt"],
+        excludes=["_bundled_version.txt", "__pycache__", "*.pyc"],
     )
 
 pyz = PYZ(a.pure)

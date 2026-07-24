@@ -578,8 +578,27 @@ def _seed_binary_path(python_root: Path, target_platform: str) -> Path:
     return python_root / "bin" / f"python{major_minor}"
 
 
+def _prune_python_bytecode(python_root: Path) -> tuple[int, int]:
+    """Remove cache directories and loose bytecode from a staged Python tree."""
+    removed_files = 0
+    removed_dirs = 0
+    cache_dirs = sorted(
+        (path for path in python_root.rglob("__pycache__") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for cache_dir in cache_dirs:
+        removed_files += sum(1 for path in cache_dir.rglob("*") if path.is_file())
+        shutil.rmtree(cache_dir)
+        removed_dirs += 1
+    for pyc_file in python_root.rglob("*.pyc"):
+        pyc_file.unlink()
+        removed_files += 1
+    return removed_files, removed_dirs
+
+
 def _slim_python_seed(python_root: Path, target_platform: str) -> None:
-    """Remove docs/tests/IDLE/tkinter/turtledemo + __pycache__ to shave size."""
+    """Remove development-only files from the staged Python seed."""
     if target_platform.startswith("win"):
         lib_roots = [python_root / "Lib"]
     else:
@@ -590,8 +609,7 @@ def _slim_python_seed(python_root: Path, target_platform: str) -> None:
             target = lib_root / sub
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
-    for cache_dir in python_root.rglob("__pycache__"):
-        shutil.rmtree(cache_dir, ignore_errors=True)
+    _prune_python_bytecode(python_root)
     if not target_platform.startswith("win"):
         for sub in ("share/man", "share/doc"):
             target = python_root / sub
@@ -727,6 +745,16 @@ def prepare_python_seed(
         print(
             f"[INFO] skipping seed smoke test: host {platform.system()}/{platform.machine()} "
             f"cannot execute target {target_platform!r}"
+        )
+
+    # The smoke test imports stdlib modules and recreates __pycache__. The
+    # staged tree is immutable after this point, so remove those build-only
+    # caches before Tauri collects the bootstrap resources.
+    removed_files, removed_dirs = _prune_python_bytecode(python_root)
+    if removed_files or removed_dirs:
+        print(
+            f"[INFO] removed {removed_files} smoke-test bytecode files "
+            f"from {removed_dirs} cache directories"
         )
 
     rel_path = seed_python.relative_to(bootstrap_dir).as_posix()
